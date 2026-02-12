@@ -10,7 +10,7 @@ use common::{temp_git_repo, temp_git_repo_with_config};
 #[test]
 fn change_fails_when_no_config() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(["chronicle", "change"], dir.path());
+	let result = chronicle::run(["chronicle", "--no-interactive", "change"], dir.path());
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -26,7 +26,7 @@ fn change_succeeds_when_config_exists() {
 		package_manager: PackageManager::Npm,
 	};
 	let dir = temp_git_repo_with_config(&config);
-	let result = chronicle::run(["chronicle", "change"], dir.path());
+	let result = chronicle::run(["chronicle", "--no-interactive", "change"], dir.path());
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -38,7 +38,7 @@ fn change_succeeds_with_cargo_config() {
 		package_manager: PackageManager::Cargo,
 	};
 	let dir = temp_git_repo_with_config(&config);
-	let result = chronicle::run(["chronicle", "change"], dir.path());
+	let result = chronicle::run(["chronicle", "--no-interactive", "change"], dir.path());
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -49,7 +49,7 @@ fn change_is_default_command() {
 	// Running without a subcommand should behave like `change`,
 	// which fails when no config exists
 	let dir = temp_git_repo();
-	let result = chronicle::run(["chronicle"], dir.path());
+	let result = chronicle::run(["chronicle", "--no-interactive"], dir.path());
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();

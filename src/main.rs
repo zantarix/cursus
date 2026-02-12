@@ -1,5 +1,8 @@
+#![feature(coverage_attribute)]
+
 use std::process::ExitCode;
 
+#[coverage(off)]
 fn main() -> ExitCode {
 	let cwd = match std::env::current_dir() {
 		Ok(cwd) => cwd,

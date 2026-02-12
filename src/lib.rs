@@ -38,7 +38,7 @@ where
 	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
 
 	match cli.command {
-		Some(cli::Command::Init) => cli::cmd_init(&git_workdir),
+		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
 		Some(cli::Command::Change) | None => cli::cmd_change(&git_workdir),
 	}
 }

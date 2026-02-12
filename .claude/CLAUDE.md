@@ -26,6 +26,14 @@ This project uses Nix flakes and direnv for development. You should be running i
 
 The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries.
 
+You should format code before making any commit.
+
+## Testing
+
+Integration tests should always use the `--no-interactive` flag as part of the argument list they test in order to ensure that the TUI never runs during tests.
+
+Integration tests should be full end-to-end tests and call `chronicle::run()` as the entrypoint of the test.
+
 ## Architecture
 
 Chronicle is a Rust CLI tool that manages project configuration via an interactive TUI setup wizard.

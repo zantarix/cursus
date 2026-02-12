@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 /// Supported package managers for project configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum PackageManager {
 	/// Node Package Manager (npm).
