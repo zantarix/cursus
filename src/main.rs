@@ -1,133 +1,52 @@
-use std::io;
+mod config;
+mod tui;
 
-use clap::Parser;
-use crossterm::{
-	ExecutableCommand,
-	event::{self, Event, KeyCode, KeyEventKind},
-	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{
-	prelude::*,
-	widgets::{Block, Borders, Paragraph},
-};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
-#[derive(Parser, Debug)]
-#[command(name = "chronicle")]
-#[command(about = "A CLI application with interactive TUI support")]
-struct Args {
-	/// Run in interactive TUI mode
-	#[arg(short, long)]
-	interactive: bool,
+use anyhow::Context;
 
-	/// Name to greet (optional, will prompt in interactive mode)
-	#[arg(short, long)]
-	name: Option<String>,
-}
+use crate::tui::init::{SetupChoice, prompt_setup};
 
-fn main() -> anyhow::Result<()> {
-	let args = Args::parse();
-
-	if args.interactive {
-		run_tui(args.name)?;
-	} else if let Some(name) = args.name {
-		println!("Hello, {}!", name);
-	} else {
-		run_tui(None)?;
-	}
-
-	Ok(())
-}
-
-struct App {
-	input: String,
-	submitted: bool,
-}
-
-impl App {
-	fn new(initial: Option<String>) -> Self {
-		Self {
-			input: initial.unwrap_or_default(),
-			submitted: false,
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+	let mut current = Some(start.to_path_buf());
+	while let Some(dir) = current {
+		if dir.join(".git").exists() {
+			return Some(dir);
 		}
+		current = dir.parent().map(Path::to_path_buf);
 	}
+	None
 }
 
-fn run_tui(initial_name: Option<String>) -> anyhow::Result<()> {
-	// Setup terminal
-	enable_raw_mode()?;
-	io::stdout().execute(EnterAlternateScreen)?;
-	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+fn run() -> anyhow::Result<ExitCode> {
+	let cwd = std::env::current_dir().context("Failed to get current working directory")?;
+	let git_root = find_git_root(&cwd).context("No git repository found")?;
 
-	let mut app = App::new(initial_name);
-
-	// Main loop
-	loop {
-		terminal.draw(|frame| ui(frame, &app))?;
-
-		if let Event::Key(key) = event::read()?
-			&& key.kind == KeyEventKind::Press
-		{
-			match key.code {
-				KeyCode::Esc => break,
-				KeyCode::Enter => {
-					app.submitted = true;
-					break;
-				}
-				KeyCode::Backspace => {
-					app.input.pop();
-				}
-				KeyCode::Char(c) => {
-					app.input.push(c);
-				}
-				_ => {}
+	if !config::exists(&git_root) {
+		match prompt_setup()? {
+			SetupChoice::Yes => {
+				let path = config::create(&git_root)?;
+				println!("Created {}", path.display());
+			}
+			SetupChoice::No => {
+				return Ok(ExitCode::from(2));
 			}
 		}
 	}
 
-	// Restore terminal
-	disable_raw_mode()?;
-	io::stdout().execute(LeaveAlternateScreen)?;
+	let _config = config::load(&git_root)?;
+	println!("{}", git_root.display());
 
-	if app.submitted && !app.input.is_empty() {
-		println!("Hello, {}!", app.input);
-	}
-
-	Ok(())
+	Ok(ExitCode::SUCCESS)
 }
 
-fn ui(frame: &mut Frame, app: &App) {
-	let chunks = Layout::default()
-		.direction(Direction::Vertical)
-		.margin(2)
-		.constraints([
-			Constraint::Length(3),
-			Constraint::Length(3),
-			Constraint::Min(1),
-		])
-		.split(frame.area());
-
-	let title = Paragraph::new("Chronicle")
-		.style(
-			Style::default()
-				.fg(Color::Cyan)
-				.add_modifier(Modifier::BOLD),
-		)
-		.block(Block::default().borders(Borders::ALL).title("Welcome"));
-	frame.render_widget(title, chunks[0]);
-
-	let input = Paragraph::new(app.input.as_str())
-		.style(Style::default().fg(Color::Yellow))
-		.block(
-			Block::default()
-				.borders(Borders::ALL)
-				.title("Enter your name"),
-		);
-	frame.render_widget(input, chunks[1]);
-
-	let help = Paragraph::new("Press Enter to submit, Esc to cancel")
-		.style(Style::default().fg(Color::Gray));
-	frame.render_widget(help, chunks[2]);
-
-	// Show cursor at end of input
-	frame.set_cursor_position((chunks[1].x + app.input.len() as u16 + 1, chunks[1].y + 1));
+fn main() -> ExitCode {
+	match run() {
+		Ok(code) => code,
+		Err(e) => {
+			eprintln!("Error: {e:#}");
+			ExitCode::FAILURE
+		}
+	}
 }
