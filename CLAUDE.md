@@ -19,8 +19,8 @@ make release
 
 ## Development Environment
 
-This project uses Nix flakes for development. You should be running inside a dev shell already. If something appears
-missing then prompt the user to restart you.
+This project uses Nix flakes and direnv for development. You should be running inside a dev shell already. If something
+appears missing then prompt the user to restart you.
 
 The dev shell provides: rustc, cargo, rustfmt, clippy, rust-analyzer, and musl cross-compilation toolchain for static binaries.
 
