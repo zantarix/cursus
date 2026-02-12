@@ -29,6 +29,20 @@ fn detect_package_manager(git_root: &Path) -> PackageManager {
 	}
 }
 
+/// Runs the interactive TUI setup wizard for Chronicle configuration.
+///
+/// Displays a terminal UI that guides the user through selecting a package
+/// manager for their project. Auto-detects the likely package manager based
+/// on the presence of `package.json` or `Cargo.toml`.
+///
+/// # Returns
+///
+/// Returns `Ok(Some(Config))` if the user completes setup, or `Ok(None)` if
+/// the user cancels.
+///
+/// # Errors
+///
+/// Returns an error if terminal setup or I/O operations fail.
 pub fn setup(git_root: &Path) -> anyhow::Result<Option<Config>> {
 	let detected = detect_package_manager(git_root);
 

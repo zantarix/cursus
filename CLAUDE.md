@@ -49,3 +49,9 @@ Chronicle is a Rust CLI application with interactive TUI support built on ratatu
 - Uses crossterm's alternate screen and raw mode for proper terminal handling
 
 Uses Rust 2024 edition.
+
+## Non-functional requirements
+
+All new changes should meet the 80% test coverage threshold.
+
+All functions which are made public from a module should be documented.
