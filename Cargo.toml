@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.101"
-clap = { version = "4.5.58", features = ["derive"] }
-crossterm = "0.29.0"
-glob = "0.3"
-serde_yaml = "0.9"
-ratatui = "0.30.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
+anyhow = "=1.0.101"
+clap = { version = "=4.5.58", features = ["derive"] }
+crossterm = "=0.29.0"
+glob = "=0.3.3"
+serde_yaml = "=0.9.34+deprecated"
+ratatui = "=0.30.0"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+toml = "=0.8.23"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = "=3.25.0"
