@@ -50,3 +50,62 @@ fn main() -> ExitCode {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use tempfile::TempDir;
+
+	fn temp_dir() -> TempDir {
+		tempfile::tempdir().expect("Failed to create temp dir")
+	}
+
+	#[test]
+	fn find_git_root_returns_none_when_no_git() {
+		let dir = temp_dir();
+		assert!(find_git_root(dir.path()).is_none());
+	}
+
+	#[test]
+	fn find_git_root_finds_git_in_current_dir() {
+		let dir = temp_dir();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let result = find_git_root(dir.path());
+		assert_eq!(result, Some(dir.path().to_path_buf()));
+	}
+
+	#[test]
+	fn find_git_root_finds_git_in_parent_dir() {
+		let dir = temp_dir();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let subdir = dir.path().join("subdir");
+		std::fs::create_dir(&subdir).unwrap();
+
+		let result = find_git_root(&subdir);
+		assert_eq!(result, Some(dir.path().to_path_buf()));
+	}
+
+	#[test]
+	fn find_git_root_finds_git_in_nested_parent() {
+		let dir = temp_dir();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let nested = dir.path().join("a/b/c");
+		std::fs::create_dir_all(&nested).unwrap();
+
+		let result = find_git_root(&nested);
+		assert_eq!(result, Some(dir.path().to_path_buf()));
+	}
+
+	#[test]
+	fn find_git_root_stops_at_first_git() {
+		let dir = temp_dir();
+		// Create nested git repos
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let inner = dir.path().join("inner");
+		std::fs::create_dir_all(inner.join(".git")).unwrap();
+
+		// From inner, should find inner's .git
+		let result = find_git_root(&inner);
+		assert_eq!(result, Some(inner));
+	}
+}

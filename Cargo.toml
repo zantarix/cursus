@@ -10,3 +10,6 @@ crossterm = "0.29.0"
 ratatui = "0.30.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

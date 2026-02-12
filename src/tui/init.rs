@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crossterm::{
 	ExecutableCommand,
-	event::{self, Event, KeyCode, KeyEventKind},
+	event::{Event, KeyCode, KeyEventKind},
 	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
@@ -13,9 +13,21 @@ use ratatui::{
 
 use crate::config::{Config, PackageManager};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
 	Confirm(bool),
 	SelectPackageManager(PackageManager),
+}
+
+/// Result of processing a key press in the setup wizard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KeyResult {
+	/// Continue with updated screen state.
+	Continue(Screen),
+	/// Setup completed with a configuration.
+	Complete(Config),
+	/// Setup cancelled by user.
+	Cancelled,
 }
 
 fn detect_package_manager(git_root: &Path) -> PackageManager {
@@ -26,6 +38,45 @@ fn detect_package_manager(git_root: &Path) -> PackageManager {
 		PackageManager::Cargo
 	} else {
 		PackageManager::Npm
+	}
+}
+
+fn handle_key(screen: Screen, key: KeyCode, detected: PackageManager) -> KeyResult {
+	match screen {
+		Screen::Confirm(yes) => match key {
+			KeyCode::Left
+			| KeyCode::Right
+			| KeyCode::Tab
+			| KeyCode::Char('h')
+			| KeyCode::Char('l') => KeyResult::Continue(Screen::Confirm(!yes)),
+			KeyCode::Enter => {
+				if yes {
+					KeyResult::Continue(Screen::SelectPackageManager(detected))
+				} else {
+					KeyResult::Cancelled
+				}
+			}
+			KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
+			_ => KeyResult::Continue(screen),
+		},
+		Screen::SelectPackageManager(selected) => match key {
+			KeyCode::Left
+			| KeyCode::Right
+			| KeyCode::Tab
+			| KeyCode::Char('h')
+			| KeyCode::Char('l') => {
+				let new_selected = match selected {
+					PackageManager::Cargo => PackageManager::Npm,
+					PackageManager::Npm => PackageManager::Cargo,
+				};
+				KeyResult::Continue(Screen::SelectPackageManager(new_selected))
+			}
+			KeyCode::Enter => KeyResult::Complete(Config {
+				package_manager: selected,
+			}),
+			KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
+			_ => KeyResult::Continue(screen),
+		},
 	}
 }
 
@@ -55,47 +106,13 @@ pub fn setup(git_root: &Path) -> anyhow::Result<Option<Config>> {
 	let result = loop {
 		terminal.draw(|frame| ui(frame, &screen))?;
 
-		if let Event::Key(key) = event::read()?
+		if let Event::Key(key) = crossterm::event::read()?
 			&& key.kind == KeyEventKind::Press
 		{
-			match &mut screen {
-				Screen::Confirm(yes) => match key.code {
-					KeyCode::Left
-					| KeyCode::Right
-					| KeyCode::Tab
-					| KeyCode::Char('h')
-					| KeyCode::Char('l') => {
-						*yes = !*yes;
-					}
-					KeyCode::Enter => {
-						if *yes {
-							screen = Screen::SelectPackageManager(detected);
-						} else {
-							break None;
-						}
-					}
-					KeyCode::Esc | KeyCode::Char('q') => break None,
-					_ => {}
-				},
-				Screen::SelectPackageManager(selected) => match key.code {
-					KeyCode::Left
-					| KeyCode::Right
-					| KeyCode::Tab
-					| KeyCode::Char('h')
-					| KeyCode::Char('l') => {
-						*selected = match selected {
-							PackageManager::Cargo => PackageManager::Npm,
-							PackageManager::Npm => PackageManager::Cargo,
-						};
-					}
-					KeyCode::Enter => {
-						break Some(Config {
-							package_manager: *selected,
-						});
-					}
-					KeyCode::Esc | KeyCode::Char('q') => break None,
-					_ => {}
-				},
+			match handle_key(screen, key.code, detected) {
+				KeyResult::Continue(new_screen) => screen = new_screen,
+				KeyResult::Complete(config) => break Some(config),
+				KeyResult::Cancelled => break None,
 			}
 		}
 	};
@@ -204,4 +221,407 @@ fn render_package_manager(frame: &mut Frame, chunks: &[Rect], selected: PackageM
 			.title("Package Manager"),
 	);
 	frame.render_widget(button_para, chunks[2]);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use tempfile::TempDir;
+
+	fn temp_dir() -> TempDir {
+		tempfile::tempdir().expect("Failed to create temp dir")
+	}
+
+	// detect_package_manager tests
+	#[test]
+	fn detect_package_manager_defaults_to_npm() {
+		let dir = temp_dir();
+		let result = detect_package_manager(dir.path());
+		assert_eq!(result, PackageManager::Npm);
+	}
+
+	#[test]
+	fn detect_package_manager_detects_npm() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+		let result = detect_package_manager(dir.path());
+		assert_eq!(result, PackageManager::Npm);
+	}
+
+	#[test]
+	fn detect_package_manager_detects_cargo() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+		let result = detect_package_manager(dir.path());
+		assert_eq!(result, PackageManager::Cargo);
+	}
+
+	#[test]
+	fn detect_package_manager_prefers_npm_when_both_exist() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+		let result = detect_package_manager(dir.path());
+		assert_eq!(result, PackageManager::Npm);
+	}
+
+	// handle_key tests - Confirm screen
+	#[test]
+	fn confirm_left_toggles_selection() {
+		let result = handle_key(Screen::Confirm(true), KeyCode::Left, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(false)));
+
+		let result = handle_key(Screen::Confirm(false), KeyCode::Left, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(true)));
+	}
+
+	#[test]
+	fn confirm_right_toggles_selection() {
+		let result = handle_key(Screen::Confirm(true), KeyCode::Right, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(false)));
+	}
+
+	#[test]
+	fn confirm_tab_toggles_selection() {
+		let result = handle_key(Screen::Confirm(true), KeyCode::Tab, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(false)));
+	}
+
+	#[test]
+	fn confirm_h_toggles_selection() {
+		let result = handle_key(
+			Screen::Confirm(true),
+			KeyCode::Char('h'),
+			PackageManager::Npm,
+		);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(false)));
+	}
+
+	#[test]
+	fn confirm_l_toggles_selection() {
+		let result = handle_key(
+			Screen::Confirm(true),
+			KeyCode::Char('l'),
+			PackageManager::Npm,
+		);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(false)));
+	}
+
+	#[test]
+	fn confirm_enter_yes_advances_to_package_manager() {
+		let result = handle_key(Screen::Confirm(true), KeyCode::Enter, PackageManager::Cargo);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Cargo))
+		);
+	}
+
+	#[test]
+	fn confirm_enter_no_cancels() {
+		let result = handle_key(Screen::Confirm(false), KeyCode::Enter, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn confirm_esc_cancels() {
+		let result = handle_key(Screen::Confirm(true), KeyCode::Esc, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn confirm_q_cancels() {
+		let result = handle_key(
+			Screen::Confirm(true),
+			KeyCode::Char('q'),
+			PackageManager::Npm,
+		);
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn confirm_other_keys_do_nothing() {
+		let result = handle_key(
+			Screen::Confirm(true),
+			KeyCode::Char('x'),
+			PackageManager::Npm,
+		);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(true)));
+
+		let result = handle_key(Screen::Confirm(true), KeyCode::Up, PackageManager::Npm);
+		assert_eq!(result, KeyResult::Continue(Screen::Confirm(true)));
+	}
+
+	// handle_key tests - SelectPackageManager screen
+	#[test]
+	fn select_pm_left_toggles_selection() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Left,
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Cargo))
+		);
+
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Cargo),
+			KeyCode::Left,
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Npm))
+		);
+	}
+
+	#[test]
+	fn select_pm_right_toggles_selection() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Right,
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Cargo))
+		);
+	}
+
+	#[test]
+	fn select_pm_tab_toggles_selection() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Cargo),
+			KeyCode::Tab,
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Npm))
+		);
+	}
+
+	#[test]
+	fn select_pm_h_toggles_selection() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Char('h'),
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Cargo))
+		);
+	}
+
+	#[test]
+	fn select_pm_l_toggles_selection() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Cargo),
+			KeyCode::Char('l'),
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Npm))
+		);
+	}
+
+	#[test]
+	fn select_pm_enter_completes_with_npm() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Enter,
+			PackageManager::Cargo,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Complete(Config {
+				package_manager: PackageManager::Npm
+			})
+		);
+	}
+
+	#[test]
+	fn select_pm_enter_completes_with_cargo() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Cargo),
+			KeyCode::Enter,
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Complete(Config {
+				package_manager: PackageManager::Cargo
+			})
+		);
+	}
+
+	#[test]
+	fn select_pm_esc_cancels() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Esc,
+			PackageManager::Npm,
+		);
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn select_pm_q_cancels() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Char('q'),
+			PackageManager::Npm,
+		);
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn select_pm_other_keys_do_nothing() {
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Char('x'),
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Continue(Screen::SelectPackageManager(PackageManager::Npm))
+		);
+	}
+
+	// Full workflow tests
+	#[test]
+	fn workflow_confirm_yes_select_npm() {
+		// Start at confirm, select yes
+		let result = handle_key(Screen::Confirm(true), KeyCode::Enter, PackageManager::Npm);
+		let Screen::SelectPackageManager(pm) = (match result {
+			KeyResult::Continue(s) => s,
+			_ => panic!("Expected Continue"),
+		}) else {
+			panic!("Expected SelectPackageManager")
+		};
+		assert_eq!(pm, PackageManager::Npm);
+
+		// Select npm and confirm
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Npm),
+			KeyCode::Enter,
+			PackageManager::Npm,
+		);
+		assert_eq!(
+			result,
+			KeyResult::Complete(Config {
+				package_manager: PackageManager::Npm
+			})
+		);
+	}
+
+	#[test]
+	fn workflow_confirm_yes_toggle_select_cargo() {
+		// Start at confirm with detected cargo
+		let result = handle_key(Screen::Confirm(true), KeyCode::Enter, PackageManager::Cargo);
+		let Screen::SelectPackageManager(pm) = (match result {
+			KeyResult::Continue(s) => s,
+			_ => panic!("Expected Continue"),
+		}) else {
+			panic!("Expected SelectPackageManager")
+		};
+		assert_eq!(pm, PackageManager::Cargo);
+
+		// Toggle to npm then back to cargo
+		let result = handle_key(
+			Screen::SelectPackageManager(PackageManager::Cargo),
+			KeyCode::Tab,
+			PackageManager::Cargo,
+		);
+		let screen = match result {
+			KeyResult::Continue(s) => s,
+			_ => panic!("Expected Continue"),
+		};
+
+		let result = handle_key(screen, KeyCode::Tab, PackageManager::Cargo);
+		let screen = match result {
+			KeyResult::Continue(s) => s,
+			_ => panic!("Expected Continue"),
+		};
+
+		// Confirm cargo
+		let result = handle_key(screen, KeyCode::Enter, PackageManager::Cargo);
+		assert_eq!(
+			result,
+			KeyResult::Complete(Config {
+				package_manager: PackageManager::Cargo
+			})
+		);
+	}
+
+	// UI rendering tests using TestBackend
+	fn create_test_terminal() -> Terminal<ratatui::backend::TestBackend> {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		Terminal::new(backend).unwrap()
+	}
+
+	#[test]
+	fn ui_renders_confirm_screen_yes_selected() {
+		let mut terminal = create_test_terminal();
+		terminal
+			.draw(|frame| ui(frame, &Screen::Confirm(true)))
+			.unwrap();
+		let buffer = terminal.backend().buffer().clone();
+		let content = buffer_to_string(&buffer);
+		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Yes"));
+		assert!(content.contains("No"));
+	}
+
+	#[test]
+	fn ui_renders_confirm_screen_no_selected() {
+		let mut terminal = create_test_terminal();
+		terminal
+			.draw(|frame| ui(frame, &Screen::Confirm(false)))
+			.unwrap();
+		let buffer = terminal.backend().buffer().clone();
+		let content = buffer_to_string(&buffer);
+		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Yes"));
+		assert!(content.contains("No"));
+	}
+
+	#[test]
+	fn ui_renders_package_manager_screen_npm_selected() {
+		let mut terminal = create_test_terminal();
+		terminal
+			.draw(|frame| ui(frame, &Screen::SelectPackageManager(PackageManager::Npm)))
+			.unwrap();
+		let buffer = terminal.backend().buffer().clone();
+		let content = buffer_to_string(&buffer);
+		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Cargo"));
+		assert!(content.contains("NPM"));
+	}
+
+	#[test]
+	fn ui_renders_package_manager_screen_cargo_selected() {
+		let mut terminal = create_test_terminal();
+		terminal
+			.draw(|frame| ui(frame, &Screen::SelectPackageManager(PackageManager::Cargo)))
+			.unwrap();
+		let buffer = terminal.backend().buffer().clone();
+		let content = buffer_to_string(&buffer);
+		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Cargo"));
+		assert!(content.contains("NPM"));
+	}
+
+	fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+		let mut s = String::new();
+		for y in 0..buffer.area.height {
+			for x in 0..buffer.area.width {
+				s.push(buffer[(x, y)].symbol().chars().next().unwrap_or(' '));
+			}
+			s.push('\n');
+		}
+		s
+	}
 }
