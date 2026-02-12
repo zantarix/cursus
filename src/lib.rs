@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod package_manager;
 pub mod tui;
 
 use std::ffi::OsString;
