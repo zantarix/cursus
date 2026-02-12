@@ -4,24 +4,40 @@
 	inputs = {
 		nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 		flake-utils.url = "github:numtide/flake-utils";
+		rust-overlay = {
+			url = "github:oxalica/rust-overlay";
+			inputs.nixpkgs.follows = "nixpkgs";
+		};
 	};
 
-	outputs = { self, nixpkgs, flake-utils }:
+	outputs = { self, nixpkgs, flake-utils, rust-overlay }:
 		flake-utils.lib.eachDefaultSystem (system:
 			let
-				pkgs = nixpkgs.legacyPackages.${system};
+				overlays = [ (import rust-overlay) ];
+				pkgs = import nixpkgs {
+					inherit system overlays;
+				};
+				rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+					targets = [ "x86_64-unknown-linux-musl" "aarch64-unknown-linux-musl" ];
+				};
 			in
 			{
 				devShells.default = pkgs.mkShell {
 					buildInputs = with pkgs; [
-						rustc
-						cargo
-						rustfmt
-						clippy
+						rustToolchain
 						rust-analyzer
+						gnumake
+					] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+						pkgs.pkgsCross.musl64.stdenv.cc
+						pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc
 					];
 
 					RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+				} // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+					CC_x86_64_unknown_linux_musl = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
+					CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
+					CC_aarch64_unknown_linux_musl = "${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc}/bin/aarch64-unknown-linux-musl-cc";
+					CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc}/bin/aarch64-unknown-linux-musl-cc";
 				};
 			}
 		);
