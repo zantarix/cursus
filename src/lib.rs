@@ -27,16 +27,15 @@ fn find_git_workdir(start: &Path) -> Option<PathBuf> {
 
 /// Main entry point for the chronicle application.
 ///
-/// Parses CLI arguments from the provided iterator, finds the git root,
-/// and dispatches to the appropriate command.
-pub fn run<I, T>(args: I) -> anyhow::Result<ExitCode>
+/// Parses CLI arguments from the provided iterator, finds the git root
+/// starting from the given working directory, and dispatches to the appropriate command.
+pub fn run<I, T>(args: I, cwd: &Path) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
 {
 	let cli = cli::Cli::try_parse_from(args)?;
-	let cwd = std::env::current_dir().context("Failed to get current working directory")?;
-	let git_workdir = find_git_workdir(&cwd).context("No git repository found")?;
+	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
 
 	match cli.command {
 		Some(cli::Command::Init) => cli::cmd_init(&git_workdir),

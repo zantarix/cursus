@@ -1,0 +1,60 @@
+//! Integration tests for the `change` command.
+
+mod common;
+
+use std::process::ExitCode;
+
+use chronicle::config::{Config, PackageManager};
+use common::{temp_git_repo, temp_git_repo_with_config};
+
+#[test]
+fn change_fails_when_no_config() {
+	let dir = temp_git_repo();
+	let result = chronicle::run(["chronicle", "change"], dir.path());
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+	assert!(
+		err.to_string().contains("No configuration found"),
+		"Expected 'No configuration found' error, got: {err}"
+	);
+}
+
+#[test]
+fn change_succeeds_when_config_exists() {
+	let config = Config {
+		package_manager: PackageManager::Npm,
+	};
+	let dir = temp_git_repo_with_config(&config);
+	let result = chronicle::run(["chronicle", "change"], dir.path());
+
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+}
+
+#[test]
+fn change_succeeds_with_cargo_config() {
+	let config = Config {
+		package_manager: PackageManager::Cargo,
+	};
+	let dir = temp_git_repo_with_config(&config);
+	let result = chronicle::run(["chronicle", "change"], dir.path());
+
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+}
+
+#[test]
+fn change_is_default_command() {
+	// Running without a subcommand should behave like `change`,
+	// which fails when no config exists
+	let dir = temp_git_repo();
+	let result = chronicle::run(["chronicle"], dir.path());
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+	assert!(
+		err.to_string().contains("No configuration found"),
+		"Expected 'No configuration found' error (same as change command), got: {err}"
+	);
+}
