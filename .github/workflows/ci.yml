@@ -29,3 +29,7 @@ jobs:
       - name: Run tests
         shell: nix develop -c bash -e {0}
         run: cargo test
+
+      - name: Check code coverage
+        shell: nix develop -c bash -e {0}
+        run: cargo llvm-cov --branch --fail-under-lines 80 --fail-under-regions 80

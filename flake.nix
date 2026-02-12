@@ -17,7 +17,8 @@
 				pkgs = import nixpkgs {
 					inherit system overlays;
 				};
-				rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+				rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
+					extensions = [ "llvm-tools-preview" "rust-src" ];
 					targets = [
 						"x86_64-unknown-linux-musl"
 						"aarch64-unknown-linux-musl"
@@ -33,12 +34,13 @@
 						gnumake
 						zig
 						cargo-zigbuild
+						cargo-llvm-cov
 					] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
 						pkgs.pkgsCross.musl64.stdenv.cc
 						pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc
 					];
 
-					RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+					RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
 				} // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
 					CC_x86_64_unknown_linux_musl = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
 					CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
