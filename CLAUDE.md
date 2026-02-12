@@ -13,8 +13,8 @@ cargo test               # Run tests
 cargo clippy             # Lint the code
 cargo fmt                # Format the code
 
-# Static binary (Linux)
-cargo build --release --target x86_64-unknown-linux-musl
+# Generate static binaries
+make release
 ```
 
 ## Development Environment
