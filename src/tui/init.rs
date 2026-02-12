@@ -682,13 +682,14 @@ mod tests {
 	}
 
 	fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-		let mut s = String::new();
-		for y in 0..buffer.area.height {
-			for x in 0..buffer.area.width {
-				s.push(buffer[(x, y)].symbol().chars().next().unwrap_or(' '));
-			}
-			s.push('\n');
-		}
-		s
+		(0..buffer.area.height)
+			.map(|y| {
+				(0..buffer.area.width)
+					.map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+					.collect::<String>()
+			})
+			.collect::<Vec<_>>()
+			.join("\n")
+			+ "\n"
 	}
 }

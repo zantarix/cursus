@@ -16,14 +16,10 @@ use clap::Parser;
 ///
 /// Returns `Some(path)` if a `.git` directory is found, `None` otherwise.
 fn find_git_workdir(start: &Path) -> Option<PathBuf> {
-	let mut current = Some(start.to_path_buf());
-	while let Some(dir) = current {
-		if dir.join(".git").exists() {
-			return Some(dir);
-		}
-		current = dir.parent().map(Path::to_path_buf);
-	}
-	None
+	std::iter::successors(Some(start.to_path_buf()), |dir| {
+		dir.parent().map(Path::to_path_buf)
+	})
+	.find(|dir| dir.join(".git").exists())
 }
 
 /// Main entry point for the chronicle application.

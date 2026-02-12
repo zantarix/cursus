@@ -148,29 +148,31 @@ fn ui(frame: &mut Frame, selected: ChangeType) {
 		.block(Block::default().borders(Borders::ALL));
 	frame.render_widget(question, chunks[1]);
 
-	let mut buttons = vec![Span::raw("  ")];
-	buttons.extend(button_spans(
-		" ",
-		"M",
-		"ajor ",
-		selected == ChangeType::Major,
-	));
-	buttons.push(Span::raw("   "));
-	buttons.extend(button_spans(
-		" M",
-		"i",
-		"nor ",
-		selected == ChangeType::Minor,
-	));
-	buttons.push(Span::raw("   "));
-	buttons.extend(button_spans(
-		" ",
-		"P",
-		"atch ",
-		selected == ChangeType::Patch,
-	));
-	buttons.push(Span::raw("  "));
-	let buttons = Line::from(buttons);
+	let buttons = Line::from(
+		std::iter::once(Span::raw("  "))
+			.chain(button_spans(
+				" ",
+				"M",
+				"ajor ",
+				selected == ChangeType::Major,
+			))
+			.chain(std::iter::once(Span::raw("   ")))
+			.chain(button_spans(
+				" M",
+				"i",
+				"nor ",
+				selected == ChangeType::Minor,
+			))
+			.chain(std::iter::once(Span::raw("   ")))
+			.chain(button_spans(
+				" ",
+				"P",
+				"atch ",
+				selected == ChangeType::Patch,
+			))
+			.chain(std::iter::once(Span::raw("  ")))
+			.collect::<Vec<_>>(),
+	);
 	let button_para =
 		Paragraph::new(buttons).block(Block::default().borders(Borders::ALL).title("Change Type"));
 	frame.render_widget(button_para, chunks[2]);
@@ -195,14 +197,15 @@ fn button_spans<'a>(
 	shortcut: &'a str,
 	suffix: &'a str,
 	selected: bool,
-) -> Vec<Span<'a>> {
+) -> impl Iterator<Item = Span<'a>> {
 	let base = button_style(selected);
 	let underlined = base.add_modifier(Modifier::UNDERLINED);
-	vec![
+	[
 		Span::styled(prefix, base),
 		Span::styled(shortcut, underlined),
 		Span::styled(suffix, base),
 	]
+	.into_iter()
 }
 
 #[cfg(test)]
@@ -340,13 +343,14 @@ mod tests {
 	}
 
 	fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-		let mut s = String::new();
-		for y in 0..buffer.area.height {
-			for x in 0..buffer.area.width {
-				s.push(buffer[(x, y)].symbol().chars().next().unwrap_or(' '));
-			}
-			s.push('\n');
-		}
-		s
+		(0..buffer.area.height)
+			.map(|y| {
+				(0..buffer.area.width)
+					.map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+					.collect::<String>()
+			})
+			.collect::<Vec<_>>()
+			.join("\n")
+			+ "\n"
 	}
 }

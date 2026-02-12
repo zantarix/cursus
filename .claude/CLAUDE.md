@@ -26,7 +26,11 @@ This project uses Nix flakes and direnv for development. You should be running i
 
 The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries.
 
+## Code style
+
 You should format code before making any commit.
+
+Prefer functional style over imperative.
 
 ## Testing
 

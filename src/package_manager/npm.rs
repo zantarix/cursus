@@ -175,16 +175,16 @@ impl PackageManagerAdapter for NpmAdapter {
 			path: std::path::PathBuf::new(),
 		};
 
-		let workspace_projects: Vec<Project> = workspace_patterns
-			.iter()
-			.map(|pattern| expand_workspace_pattern(git_root, pattern))
-			.collect::<anyhow::Result<Vec<_>>>()?
-			.into_iter()
-			.flatten()
+		let mut projects: Vec<Project> = std::iter::once(root_project)
+			.chain(
+				workspace_patterns
+					.iter()
+					.map(|pattern| expand_workspace_pattern(git_root, pattern))
+					.collect::<anyhow::Result<Vec<_>>>()?
+					.into_iter()
+					.flatten(),
+			)
 			.collect();
-
-		let mut projects = vec![root_project];
-		projects.extend(workspace_projects);
 
 		// Sort by path for consistent ordering
 		projects.sort_by(|a, b| a.path.cmp(&b.path));
