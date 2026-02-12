@@ -39,7 +39,8 @@ where
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
-		Some(cli::Command::Change) | None => cli::cmd_change(&git_workdir),
+		Some(cli::Command::Change(args)) => cli::cmd_change(&git_workdir, &args, &cli.global),
+		None => cli::cmd_change(&git_workdir, &cli::ChangeArgs::default(), &cli.global),
 	}
 }
 

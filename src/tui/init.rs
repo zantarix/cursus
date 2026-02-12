@@ -115,7 +115,7 @@ fn handle_key(
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
-pub fn setup(git_root: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
+pub fn run(git_root: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
 	let detected = detect_package_manager(git_root);
 
 	enable_raw_mode()?;
