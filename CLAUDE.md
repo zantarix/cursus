@@ -14,7 +14,10 @@ cargo clippy             # Lint the code
 cargo fmt                # Format the code
 
 # Generate static binaries
-make release
+make release                 # Build all release targets
+make release-x86_64          # x86_64 Linux (musl static)
+make release-aarch64         # ARM64 Linux (musl static)
+make release-macos           # ARM64 macOS (via cargo-zigbuild)
 ```
 
 ## Development Environment
