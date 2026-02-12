@@ -9,7 +9,7 @@ cargo build              # Build the project
 cargo run                # Run the application
 cargo test               # Run tests
 cargo test <test_name>   # Run a specific test
-make coverage            # Check test coverage (80% threshold)
+make coverage            # Check test coverage (90% threshold)
 cargo clippy             # Lint the code
 cargo fmt                # Format the code
 
@@ -64,6 +64,6 @@ Uses Rust 2024 edition.
 
 ## Non-functional requirements
 
-All new changes should meet the 80% test coverage threshold.
+All new changes should meet the 90% test coverage threshold.
 
 All functions which are made public from a module should be documented.

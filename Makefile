@@ -7,7 +7,7 @@ test:
 	cargo test
 
 coverage:
-	cargo llvm-cov --branch --fail-under-lines 80 --fail-under-regions 80
+	cargo llvm-cov --branch --fail-under-lines 90 --fail-under-regions 90
 
 lint:
 	cargo clippy
