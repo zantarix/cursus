@@ -11,7 +11,7 @@
 	};
 
 	outputs = { self, nixpkgs, flake-utils, rust-overlay }:
-		flake-utils.lib.eachDefaultSystem (system:
+		flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (system:
 			let
 				overlays = [ (import rust-overlay) ];
 				pkgs = import nixpkgs {
@@ -25,8 +25,20 @@
 						"aarch64-apple-darwin"
 					];
 				};
+				rustPlatform = pkgs.makeRustPlatform {
+					cargo = rustToolchain;
+					rustc = rustToolchain;
+				};
+				cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
 			in
 			{
+				packages.default = rustPlatform.buildRustPackage {
+					pname = cargoToml.package.name;
+					version = cargoToml.package.version;
+					src = ./.;
+					cargoLock.lockFile = ./Cargo.lock;
+				};
+
 				devShells.default = pkgs.mkShell ({
 					buildInputs = with pkgs; [
 						rustToolchain

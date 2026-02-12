@@ -20,6 +20,9 @@ jobs:
       - name: Pre-build devShell
         run: nix build --no-link .#devShells.$(nix eval --impure --raw --expr 'builtins.currentSystem').default
 
+      - name: Build Nix package
+        run: nix build
+
       - name: Check formatting
         shell: nix develop -c bash -e {0}
         run: cargo fmt --check

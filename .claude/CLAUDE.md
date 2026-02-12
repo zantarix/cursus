@@ -22,9 +22,9 @@ make release-macos           # ARM64 macOS (via cargo-zigbuild)
 
 ## Development Environment
 
-This project uses Nix flakes and direnv for development. You should be running inside a dev shell already. If something appears missing then prompt the user to restart you.
+This project uses Nix flakes and direnv for development. The flake only supports three systems: x86_64-linux, aarch64-linux, and aarch64-darwin. You should be running inside a dev shell already. If something appears missing then prompt the user to restart you.
 
-The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries.
+The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries (Linux only).
 
 ## Code style
 
