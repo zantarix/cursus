@@ -18,15 +18,21 @@
 					inherit system overlays;
 				};
 				rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-					targets = [ "x86_64-unknown-linux-musl" "aarch64-unknown-linux-musl" ];
+					targets = [
+						"x86_64-unknown-linux-musl"
+						"aarch64-unknown-linux-musl"
+						"aarch64-apple-darwin"
+					];
 				};
 			in
 			{
-				devShells.default = pkgs.mkShell {
+				devShells.default = pkgs.mkShell ({
 					buildInputs = with pkgs; [
 						rustToolchain
 						rust-analyzer
 						gnumake
+						zig
+						cargo-zigbuild
 					] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
 						pkgs.pkgsCross.musl64.stdenv.cc
 						pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc
@@ -38,7 +44,7 @@
 					CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
 					CC_aarch64_unknown_linux_musl = "${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc}/bin/aarch64-unknown-linux-musl-cc";
 					CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc}/bin/aarch64-unknown-linux-musl-cc";
-				};
+				});
 			}
 		);
 }
