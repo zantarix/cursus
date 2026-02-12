@@ -1,11 +1,18 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PackageManager {
+	Npm,
+	Cargo,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-	// Add config fields here as needed
+	pub package_manager: PackageManager,
 }
 
 fn path(git_root: &Path) -> PathBuf {
@@ -25,13 +32,14 @@ pub fn load(git_root: &Path) -> anyhow::Result<Config> {
 	Ok(config)
 }
 
-pub fn create(git_root: &Path) -> anyhow::Result<PathBuf> {
+pub fn create(git_root: &Path, config: &Config) -> anyhow::Result<PathBuf> {
 	let path = path(git_root);
 	if let Some(parent) = path.parent() {
 		std::fs::create_dir_all(parent)
 			.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
 	}
-	std::fs::write(&path, "")
+	let contents = toml::to_string_pretty(config).context("Failed to serialize config")?;
+	std::fs::write(&path, contents)
 		.with_context(|| format!("Failed to create config: {}", path.display()))?;
 	Ok(path)
 }

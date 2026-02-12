@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use anyhow::Context;
 
-use crate::tui::init::{SetupChoice, prompt_setup};
+use crate::tui::init;
 
 fn find_git_root(start: &Path) -> Option<PathBuf> {
 	let mut current = Some(start.to_path_buf());
@@ -24,12 +24,12 @@ fn run() -> anyhow::Result<ExitCode> {
 	let git_root = find_git_root(&cwd).context("No git repository found")?;
 
 	if !config::exists(&git_root) {
-		match prompt_setup()? {
-			SetupChoice::Yes => {
-				let path = config::create(&git_root)?;
+		match init::setup(&git_root)? {
+			Some(config) => {
+				let path = config::create(&git_root, &config)?;
 				println!("Created {}", path.display());
 			}
-			SetupChoice::No => {
+			None => {
 				return Ok(ExitCode::from(2));
 			}
 		}

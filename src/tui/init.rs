@@ -1,4 +1,5 @@
 use std::io;
+use std::path::Path;
 
 use crossterm::{
 	ExecutableCommand,
@@ -10,53 +11,88 @@ use ratatui::{
 	widgets::{Block, Borders, Paragraph},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SetupChoice {
-	Yes,
-	No,
+use crate::config::{Config, PackageManager};
+
+enum Screen {
+	Confirm(bool),
+	SelectPackageManager(PackageManager),
 }
 
-pub fn prompt_setup() -> anyhow::Result<SetupChoice> {
+fn detect_package_manager(git_root: &Path) -> PackageManager {
+	// Prefer NPM as tie breaker, so check for it first
+	if git_root.join("package.json").exists() {
+		PackageManager::Npm
+	} else if git_root.join("Cargo.toml").exists() {
+		PackageManager::Cargo
+	} else {
+		PackageManager::Npm
+	}
+}
+
+pub fn setup(git_root: &Path) -> anyhow::Result<Option<Config>> {
+	let detected = detect_package_manager(git_root);
+
 	enable_raw_mode()?;
 	io::stdout().execute(EnterAlternateScreen)?;
 	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
-	let mut selected = SetupChoice::Yes;
+	let mut screen = Screen::Confirm(true);
 
-	loop {
-		terminal.draw(|frame| ui(frame, selected))?;
+	let result = loop {
+		terminal.draw(|frame| ui(frame, &screen))?;
 
 		if let Event::Key(key) = event::read()?
 			&& key.kind == KeyEventKind::Press
 		{
-			match key.code {
-				KeyCode::Left
-				| KeyCode::Right
-				| KeyCode::Tab
-				| KeyCode::Char('h')
-				| KeyCode::Char('l') => {
-					selected = match selected {
-						SetupChoice::Yes => SetupChoice::No,
-						SetupChoice::No => SetupChoice::Yes,
-					};
-				}
-				KeyCode::Enter => break,
-				KeyCode::Esc | KeyCode::Char('q') => {
-					selected = SetupChoice::No;
-					break;
-				}
-				_ => {}
+			match &mut screen {
+				Screen::Confirm(yes) => match key.code {
+					KeyCode::Left
+					| KeyCode::Right
+					| KeyCode::Tab
+					| KeyCode::Char('h')
+					| KeyCode::Char('l') => {
+						*yes = !*yes;
+					}
+					KeyCode::Enter => {
+						if *yes {
+							screen = Screen::SelectPackageManager(detected);
+						} else {
+							break None;
+						}
+					}
+					KeyCode::Esc | KeyCode::Char('q') => break None,
+					_ => {}
+				},
+				Screen::SelectPackageManager(selected) => match key.code {
+					KeyCode::Left
+					| KeyCode::Right
+					| KeyCode::Tab
+					| KeyCode::Char('h')
+					| KeyCode::Char('l') => {
+						*selected = match selected {
+							PackageManager::Cargo => PackageManager::Npm,
+							PackageManager::Npm => PackageManager::Cargo,
+						};
+					}
+					KeyCode::Enter => {
+						break Some(Config {
+							package_manager: *selected,
+						});
+					}
+					KeyCode::Esc | KeyCode::Char('q') => break None,
+					_ => {}
+				},
 			}
 		}
-	}
+	};
 
 	disable_raw_mode()?;
 	io::stdout().execute(LeaveAlternateScreen)?;
 
-	Ok(selected)
+	Ok(result)
 }
 
-fn ui(frame: &mut Frame, selected: SetupChoice) {
+fn ui(frame: &mut Frame, screen: &Screen) {
 	let chunks = Layout::default()
 		.direction(Direction::Vertical)
 		.margin(2)
@@ -77,19 +113,30 @@ fn ui(frame: &mut Frame, selected: SetupChoice) {
 		.block(Block::default().borders(Borders::ALL).title("Setup"));
 	frame.render_widget(title, chunks[0]);
 
+	match screen {
+		Screen::Confirm(yes) => render_confirm(frame, &chunks, *yes),
+		Screen::SelectPackageManager(selected) => render_package_manager(frame, &chunks, *selected),
+	}
+
+	let help = Paragraph::new("Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel")
+		.style(Style::default().fg(Color::DarkGray));
+	frame.render_widget(help, chunks[3]);
+}
+
+fn render_confirm(frame: &mut Frame, chunks: &[Rect], yes: bool) {
 	let question = Paragraph::new("No configuration found. Set up Chronicle for this repository?")
 		.style(Style::default().fg(Color::Yellow))
 		.block(Block::default().borders(Borders::ALL));
 	frame.render_widget(question, chunks[1]);
 
-	let yes_style = if selected == SetupChoice::Yes {
+	let yes_style = if yes {
 		Style::default()
 			.fg(Color::Green)
 			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
 	} else {
 		Style::default().fg(Color::Gray)
 	};
-	let no_style = if selected == SetupChoice::No {
+	let no_style = if !yes {
 		Style::default()
 			.fg(Color::Red)
 			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -107,8 +154,40 @@ fn ui(frame: &mut Frame, selected: SetupChoice) {
 	let button_para =
 		Paragraph::new(buttons).block(Block::default().borders(Borders::ALL).title("Choose"));
 	frame.render_widget(button_para, chunks[2]);
+}
 
-	let help = Paragraph::new("Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel")
-		.style(Style::default().fg(Color::DarkGray));
-	frame.render_widget(help, chunks[3]);
+fn render_package_manager(frame: &mut Frame, chunks: &[Rect], selected: PackageManager) {
+	let question = Paragraph::new("Which package manager does this project use?")
+		.style(Style::default().fg(Color::Yellow))
+		.block(Block::default().borders(Borders::ALL));
+	frame.render_widget(question, chunks[1]);
+
+	let cargo_style = if selected == PackageManager::Cargo {
+		Style::default()
+			.fg(Color::Green)
+			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
+	} else {
+		Style::default().fg(Color::Gray)
+	};
+	let npm_style = if selected == PackageManager::Npm {
+		Style::default()
+			.fg(Color::Green)
+			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
+	} else {
+		Style::default().fg(Color::Gray)
+	};
+
+	let buttons = Line::from(vec![
+		Span::raw("  "),
+		Span::styled(" Cargo ", cargo_style),
+		Span::raw("   "),
+		Span::styled(" NPM ", npm_style),
+		Span::raw("  "),
+	]);
+	let button_para = Paragraph::new(buttons).block(
+		Block::default()
+			.borders(Borders::ALL)
+			.title("Package Manager"),
+	);
+	frame.render_widget(button_para, chunks[2]);
 }
