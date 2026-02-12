@@ -27,10 +27,12 @@ struct Args {
 fn main() -> anyhow::Result<()> {
 	let args = Args::parse();
 
-	if args.interactive || args.name.is_none() {
+	if args.interactive {
 		run_tui(args.name)?;
+	} else if let Some(name) = args.name {
+		println!("Hello, {}!", name);
 	} else {
-		println!("Hello, {}!", args.name.unwrap());
+		run_tui(None)?;
 	}
 
 	Ok(())
@@ -62,22 +64,22 @@ fn run_tui(initial_name: Option<String>) -> anyhow::Result<()> {
 	loop {
 		terminal.draw(|frame| ui(frame, &app))?;
 
-		if let Event::Key(key) = event::read()? {
-			if key.kind == KeyEventKind::Press {
-				match key.code {
-					KeyCode::Esc => break,
-					KeyCode::Enter => {
-						app.submitted = true;
-						break;
-					}
-					KeyCode::Backspace => {
-						app.input.pop();
-					}
-					KeyCode::Char(c) => {
-						app.input.push(c);
-					}
-					_ => {}
+		if let Event::Key(key) = event::read()?
+			&& key.kind == KeyEventKind::Press
+		{
+			match key.code {
+				KeyCode::Esc => break,
+				KeyCode::Enter => {
+					app.submitted = true;
+					break;
 				}
+				KeyCode::Backspace => {
+					app.input.pop();
+				}
+				KeyCode::Char(c) => {
+					app.input.push(c);
+				}
+				_ => {}
 			}
 		}
 	}
