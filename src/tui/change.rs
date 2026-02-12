@@ -69,6 +69,9 @@ fn handle_key(selected: ChangeType, key: KeyCode) -> KeyResult {
 		KeyCode::Left | KeyCode::Char('h') => KeyResult::Continue(selected.prev()),
 		KeyCode::Right | KeyCode::Tab | KeyCode::Char('l') => KeyResult::Continue(selected.next()),
 		KeyCode::Enter => KeyResult::Complete(selected),
+		KeyCode::Char('m') => KeyResult::Complete(ChangeType::Major),
+		KeyCode::Char('i') => KeyResult::Complete(ChangeType::Minor),
+		KeyCode::Char('p') => KeyResult::Complete(ChangeType::Patch),
 		KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
 		_ => KeyResult::Continue(selected),
 	}
@@ -145,24 +148,34 @@ fn ui(frame: &mut Frame, selected: ChangeType) {
 		.block(Block::default().borders(Borders::ALL));
 	frame.render_widget(question, chunks[1]);
 
-	let major_style = button_style(selected == ChangeType::Major);
-	let minor_style = button_style(selected == ChangeType::Minor);
-	let patch_style = button_style(selected == ChangeType::Patch);
-
-	let buttons = Line::from(vec![
-		Span::raw("  "),
-		Span::styled(" Major ", major_style),
-		Span::raw("   "),
-		Span::styled(" Minor ", minor_style),
-		Span::raw("   "),
-		Span::styled(" Patch ", patch_style),
-		Span::raw("  "),
-	]);
+	let mut buttons = vec![Span::raw("  ")];
+	buttons.extend(button_spans(
+		" ",
+		"M",
+		"ajor ",
+		selected == ChangeType::Major,
+	));
+	buttons.push(Span::raw("   "));
+	buttons.extend(button_spans(
+		" M",
+		"i",
+		"nor ",
+		selected == ChangeType::Minor,
+	));
+	buttons.push(Span::raw("   "));
+	buttons.extend(button_spans(
+		" ",
+		"P",
+		"atch ",
+		selected == ChangeType::Patch,
+	));
+	buttons.push(Span::raw("  "));
+	let buttons = Line::from(buttons);
 	let button_para =
 		Paragraph::new(buttons).block(Block::default().borders(Borders::ALL).title("Change Type"));
 	frame.render_widget(button_para, chunks[2]);
 
-	let help = Paragraph::new("Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel")
+	let help = Paragraph::new("←/→/Tab: switch | m/i/p: select | Enter: confirm | Esc: cancel")
 		.style(Style::default().fg(Color::DarkGray));
 	frame.render_widget(help, chunks[3]);
 }
@@ -175,6 +188,21 @@ fn button_style(selected: bool) -> Style {
 	} else {
 		Style::default().fg(Color::Gray)
 	}
+}
+
+fn button_spans<'a>(
+	prefix: &'a str,
+	shortcut: &'a str,
+	suffix: &'a str,
+	selected: bool,
+) -> Vec<Span<'a>> {
+	let base = button_style(selected);
+	let underlined = base.add_modifier(Modifier::UNDERLINED);
+	vec![
+		Span::styled(prefix, base),
+		Span::styled(shortcut, underlined),
+		Span::styled(suffix, base),
+	]
 }
 
 #[cfg(test)]
@@ -236,6 +264,24 @@ mod tests {
 		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
 
 		let result = handle_key(ChangeType::Patch, KeyCode::Enter);
+		assert_eq!(result, KeyResult::Complete(ChangeType::Patch));
+	}
+
+	#[test]
+	fn m_selects_major() {
+		let result = handle_key(ChangeType::Patch, KeyCode::Char('m'));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Major));
+	}
+
+	#[test]
+	fn i_selects_minor() {
+		let result = handle_key(ChangeType::Patch, KeyCode::Char('i'));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
+	}
+
+	#[test]
+	fn p_selects_patch() {
+		let result = handle_key(ChangeType::Major, KeyCode::Char('p'));
 		assert_eq!(result, KeyResult::Complete(ChangeType::Patch));
 	}
 

@@ -12,17 +12,11 @@ use crate::tui::change;
 use super::GlobalArgs;
 
 /// Arguments for the `change` subcommand.
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct ChangeArgs {
 	/// Type of change: major, minor, or patch (required in non-interactive mode)
 	#[arg(short = 't', long)]
 	pub change_type: Option<change::ChangeType>,
-}
-
-impl Default for ChangeArgs {
-	fn default() -> Self {
-		Self { change_type: None }
-	}
 }
 
 /// Runs the `change` subcommand.
