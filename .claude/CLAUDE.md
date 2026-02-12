@@ -40,25 +40,28 @@ Integration tests should be full end-to-end tests and call `chronicle::run()` as
 
 ## Architecture
 
-Chronicle is a Rust CLI tool that manages project configuration via an interactive TUI setup wizard.
+Chronicle is a Rust CLI tool for release management. It uses an interactive TUI for setup and change recording.
 
 **Module structure:**
-- `src/main.rs` - Entry point, git root detection, orchestrates config loading/creation
-- `src/config.rs` - Configuration types (`Config`, `PackageManager`) and TOML persistence to `.chronicle/config.toml`
-- `src/tui/` - Terminal UI components
-  - `init.rs` - Setup wizard with screen-based state machine (`Confirm` → `SelectPackageManager`)
-
-**Application flow:**
-1. Find git root by walking up from current directory
-2. If no `.chronicle/config.toml` exists, launch TUI setup wizard
-3. TUI auto-detects package manager (checks for `package.json` or `Cargo.toml`)
-4. User confirms setup and selects package manager
-5. Config is written and loaded
+- `src/lib.rs` - Library entry point (`chronicle::run()`), git root detection
+- `src/main.rs` - Binary entry point, error handling
+- `src/cli/` - Command-line interface (clap)
+  - `mod.rs` - `Cli` struct, `GlobalArgs` (`--interactive`/`--no-interactive`), `Command` enum
+  - `init.rs` - `init` subcommand: creates `.chronicle/config.toml`
+  - `change.rs` - `change` subcommand: records semantic version changes (default when no subcommand)
+- `src/config.rs` - `Config` and `PackageManager` types, TOML persistence
+- `src/tui/` - Terminal UI (ratatui/crossterm)
+  - `init.rs` - Setup wizard with screen-based state machine
+  - `change.rs` - Change type selector (major/minor/patch)
+- `src/package_manager/` - Adapter pattern for package managers
+  - `mod.rs` - `PackageManagerAdapter` trait, `Project` struct
+  - `npm.rs` - npm/yarn/pnpm workspace support
 
 **TUI pattern:**
-- `Screen` enum represents wizard state, `handle_key()` is a pure function for state transitions
-- `setup()` manages terminal lifecycle (raw mode, alternate screen)
-- UI rendering is separated into `render_*` functions per screen
+- `Screen` enum represents wizard state
+- `handle_key()` is a pure function for state transitions (testable without terminal)
+- UI rendering in separate `ui()` and `render_*` functions
+- Tests use `ratatui::backend::TestBackend`
 
 Uses Rust 2024 edition.
 
