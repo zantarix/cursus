@@ -16,6 +16,7 @@ pub enum PackageManager {
 
 /// Configuration for an individual package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageManagerConfig {
 	/// Whether this package manager is enabled for the project.
 	#[serde(default)]
@@ -24,6 +25,7 @@ pub struct PackageManagerConfig {
 
 /// Chronicle configuration for a repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
 	/// Configuration for npm package manager.
 	#[serde(default)]
@@ -257,6 +259,40 @@ mod tests {
 		let config: Config = toml::from_str("[cargo]\nenabled = true").unwrap();
 		assert!(!config.npm.enabled);
 		assert!(config.cargo.enabled);
+	}
+
+	#[test]
+	fn load_fails_on_unknown_top_level_field() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(config_dir.join("config.toml"), "[rust]\nenabled = true").unwrap();
+
+		let err = load(dir.path()).unwrap_err();
+		let chain = format!("{err:#}");
+		assert!(
+			chain.contains("unknown field"),
+			"Expected 'unknown field' error, got: {chain}"
+		);
+	}
+
+	#[test]
+	fn load_fails_on_unknown_package_manager_field() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[npm]\nenabled = true\nversion = \"1.0\"",
+		)
+		.unwrap();
+
+		let err = load(dir.path()).unwrap_err();
+		let chain = format!("{err:#}");
+		assert!(
+			chain.contains("unknown field"),
+			"Expected 'unknown field' error, got: {chain}"
+		);
 	}
 
 	#[test]

@@ -5,7 +5,7 @@ mod common;
 use std::process::ExitCode;
 
 use chronicle::config::{Config, PackageManager};
-use common::{temp_git_repo, temp_git_repo_with_config};
+use common::{temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project};
 
 #[test]
 fn change_fails_when_no_config() {
@@ -24,9 +24,25 @@ fn change_fails_when_no_config() {
 }
 
 #[test]
-fn change_succeeds_with_major() {
+fn change_fails_when_no_projects_found() {
 	let config = Config::with_package_manager(PackageManager::Npm);
 	let dir = temp_git_repo_with_config(&config);
+	let result = chronicle::run(
+		["chronicle", "--no-interactive", "change", "-t", "minor"],
+		dir.path(),
+	);
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+	assert!(
+		err.to_string().contains("No projects found"),
+		"Expected 'No projects found' error, got: {err}"
+	);
+}
+
+#[test]
+fn change_succeeds_with_major() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm);
 	let result = chronicle::run(
 		["chronicle", "--no-interactive", "change", "-t", "major"],
 		dir.path(),
@@ -38,8 +54,7 @@ fn change_succeeds_with_major() {
 
 #[test]
 fn change_succeeds_with_minor() {
-	let config = Config::with_package_manager(PackageManager::Npm);
-	let dir = temp_git_repo_with_config(&config);
+	let dir = temp_git_repo_with_project(PackageManager::Npm);
 	let result = chronicle::run(
 		["chronicle", "--no-interactive", "change", "-t", "minor"],
 		dir.path(),
@@ -51,8 +66,7 @@ fn change_succeeds_with_minor() {
 
 #[test]
 fn change_succeeds_with_patch() {
-	let config = Config::with_package_manager(PackageManager::Cargo);
-	let dir = temp_git_repo_with_config(&config);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	let result = chronicle::run(
 		["chronicle", "--no-interactive", "change", "-t", "patch"],
 		dir.path(),
@@ -64,8 +78,7 @@ fn change_succeeds_with_patch() {
 
 #[test]
 fn change_no_interactive_requires_change_type() {
-	let config = Config::with_package_manager(PackageManager::Npm);
-	let dir = temp_git_repo_with_config(&config);
+	let dir = temp_git_repo_with_project(PackageManager::Npm);
 	let result = chronicle::run(["chronicle", "--no-interactive", "change"], dir.path());
 
 	assert!(result.is_err());

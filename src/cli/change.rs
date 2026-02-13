@@ -2,11 +2,13 @@
 
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::bail;
 use clap::Args;
 
-use crate::config;
+use crate::config::{self, PackageManager};
+use crate::package_manager::{self, CargoAdapter, NpmAdapter, PackageManagerAdapter};
 use crate::tui::change;
 
 use super::GlobalArgs;
@@ -28,7 +30,27 @@ pub fn cmd_change(
 	if !config::exists(git_workdir) {
 		bail!("No configuration found. Run 'chronicle init' to create one.");
 	}
-	let _config = config::load(git_workdir)?;
+	let config = config::load(git_workdir)?;
+
+	let adapters: Vec<Arc<dyn PackageManagerAdapter>> = config
+		.enabled_package_managers()
+		.map(|pm| -> Arc<dyn PackageManagerAdapter> {
+			match pm {
+				PackageManager::Npm => Arc::new(NpmAdapter::new(config.npm.clone())),
+				PackageManager::Cargo => Arc::new(CargoAdapter::new(config.cargo.clone())),
+			}
+		})
+		.collect();
+
+	let projects = package_manager::enumerate_projects(adapters, git_workdir)?;
+
+	if projects.is_empty() {
+		bail!("No projects found. Check that your package manager configuration is correct.");
+	}
+
+	for project in &projects {
+		println!("{}: {}", project.name(), project.path().display());
+	}
 
 	let change_type = if global.no_interactive {
 		let Some(ct) = args.change_type else {

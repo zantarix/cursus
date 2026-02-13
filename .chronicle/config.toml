@@ -1,2 +1,5 @@
 [npm]
 enabled = true
+
+[cargo]
+enabled = true
