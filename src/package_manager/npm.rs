@@ -6,7 +6,7 @@ use anyhow::Context;
 use glob::glob;
 use serde::Deserialize;
 
-use super::{PackageManagerAdapter, Project};
+use super::{PackageManagerAdapter, ProjectInfo};
 
 /// Adapter for npm-based projects.
 ///
@@ -108,13 +108,13 @@ fn get_workspace_patterns(
 		.map(|ws| ws.patterns().to_vec())
 }
 
-/// Attempts to create a Project from a workspace directory path.
+/// Attempts to create a ProjectInfo from a workspace directory path.
 ///
 /// Returns `Ok(None)` if the path is not a valid workspace (not a directory or no package.json).
 fn read_workspace_project(
 	git_root: &Path,
 	workspace_path: &Path,
-) -> anyhow::Result<Option<Project>> {
+) -> anyhow::Result<Option<ProjectInfo>> {
 	if !workspace_path.is_dir() {
 		return Ok(None);
 	}
@@ -129,11 +129,11 @@ fn read_workspace_project(
 		.context("Workspace path is not under git root")?
 		.to_path_buf();
 
-	Ok(Some(Project { name, path }))
+	Ok(Some(ProjectInfo { name, path }))
 }
 
 /// Expands a workspace glob pattern and returns all matching projects.
-fn expand_workspace_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Vec<Project>> {
+fn expand_workspace_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Vec<ProjectInfo>> {
 	let full_pattern = git_root.join(pattern);
 	let pattern_str = full_pattern
 		.to_str()
@@ -151,7 +151,7 @@ fn expand_workspace_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Ve
 }
 
 impl PackageManagerAdapter for NpmAdapter {
-	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<Project>> {
+	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
 		let Some(root_package) = read_package_json(git_root)? else {
 			return Ok(Vec::new());
 		};
@@ -162,7 +162,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		else {
 			// Single package repository
 			let name = root_package.name.unwrap_or_else(|| "unnamed".to_string());
-			return Ok(vec![Project {
+			return Ok(vec![ProjectInfo {
 				name,
 				path: std::path::PathBuf::new(),
 			}]);
@@ -170,12 +170,12 @@ impl PackageManagerAdapter for NpmAdapter {
 
 		// Monorepo with workspaces - include root project first
 		let root_name = root_package.name.unwrap_or_else(|| "unnamed".to_string());
-		let root_project = Project {
+		let root_project = ProjectInfo {
 			name: root_name,
 			path: std::path::PathBuf::new(),
 		};
 
-		let mut projects: Vec<Project> = std::iter::once(root_project)
+		let mut projects: Vec<ProjectInfo> = std::iter::once(root_project)
 			.chain(
 				workspace_patterns
 					.iter()
@@ -206,12 +206,15 @@ mod tests {
 		std::fs::write(dir.join("package.json"), content).unwrap();
 	}
 
+	/// Helper to enumerate projects using the adapter.
+	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
+		NpmAdapter::new().enumerate_projects(dir)
+	}
+
 	#[test]
 	fn enumerate_returns_empty_when_no_package_json() {
 		let dir = temp_dir();
-		let adapter = NpmAdapter::new();
-
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 		assert!(projects.is_empty());
 	}
 
@@ -220,12 +223,11 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-app");
-		assert_eq!(projects[0].path, std::path::PathBuf::new());
+		assert_eq!(projects[0].path, Path::new(""));
 	}
 
 	#[test]
@@ -233,8 +235,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "unnamed");
@@ -256,17 +257,16 @@ mod tests {
 		write_package_json(&pkg_a, r#"{"name": "@scope/pkg-a"}"#);
 		write_package_json(&pkg_b, r#"{"name": "@scope/pkg-b"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 3);
 		// Root project first (empty path sorts first)
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, std::path::PathBuf::new());
+		assert_eq!(projects[0].path, Path::new(""));
 		assert_eq!(projects[1].name, "@scope/pkg-a");
-		assert_eq!(projects[1].path, std::path::PathBuf::from("packages/pkg-a"));
+		assert_eq!(projects[1].path, Path::new("packages/pkg-a"));
 		assert_eq!(projects[2].name, "@scope/pkg-b");
-		assert_eq!(projects[2].path, std::path::PathBuf::from("packages/pkg-b"));
+		assert_eq!(projects[2].path, Path::new("packages/pkg-b"));
 	}
 
 	#[test]
@@ -281,12 +281,11 @@ mod tests {
 		std::fs::create_dir_all(&pkg).unwrap();
 		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
-		assert_eq!(projects[0].path, std::path::PathBuf::new());
+		assert_eq!(projects[0].path, Path::new(""));
 		assert_eq!(projects[1].name, "my-pkg");
 	}
 
@@ -305,17 +304,16 @@ mod tests {
 		write_package_json(&pkg, r#"{"name": "lib"}"#);
 		write_package_json(&app, r#"{"name": "web"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 3);
 		// Root first (empty path), then sorted by path
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, std::path::PathBuf::new());
+		assert_eq!(projects[0].path, Path::new(""));
 		assert_eq!(projects[1].name, "web");
-		assert_eq!(projects[1].path, std::path::PathBuf::from("apps/web"));
+		assert_eq!(projects[1].path, Path::new("apps/web"));
 		assert_eq!(projects[2].name, "lib");
-		assert_eq!(projects[2].path, std::path::PathBuf::from("packages/lib"));
+		assert_eq!(projects[2].path, Path::new("packages/lib"));
 	}
 
 	#[test]
@@ -333,8 +331,7 @@ mod tests {
 		write_package_json(&pkg, r#"{"name": "valid"}"#);
 		// no_pkg has no package.json
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
@@ -353,8 +350,7 @@ mod tests {
 		// Create a file instead of directory
 		std::fs::write(dir.path().join("packages/not-a-dir"), "").unwrap();
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		// Only root project, no workspace packages
 		assert_eq!(projects.len(), 1);
@@ -373,15 +369,14 @@ mod tests {
 		std::fs::create_dir_all(&nested).unwrap();
 		write_package_json(&nested, r#"{"name": "nested-pkg"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
 		assert_eq!(projects[1].name, "nested-pkg");
 		assert_eq!(
 			projects[1].path,
-			std::path::PathBuf::from("packages/group/subpackages/nested-pkg")
+			Path::new("packages/group/subpackages/nested-pkg")
 		);
 	}
 
@@ -390,8 +385,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), "not valid json");
 
-		let adapter = NpmAdapter::new();
-		let result = adapter.enumerate_projects(dir.path());
+		let result = enumerate(dir.path());
 
 		assert!(result.is_err());
 	}
@@ -405,8 +399,7 @@ mod tests {
 		std::fs::create_dir_all(&pkg).unwrap();
 		write_package_json(&pkg, "invalid json");
 
-		let adapter = NpmAdapter::new();
-		let result = adapter.enumerate_projects(dir.path());
+		let result = enumerate(dir.path());
 
 		assert!(result.is_err());
 	}
@@ -447,17 +440,13 @@ mod tests {
 		std::fs::create_dir_all(&pkg).unwrap();
 		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "pnpm-monorepo");
-		assert_eq!(projects[0].path, std::path::PathBuf::new());
+		assert_eq!(projects[0].path, Path::new(""));
 		assert_eq!(projects[1].name, "my-pkg");
-		assert_eq!(
-			projects[1].path,
-			std::path::PathBuf::from("packages/my-pkg")
-		);
+		assert_eq!(projects[1].path, Path::new("packages/my-pkg"));
 	}
 
 	#[test]
@@ -473,8 +462,7 @@ mod tests {
 		write_package_json(&pkg, r#"{"name": "lib"}"#);
 		write_package_json(&app, r#"{"name": "web"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 3);
 		assert_eq!(projects[0].name, "root");
@@ -497,8 +485,7 @@ mod tests {
 		write_package_json(&pkg, r#"{"name": "from-pnpm"}"#);
 		write_package_json(&other, r#"{"name": "from-npm"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
@@ -520,8 +507,7 @@ mod tests {
 		std::fs::create_dir_all(&pkg).unwrap();
 		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
@@ -538,8 +524,7 @@ mod tests {
 		// Invalid YAML
 		write_pnpm_workspace(dir.path(), "not: valid: yaml: [[");
 
-		let adapter = NpmAdapter::new();
-		let result = adapter.enumerate_projects(dir.path());
+		let result = enumerate(dir.path());
 
 		assert!(result.is_err());
 	}
@@ -558,8 +543,7 @@ mod tests {
 		std::fs::create_dir_all(&pkg).unwrap();
 		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
 
-		let adapter = NpmAdapter::new();
-		let projects = adapter.enumerate_projects(dir.path()).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
