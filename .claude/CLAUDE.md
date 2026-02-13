@@ -55,6 +55,7 @@ Chronicle is a Rust CLI tool for release management. It uses an interactive TUI 
   - `change.rs` - Change type selector (major/minor/patch)
 - `src/package_manager/` - Adapter pattern for package managers
   - `mod.rs` - `PackageManagerAdapter` trait, `Project` struct
+  - `cargo.rs` - Cargo workspace support
   - `npm.rs` - npm/yarn/pnpm workspace support
 
 **TUI pattern:**
