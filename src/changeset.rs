@@ -96,15 +96,35 @@ pub fn write_changeset(git_root: &Path, changeset: &Changeset) -> anyhow::Result
 	Ok(path)
 }
 
+/// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
+fn find_default_editor() -> Option<String> {
+	["nano", "vim", "vi"]
+		.into_iter()
+		.find(|cmd| {
+			std::process::Command::new("which")
+				.arg(cmd)
+				.stdout(std::process::Stdio::null())
+				.stderr(std::process::Stdio::null())
+				.status()
+				.is_ok_and(|s| s.success())
+		})
+		.map(String::from)
+}
+
 /// Opens the user's editor to edit the changeset file.
 ///
-/// Uses the `EDITOR` environment variable, falling back to `nano`.
+/// Uses the `EDITOR` environment variable, falling back to the first available
+/// editor from `nano`, `vim`, `vi`.
 ///
 /// # Errors
 ///
-/// Returns an error if the editor process cannot be spawned or exits with an error.
+/// Returns an error if no editor is found or the editor process fails.
 pub fn open_editor(path: &Path) -> anyhow::Result<()> {
-	let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+	let editor = std::env::var("EDITOR")
+		.ok()
+		.filter(|v| !v.is_empty())
+		.or_else(find_default_editor)
+		.context("No editor found. Set the EDITOR environment variable.")?;
 	let status = std::process::Command::new(&editor)
 		.arg(path)
 		.status()
