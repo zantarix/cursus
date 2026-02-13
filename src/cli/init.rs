@@ -34,9 +34,7 @@ pub fn cmd_init(
 		let Some(pm) = args.package_manager else {
 			bail!("--package-manager is required in non-interactive mode");
 		};
-		Config {
-			package_manager: pm,
-		}
+		Config::with_package_manager(pm)
 	} else {
 		// Interactive mode (default): run TUI, skipping steps for pre-filled options
 		let options = init::InitOptions {

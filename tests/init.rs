@@ -9,9 +9,7 @@ use common::{temp_git_repo, temp_git_repo_with_config};
 
 #[test]
 fn init_fails_when_config_already_exists() {
-	let config = Config {
-		package_manager: PackageManager::Npm,
-	};
+	let config = Config::with_package_manager(PackageManager::Npm);
 	let dir = temp_git_repo_with_config(&config);
 	let result = chronicle::run(
 		["chronicle", "--no-interactive", "init", "-p", "npm"],
@@ -54,7 +52,8 @@ fn init_creates_config_with_npm() {
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
 	let config = config::load(dir.path()).unwrap();
-	assert_eq!(config.package_manager, PackageManager::Npm);
+	assert!(config.npm.enabled);
+	assert!(!config.cargo.enabled);
 }
 
 #[test]
@@ -69,7 +68,8 @@ fn init_creates_config_with_cargo() {
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
 	let config = config::load(dir.path()).unwrap();
-	assert_eq!(config.package_manager, PackageManager::Cargo);
+	assert!(!config.npm.enabled);
+	assert!(config.cargo.enabled);
 }
 
 #[test]

@@ -65,9 +65,7 @@ fn handle_key(
 				if yes {
 					// If package manager is pre-filled, skip to completion
 					if let Some(pm) = options.package_manager {
-						KeyResult::Complete(Config {
-							package_manager: pm,
-						})
+						KeyResult::Complete(Config::with_package_manager(pm))
 					} else {
 						KeyResult::Continue(Screen::SelectPackageManager(detected))
 					}
@@ -90,9 +88,7 @@ fn handle_key(
 				};
 				KeyResult::Continue(Screen::SelectPackageManager(new_selected))
 			}
-			KeyCode::Enter => KeyResult::Complete(Config {
-				package_manager: selected,
-			}),
+			KeyCode::Enter => KeyResult::Complete(Config::with_package_manager(selected)),
 			KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
 			_ => KeyResult::Continue(screen),
 		},
@@ -356,9 +352,7 @@ mod tests {
 		);
 		assert_eq!(
 			result,
-			KeyResult::Complete(Config {
-				package_manager: PackageManager::Npm,
-			})
+			KeyResult::Complete(Config::with_package_manager(PackageManager::Npm))
 		);
 	}
 
@@ -375,9 +369,7 @@ mod tests {
 		);
 		assert_eq!(
 			result,
-			KeyResult::Complete(Config {
-				package_manager: PackageManager::Cargo,
-			})
+			KeyResult::Complete(Config::with_package_manager(PackageManager::Cargo))
 		);
 	}
 
@@ -502,9 +494,7 @@ mod tests {
 		);
 		assert_eq!(
 			result,
-			KeyResult::Complete(Config {
-				package_manager: PackageManager::Npm
-			})
+			KeyResult::Complete(Config::with_package_manager(PackageManager::Npm))
 		);
 	}
 
@@ -517,9 +507,7 @@ mod tests {
 		);
 		assert_eq!(
 			result,
-			KeyResult::Complete(Config {
-				package_manager: PackageManager::Cargo
-			})
+			KeyResult::Complete(Config::with_package_manager(PackageManager::Cargo))
 		);
 	}
 
@@ -577,9 +565,7 @@ mod tests {
 		);
 		assert_eq!(
 			result,
-			KeyResult::Complete(Config {
-				package_manager: PackageManager::Npm
-			})
+			KeyResult::Complete(Config::with_package_manager(PackageManager::Npm))
 		);
 	}
 
@@ -617,9 +603,7 @@ mod tests {
 		let result = handle_key_default(screen, KeyCode::Enter, PackageManager::Cargo);
 		assert_eq!(
 			result,
-			KeyResult::Complete(Config {
-				package_manager: PackageManager::Cargo
-			})
+			KeyResult::Complete(Config::with_package_manager(PackageManager::Cargo))
 		);
 	}
 

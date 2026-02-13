@@ -14,11 +14,46 @@ pub enum PackageManager {
 	Cargo,
 }
 
+/// Configuration for an individual package manager.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageManagerConfig {
+	/// Whether this package manager is enabled for the project.
+	#[serde(default)]
+	pub enabled: bool,
+}
+
 /// Chronicle configuration for a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Config {
-	/// The package manager used by this project.
-	pub package_manager: PackageManager,
+	/// Configuration for npm package manager.
+	#[serde(default)]
+	pub npm: PackageManagerConfig,
+	/// Configuration for Cargo package manager.
+	#[serde(default)]
+	pub cargo: PackageManagerConfig,
+}
+
+impl Config {
+	/// Creates a new config with only the specified package manager enabled.
+	pub fn with_package_manager(pm: PackageManager) -> Self {
+		let mut config = Self::default();
+		match pm {
+			PackageManager::Npm => config.npm.enabled = true,
+			PackageManager::Cargo => config.cargo.enabled = true,
+		}
+		config
+	}
+
+	/// Returns an iterator over all enabled package managers.
+	pub fn enabled_package_managers(&self) -> impl Iterator<Item = PackageManager> + '_ {
+		[
+			(PackageManager::Npm, &self.npm),
+			(PackageManager::Cargo, &self.cargo),
+		]
+		.into_iter()
+		.filter(|(_, config)| config.enabled)
+		.map(|(pm, _)| pm)
+	}
 }
 
 fn path(git_root: &Path) -> PathBuf {
@@ -86,9 +121,7 @@ mod tests {
 	#[test]
 	fn exists_returns_true_when_config_exists() {
 		let dir = temp_dir();
-		let config = Config {
-			package_manager: PackageManager::Cargo,
-		};
+		let config = Config::with_package_manager(PackageManager::Cargo);
 		create(dir.path(), &config).unwrap();
 		assert!(exists(dir.path()));
 	}
@@ -96,9 +129,7 @@ mod tests {
 	#[test]
 	fn create_creates_config_file() {
 		let dir = temp_dir();
-		let config = Config {
-			package_manager: PackageManager::Npm,
-		};
+		let config = Config::with_package_manager(PackageManager::Npm);
 		let path = create(dir.path(), &config).unwrap();
 		assert!(path.exists());
 		assert_eq!(path, dir.path().join(".chronicle/config.toml"));
@@ -107,9 +138,7 @@ mod tests {
 	#[test]
 	fn create_creates_directory_if_needed() {
 		let dir = temp_dir();
-		let config = Config {
-			package_manager: PackageManager::Cargo,
-		};
+		let config = Config::with_package_manager(PackageManager::Cargo);
 		create(dir.path(), &config).unwrap();
 		assert!(dir.path().join(".chronicle").is_dir());
 	}
@@ -117,9 +146,7 @@ mod tests {
 	#[test]
 	fn load_reads_config_file() {
 		let dir = temp_dir();
-		let config = Config {
-			package_manager: PackageManager::Npm,
-		};
+		let config = Config::with_package_manager(PackageManager::Npm);
 		create(dir.path(), &config).unwrap();
 
 		let loaded = load(dir.path()).unwrap();
@@ -145,38 +172,91 @@ mod tests {
 	}
 
 	#[test]
-	fn load_fails_on_missing_fields() {
+	fn load_succeeds_with_empty_config() {
 		let dir = temp_dir();
 		let config_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&config_dir).unwrap();
-		std::fs::write(config_dir.join("config.toml"), "other_field = 123").unwrap();
+		std::fs::write(config_dir.join("config.toml"), "").unwrap();
 
-		let result = load(dir.path());
-		assert!(result.is_err());
+		let config = load(dir.path()).unwrap();
+		assert!(!config.npm.enabled);
+		assert!(!config.cargo.enabled);
 	}
 
 	#[test]
-	fn package_manager_serializes_lowercase() {
-		let config = Config {
-			package_manager: PackageManager::Npm,
-		};
-		let toml = toml::to_string(&config).unwrap();
-		assert!(toml.contains("npm"));
-
-		let config = Config {
-			package_manager: PackageManager::Cargo,
-		};
-		let toml = toml::to_string(&config).unwrap();
-		assert!(toml.contains("cargo"));
+	fn package_manager_config_defaults_to_disabled() {
+		let config = PackageManagerConfig::default();
+		assert!(!config.enabled);
 	}
 
 	#[test]
-	fn package_manager_deserializes_lowercase() {
-		let config: Config = toml::from_str("package_manager = \"npm\"").unwrap();
-		assert_eq!(config.package_manager, PackageManager::Npm);
+	fn config_defaults_all_disabled() {
+		let config = Config::default();
+		assert!(!config.npm.enabled);
+		assert!(!config.cargo.enabled);
+	}
 
-		let config: Config = toml::from_str("package_manager = \"cargo\"").unwrap();
-		assert_eq!(config.package_manager, PackageManager::Cargo);
+	#[test]
+	fn config_with_package_manager_enables_npm() {
+		let config = Config::with_package_manager(PackageManager::Npm);
+		assert!(config.npm.enabled);
+		assert!(!config.cargo.enabled);
+	}
+
+	#[test]
+	fn config_with_package_manager_enables_cargo() {
+		let config = Config::with_package_manager(PackageManager::Cargo);
+		assert!(!config.npm.enabled);
+		assert!(config.cargo.enabled);
+	}
+
+	#[test]
+	fn enabled_package_managers_returns_empty_when_none_enabled() {
+		let config = Config::default();
+		let enabled: Vec<_> = config.enabled_package_managers().collect();
+		assert!(enabled.is_empty());
+	}
+
+	#[test]
+	fn enabled_package_managers_returns_npm_when_enabled() {
+		let config = Config::with_package_manager(PackageManager::Npm);
+		let enabled: Vec<_> = config.enabled_package_managers().collect();
+		assert_eq!(enabled, vec![PackageManager::Npm]);
+	}
+
+	#[test]
+	fn enabled_package_managers_returns_cargo_when_enabled() {
+		let config = Config::with_package_manager(PackageManager::Cargo);
+		let enabled: Vec<_> = config.enabled_package_managers().collect();
+		assert_eq!(enabled, vec![PackageManager::Cargo]);
+	}
+
+	#[test]
+	fn enabled_package_managers_returns_both_when_both_enabled() {
+		let mut config = Config::default();
+		config.npm.enabled = true;
+		config.cargo.enabled = true;
+		let enabled: Vec<_> = config.enabled_package_managers().collect();
+		assert_eq!(enabled, vec![PackageManager::Npm, PackageManager::Cargo]);
+	}
+
+	#[test]
+	fn config_serializes_with_sections() {
+		let config = Config::with_package_manager(PackageManager::Npm);
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(toml_str.contains("[npm]"));
+		assert!(toml_str.contains("enabled = true"));
+	}
+
+	#[test]
+	fn config_deserializes_with_sections() {
+		let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+		assert!(config.npm.enabled);
+		assert!(!config.cargo.enabled);
+
+		let config: Config = toml::from_str("[cargo]\nenabled = true").unwrap();
+		assert!(!config.npm.enabled);
+		assert!(config.cargo.enabled);
 	}
 
 	#[test]
@@ -184,12 +264,11 @@ mod tests {
 		let dir = temp_dir();
 
 		for pm in [PackageManager::Npm, PackageManager::Cargo] {
-			let config = Config {
-				package_manager: pm,
-			};
+			let config = Config::with_package_manager(pm);
 			create(dir.path(), &config).unwrap();
 			let loaded = load(dir.path()).unwrap();
-			assert_eq!(loaded.package_manager, pm);
+			let enabled: Vec<_> = loaded.enabled_package_managers().collect();
+			assert_eq!(enabled, vec![pm]);
 		}
 	}
 }

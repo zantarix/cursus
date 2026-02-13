@@ -1,1 +1,2 @@
-package_manager = "npm"
+[npm]
+enabled = true
