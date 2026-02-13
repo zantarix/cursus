@@ -43,7 +43,7 @@
 					buildInputs = with pkgs; [
 						rustToolchain
 						rust-analyzer
-						gnumake
+						cargo-make
 						zig
 						cargo-zigbuild
 						cargo-llvm-cov

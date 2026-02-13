@@ -5,26 +5,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-cargo build              # Build the project
-cargo run                # Run the application
-cargo test               # Run tests
-cargo test <test_name>   # Run a specific test
-make coverage            # Check test coverage (90% threshold)
-cargo clippy             # Lint the code
-cargo fmt                # Format the code
+cargo build                    # Build the project
+cargo run                      # Run the application
+cargo test                     # Run tests
+cargo test <test_name>         # Run a specific test
+cargo make coverage            # Check test coverage (90% threshold)
+cargo clippy                   # Lint the code
+cargo fmt                      # Format the code
 
 # Generate static binaries
-make release                 # Build all release targets
-make release-x86_64          # x86_64 Linux (musl static)
-make release-aarch64         # ARM64 Linux (musl static)
-make release-macos           # ARM64 macOS (via cargo-zigbuild)
+cargo make release             # Build all release targets
+cargo make release-x86_64      # x86_64 Linux (musl static)
+cargo make release-aarch64     # ARM64 Linux (musl static)
+cargo make release-macos       # ARM64 macOS (via cargo-zigbuild)
 ```
 
 ## Development Environment
 
 This project uses Nix flakes and direnv for development. The flake only supports three systems: x86_64-linux, aarch64-linux, and aarch64-darwin. You should be running inside a dev shell already. If something appears missing then prompt the user to restart you.
 
-The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries (Linux only).
+The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries (Linux only).
 
 ## Code style
 

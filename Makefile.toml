@@ -1,0 +1,21 @@
+[config]
+default_to_workspace = false
+
+[tasks.coverage]
+command = "cargo"
+args = ["llvm-cov", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90"]
+
+[tasks.release-x86_64]
+command = "cargo"
+args = ["build", "--release", "--target", "x86_64-unknown-linux-musl"]
+
+[tasks.release-aarch64]
+command = "cargo"
+args = ["build", "--release", "--target", "aarch64-unknown-linux-musl"]
+
+[tasks.release-macos]
+command = "cargo"
+args = ["zigbuild", "--release", "--target", "aarch64-apple-darwin"]
+
+[tasks.release]
+dependencies = ["release-x86_64", "release-aarch64", "release-macos"]
