@@ -4,7 +4,7 @@ default_to_workspace = false
 [tasks.coverage]
 clear = true
 command = "cargo"
-args = ["llvm-cov", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90"]
+args = ["llvm-cov", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 
 [tasks.release-x86_64]
 command = "cargo"
