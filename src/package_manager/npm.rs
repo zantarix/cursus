@@ -7,17 +7,22 @@ use glob::glob;
 use serde::Deserialize;
 
 use super::{PackageManagerAdapter, ProjectInfo};
+use crate::config::PackageManagerConfig;
 
 /// Adapter for npm-based projects.
 ///
 /// Supports both single-package repositories and monorepos using npm/yarn/pnpm workspaces.
-#[derive(Debug, Default)]
-pub struct NpmAdapter;
+#[derive(Debug)]
+pub struct NpmAdapter {
+	/// Configuration for this package manager.
+	#[allow(dead_code)]
+	config: PackageManagerConfig,
+}
 
 impl NpmAdapter {
-	/// Creates a new npm adapter.
-	pub fn new() -> Self {
-		Self
+	/// Creates a new npm adapter with the given configuration.
+	pub fn new(config: PackageManagerConfig) -> Self {
+		Self { config }
 	}
 }
 
@@ -208,7 +213,7 @@ mod tests {
 
 	/// Helper to enumerate projects using the adapter.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		NpmAdapter::new().enumerate_projects(dir)
+		NpmAdapter::new(PackageManagerConfig::default()).enumerate_projects(dir)
 	}
 
 	#[test]
@@ -405,8 +410,8 @@ mod tests {
 	}
 
 	#[test]
-	fn default_creates_adapter() {
-		let adapter = NpmAdapter::default();
+	fn new_creates_adapter() {
+		let adapter = NpmAdapter::new(PackageManagerConfig::default());
 		let dir = temp_dir();
 		// Should work without panicking
 		let _ = adapter.enumerate_projects(dir.path());

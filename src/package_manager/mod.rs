@@ -4,8 +4,10 @@
 //! allowing Chronicle to work with various ecosystems (npm, Cargo, etc.) through
 //! a unified interface.
 
+mod cargo;
 mod npm;
 
+pub use cargo::CargoAdapter;
 pub use npm::NpmAdapter;
 
 use std::path::Path;
@@ -133,10 +135,12 @@ pub fn enumerate_projects(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::config::PackageManagerConfig;
 
 	/// Creates a test project with a dummy adapter.
 	fn test_project(name: &str, path: &str) -> Project {
-		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new());
+		let adapter: Arc<dyn PackageManagerAdapter> =
+			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
 		Project {
 			name: name.to_string(),
 			path: std::path::PathBuf::from(path),
@@ -180,7 +184,8 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
 
-		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new());
+		let adapter: Arc<dyn PackageManagerAdapter> =
+			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
 		let projects = enumerate_projects([adapter.clone()], dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 1);
@@ -195,8 +200,10 @@ mod tests {
 		std::fs::write(dir.path().join("package.json"), r#"{"name": "npm-pkg"}"#).unwrap();
 
 		// Two adapters pointing at the same directory (both will find the package)
-		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new());
-		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new());
+		let adapter1: Arc<dyn PackageManagerAdapter> =
+			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
+		let adapter2: Arc<dyn PackageManagerAdapter> =
+			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
 
 		let projects = enumerate_projects([adapter1, adapter2], dir.path()).unwrap();
 
