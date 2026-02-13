@@ -19,6 +19,10 @@ pub struct ChangeArgs {
 	/// Type of change: major, minor, or patch (required in non-interactive mode)
 	#[arg(short = 't', long)]
 	pub change_type: Option<change::ChangeType>,
+
+	/// Project name(s) to include (repeatable; defaults to all in non-interactive mode)
+	#[arg(short = 'p', long = "project")]
+	pub projects: Vec<String>,
 }
 
 /// Runs the `change` subcommand.
@@ -48,25 +52,48 @@ pub fn cmd_change(
 		bail!("No projects found. Check that your package manager configuration is correct.");
 	}
 
-	for project in &projects {
-		println!("{}: {}", project.name(), project.path().display());
-	}
+	let project_indices = if !args.projects.is_empty() {
+		let indices: Vec<usize> = args
+			.projects
+			.iter()
+			.map(|name| {
+				projects
+					.iter()
+					.position(|p| p.name() == name)
+					.ok_or_else(|| anyhow::anyhow!("Unknown project: {name}"))
+			})
+			.collect::<anyhow::Result<Vec<_>>>()?;
+		Some(indices)
+	} else {
+		None
+	};
 
-	let change_type = if global.no_interactive {
+	let result = if global.no_interactive {
 		let Some(ct) = args.change_type else {
 			bail!("--change-type is required in non-interactive mode");
 		};
-		ct
+		let selected_projects = match &project_indices {
+			Some(indices) => indices.iter().map(|&i| projects[i].clone()).collect(),
+			None => projects.clone(),
+		};
+		change::ChangeResult {
+			projects: selected_projects,
+			change_type: ct,
+		}
 	} else {
 		let options = change::ChangeOptions {
 			change_type: args.change_type,
+			projects: project_indices,
 		};
-		match change::run(&options)? {
-			Some(ct) => ct,
+		match change::run(&projects, &options)? {
+			Some(r) => r,
 			None => return Ok(ExitCode::from(2)),
 		}
 	};
 
-	println!("{change_type:?}");
+	for project in &result.projects {
+		println!("{}: {}", project.name(), project.path().display());
+	}
+	println!("{:?}", result.change_type);
 	Ok(ExitCode::SUCCESS)
 }

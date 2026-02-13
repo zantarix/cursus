@@ -147,19 +147,9 @@ fn ui(frame: &mut Frame, screen: &Screen) {
 		.constraints([
 			Constraint::Length(3),
 			Constraint::Length(3),
-			Constraint::Length(3),
 			Constraint::Min(1),
 		])
 		.split(frame.area());
-
-	let title = Paragraph::new("Chronicle")
-		.style(
-			Style::default()
-				.fg(Color::Cyan)
-				.add_modifier(Modifier::BOLD),
-		)
-		.block(Block::default().borders(Borders::ALL).title("Setup"));
-	frame.render_widget(title, chunks[0]);
 
 	match screen {
 		Screen::Confirm(yes) => render_confirm(frame, &chunks, *yes),
@@ -168,14 +158,14 @@ fn ui(frame: &mut Frame, screen: &Screen) {
 
 	let help = Paragraph::new("Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel")
 		.style(Style::default().fg(Color::DarkGray));
-	frame.render_widget(help, chunks[3]);
+	frame.render_widget(help, chunks[2]);
 }
 
 fn render_confirm(frame: &mut Frame, chunks: &[Rect], yes: bool) {
 	let question = Paragraph::new("No configuration found. Set up Chronicle for this repository?")
 		.style(Style::default().fg(Color::Yellow))
 		.block(Block::default().borders(Borders::ALL));
-	frame.render_widget(question, chunks[1]);
+	frame.render_widget(question, chunks[0]);
 
 	let yes_style = if yes {
 		Style::default()
@@ -201,14 +191,14 @@ fn render_confirm(frame: &mut Frame, chunks: &[Rect], yes: bool) {
 	]);
 	let button_para =
 		Paragraph::new(buttons).block(Block::default().borders(Borders::ALL).title("Choose"));
-	frame.render_widget(button_para, chunks[2]);
+	frame.render_widget(button_para, chunks[1]);
 }
 
 fn render_package_manager(frame: &mut Frame, chunks: &[Rect], selected: PackageManager) {
 	let question = Paragraph::new("Which package manager does this project use?")
 		.style(Style::default().fg(Color::Yellow))
 		.block(Block::default().borders(Borders::ALL));
-	frame.render_widget(question, chunks[1]);
+	frame.render_widget(question, chunks[0]);
 
 	let cargo_style = if selected == PackageManager::Cargo {
 		Style::default()
@@ -237,7 +227,7 @@ fn render_package_manager(frame: &mut Frame, chunks: &[Rect], selected: PackageM
 			.borders(Borders::ALL)
 			.title("Package Manager"),
 	);
-	frame.render_widget(button_para, chunks[2]);
+	frame.render_widget(button_para, chunks[1]);
 }
 
 #[cfg(test)]
@@ -621,7 +611,7 @@ mod tests {
 			.unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
-		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Choose"));
 		assert!(content.contains("Yes"));
 		assert!(content.contains("No"));
 	}
@@ -634,7 +624,7 @@ mod tests {
 			.unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
-		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Choose"));
 		assert!(content.contains("Yes"));
 		assert!(content.contains("No"));
 	}
@@ -647,7 +637,7 @@ mod tests {
 			.unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
-		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Package Manager"));
 		assert!(content.contains("Cargo"));
 		assert!(content.contains("NPM"));
 	}
@@ -660,7 +650,7 @@ mod tests {
 			.unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
-		assert!(content.contains("Chronicle"));
+		assert!(content.contains("Package Manager"));
 		assert!(content.contains("Cargo"));
 		assert!(content.contains("NPM"));
 	}
