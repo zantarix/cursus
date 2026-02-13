@@ -1,5 +1,8 @@
 //! Chronicle is a CLI tool that manages project configuration via an interactive TUI setup wizard.
 
+#![feature(coverage_attribute)]
+
+pub mod changeset;
 pub mod cli;
 pub mod config;
 pub mod package_manager;

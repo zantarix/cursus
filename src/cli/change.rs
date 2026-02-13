@@ -1,5 +1,6 @@
 //! The `change` subcommand.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use std::sync::Arc;
 use anyhow::bail;
 use clap::Args;
 
+use crate::changeset::{self, Changeset};
 use crate::config::{self, PackageManager};
 use crate::package_manager::{self, CargoAdapter, NpmAdapter, PackageManagerAdapter};
 use crate::tui::change;
@@ -23,6 +25,10 @@ pub struct ChangeArgs {
 	/// Project name(s) to include (repeatable; defaults to all in non-interactive mode)
 	#[arg(short = 'p', long = "project")]
 	pub projects: Vec<String>,
+
+	/// Description message for the changeset (required in non-interactive mode)
+	#[arg(short = 'm', long)]
+	pub message: Option<String>,
 }
 
 /// Runs the `change` subcommand.
@@ -72,6 +78,9 @@ pub fn cmd_change(
 		let Some(ct) = args.change_type else {
 			bail!("--change-type is required in non-interactive mode");
 		};
+		if args.message.is_none() {
+			bail!("--message is required in non-interactive mode");
+		}
 		let selected_projects = match &project_indices {
 			Some(indices) => indices.iter().map(|&i| projects[i].clone()).collect(),
 			None => projects.clone(),
@@ -91,9 +100,22 @@ pub fn cmd_change(
 		}
 	};
 
-	for project in &result.projects {
-		println!("{}: {}", project.name(), project.path().display());
+	let packages: BTreeMap<String, change::ChangeType> = result
+		.projects
+		.iter()
+		.map(|p| (p.name().to_string(), result.change_type))
+		.collect();
+
+	let changeset = Changeset {
+		packages,
+		message: args.message.clone(),
+	};
+
+	let path = changeset::write_changeset(git_workdir, &changeset)?;
+
+	if !global.no_interactive && args.message.is_none() {
+		changeset::open_editor(&path)?;
 	}
-	println!("{:?}", result.change_type);
+
 	Ok(ExitCode::SUCCESS)
 }
