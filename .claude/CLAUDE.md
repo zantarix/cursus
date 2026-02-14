@@ -26,47 +26,39 @@ This project uses Nix flakes and direnv for development. The flake only supports
 
 The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries (Linux only).
 
-## Code style
+## Code Style
 
-You should format code before making any commit.
+Format code before making any commit. Prefer functional style over imperative.
 
-Prefer functional style over imperative.
+Uses Rust 2024 edition.
 
 ## Testing
 
-Integration tests should always use the `--no-interactive` flag as part of the argument list they test in order to ensure that the TUI never runs during tests.
-
-Integration tests should be full end-to-end tests and call `chronicle::run()` as the entrypoint of the test.
+Integration tests live in `tests/` and should always use the `--no-interactive` flag to ensure the TUI never runs during tests. They should be full end-to-end tests calling `chronicle::run()` as the entrypoint.
 
 ## Architecture
 
 Chronicle is a Rust CLI tool for release management. It uses an interactive TUI for setup and change recording.
 
-**Module structure:**
-- `src/lib.rs` - Library entry point (`chronicle::run()`), git root detection
-- `src/main.rs` - Binary entry point, error handling
-- `src/cli/` - Command-line interface (clap)
-  - `mod.rs` - `Cli` struct, `GlobalArgs` (`--interactive`/`--no-interactive`), `Command` enum
-  - `init.rs` - `init` subcommand: creates `.chronicle/config.toml`
-  - `change.rs` - `change` subcommand: records semantic version changes (default when no subcommand)
-- `src/config.rs` - `Config` and `PackageManager` types, TOML persistence
-- `src/tui/` - Terminal UI (ratatui/crossterm)
-  - `init.rs` - Setup wizard with screen-based state machine
-  - `change.rs` - Change type selector (major/minor/patch)
-- `src/package_manager/` - Adapter pattern for package managers
-  - `mod.rs` - `PackageManagerAdapter` trait, `Project` struct
-  - `cargo.rs` - Cargo workspace support
-  - `npm.rs` - npm/yarn/pnpm workspace support
+**Key modules:**
+- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`) and subcommands (`init`, `change`). `change` is the default when no subcommand is given.
+- `src/tui/` - ratatui/crossterm terminal UI wizards
+- `src/config.rs` - `Config` and `PackageManager` types, TOML persistence in `.chronicle/config.toml`
+- `src/changeset.rs` - Changeset file I/O: Hugo-style `+++` TOML frontmatter format, parsing, writing to `.chronicle/`, and editor integration
+- `src/package_manager/` - Adapter pattern (`PackageManagerAdapter` trait) for Cargo and npm/yarn/pnpm workspace enumeration
 
-**TUI pattern:**
-- `Screen` enum represents wizard state
-- `handle_key()` is a pure function for state transitions (testable without terminal)
-- UI rendering in separate `ui()` and `render_*` functions
-- Tests use `ratatui::backend::TestBackend`
+**TUI pattern:** Each TUI wizard uses a `Screen` enum for state, a pure `handle_key()` function for state transitions (testable without a terminal), and separate `ui()`/`render_*()` functions. Tests use `ratatui::backend::TestBackend`.
 
-Uses Rust 2024 edition.
+**Changeset file format:**
+```
++++
+package-name = "minor"
++++
 
-## Non-functional requirements
+Description message here
+```
+
+## Non-functional Requirements
 
 All new changes should meet the 90% test coverage threshold.
 
