@@ -1,5 +1,6 @@
 [npm]
 enabled = true
+path = "pkg/"
 
 [cargo]
 enabled = true

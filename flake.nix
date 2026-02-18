@@ -47,6 +47,7 @@
 						zig
 						cargo-zigbuild
 						cargo-llvm-cov
+					nodejs
 					] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
 						pkgs.pkgsCross.musl64.stdenv.cc
 						pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc

@@ -1,0 +1,21 @@
+{
+	"name": "@mscharley/chronicle",
+	"version": "0.1.0",
+	"description": "Release management with style",
+	"homepage": "https://github.com/mscharley/chronicle#readme",
+	"bugs": {
+		"url": "https://github.com/mscharley/chronicle/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mscharley/chronicle.git"
+	},
+	"license": "MPL-2.0",
+	"author": "Matthew Scharley <github@scharley.me>",
+	"type": "module",
+	"bin": "bin/chronicle",
+	"scripts": {
+		"postinstall": "node bin/download-binary.js",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	}
+}
