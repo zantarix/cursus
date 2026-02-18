@@ -1,4 +1,10 @@
-Verify the current changes pass all quality checks. Run these steps in order, stopping if any step fails:
+---
+name: verify-code
+description: Use to fully verify changes made to code.
+---
+
+Verify the current changes pass all quality checks. Run these steps in order, attempting to fix any failures or stop if
+you are unable to fix the failures:
 
 1. **Lint** the code: `cargo clippy -- -D warnings`
 2. **Test** the code: `cargo test`
