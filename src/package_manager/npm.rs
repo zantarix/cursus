@@ -85,7 +85,7 @@ fn read_pnpm_workspace(git_root: &Path) -> anyhow::Result<Option<PnpmWorkspace>>
 	}
 	let contents = std::fs::read_to_string(&path)
 		.with_context(|| format!("Failed to read {}", path.display()))?;
-	let workspace: PnpmWorkspace = serde_yaml_ng::from_str(&contents)
+	let workspace: PnpmWorkspace = serde_saphyr::from_str(&contents)
 		.with_context(|| format!("Failed to parse {}", path.display()))?;
 	Ok(Some(workspace))
 }
