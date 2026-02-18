@@ -5,7 +5,10 @@ mod common;
 use std::process::ExitCode;
 
 use chronicle::config::{Config, PackageManager};
-use common::{temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project};
+use common::{
+	temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project,
+	temp_git_repo_with_project_in_subfolder,
+};
 
 #[test]
 fn change_fails_when_no_config() {
@@ -294,4 +297,44 @@ fn change_with_message_and_project() {
 		content.contains("Fixed a bug"),
 		"Should contain the message, got: {content}"
 	);
+}
+
+#[test]
+fn change_succeeds_with_npm_project_in_subfolder() {
+	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Npm, "frontend");
+	let result = chronicle::run(
+		[
+			"chronicle",
+			"--no-interactive",
+			"change",
+			"-t",
+			"minor",
+			"-m",
+			"test subfolder",
+		],
+		dir.path(),
+	);
+
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+}
+
+#[test]
+fn change_succeeds_with_cargo_project_in_subfolder() {
+	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Cargo, "backend");
+	let result = chronicle::run(
+		[
+			"chronicle",
+			"--no-interactive",
+			"change",
+			"-t",
+			"patch",
+			"-m",
+			"test subfolder",
+		],
+		dir.path(),
+	);
+
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }

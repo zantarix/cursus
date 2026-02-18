@@ -21,6 +21,25 @@ pub struct PackageManagerConfig {
 	/// Whether this package manager is enabled for the project.
 	#[serde(default)]
 	pub enabled: bool,
+	/// Optional path to the package manager root, relative to the git root.
+	///
+	/// When set, the package manager will look for its manifest files in this
+	/// subdirectory instead of the git repository root.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub path: Option<String>,
+}
+
+impl PackageManagerConfig {
+	/// Returns the resolved root directory for this package manager.
+	///
+	/// If a `path` is configured, returns `git_root` joined with that path.
+	/// Otherwise, returns a copy of `git_root`.
+	pub fn resolve_root(&self, git_root: &Path) -> PathBuf {
+		match &self.path {
+			Some(path) => git_root.join(path),
+			None => git_root.to_path_buf(),
+		}
+	}
 }
 
 /// Chronicle configuration for a repository.
@@ -293,6 +312,70 @@ mod tests {
 			chain.contains("unknown field"),
 			"Expected 'unknown field' error, got: {chain}"
 		);
+	}
+
+	#[test]
+	fn deserialize_config_with_path() {
+		let config: Config = toml::from_str("[npm]\nenabled = true\npath = \"frontend\"").unwrap();
+		assert!(config.npm.enabled);
+		assert_eq!(config.npm.path, Some("frontend".to_string()));
+	}
+
+	#[test]
+	fn deserialize_config_without_path() {
+		let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+		assert!(config.npm.enabled);
+		assert_eq!(config.npm.path, None);
+	}
+
+	#[test]
+	fn serialize_config_omits_none_path() {
+		let config = Config::with_package_manager(PackageManager::Npm);
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(!toml_str.contains("path"), "None path should be omitted");
+	}
+
+	#[test]
+	fn serialize_config_includes_some_path() {
+		let mut config = Config::with_package_manager(PackageManager::Npm);
+		config.npm.path = Some("frontend".to_string());
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			toml_str.contains("path = \"frontend\""),
+			"Some path should be serialized, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn resolve_root_without_path_returns_git_root() {
+		let config = PackageManagerConfig {
+			enabled: true,
+			path: None,
+		};
+		let git_root = Path::new("/repo");
+		let resolved = config.resolve_root(git_root);
+		assert_eq!(resolved, git_root);
+	}
+
+	#[test]
+	fn resolve_root_with_path_joins_git_root() {
+		let config = PackageManagerConfig {
+			enabled: true,
+			path: Some("frontend".to_string()),
+		};
+		let git_root = Path::new("/repo");
+		let resolved = config.resolve_root(git_root);
+		assert_eq!(resolved, Path::new("/repo/frontend"));
+	}
+
+	#[test]
+	fn config_roundtrip_with_path() {
+		let dir = temp_dir();
+		let mut config = Config::with_package_manager(PackageManager::Npm);
+		config.npm.path = Some("frontend".to_string());
+		create(dir.path(), &config).unwrap();
+		let loaded = load(dir.path()).unwrap();
+		assert_eq!(loaded.npm.path, Some("frontend".to_string()));
 	}
 
 	#[test]

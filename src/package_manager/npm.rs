@@ -15,7 +15,6 @@ use crate::config::PackageManagerConfig;
 #[derive(Debug)]
 pub struct NpmAdapter {
 	/// Configuration for this package manager.
-	#[allow(dead_code)]
 	config: PackageManagerConfig,
 }
 
@@ -138,8 +137,15 @@ fn read_workspace_project(
 }
 
 /// Expands a workspace glob pattern and returns all matching projects.
-fn expand_workspace_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-	let full_pattern = git_root.join(pattern);
+///
+/// Globs are resolved relative to `pm_root`, but paths in the returned
+/// [`ProjectInfo`] are stripped relative to `git_root`.
+fn expand_workspace_pattern(
+	git_root: &Path,
+	pm_root: &Path,
+	pattern: &str,
+) -> anyhow::Result<Vec<ProjectInfo>> {
+	let full_pattern = pm_root.join(pattern);
 	let pattern_str = full_pattern
 		.to_str()
 		.context("Invalid UTF-8 in workspace pattern")?;
@@ -157,10 +163,16 @@ fn expand_workspace_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Ve
 
 impl PackageManagerAdapter for NpmAdapter {
 	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		let Some(root_package) = read_package_json(git_root)? else {
+		let pm_root = self.config.resolve_root(git_root);
+		let Some(root_package) = read_package_json(&pm_root)? else {
 			return Ok(Vec::new());
 		};
-		let pnpm_workspace = read_pnpm_workspace(git_root)?;
+		let pnpm_workspace = read_pnpm_workspace(&pm_root)?;
+
+		let pm_relative_path = pm_root
+			.strip_prefix(git_root)
+			.unwrap_or(Path::new(""))
+			.to_path_buf();
 
 		let Some(workspace_patterns) =
 			get_workspace_patterns(pnpm_workspace.as_ref(), &root_package)
@@ -169,7 +181,7 @@ impl PackageManagerAdapter for NpmAdapter {
 			let name = root_package.name.unwrap_or_else(|| "unnamed".to_string());
 			return Ok(vec![ProjectInfo {
 				name,
-				path: std::path::PathBuf::new(),
+				path: pm_relative_path,
 			}]);
 		};
 
@@ -177,14 +189,14 @@ impl PackageManagerAdapter for NpmAdapter {
 		let root_name = root_package.name.unwrap_or_else(|| "unnamed".to_string());
 		let root_project = ProjectInfo {
 			name: root_name,
-			path: std::path::PathBuf::new(),
+			path: pm_relative_path,
 		};
 
 		let mut projects: Vec<ProjectInfo> = std::iter::once(root_project)
 			.chain(
 				workspace_patterns
 					.iter()
-					.map(|pattern| expand_workspace_pattern(git_root, pattern))
+					.map(|pattern| expand_workspace_pattern(git_root, &pm_root, pattern))
 					.collect::<anyhow::Result<Vec<_>>>()?
 					.into_iter()
 					.flatten(),
@@ -211,9 +223,18 @@ mod tests {
 		std::fs::write(dir.join("package.json"), content).unwrap();
 	}
 
-	/// Helper to enumerate projects using the adapter.
+	/// Helper to enumerate projects using the adapter with no configured path.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
 		NpmAdapter::new(PackageManagerConfig::default()).enumerate_projects(dir)
+	}
+
+	/// Helper to enumerate projects using the adapter with a configured path.
+	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
+		NpmAdapter::new(PackageManagerConfig {
+			enabled: true,
+			path: Some(path.to_string()),
+		})
+		.enumerate_projects(dir)
 	}
 
 	#[test]
@@ -553,5 +574,54 @@ mod tests {
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
 		assert_eq!(projects[1].name, "my-pkg");
+	}
+
+	#[test]
+	fn enumerate_single_package_in_subfolder() {
+		let dir = temp_dir();
+		let subfolder = dir.path().join("frontend");
+		std::fs::create_dir_all(&subfolder).unwrap();
+		write_package_json(&subfolder, r#"{"name": "my-app"}"#);
+
+		let projects = enumerate_with_path(dir.path(), "frontend").unwrap();
+
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name, "my-app");
+		assert_eq!(projects[0].path, Path::new("frontend"));
+	}
+
+	#[test]
+	fn enumerate_workspace_in_subfolder() {
+		let dir = temp_dir();
+		let subfolder = dir.path().join("frontend");
+		std::fs::create_dir_all(&subfolder).unwrap();
+		write_package_json(
+			&subfolder,
+			r#"{"name": "monorepo", "workspaces": ["packages/*"]}"#,
+		);
+
+		let pkg_a = subfolder.join("packages/pkg-a");
+		let pkg_b = subfolder.join("packages/pkg-b");
+		std::fs::create_dir_all(&pkg_a).unwrap();
+		std::fs::create_dir_all(&pkg_b).unwrap();
+		write_package_json(&pkg_a, r#"{"name": "@scope/pkg-a"}"#);
+		write_package_json(&pkg_b, r#"{"name": "@scope/pkg-b"}"#);
+
+		let projects = enumerate_with_path(dir.path(), "frontend").unwrap();
+
+		assert_eq!(projects.len(), 3);
+		assert_eq!(projects[0].name, "monorepo");
+		assert_eq!(projects[0].path, Path::new("frontend"));
+		assert_eq!(projects[1].name, "@scope/pkg-a");
+		assert_eq!(projects[1].path, Path::new("frontend/packages/pkg-a"));
+		assert_eq!(projects[2].name, "@scope/pkg-b");
+		assert_eq!(projects[2].path, Path::new("frontend/packages/pkg-b"));
+	}
+
+	#[test]
+	fn enumerate_returns_empty_when_subfolder_missing() {
+		let dir = temp_dir();
+		let projects = enumerate_with_path(dir.path(), "nonexistent").unwrap();
+		assert!(projects.is_empty());
 	}
 }

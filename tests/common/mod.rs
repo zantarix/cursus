@@ -41,3 +41,28 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	}
 	dir
 }
+
+/// Creates a temporary git repository with a config and package manifest in a subfolder.
+pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &str) -> TempDir {
+	let mut config = Config::with_package_manager(pm);
+	match pm {
+		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),
+		PackageManager::Cargo => config.cargo.path = Some(subfolder.to_string()),
+	}
+	let dir = temp_git_repo_with_config(&config);
+	let sub_path = dir.path().join(subfolder);
+	std::fs::create_dir_all(&sub_path).unwrap();
+	match pm {
+		PackageManager::Npm => {
+			std::fs::write(sub_path.join("package.json"), r#"{"name": "test-project"}"#).unwrap();
+		}
+		PackageManager::Cargo => {
+			std::fs::write(
+				sub_path.join("Cargo.toml"),
+				"[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+			)
+			.unwrap();
+		}
+	}
+	dir
+}

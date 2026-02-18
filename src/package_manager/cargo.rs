@@ -15,7 +15,6 @@ use crate::config::PackageManagerConfig;
 #[derive(Debug)]
 pub struct CargoAdapter {
 	/// Configuration for this package manager.
-	#[allow(dead_code)]
 	config: PackageManagerConfig,
 }
 
@@ -93,8 +92,15 @@ fn read_workspace_member(
 }
 
 /// Expands a workspace member glob pattern and returns all matching projects.
-fn expand_member_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-	let full_pattern = git_root.join(pattern);
+///
+/// Globs are resolved relative to `pm_root`, but paths in the returned
+/// [`ProjectInfo`] are stripped relative to `git_root`.
+fn expand_member_pattern(
+	git_root: &Path,
+	pm_root: &Path,
+	pattern: &str,
+) -> anyhow::Result<Vec<ProjectInfo>> {
+	let full_pattern = pm_root.join(pattern);
 	let pattern_str = full_pattern
 		.to_str()
 		.context("Invalid UTF-8 in workspace member pattern")?;
@@ -112,9 +118,15 @@ fn expand_member_pattern(git_root: &Path, pattern: &str) -> anyhow::Result<Vec<P
 
 impl PackageManagerAdapter for CargoAdapter {
 	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		let Some(root_cargo) = read_cargo_toml(git_root)? else {
+		let pm_root = self.config.resolve_root(git_root);
+		let Some(root_cargo) = read_cargo_toml(&pm_root)? else {
 			return Ok(Vec::new());
 		};
+
+		let pm_relative_path = pm_root
+			.strip_prefix(git_root)
+			.unwrap_or(Path::new(""))
+			.to_path_buf();
 
 		// Check for workspace members
 		let workspace_members = root_cargo
@@ -131,14 +143,14 @@ impl PackageManagerAdapter for CargoAdapter {
 			};
 			return Ok(vec![ProjectInfo {
 				name: package.name,
-				path: std::path::PathBuf::new(),
+				path: pm_relative_path,
 			}]);
 		};
 
 		// Workspace with members
 		let mut projects: Vec<ProjectInfo> = members
 			.iter()
-			.map(|pattern| expand_member_pattern(git_root, pattern))
+			.map(|pattern| expand_member_pattern(git_root, &pm_root, pattern))
 			.collect::<anyhow::Result<Vec<_>>>()?
 			.into_iter()
 			.flatten()
@@ -150,7 +162,7 @@ impl PackageManagerAdapter for CargoAdapter {
 				0,
 				ProjectInfo {
 					name: package.name,
-					path: std::path::PathBuf::new(),
+					path: pm_relative_path,
 				},
 			);
 		}
@@ -175,9 +187,18 @@ mod tests {
 		std::fs::write(dir.join("Cargo.toml"), content).unwrap();
 	}
 
-	/// Helper to enumerate projects using the adapter.
+	/// Helper to enumerate projects using the adapter with no configured path.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
 		CargoAdapter::new(PackageManagerConfig::default()).enumerate_projects(dir)
+	}
+
+	/// Helper to enumerate projects using the adapter with a configured path.
+	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
+		CargoAdapter::new(PackageManagerConfig {
+			enabled: true,
+			path: Some(path.to_string()),
+		})
+		.enumerate_projects(dir)
 	}
 
 	#[test]
@@ -441,5 +462,76 @@ members = ["crates/*"]
 		let adapter = CargoAdapter::new(PackageManagerConfig::default());
 		let dir = temp_dir();
 		let _ = adapter.enumerate_projects(dir.path());
+	}
+
+	#[test]
+	fn enumerate_single_crate_in_subfolder() {
+		let dir = temp_dir();
+		let subfolder = dir.path().join("backend");
+		std::fs::create_dir_all(&subfolder).unwrap();
+		write_cargo_toml(
+			&subfolder,
+			r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+"#,
+		);
+
+		let projects = enumerate_with_path(dir.path(), "backend").unwrap();
+
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name, "my-crate");
+		assert_eq!(projects[0].path, Path::new("backend"));
+	}
+
+	#[test]
+	fn enumerate_workspace_in_subfolder() {
+		let dir = temp_dir();
+		let subfolder = dir.path().join("backend");
+		std::fs::create_dir_all(&subfolder).unwrap();
+		write_cargo_toml(
+			&subfolder,
+			r#"
+[workspace]
+members = ["crates/*"]
+"#,
+		);
+
+		let crate_a = subfolder.join("crates/crate-a");
+		let crate_b = subfolder.join("crates/crate-b");
+		std::fs::create_dir_all(&crate_a).unwrap();
+		std::fs::create_dir_all(&crate_b).unwrap();
+		write_cargo_toml(
+			&crate_a,
+			r#"
+[package]
+name = "crate-a"
+version = "0.1.0"
+"#,
+		);
+		write_cargo_toml(
+			&crate_b,
+			r#"
+[package]
+name = "crate-b"
+version = "0.1.0"
+"#,
+		);
+
+		let projects = enumerate_with_path(dir.path(), "backend").unwrap();
+
+		assert_eq!(projects.len(), 2);
+		assert_eq!(projects[0].name, "crate-a");
+		assert_eq!(projects[0].path, Path::new("backend/crates/crate-a"));
+		assert_eq!(projects[1].name, "crate-b");
+		assert_eq!(projects[1].path, Path::new("backend/crates/crate-b"));
+	}
+
+	#[test]
+	fn enumerate_returns_empty_when_subfolder_missing() {
+		let dir = temp_dir();
+		let projects = enumerate_with_path(dir.path(), "nonexistent").unwrap();
+		assert!(projects.is_empty());
 	}
 }
