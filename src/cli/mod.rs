@@ -33,7 +33,7 @@ impl Default for GlobalArgs {
 
 /// Command-line interface for chronicle.
 #[derive(Parser)]
-#[command(name = "chronicle", about = "Release management")]
+#[command(name = "chronicle", about = "Release management", version)]
 pub struct Cli {
 	#[command(flatten)]
 	pub global: GlobalArgs,

@@ -33,7 +33,21 @@ where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
 {
-	let cli = cli::Cli::try_parse_from(args)?;
+	let cli = match cli::Cli::try_parse_from(args) {
+		Ok(cli) => cli,
+		Err(e) => {
+			// clap returns errors for help/version requests too
+			// Use clap's error printing to handle them correctly
+			e.print().expect("Failed to print clap error");
+			let exit_code = if e.use_stderr() {
+				ExitCode::FAILURE
+			} else {
+				ExitCode::SUCCESS
+			};
+			return Ok(exit_code);
+		}
+	};
+
 	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
 
 	match cli.command {

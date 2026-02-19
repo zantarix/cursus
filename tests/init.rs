@@ -80,7 +80,7 @@ fn init_fails_with_invalid_package_manager() {
 		dir.path(),
 	);
 
-	assert!(result.is_err());
+	assert!(result.is_ok_and(|code| code == std::process::ExitCode::FAILURE));
 }
 
 #[test]

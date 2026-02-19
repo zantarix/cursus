@@ -11,7 +11,7 @@ fn run_fails_with_invalid_command() {
 		["chronicle", "--no-interactive", "invalid-command"],
 		dir.path(),
 	);
-	assert!(result.is_err());
+	assert!(result.is_ok_and(|code| code == std::process::ExitCode::FAILURE));
 }
 
 #[test]
@@ -21,5 +21,5 @@ fn run_fails_with_unknown_flag() {
 		["chronicle", "--no-interactive", "--unknown-flag"],
 		dir.path(),
 	);
-	assert!(result.is_err());
+	assert!(result.is_ok_and(|code| code == std::process::ExitCode::FAILURE));
 }
