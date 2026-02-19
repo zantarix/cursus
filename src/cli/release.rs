@@ -196,8 +196,9 @@ mod tests {
 	fn cmd_release_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config =
-			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		let config = crate::model::config::Config::with_package_manager(
+			crate::model::config::PackageManager::Cargo,
+		);
 		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -214,8 +215,9 @@ mod tests {
 	fn cmd_release_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config =
-			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		let config = crate::model::config::Config::with_package_manager(
+			crate::model::config::PackageManager::Cargo,
+		);
 		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -245,8 +247,9 @@ mod tests {
 	fn cmd_release_package_flag_filters_packages() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config =
-			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		let config = crate::model::config::Config::with_package_manager(
+			crate::model::config::PackageManager::Cargo,
+		);
 		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -287,8 +290,9 @@ mod tests {
 	fn cmd_release_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config =
-			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		let config = crate::model::config::Config::with_package_manager(
+			crate::model::config::PackageManager::Cargo,
+		);
 		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
