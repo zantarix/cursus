@@ -1,13 +1,41 @@
 //! Cargo package manager adapter.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use glob::glob;
-use serde::Deserialize;
+use semver::Version;
+use serde::{Deserialize, Serialize};
 
 use super::{PackageManagerAdapter, ProjectInfo};
-use crate::config::PackageManagerConfig;
+
+/// Configuration for Cargo package manager.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CargoConfig {
+	/// Whether this package manager is enabled for the project.
+	#[serde(default)]
+	pub enabled: bool,
+	/// Optional path to the package manager root, relative to the git root.
+	///
+	/// When set, the package manager will look for its manifest files in this
+	/// subdirectory instead of the git repository root.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub path: Option<String>,
+}
+
+impl CargoConfig {
+	/// Returns the resolved root directory for this package manager.
+	///
+	/// If a `path` is configured, returns `git_root` joined with that path.
+	/// Otherwise, returns a copy of `git_root`.
+	pub fn resolve_root(&self, git_root: &Path) -> PathBuf {
+		match &self.path {
+			Some(path) => git_root.join(path),
+			None => git_root.to_path_buf(),
+		}
+	}
+}
 
 /// Adapter for Cargo-based Rust projects.
 ///
@@ -15,12 +43,12 @@ use crate::config::PackageManagerConfig;
 #[derive(Debug)]
 pub struct CargoAdapter {
 	/// Configuration for this package manager.
-	config: PackageManagerConfig,
+	config: CargoConfig,
 }
 
 impl CargoAdapter {
 	/// Creates a new Cargo adapter with the given configuration.
-	pub fn new(config: PackageManagerConfig) -> Self {
+	pub fn new(config: CargoConfig) -> Self {
 		Self { config }
 	}
 }
@@ -117,6 +145,41 @@ fn expand_member_pattern(
 }
 
 impl PackageManagerAdapter for CargoAdapter {
+	fn read_version(&self, git_root: &Path, project: &ProjectInfo) -> anyhow::Result<Version> {
+		let manifest_path = git_root.join(&project.path).join("Cargo.toml");
+		let contents = std::fs::read_to_string(&manifest_path)
+			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+		let doc = contents
+			.parse::<toml_edit::DocumentMut>()
+			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+		let version_str = doc
+			.get("package")
+			.and_then(|p| p.get("version"))
+			.and_then(|v| v.as_str())
+			.context("Missing package.version in Cargo.toml")?;
+		version_str
+			.parse::<Version>()
+			.with_context(|| format!("Invalid semver version: {version_str}"))
+	}
+
+	fn write_version(
+		&self,
+		git_root: &Path,
+		project: &ProjectInfo,
+		version: &Version,
+	) -> anyhow::Result<()> {
+		let manifest_path = git_root.join(&project.path).join("Cargo.toml");
+		let contents = std::fs::read_to_string(&manifest_path)
+			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+		let mut doc = contents
+			.parse::<toml_edit::DocumentMut>()
+			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+		doc["package"]["version"] = toml_edit::value(version.to_string());
+		std::fs::write(&manifest_path, doc.to_string())
+			.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+		Ok(())
+	}
+
 	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
 		let pm_root = self.config.resolve_root(git_root);
 		let Some(root_cargo) = read_cargo_toml(&pm_root)? else {
@@ -172,6 +235,33 @@ impl PackageManagerAdapter for CargoAdapter {
 
 		Ok(projects)
 	}
+
+	fn update_lock_file(&self, git_root: &Path, _project: &ProjectInfo) -> anyhow::Result<()> {
+		// For Cargo, always regenerate the lock file at the workspace root
+		let workspace_root = self.config.resolve_root(git_root);
+
+		let output = std::process::Command::new("cargo")
+			.arg("generate-lockfile")
+			.current_dir(&workspace_root)
+			.output()
+			.with_context(|| {
+				format!(
+					"Failed to execute cargo generate-lockfile in {}",
+					workspace_root.display()
+				)
+			})?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			anyhow::bail!(
+				"cargo generate-lockfile failed in {}: {}",
+				workspace_root.display(),
+				stderr
+			);
+		}
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -189,12 +279,12 @@ mod tests {
 
 	/// Helper to enumerate projects using the adapter with no configured path.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		CargoAdapter::new(PackageManagerConfig::default()).enumerate_projects(dir)
+		CargoAdapter::new(CargoConfig::default()).enumerate_projects(dir)
 	}
 
 	/// Helper to enumerate projects using the adapter with a configured path.
 	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-		CargoAdapter::new(PackageManagerConfig {
+		CargoAdapter::new(CargoConfig {
 			enabled: true,
 			path: Some(path.to_string()),
 		})
@@ -459,7 +549,7 @@ members = ["crates/*"]
 
 	#[test]
 	fn new_creates_adapter() {
-		let adapter = CargoAdapter::new(PackageManagerConfig::default());
+		let adapter = CargoAdapter::new(CargoConfig::default());
 		let dir = temp_dir();
 		let _ = adapter.enumerate_projects(dir.path());
 	}
@@ -533,5 +623,180 @@ version = "0.1.0"
 		let dir = temp_dir();
 		let projects = enumerate_with_path(dir.path(), "nonexistent").unwrap();
 		assert!(projects.is_empty());
+	}
+
+	fn project_info(name: &str, path: &str) -> ProjectInfo {
+		ProjectInfo {
+			name: name.to_string(),
+			path: std::path::PathBuf::from(path),
+		}
+	}
+
+	#[test]
+	fn read_version_from_cargo_toml() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.2.3"
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let version = adapter.read_version(dir.path(), &info).unwrap();
+		assert_eq!(version.to_string(), "1.2.3");
+	}
+
+	#[test]
+	fn read_version_missing_version_field() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let result = adapter.read_version(dir.path(), &info);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn read_version_file_not_found() {
+		let dir = temp_dir();
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let result = adapter.read_version(dir.path(), &info);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn read_version_invalid_toml() {
+		let dir = temp_dir();
+		write_cargo_toml(dir.path(), "not valid toml [[[");
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let result = adapter.read_version(dir.path(), &info);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn read_version_invalid_semver() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "not-a-version"
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let result = adapter.read_version(dir.path(), &info);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn write_version_file_not_found() {
+		let dir = temp_dir();
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let version: semver::Version = "1.0.0".parse().unwrap();
+		let result = adapter.write_version(dir.path(), &info, &version);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn write_version_invalid_toml() {
+		let dir = temp_dir();
+		write_cargo_toml(dir.path(), "not valid toml [[[");
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let version: semver::Version = "1.0.0".parse().unwrap();
+		let result = adapter.write_version(dir.path(), &info, &version);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn write_version_updates_cargo_toml() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+edition = "2024"
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let new_version: semver::Version = "2.0.0".parse().unwrap();
+		adapter
+			.write_version(dir.path(), &info, &new_version)
+			.unwrap();
+
+		let contents = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+		assert!(contents.contains("version = \"2.0.0\""));
+		// Preserve other fields
+		assert!(contents.contains("edition = \"2024\""));
+	}
+
+	#[test]
+	fn read_write_version_roundtrip() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+
+		let v = adapter.read_version(dir.path(), &info).unwrap();
+		assert_eq!(v.to_string(), "0.1.0");
+
+		let new_v: semver::Version = "0.2.0".parse().unwrap();
+		adapter.write_version(dir.path(), &info, &new_v).unwrap();
+
+		let v2 = adapter.read_version(dir.path(), &info).unwrap();
+		assert_eq!(v2.to_string(), "0.2.0");
+	}
+
+	#[test]
+	fn cargo_config_defaults_to_disabled() {
+		let config = CargoConfig::default();
+		assert!(!config.enabled);
+		assert_eq!(config.path, None);
+	}
+
+	#[test]
+	fn cargo_config_resolve_root_without_path() {
+		let config = CargoConfig {
+			enabled: true,
+			path: None,
+		};
+		let git_root = Path::new("/repo");
+		let resolved = config.resolve_root(git_root);
+		assert_eq!(resolved, git_root);
+	}
+
+	#[test]
+	fn cargo_config_resolve_root_with_path() {
+		let config = CargoConfig {
+			enabled: true,
+			path: Some("rust-workspace".to_string()),
+		};
+		let git_root = Path::new("/repo");
+		let resolved = config.resolve_root(git_root);
+		assert_eq!(resolved, Path::new("/repo/rust-workspace"));
 	}
 }

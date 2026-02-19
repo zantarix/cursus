@@ -7,8 +7,53 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 
-use crate::tui::change::ChangeType;
+/// The type of semantic version change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeType {
+	/// A breaking change that increments the major version.
+	Major,
+	/// A backwards-compatible feature that increments the minor version.
+	Minor,
+	/// A backwards-compatible bug fix that increments the patch version.
+	Patch,
+}
+
+impl PartialOrd for ChangeType {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for ChangeType {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.rank().cmp(&other.rank())
+	}
+}
+
+impl std::fmt::Display for ChangeType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Major => write!(f, "major"),
+			Self::Minor => write!(f, "minor"),
+			Self::Patch => write!(f, "patch"),
+		}
+	}
+}
+
+impl ChangeType {
+	/// Returns a numeric rank for ordering: Patch(0) < Minor(1) < Major(2).
+	fn rank(self) -> u8 {
+		match self {
+			Self::Patch => 0,
+			Self::Minor => 1,
+			Self::Major => 2,
+		}
+	}
+}
 
 /// A changeset recording project changes and an optional description message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +139,39 @@ pub fn write_changeset(git_root: &Path, changeset: &Changeset) -> anyhow::Result
 	std::fs::write(&path, &content)
 		.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
 	Ok(path)
+}
+
+/// Reads all changeset files from the `.chronicle/` directory.
+///
+/// Returns a list of `(path, changeset)` pairs for each `.md` file found.
+/// Returns an empty vec if no changesets exist.
+///
+/// # Errors
+///
+/// Returns an error if any changeset file cannot be read or parsed.
+pub fn read_all_changesets(git_root: &Path) -> anyhow::Result<Vec<(PathBuf, Changeset)>> {
+	let chronicle_dir = git_root.join(".chronicle");
+	if !chronicle_dir.is_dir() {
+		return Ok(Vec::new());
+	}
+
+	let pattern = chronicle_dir
+		.join("*.md")
+		.to_str()
+		.context("Invalid UTF-8 in .chronicle path")?
+		.to_string();
+
+	glob::glob(&pattern)
+		.context("Invalid glob pattern")?
+		.map(|entry| {
+			let path = entry.context("Failed to read glob entry")?;
+			let contents = std::fs::read_to_string(&path)
+				.with_context(|| format!("Failed to read changeset: {}", path.display()))?;
+			let changeset = parse_changeset(&contents)
+				.with_context(|| format!("Failed to parse changeset: {}", path.display()))?;
+			Ok((path, changeset))
+		})
+		.collect()
 }
 
 /// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
@@ -362,5 +440,91 @@ mod tests {
 		assert!(toml_str.contains("\"major\""));
 		assert!(toml_str.contains("\"minor\""));
 		assert!(toml_str.contains("\"patch\""));
+	}
+
+	#[test]
+	fn read_all_changesets_empty_when_no_directory() {
+		let dir = tempfile::tempdir().unwrap();
+		let result = read_all_changesets(dir.path()).unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn read_all_changesets_empty_when_no_md_files() {
+		let dir = tempfile::tempdir().unwrap();
+		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		std::fs::write(chronicle_dir.join("config.toml"), "").unwrap();
+		let result = read_all_changesets(dir.path()).unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn read_all_changesets_single_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		std::fs::write(
+			chronicle_dir.join("test.md"),
+			"+++\nmy-app = \"minor\"\n+++\n\nA change\n",
+		)
+		.unwrap();
+
+		let result = read_all_changesets(dir.path()).unwrap();
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].1.packages["my-app"], ChangeType::Minor);
+		assert_eq!(result[0].1.message, Some("A change".to_string()));
+	}
+
+	#[test]
+	fn read_all_changesets_multiple_files() {
+		let dir = tempfile::tempdir().unwrap();
+		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		std::fs::write(chronicle_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
+		std::fs::write(chronicle_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
+
+		let result = read_all_changesets(dir.path()).unwrap();
+		assert_eq!(result.len(), 2);
+	}
+
+	#[test]
+	fn read_all_changesets_invalid_file_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		std::fs::write(chronicle_dir.join("bad.md"), "not a valid changeset").unwrap();
+
+		let result = read_all_changesets(dir.path());
+		assert!(result.is_err());
+	}
+
+	// ChangeType tests
+	#[test]
+	fn change_type_ordering() {
+		assert!(ChangeType::Major > ChangeType::Minor);
+		assert!(ChangeType::Minor > ChangeType::Patch);
+		assert!(ChangeType::Major > ChangeType::Patch);
+		assert!(ChangeType::Patch < ChangeType::Minor);
+		assert!(ChangeType::Minor < ChangeType::Major);
+		assert_eq!(
+			ChangeType::Major.cmp(&ChangeType::Major),
+			std::cmp::Ordering::Equal
+		);
+	}
+
+	#[test]
+	fn change_type_display_major() {
+		assert_eq!(format!("{}", ChangeType::Major), "major");
+	}
+
+	#[test]
+	fn change_type_display_minor() {
+		assert_eq!(format!("{}", ChangeType::Minor), "minor");
+	}
+
+	#[test]
+	fn change_type_display_patch() {
+		assert_eq!(format!("{}", ChangeType::Patch), "patch");
 	}
 }

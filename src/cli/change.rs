@@ -3,14 +3,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use anyhow::bail;
 use clap::Args;
 
-use crate::changeset::{self, Changeset};
-use crate::config::{self, PackageManager};
-use crate::package_manager::{self, CargoAdapter, NpmAdapter, PackageManagerAdapter};
+use crate::changeset::{self, ChangeType, Changeset};
+use crate::config;
 use crate::tui::change;
 
 use super::GlobalArgs;
@@ -20,7 +18,7 @@ use super::GlobalArgs;
 pub struct ChangeArgs {
 	/// Type of change: major, minor, or patch (required in non-interactive mode)
 	#[arg(short = 't', long)]
-	pub change_type: Option<change::ChangeType>,
+	pub change_type: Option<ChangeType>,
 
 	/// Project name(s) to include (repeatable; defaults to all in non-interactive mode)
 	#[arg(short = 'p', long = "project")]
@@ -37,22 +35,7 @@ pub fn cmd_change(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 ) -> anyhow::Result<ExitCode> {
-	if !config::exists(git_workdir) {
-		bail!("No configuration found. Run 'chronicle init' to create one.");
-	}
-	let config = config::load(git_workdir)?;
-
-	let adapters: Vec<Arc<dyn PackageManagerAdapter>> = config
-		.enabled_package_managers()
-		.map(|pm| -> Arc<dyn PackageManagerAdapter> {
-			match pm {
-				PackageManager::Npm => Arc::new(NpmAdapter::new(config.npm.clone())),
-				PackageManager::Cargo => Arc::new(CargoAdapter::new(config.cargo.clone())),
-			}
-		})
-		.collect();
-
-	let projects = package_manager::enumerate_projects(adapters, git_workdir)?;
+	let (_config, projects) = config::load_projects(git_workdir)?;
 
 	if projects.is_empty() {
 		bail!("No projects found. Check that your package manager configuration is correct.");
@@ -100,7 +83,7 @@ pub fn cmd_change(
 		}
 	};
 
-	let packages: BTreeMap<String, change::ChangeType> = result
+	let packages: BTreeMap<String, ChangeType> = result
 		.projects
 		.iter()
 		.map(|p| (p.name().to_string(), result.change_type))

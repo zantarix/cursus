@@ -27,7 +27,7 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 		PackageManager::Npm => {
 			std::fs::write(
 				dir.path().join("package.json"),
-				r#"{"name": "test-project"}"#,
+				r#"{"name": "test-project", "version": "0.1.0"}"#,
 			)
 			.unwrap();
 		}
@@ -37,6 +37,9 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 				"[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
 			)
 			.unwrap();
+			// Create src/lib.rs so cargo can generate a valid Cargo.lock
+			std::fs::create_dir_all(dir.path().join("src")).unwrap();
+			std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
 		}
 	}
 	dir
@@ -54,7 +57,11 @@ pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &s
 	std::fs::create_dir_all(&sub_path).unwrap();
 	match pm {
 		PackageManager::Npm => {
-			std::fs::write(sub_path.join("package.json"), r#"{"name": "test-project"}"#).unwrap();
+			std::fs::write(
+				sub_path.join("package.json"),
+				r#"{"name": "test-project", "version": "0.1.0"}"#,
+			)
+			.unwrap();
 		}
 		PackageManager::Cargo => {
 			std::fs::write(

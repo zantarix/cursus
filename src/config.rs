@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+
+use crate::package_manager::{
+	self, CargoAdapter, CargoConfig, NpmAdapter, NpmConfig, PackageManagerAdapter, Project,
+};
 
 /// Supported package managers for project configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
@@ -14,44 +19,16 @@ pub enum PackageManager {
 	Cargo,
 }
 
-/// Configuration for an individual package manager.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PackageManagerConfig {
-	/// Whether this package manager is enabled for the project.
-	#[serde(default)]
-	pub enabled: bool,
-	/// Optional path to the package manager root, relative to the git root.
-	///
-	/// When set, the package manager will look for its manifest files in this
-	/// subdirectory instead of the git repository root.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub path: Option<String>,
-}
-
-impl PackageManagerConfig {
-	/// Returns the resolved root directory for this package manager.
-	///
-	/// If a `path` is configured, returns `git_root` joined with that path.
-	/// Otherwise, returns a copy of `git_root`.
-	pub fn resolve_root(&self, git_root: &Path) -> PathBuf {
-		match &self.path {
-			Some(path) => git_root.join(path),
-			None => git_root.to_path_buf(),
-		}
-	}
-}
-
 /// Chronicle configuration for a repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
 	/// Configuration for npm package manager.
 	#[serde(default)]
-	pub npm: PackageManagerConfig,
+	pub npm: NpmConfig,
 	/// Configuration for Cargo package manager.
 	#[serde(default)]
-	pub cargo: PackageManagerConfig,
+	pub cargo: CargoConfig,
 }
 
 impl Config {
@@ -66,14 +43,15 @@ impl Config {
 	}
 
 	/// Returns an iterator over all enabled package managers.
-	pub fn enabled_package_managers(&self) -> impl Iterator<Item = PackageManager> + '_ {
-		[
-			(PackageManager::Npm, &self.npm),
-			(PackageManager::Cargo, &self.cargo),
-		]
-		.into_iter()
-		.filter(|(_, config)| config.enabled)
-		.map(|(pm, _)| pm)
+	pub fn enabled_package_managers(&self) -> impl Iterator<Item = PackageManager> {
+		let mut managers = Vec::new();
+		if self.npm.enabled {
+			managers.push(PackageManager::Npm);
+		}
+		if self.cargo.enabled {
+			managers.push(PackageManager::Cargo);
+		}
+		managers.into_iter()
 	}
 }
 
@@ -122,6 +100,41 @@ pub fn create(git_root: &Path, config: &Config) -> anyhow::Result<PathBuf> {
 	std::fs::write(&path, contents)
 		.with_context(|| format!("Failed to create config: {}", path.display()))?;
 	Ok(path)
+}
+
+/// Loads the Chronicle configuration and enumerates all projects.
+///
+/// This is a convenience function that:
+/// 1. Checks that a configuration exists
+/// 2. Loads the configuration
+/// 3. Builds package manager adapters
+/// 4. Enumerates all projects
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No configuration file exists
+/// - The configuration cannot be loaded
+/// - Projects cannot be enumerated
+pub fn load_projects(git_root: &Path) -> anyhow::Result<(Config, Vec<Project>)> {
+	if !exists(git_root) {
+		bail!("No configuration found. Run 'chronicle init' to create one.");
+	}
+	let config = load(git_root)?;
+
+	let adapters: Vec<Arc<dyn PackageManagerAdapter>> = config
+		.enabled_package_managers()
+		.map(|pm| -> Arc<dyn PackageManagerAdapter> {
+			match pm {
+				PackageManager::Npm => Arc::new(NpmAdapter::new(config.npm.clone())),
+				PackageManager::Cargo => Arc::new(CargoAdapter::new(config.cargo.clone())),
+			}
+		})
+		.collect();
+
+	let projects = package_manager::enumerate_projects(adapters, git_root)?;
+
+	Ok((config, projects))
 }
 
 #[cfg(test)]
@@ -202,12 +215,6 @@ mod tests {
 		let config = load(dir.path()).unwrap();
 		assert!(!config.npm.enabled);
 		assert!(!config.cargo.enabled);
-	}
-
-	#[test]
-	fn package_manager_config_defaults_to_disabled() {
-		let config = PackageManagerConfig::default();
-		assert!(!config.enabled);
 	}
 
 	#[test]
@@ -347,28 +354,6 @@ mod tests {
 	}
 
 	#[test]
-	fn resolve_root_without_path_returns_git_root() {
-		let config = PackageManagerConfig {
-			enabled: true,
-			path: None,
-		};
-		let git_root = Path::new("/repo");
-		let resolved = config.resolve_root(git_root);
-		assert_eq!(resolved, git_root);
-	}
-
-	#[test]
-	fn resolve_root_with_path_joins_git_root() {
-		let config = PackageManagerConfig {
-			enabled: true,
-			path: Some("frontend".to_string()),
-		};
-		let git_root = Path::new("/repo");
-		let resolved = config.resolve_root(git_root);
-		assert_eq!(resolved, Path::new("/repo/frontend"));
-	}
-
-	#[test]
 	fn config_roundtrip_with_path() {
 		let dir = temp_dir();
 		let mut config = Config::with_package_manager(PackageManager::Npm);
@@ -389,5 +374,52 @@ mod tests {
 			let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 			assert_eq!(enabled, vec![pm]);
 		}
+	}
+
+	#[test]
+	fn load_projects_fails_when_no_config() {
+		let dir = temp_dir();
+		let result = load_projects(dir.path());
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("No configuration found")
+		);
+	}
+
+	#[test]
+	fn load_projects_succeeds_with_cargo_manifest() {
+		let dir = temp_dir();
+		let config = Config::with_package_manager(PackageManager::Cargo);
+		create(dir.path(), &config).unwrap();
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"test-package\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let (loaded_config, projects) = load_projects(dir.path()).unwrap();
+		assert_eq!(loaded_config, config);
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name(), "test-package");
+	}
+
+	#[test]
+	fn load_projects_succeeds_with_npm_manifest() {
+		let dir = temp_dir();
+		let config = Config::with_package_manager(PackageManager::Npm);
+		create(dir.path(), &config).unwrap();
+		std::fs::write(
+			dir.path().join("package.json"),
+			r#"{"name": "test-package", "version": "0.1.0"}"#,
+		)
+		.unwrap();
+
+		let (loaded_config, projects) = load_projects(dir.path()).unwrap();
+		assert_eq!(loaded_config, config);
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name(), "test-package");
 	}
 }

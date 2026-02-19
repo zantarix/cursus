@@ -7,11 +7,13 @@
 mod cargo;
 mod npm;
 
-pub use cargo::CargoAdapter;
-pub use npm::NpmAdapter;
+pub use cargo::{CargoAdapter, CargoConfig};
+pub use npm::{NpmAdapter, NpmConfig};
 
 use std::path::Path;
 use std::sync::Arc;
+
+use semver::Version;
 
 /// Raw project data returned by package manager adapters.
 ///
@@ -30,10 +32,8 @@ pub struct ProjectInfo {
 /// Each project maintains a reference to the package manager that discovered it,
 /// allowing further interaction through methods implemented on this type.
 pub struct Project {
-	/// The name of the project (e.g., package name).
-	name: String,
-	/// The path to the project root, relative to the git root.
-	path: std::path::PathBuf,
+	/// The project metadata.
+	info: ProjectInfo,
 	/// Reference to the package manager that discovered this project.
 	adapter: Arc<dyn PackageManagerAdapter>,
 }
@@ -41,8 +41,8 @@ pub struct Project {
 impl std::fmt::Debug for Project {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("Project")
-			.field("name", &self.name)
-			.field("path", &self.path)
+			.field("name", &self.info.name)
+			.field("path", &self.info.path)
 			.finish_non_exhaustive()
 	}
 }
@@ -50,8 +50,7 @@ impl std::fmt::Debug for Project {
 impl Clone for Project {
 	fn clone(&self) -> Self {
 		Self {
-			name: self.name.clone(),
-			path: self.path.clone(),
+			info: self.info.clone(),
 			adapter: Arc::clone(&self.adapter),
 		}
 	}
@@ -59,7 +58,7 @@ impl Clone for Project {
 
 impl PartialEq for Project {
 	fn eq(&self, other: &Self) -> bool {
-		self.name == other.name && self.path == other.path
+		self.info == other.info
 	}
 }
 
@@ -68,12 +67,33 @@ impl Eq for Project {}
 impl Project {
 	/// Returns the name of the project (e.g., package name).
 	pub fn name(&self) -> &str {
-		&self.name
+		&self.info.name
 	}
 
 	/// Returns the path to the project root, relative to the git root.
 	pub fn path(&self) -> &Path {
-		&self.path
+		&self.info.path
+	}
+
+	/// Reads the current version of this project from its manifest file.
+	///
+	/// Delegates to the underlying package manager adapter.
+	pub fn read_version(&self, git_root: &Path) -> anyhow::Result<Version> {
+		self.adapter.read_version(git_root, &self.info)
+	}
+
+	/// Writes a new version to this project's manifest file.
+	///
+	/// Delegates to the underlying package manager adapter.
+	pub fn write_version(&self, git_root: &Path, version: &Version) -> anyhow::Result<()> {
+		self.adapter.write_version(git_root, &self.info, version)
+	}
+
+	/// Updates the lock file for this project after a version change.
+	///
+	/// Delegates to the underlying package manager adapter.
+	pub fn update_lock_file(&self, git_root: &Path) -> anyhow::Result<()> {
+		self.adapter.update_lock_file(git_root, &self.info)
 	}
 }
 
@@ -95,6 +115,52 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// Returns an error if project enumeration fails (e.g., invalid manifest files).
 	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>>;
+
+	/// Reads the current version of a project from its manifest file.
+	///
+	/// # Arguments
+	///
+	/// * `git_root` - The root directory of the git repository.
+	/// * `project` - The project to read the version for.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the manifest file cannot be read or the version cannot be parsed.
+	fn read_version(&self, git_root: &Path, project: &ProjectInfo) -> anyhow::Result<Version>;
+
+	/// Writes a new version to a project's manifest file, preserving formatting.
+	///
+	/// # Arguments
+	///
+	/// * `git_root` - The root directory of the git repository.
+	/// * `project` - The project to update.
+	/// * `version` - The new version to write.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the manifest file cannot be read or written.
+	fn write_version(
+		&self,
+		git_root: &Path,
+		project: &ProjectInfo,
+		version: &Version,
+	) -> anyhow::Result<()>;
+
+	/// Updates the lock file for a project after a version change.
+	///
+	/// This method should regenerate or update the lock file to reflect the new
+	/// version information. The implementation may use a custom command from the
+	/// configuration or fall back to package-manager-specific defaults.
+	///
+	/// # Arguments
+	///
+	/// * `git_root` - The root directory of the git repository.
+	/// * `project` - The project whose lock file should be updated.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the lock file update command fails.
+	fn update_lock_file(&self, git_root: &Path, project: &ProjectInfo) -> anyhow::Result<()>;
 }
 
 /// Enumerates projects from multiple adapters and returns a flattened list.
@@ -121,8 +187,7 @@ pub fn enumerate_projects(
 				infos
 					.into_iter()
 					.map(|info| Project {
-						name: info.name,
-						path: info.path,
+						info,
 						adapter: Arc::clone(&adapter),
 					})
 					.collect::<Vec<_>>()
@@ -135,15 +200,16 @@ pub fn enumerate_projects(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::config::PackageManagerConfig;
 
 	/// Creates a test project with a dummy adapter.
 	fn test_project(name: &str, path: &str) -> Project {
 		let adapter: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
+			Arc::new(NpmAdapter::new(NpmConfig::default()));
 		Project {
-			name: name.to_string(),
-			path: std::path::PathBuf::from(path),
+			info: ProjectInfo {
+				name: name.to_string(),
+				path: std::path::PathBuf::from(path),
+			},
 			adapter,
 		}
 	}
@@ -185,7 +251,7 @@ mod tests {
 		std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
 
 		let adapter: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
+			Arc::new(NpmAdapter::new(NpmConfig::default()));
 		let projects = enumerate_projects([adapter.clone()], dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 1);
@@ -201,9 +267,9 @@ mod tests {
 
 		// Two adapters pointing at the same directory (both will find the package)
 		let adapter1: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
+			Arc::new(NpmAdapter::new(NpmConfig::default()));
 		let adapter2: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(PackageManagerConfig::default()));
+			Arc::new(NpmAdapter::new(NpmConfig::default()));
 
 		let projects = enumerate_projects([adapter1, adapter2], dir.path()).unwrap();
 

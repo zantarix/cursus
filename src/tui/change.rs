@@ -2,7 +2,6 @@
 
 use std::io;
 
-use clap::ValueEnum;
 use crossterm::{
 	ExecutableCommand,
 	event::{Event, KeyCode, KeyEventKind},
@@ -12,24 +11,12 @@ use ratatui::{
 	prelude::*,
 	widgets::{Block, Borders, List, ListItem, Paragraph},
 };
-use serde::{Deserialize, Serialize};
 
+use crate::changeset::ChangeType;
 use crate::package_manager::Project;
 
-/// The type of semantic version change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
-#[serde(rename_all = "lowercase")]
-pub enum ChangeType {
-	/// A breaking change that increments the major version.
-	Major,
-	/// A backwards-compatible feature that increments the minor version.
-	Minor,
-	/// A backwards-compatible bug fix that increments the patch version.
-	Patch,
-}
-
 impl ChangeType {
-	/// Returns the next change type when cycling through options.
+	/// Returns the next change type when cycling through options in the TUI.
 	fn next(self) -> Self {
 		match self {
 			Self::Major => Self::Minor,
@@ -38,7 +25,7 @@ impl ChangeType {
 		}
 	}
 
-	/// Returns the previous change type when cycling through options.
+	/// Returns the previous change type when cycling through options in the TUI.
 	fn prev(self) -> Self {
 		match self {
 			Self::Major => Self::Patch,

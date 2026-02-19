@@ -51,11 +51,26 @@ Apply standard semver bumping rules to each affected package's current version:
 
 Pre-release and build metadata are stripped on bump (standard semver behaviour).
 
-### 5. Update version files
+### 5. Update version files and lock files
 
 Write the new version back to the package's manifest file (`Cargo.toml` or `package.json`). Only the version field is modified; all other content is preserved.
 
-Lock file updates (`Cargo.lock`, `package-lock.json`, etc.) are left to the user or CI to regenerate.
+After updating the version, Chronicle automatically updates the lock file:
+
+- **Cargo**: Runs `cargo generate-lockfile` in the workspace root to regenerate `Cargo.lock`
+- **npm**: Auto-detects the lock file type and runs the appropriate command:
+  - `package-lock.json` → `npm install --package-lock-only`
+  - `pnpm-lock.yaml` → `pnpm install --lockfile-only`
+  - `yarn.lock` → `yarn install --mode update-lockfile`
+  - No lock file → no-op
+
+Users can override the npm lock file update command by setting `lock_command` in `.chronicle/config.toml`:
+
+```toml
+[npm]
+enabled = true
+lock_command = "pnpm install --lockfile-only"
+```
 
 ### 6. Generate changelog
 
@@ -108,5 +123,5 @@ The release command does not require a TUI. It is a batch operation suitable for
 
 - The filesystem is the only thing modified by this command. Users retain full control over source control and publishing.
 - Changesets are consumed (deleted) on release, so the command is not idempotent. Running it twice without new changesets results in a no-op.
-- Lock file staleness after version bumps is the user's responsibility. This keeps Chronicle focused on changeset management rather than build orchestration.
+- Lock files are automatically updated after version bumps, reducing manual steps and ensuring consistency between manifest and lock files.
 - Inter-package dependency version updates in monorepos (e.g., updating package A's dependency on package B after B is bumped) are deferred to a future enhancement.
