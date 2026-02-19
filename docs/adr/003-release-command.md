@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -81,17 +81,17 @@ Format:
 ```markdown
 ## 1.2.0
 
-### Minor Changes
+### Features
 
 - Added foo bar feature
 - Improved baz handling
 
-### Patch Changes
+### Bug Fixes
 
 - Fixed quux edge case
 ```
 
-Sections are ordered: Major Changes, Minor Changes, Patch Changes. Each entry comes from the changeset's `message` field. Changesets without a message are omitted from the changelog.
+Sections are ordered: Breaking Changes, Features, Bug Fixes. Each entry comes from the changeset's `message` field. Changesets without a message are omitted from the changelog.
 
 Changelog location:
 
