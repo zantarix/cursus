@@ -41,10 +41,12 @@ Integration tests live in `tests/` and should always use the `--no-interactive` 
 Chronicle is a Rust CLI tool for release management. It uses an interactive TUI for setup and change recording.
 
 **Key modules:**
-- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`) and subcommands (`init`, `change`). `change` is the default when no subcommand is given.
+- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`) and subcommands (`init`, `change`, `release`). `change` is the default when no subcommand is given.
 - `src/tui/` - ratatui/crossterm terminal UI wizards
-- `src/config.rs` - `Config` and `PackageManager` types, TOML persistence in `.chronicle/config.toml`
-- `src/changeset.rs` - Changeset file I/O: Hugo-style `+++` TOML frontmatter format, parsing, writing to `.chronicle/`, and editor integration
+- `src/model/` - Core domain types:
+  - `config.rs` - `Config` and `PackageManager` types, TOML persistence in `.chronicle/config.toml`
+  - `changeset.rs` - Changeset file I/O: Hugo-style `+++` TOML frontmatter format, parsing, writing to `.chronicle/`, and editor integration
+  - `changelog.rs` - Changelog generation and formatting for releases
 - `src/package_manager/` - Adapter pattern (`PackageManagerAdapter` trait) for Cargo and npm/yarn/pnpm workspace enumeration
 
 **TUI pattern:** Each TUI wizard uses a `Screen` enum for state, a pure `handle_key()` function for state transitions (testable without a terminal), and separate `ui()`/`render_*()` functions. Tests use `ratatui::backend::TestBackend`.
