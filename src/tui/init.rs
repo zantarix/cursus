@@ -11,7 +11,7 @@ use ratatui::{
 	widgets::{Block, Borders, Paragraph},
 };
 
-use crate::config::{Config, PackageManager};
+use crate::model::config::{Config, PackageManager};
 
 /// Options that can be pre-filled to skip interactive steps.
 #[derive(Debug, Clone, Default)]

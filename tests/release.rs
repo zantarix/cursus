@@ -4,7 +4,7 @@ mod common;
 
 use std::process::ExitCode;
 
-use chronicle::config::PackageManager;
+use chronicle::model::config::PackageManager;
 use common::{temp_git_repo, temp_git_repo_with_project};
 
 /// Helper to create a changeset file in the .chronicle directory.
@@ -318,8 +318,8 @@ fn release_unknown_package_in_changeset_fails() {
 fn release_package_flag_filters_packages() {
 	let dir = temp_git_repo();
 	// Create a cargo workspace with two members
-	let config = chronicle::config::Config::with_package_manager(PackageManager::Cargo);
-	chronicle::config::create(dir.path(), &config).unwrap();
+	let config = chronicle::model::config::Config::with_package_manager(PackageManager::Cargo);
+	chronicle::model::config::create(dir.path(), &config).unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",

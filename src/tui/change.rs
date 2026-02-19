@@ -12,7 +12,7 @@ use ratatui::{
 	widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
-use crate::changeset::ChangeType;
+use crate::model::changeset::ChangeType;
 use crate::package_manager::Project;
 
 impl ChangeType {

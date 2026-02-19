@@ -2,10 +2,8 @@
 
 #![feature(coverage_attribute)]
 
-pub mod changelog;
-pub mod changeset;
 pub mod cli;
-pub mod config;
+pub mod model;
 pub mod package_manager;
 pub mod tui;
 

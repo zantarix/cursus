@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::changeset::ChangeType;
+use crate::model::changeset::ChangeType;
 
 /// A changelog entry for a specific version.
 pub struct Changelog {

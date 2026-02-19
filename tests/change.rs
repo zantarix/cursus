@@ -4,7 +4,7 @@ mod common;
 
 use std::process::ExitCode;
 
-use chronicle::config::{Config, PackageManager};
+use chronicle::model::config::{Config, PackageManager};
 use common::{
 	temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project,
 	temp_git_repo_with_project_in_subfolder,

@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use chronicle::config::{self, Config, PackageManager};
+use chronicle::model::config::{self, Config, PackageManager};
 use tempfile::TempDir;
 
 /// Creates a temporary directory with a `.git` folder to simulate a git repository.

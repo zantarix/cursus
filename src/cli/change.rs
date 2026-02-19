@@ -7,8 +7,8 @@ use std::process::ExitCode;
 use anyhow::bail;
 use clap::Args;
 
-use crate::changeset::{self, ChangeType, Changeset};
-use crate::config;
+use crate::model::changeset::{self, ChangeType, Changeset};
+use crate::model::config;
 use crate::tui::change;
 
 use super::GlobalArgs;

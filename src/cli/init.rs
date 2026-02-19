@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use anyhow::bail;
 use clap::Args;
 
-use crate::config::{self, Config, PackageManager};
+use crate::model::config::{self, Config, PackageManager};
 use crate::tui::init;
 
 use super::GlobalArgs;

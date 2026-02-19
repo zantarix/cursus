@@ -7,9 +7,9 @@ use std::process::ExitCode;
 use anyhow::{Context, bail};
 use clap::Args;
 
-use crate::changelog::Changelog;
-use crate::changeset::{self, ChangeType};
-use crate::config;
+use crate::model::changelog::Changelog;
+use crate::model::changeset::{self, ChangeType};
+use crate::model::config;
 
 /// Arguments for the `release` subcommand.
 #[derive(Args, Default)]
@@ -197,8 +197,8 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config =
-			crate::config::Config::with_package_manager(crate::config::PackageManager::Cargo);
-		crate::config::create(dir.path(), &config).unwrap();
+			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
@@ -215,8 +215,8 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config =
-			crate::config::Config::with_package_manager(crate::config::PackageManager::Cargo);
-		crate::config::create(dir.path(), &config).unwrap();
+			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
@@ -246,8 +246,8 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config =
-			crate::config::Config::with_package_manager(crate::config::PackageManager::Cargo);
-		crate::config::create(dir.path(), &config).unwrap();
+			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
@@ -288,8 +288,8 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config =
-			crate::config::Config::with_package_manager(crate::config::PackageManager::Cargo);
-		crate::config::create(dir.path(), &config).unwrap();
+			crate::model::config::Config::with_package_manager(crate::model::config::PackageManager::Cargo);
+		crate::model::config::create(dir.path(), &config).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
