@@ -36,6 +36,8 @@ Uses Rust 2024 edition.
 
 Big decisions are documented in ADR format in the `docs/adr/` folder.
 
+ADR's are a running log of decisions and should not be edited once marked accepted. Currency is also important, so when new requirements are added that contradict an older ADR then a note should be added in a new Errata section. If the ADR is no longer relevant at all, then the status should be updated to be "Superceded by ADR #number" instead, noting the ADR that conflicts with it.
+
 ## Testing
 
 Integration tests live in `tests/` and should always use the `--no-interactive` flag to ensure the TUI never runs during tests. They should be full end-to-end tests calling `chronicle::run()` as the entrypoint.

@@ -125,3 +125,7 @@ The release command does not require a TUI. It is a batch operation suitable for
 - Changesets are consumed (deleted) on release, so the command is not idempotent. Running it twice without new changesets results in a no-op.
 - Lock files are automatically updated after version bumps, reducing manual steps and ensuring consistency between manifest and lock files.
 - Inter-package dependency version updates in monorepos (e.g., updating package A's dependency on package B after B is bumped) are deferred to a future enhancement.
+
+## Errata
+
+**2026-02-20**: ADR-006 introduces opt-in git lifecycle hooks that allow Chronicle to optionally handle commit, tag, and push operations after the filesystem modifications described in this ADR. When `[git].enabled = false` (the default), ADR-003's original behaviour applies: Chronicle only modifies the filesystem, and users manage source control manually. When git hooks are enabled, Chronicle automates the commit step described in line 16 as part of the `chronicle release` workflow. See ADR-006 for details.
