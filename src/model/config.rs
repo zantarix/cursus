@@ -79,6 +79,12 @@ pub fn load(git_root: &Path) -> anyhow::Result<Config> {
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
 	let config: Config =
 		toml::from_str(&contents).with_context(|| "Failed to parse config.toml")?;
+
+	// Validate that at least one package manager is enabled
+	if config.enabled_package_managers().next().is_none() {
+		bail!("Configuration must have at least one package manager enabled");
+	}
+
 	Ok(config)
 }
 
@@ -206,15 +212,30 @@ mod tests {
 	}
 
 	#[test]
-	fn load_succeeds_with_empty_config() {
+	fn load_fails_with_empty_config() {
 		let dir = temp_dir();
 		let config_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "").unwrap();
 
-		let config = load(dir.path()).unwrap();
-		assert!(!config.npm.enabled);
-		assert!(!config.cargo.enabled);
+		let result = load(dir.path());
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("at least one package manager")
+		);
+	}
+
+	#[test]
+	fn load_succeeds_with_one_package_manager() {
+		let dir = temp_dir();
+		let config = Config::with_package_manager(PackageManager::Cargo);
+		create(dir.path(), &config).unwrap();
+
+		let loaded = load(dir.path()).unwrap();
+		assert_eq!(loaded, config);
 	}
 
 	#[test]

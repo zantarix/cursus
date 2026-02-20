@@ -191,18 +191,20 @@ fn find_default_editor() -> Option<String> {
 
 /// Opens the user's editor to edit the changeset file.
 ///
-/// Uses the `EDITOR` environment variable, falling back to the first available
-/// editor from `nano`, `vim`, `vi`.
+/// Uses the `VISUAL` environment variable first (for graphical editors),
+/// then `EDITOR`, falling back to the first available editor from
+/// `nano`, `vim`, `vi`.
 ///
 /// # Errors
 ///
 /// Returns an error if no editor is found or the editor process fails.
 pub fn open_editor(path: &Path) -> anyhow::Result<()> {
-	let editor = std::env::var("EDITOR")
+	let editor = std::env::var("VISUAL")
 		.ok()
 		.filter(|v| !v.is_empty())
+		.or_else(|| std::env::var("EDITOR").ok().filter(|v| !v.is_empty()))
 		.or_else(find_default_editor)
-		.context("No editor found. Set the EDITOR environment variable.")?;
+		.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
 	let status = std::process::Command::new(&editor)
 		.arg(path)
 		.status()

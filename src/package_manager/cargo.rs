@@ -174,7 +174,11 @@ impl PackageManagerAdapter for CargoAdapter {
 		let mut doc = contents
 			.parse::<toml_edit::DocumentMut>()
 			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		doc["package"]["version"] = toml_edit::value(version.to_string());
+		let package = doc
+			.get_mut("package")
+			.and_then(|p| p.as_table_like_mut())
+			.with_context(|| format!("No [package] table in {}", manifest_path.display()))?;
+		package.insert("version", toml_edit::value(version.to_string()));
 		std::fs::write(&manifest_path, doc.to_string())
 			.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		Ok(())
@@ -723,6 +727,23 @@ version = "not-a-version"
 	}
 
 	#[test]
+	fn write_version_missing_package_section() {
+		let dir = temp_dir();
+		write_cargo_toml(dir.path(), "[dependencies]\n");
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+		let version: semver::Version = "1.0.0".parse().unwrap();
+		let result = adapter.write_version(dir.path(), &info, &version);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("No [package] table")
+		);
+	}
+
+	#[test]
 	fn write_version_updates_cargo_toml() {
 		let dir = temp_dir();
 		write_cargo_toml(
@@ -798,5 +819,16 @@ version = "0.1.0"
 		let git_root = Path::new("/repo");
 		let resolved = config.resolve_root(git_root);
 		assert_eq!(resolved, Path::new("/repo/rust-workspace"));
+	}
+
+	#[test]
+	fn update_lock_file_invalid_cargo_toml_fails() {
+		let dir = temp_dir();
+		write_cargo_toml(dir.path(), "not valid toml [[[");
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("my-crate", "");
+
+		let result = adapter.update_lock_file(dir.path(), &info);
+		assert!(result.is_err());
 	}
 }

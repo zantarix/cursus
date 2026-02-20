@@ -31,6 +31,10 @@ jobs:
         shell: nix develop -c bash -e {0}
         run: cargo clippy -- -D warnings
 
+      - name: Check dependencies
+        shell: nix develop -c bash -e {0}
+        run: cargo deny check
+
       - name: Run tests
         shell: nix develop -c bash -e {0}
         run: cargo test

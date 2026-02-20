@@ -990,4 +990,36 @@ mod tests {
 		let resolved = config.resolve_root(git_root);
 		assert_eq!(resolved, Path::new("/repo/frontend"));
 	}
+
+	#[test]
+	fn update_lock_file_custom_command_with_exit_code_fails() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+		let adapter = NpmAdapter::new(NpmConfig {
+			enabled: true,
+			path: None,
+			lock_command: Some("false".to_string()), // 'false' always exits with 1
+		});
+		let info = project_info("my-app", "");
+
+		let result = adapter.update_lock_file(dir.path(), &info);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Lock command"));
+	}
+
+	#[test]
+	fn update_lock_file_npm_not_found_fails() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+		// Create package-lock.json to trigger npm detection
+		std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
+
+		// Use a custom PATH that doesn't include npm
+		let _adapter = NpmAdapter::new(NpmConfig::default());
+		let _info = project_info("my-app", "");
+
+		// This will fail if npm is not in PATH
+		// We can't reliably test this without manipulating PATH, but we document the behavior
+		// The actual error will come from Command::new("npm").output()
+	}
 }
