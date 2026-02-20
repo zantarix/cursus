@@ -30,6 +30,10 @@
 					rustc = rustToolchain;
 				};
 				cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+				# Create a wrapper for yarn-berry (yarn 4) with a different executable name
+				yarnBerryWrapper = pkgs.writeShellScriptBin "yarn-berry" ''
+					exec ${pkgs.yarn-berry}/bin/yarn "$@"
+				'';
 			in
 			{
 				packages.default = rustPlatform.buildRustPackage {
@@ -48,7 +52,10 @@
 						cargo-zigbuild
 						cargo-llvm-cov
 						cargo-deny
-					nodejs
+						nodejs
+						nodePackages.pnpm
+						nodePackages.yarn  # yarn 1.x
+						yarnBerryWrapper   # yarn 4.x accessible via 'yarn-berry' command
 					] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
 						pkgs.pkgsCross.musl64.stdenv.cc
 						pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc

@@ -831,4 +831,38 @@ version = "0.1.0"
 		let result = adapter.update_lock_file(dir.path(), &info);
 		assert!(result.is_err());
 	}
+
+	#[test]
+	fn update_lock_file_succeeds() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "test-crate"
+version = "1.0.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+"#,
+		);
+		// Create a minimal lib.rs to make it a valid Rust crate
+		std::fs::create_dir_all(dir.path().join("src")).unwrap();
+		std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+
+		let adapter = CargoAdapter::new(CargoConfig::default());
+		let info = project_info("test-crate", "");
+
+		let result = adapter.update_lock_file(dir.path(), &info);
+		assert!(
+			result.is_ok(),
+			"cargo generate-lockfile should succeed: {:?}",
+			result.err()
+		);
+		assert!(
+			dir.path().join("Cargo.lock").exists(),
+			"Cargo.lock should be created"
+		);
+	}
 }

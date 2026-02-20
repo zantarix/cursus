@@ -9,7 +9,7 @@ cargo build                    # Build the project
 cargo run                      # Run the application
 cargo test                     # Run tests
 cargo test <test_name>         # Run a specific test
-cargo make coverage            # Check test coverage (90% threshold for lines, regions, AND functions)
+cargo make coverage            # Check test coverage (90% for lines/regions/functions, 80% for branches)
 cargo clippy                   # Lint the code
 cargo fmt                      # Format the code
 
@@ -74,6 +74,8 @@ Description message here
 
 ## Non-functional Requirements
 
-All new changes should meet the 90% test coverage threshold (lines, regions, and functions).
+All new changes should meet the coverage thresholds:
+- 90% for lines, regions, and functions
+- 80% for branches
 
 All functions which are made public from a module should be documented.
