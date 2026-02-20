@@ -41,6 +41,14 @@
 					version = cargoToml.package.version;
 					src = ./.;
 					cargoLock.lockFile = ./Cargo.lock;
+
+					# Required for tests that invoke npm/pnpm/yarn
+					nativeBuildInputs = with pkgs; [
+						nodejs
+						nodePackages.pnpm
+						nodePackages.yarn
+						yarnBerryWrapper
+					];
 				};
 
 				devShells.default = pkgs.mkShell ({
