@@ -49,6 +49,13 @@
 						nodePackages.yarn
 						yarnBerryWrapper
 					];
+
+					# Skip publish tests that shell out to npm/cargo publish in the sandbox
+					checkFlags = [
+						"--skip=publish_cargo_dry_run"
+						"--skip=publish_dry_run_basic"
+						"--skip=publish_with_package_filter"
+					];
 				};
 
 				devShells.default = pkgs.mkShell ({
