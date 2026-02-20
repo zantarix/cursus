@@ -36,8 +36,8 @@ pub fn cmd_init(
 			bail!("--package-manager is required in non-interactive mode");
 		};
 		match pm {
-			PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::default()),
-			PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::default()),
+			PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::enabled()),
+			PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::enabled()),
 		}
 	} else {
 		// Interactive mode (default): run TUI, skipping steps for pre-filled options

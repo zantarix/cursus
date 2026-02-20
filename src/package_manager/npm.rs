@@ -37,6 +37,14 @@ pub struct NpmConfig {
 }
 
 impl NpmConfig {
+	/// Creates a new enabled npm configuration.
+	pub fn enabled() -> Self {
+		Self {
+			enabled: true,
+			..Default::default()
+		}
+	}
+
 	/// Returns the resolved root directory for this package manager.
 	///
 	/// If a `path` is configured, returns `git_workdir` joined with that path.
@@ -1072,6 +1080,15 @@ mod tests {
 	fn npm_config_defaults_to_disabled() {
 		let config = NpmConfig::default();
 		assert!(!config.enabled);
+		assert_eq!(config.path, None);
+		assert_eq!(config.lock_command, None);
+		assert_eq!(config.access, None);
+	}
+
+	#[test]
+	fn npm_config_enabled_creates_enabled_config() {
+		let config = NpmConfig::enabled();
+		assert!(config.enabled);
 		assert_eq!(config.path, None);
 		assert_eq!(config.lock_command, None);
 		assert_eq!(config.access, None);

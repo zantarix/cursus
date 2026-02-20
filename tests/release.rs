@@ -319,7 +319,7 @@ fn release_package_flag_filters_packages() {
 	let dir = temp_git_repo();
 	// Create a cargo workspace with two members
 	let config = chronicle::model::config::Config::new(dir.path())
-		.with_cargo(chronicle::package_manager::CargoConfig::default());
+		.with_cargo(chronicle::package_manager::CargoConfig::enabled());
 	config.save().unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),

@@ -17,8 +17,8 @@ pub fn temp_git_repo() -> TempDir {
 pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
-		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
-		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::enabled()),
 	};
 	config.save().unwrap();
 	dir
@@ -28,8 +28,8 @@ pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
-		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
-		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::enabled()),
 	};
 	config.save().unwrap();
 	match pm {
@@ -58,8 +58,8 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &str) -> TempDir {
 	let dir = temp_git_repo();
 	let mut config = match pm {
-		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
-		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::enabled()),
 	};
 	match pm {
 		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),

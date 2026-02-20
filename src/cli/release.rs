@@ -198,7 +198,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::default());
+			.with_cargo(crate::package_manager::CargoConfig::enabled());
 		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -216,7 +216,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::default());
+			.with_cargo(crate::package_manager::CargoConfig::enabled());
 		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -247,7 +247,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::default());
+			.with_cargo(crate::package_manager::CargoConfig::enabled());
 		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -289,7 +289,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::default());
+			.with_cargo(crate::package_manager::CargoConfig::enabled());
 		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),

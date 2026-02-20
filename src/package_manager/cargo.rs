@@ -25,6 +25,14 @@ pub struct CargoConfig {
 }
 
 impl CargoConfig {
+	/// Creates a new enabled cargo configuration.
+	pub fn enabled() -> Self {
+		Self {
+			enabled: true,
+			..Default::default()
+		}
+	}
+
 	/// Returns the resolved root directory for this package manager.
 	///
 	/// If a `path` is configured, returns `git_workdir` joined with that path.
@@ -875,6 +883,13 @@ version = "0.1.0"
 	fn cargo_config_defaults_to_disabled() {
 		let config = CargoConfig::default();
 		assert!(!config.enabled);
+		assert_eq!(config.path, None);
+	}
+
+	#[test]
+	fn cargo_config_enabled_creates_enabled_config() {
+		let config = CargoConfig::enabled();
+		assert!(config.enabled);
 		assert_eq!(config.path, None);
 	}
 

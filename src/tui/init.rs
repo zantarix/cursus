@@ -139,8 +139,8 @@ pub fn run(git_workdir: &Path, options: &InitOptions) -> anyhow::Result<Option<C
 	io::stdout().execute(LeaveAlternateScreen)?;
 
 	Ok(result.map(|pm| match pm {
-		PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::default()),
-		PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::default()),
+		PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::enabled()),
 	}))
 }
 

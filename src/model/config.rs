@@ -44,17 +44,15 @@ impl Config {
 		}
 	}
 
-	/// Enables npm with the given configuration (builder pattern).
+	/// Sets npm configuration (builder pattern).
 	pub fn with_npm(mut self, config: NpmConfig) -> Self {
 		self.npm = config;
-		self.npm.enabled = true;
 		self
 	}
 
-	/// Enables cargo with the given configuration (builder pattern).
+	/// Sets cargo configuration (builder pattern).
 	pub fn with_cargo(mut self, config: CargoConfig) -> Self {
 		self.cargo = config;
-		self.cargo.enabled = true;
 		self
 	}
 
@@ -192,7 +190,7 @@ mod tests {
 	#[test]
 	fn exists_returns_true_when_config_exists() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
 		assert!(exists(dir.path()));
 	}
@@ -200,7 +198,7 @@ mod tests {
 	#[test]
 	fn create_creates_config_file() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		let path = config.save().unwrap();
 		assert!(path.exists());
 		assert_eq!(path, dir.path().join(".chronicle/config.toml"));
@@ -209,7 +207,7 @@ mod tests {
 	#[test]
 	fn create_creates_directory_if_needed() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
 		assert!(dir.path().join(".chronicle").is_dir());
 	}
@@ -217,7 +215,7 @@ mod tests {
 	#[test]
 	fn load_reads_config_file() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		config.save().unwrap();
 
 		let loaded = load(dir.path()).unwrap();
@@ -268,7 +266,7 @@ mod tests {
 	#[test]
 	fn load_succeeds_with_one_package_manager() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
 
 		let loaded = load(dir.path()).unwrap();
@@ -287,17 +285,33 @@ mod tests {
 	}
 
 	#[test]
-	fn config_with_npm_enables_npm() {
+	fn config_with_npm_does_not_force_enabled() {
 		let dir = temp_dir();
 		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		assert!(!config.npm.enabled);
+		assert!(!config.cargo.enabled);
+	}
+
+	#[test]
+	fn config_with_cargo_does_not_force_enabled() {
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		assert!(!config.npm.enabled);
+		assert!(!config.cargo.enabled);
+	}
+
+	#[test]
+	fn config_with_npm_enabled_enables_npm() {
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		assert!(config.npm.enabled);
 		assert!(!config.cargo.enabled);
 	}
 
 	#[test]
-	fn config_with_cargo_enables_cargo() {
+	fn config_with_cargo_enabled_enables_cargo() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		assert!(!config.npm.enabled);
 		assert!(config.cargo.enabled);
 	}
@@ -316,7 +330,7 @@ mod tests {
 	#[test]
 	fn enabled_package_managers_returns_npm_when_enabled() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![PackageManager::Npm]);
 	}
@@ -324,7 +338,7 @@ mod tests {
 	#[test]
 	fn enabled_package_managers_returns_cargo_when_enabled() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![PackageManager::Cargo]);
 	}
@@ -345,7 +359,7 @@ mod tests {
 	#[test]
 	fn config_serializes_with_sections() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("[npm]"));
 		assert!(toml_str.contains("enabled = true"));
@@ -413,7 +427,7 @@ mod tests {
 	#[test]
 	fn serialize_config_omits_none_path() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(!toml_str.contains("path"), "None path should be omitted");
 	}
@@ -421,7 +435,7 @@ mod tests {
 	#[test]
 	fn serialize_config_includes_some_path() {
 		let dir = temp_dir();
-		let mut config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let mut config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		config.npm.path = Some("frontend".to_string());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(
@@ -433,7 +447,7 @@ mod tests {
 	#[test]
 	fn config_roundtrip_with_path() {
 		let dir = temp_dir();
-		let mut config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let mut config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		config.npm.path = Some("frontend".to_string());
 		config.save().unwrap();
 		let loaded = load(dir.path()).unwrap();
@@ -446,8 +460,8 @@ mod tests {
 
 		for pm in [PackageManager::Npm, PackageManager::Cargo] {
 			let config = match pm {
-				PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
-				PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+				PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::enabled()),
+				PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::enabled()),
 			};
 			config.save().unwrap();
 			let loaded = load(dir.path()).unwrap();
@@ -459,7 +473,7 @@ mod tests {
 	#[test]
 	fn load_projects_succeeds_with_cargo_manifest() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -476,7 +490,7 @@ mod tests {
 	#[test]
 	fn load_projects_succeeds_with_npm_manifest() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let config = Config::new(dir.path()).with_npm(NpmConfig::enabled());
 		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("package.json"),
@@ -493,7 +507,7 @@ mod tests {
 	#[test]
 	fn load_projects_fails_when_no_projects_found() {
 		let dir = temp_dir();
-		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
 		// No Cargo.toml file, so no projects will be found
 
