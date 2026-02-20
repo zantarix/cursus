@@ -4,7 +4,7 @@ mod common;
 
 use std::process::ExitCode;
 
-use chronicle::model::config::{Config, PackageManager};
+use chronicle::model::config::PackageManager;
 use common::{
 	temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project,
 	temp_git_repo_with_project_in_subfolder,
@@ -36,8 +36,7 @@ fn change_fails_when_no_config() {
 
 #[test]
 fn change_fails_when_no_projects_found() {
-	let config = Config::with_package_manager(PackageManager::Npm);
-	let dir = temp_git_repo_with_config(&config);
+	let dir = temp_git_repo_with_config(PackageManager::Npm);
 	let result = chronicle::run(
 		[
 			"chronicle",

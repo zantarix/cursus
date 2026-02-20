@@ -56,3 +56,15 @@ pub enum Command {
 	/// Consume pending changesets and release new versions
 	Release(ReleaseArgs),
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn global_args_default() {
+		let args = GlobalArgs::default();
+		assert!(args.interactive);
+		assert!(!args.no_interactive);
+	}
+}

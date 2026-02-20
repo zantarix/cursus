@@ -7,6 +7,7 @@ use anyhow::bail;
 use clap::Args;
 
 use crate::model::config::{self, Config, PackageManager};
+use crate::package_manager::{CargoConfig, NpmConfig};
 use crate::tui::init;
 
 use super::GlobalArgs;
@@ -34,7 +35,10 @@ pub fn cmd_init(
 		let Some(pm) = args.package_manager else {
 			bail!("--package-manager is required in non-interactive mode");
 		};
-		Config::with_package_manager(pm)
+		match pm {
+			PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::default()),
+			PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::default()),
+		}
 	} else {
 		// Interactive mode (default): run TUI, skipping steps for pre-filled options
 		let options = init::InitOptions {
@@ -46,7 +50,7 @@ pub fn cmd_init(
 		}
 	};
 
-	let path = config::create(git_workdir, &config)?;
+	let path = config.save()?;
 	println!("Created {}", path.display());
 	Ok(ExitCode::SUCCESS)
 }

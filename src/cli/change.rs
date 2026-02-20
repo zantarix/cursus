@@ -36,7 +36,7 @@ pub fn cmd_change(
 	global: &GlobalArgs,
 ) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects(git_workdir)?;
+	let projects = config.load_projects()?;
 
 	let project_indices = if !args.projects.is_empty() {
 		let indices: Vec<usize> = args
@@ -91,11 +91,24 @@ pub fn cmd_change(
 		message: args.message.clone(),
 	};
 
-	let path = changeset::write_changeset(git_workdir, &changeset)?;
+	let path = changeset::write_changeset(config.git_workdir(), &changeset)?;
 
 	if !global.no_interactive && args.message.is_none() {
 		changeset::open_editor(&path)?;
 	}
 
 	Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn default_change_args() {
+		let args = ChangeArgs::default();
+		assert!(args.change_type.is_none());
+		assert!(args.projects.is_empty());
+		assert!(args.message.is_none());
+	}
 }

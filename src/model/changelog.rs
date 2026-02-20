@@ -69,8 +69,8 @@ impl Changelog {
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be read or written.
-	pub fn update(&self, git_root: &Path) -> anyhow::Result<()> {
-		let changelog_path = git_root.join(&self.project_path).join("CHANGELOG.md");
+	pub fn update(&self, git_workdir: &Path) -> anyhow::Result<()> {
+		let changelog_path = git_workdir.join(&self.project_path).join("CHANGELOG.md");
 		let entry = self.format_entry();
 		let content = if changelog_path.exists() {
 			let existing = std::fs::read_to_string(&changelog_path)

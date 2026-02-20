@@ -22,7 +22,7 @@ pub struct PublishArgs {
 pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow::Result<ExitCode> {
 	// Load configuration and enumerate projects
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects(git_workdir)?;
+	let projects = config.load_projects()?;
 
 	// Filter projects by --package flags if specified
 	let selected_projects: Vec<_> = if args.packages.is_empty() {
@@ -43,7 +43,7 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 
 	// Build dependency graph from all projects (not just selected ones)
 	// We need the full graph to correctly order the selected subset
-	let graph = package_manager::build_dependency_graph(git_workdir, &projects)?;
+	let graph = package_manager::build_dependency_graph(&projects)?;
 
 	// Sort selected projects in leaves-first order (dependencies before dependents)
 	let selected_names: Vec<String> = selected_projects
@@ -68,10 +68,10 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 	// Publish each project in order
 	for project in &sorted_projects {
 		// Read current version
-		let version = project.read_version(git_workdir)?;
+		let version = project.read_version()?;
 		let registry = project.registry_name();
 
-		match project.publish(git_workdir, args.dry_run) {
+		match project.publish(args.dry_run) {
 			Ok(PublishOutcome::Published) => {
 				println!("Published {}@{} to {}", project.name(), version, registry);
 				published_count += 1;

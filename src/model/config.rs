@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ pub enum PackageManager {
 }
 
 /// Chronicle configuration for a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
 	/// Configuration for npm package manager.
@@ -29,17 +29,38 @@ pub struct Config {
 	/// Configuration for Cargo package manager.
 	#[serde(default)]
 	pub cargo: CargoConfig,
+	/// Git repository root path.
+	#[serde(skip)]
+	git_workdir: PathBuf,
 }
 
 impl Config {
-	/// Creates a new config with only the specified package manager enabled.
-	pub fn with_package_manager(pm: PackageManager) -> Self {
-		let mut config = Self::default();
-		match pm {
-			PackageManager::Npm => config.npm.enabled = true,
-			PackageManager::Cargo => config.cargo.enabled = true,
+	/// Creates a new config with all package managers disabled.
+	pub fn new(git_workdir: &Path) -> Self {
+		Self {
+			npm: NpmConfig::default(),
+			cargo: CargoConfig::default(),
+			git_workdir: git_workdir.to_path_buf(),
 		}
-		config
+	}
+
+	/// Enables npm with the given configuration (builder pattern).
+	pub fn with_npm(mut self, config: NpmConfig) -> Self {
+		self.npm = config;
+		self.npm.enabled = true;
+		self
+	}
+
+	/// Enables cargo with the given configuration (builder pattern).
+	pub fn with_cargo(mut self, config: CargoConfig) -> Self {
+		self.cargo = config;
+		self.cargo.enabled = true;
+		self
+	}
+
+	/// Returns the git repository root path.
+	pub fn git_workdir(&self) -> &Path {
+		&self.git_workdir
 	}
 
 	/// Returns an iterator over all enabled package managers.
@@ -61,8 +82,13 @@ impl Config {
 		self.enabled_package_managers()
 			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
 				match pm {
-					PackageManager::Npm => Arc::new(NpmAdapter::new(self.npm.clone())),
-					PackageManager::Cargo => Arc::new(CargoAdapter::new(self.cargo.clone())),
+					PackageManager::Npm => {
+						Arc::new(NpmAdapter::new(self.npm.clone(), self.git_workdir.clone()))
+					}
+					PackageManager::Cargo => Arc::new(CargoAdapter::new(
+						self.cargo.clone(),
+						self.git_workdir.clone(),
+					)),
 				}
 			})
 			.collect()
@@ -77,9 +103,9 @@ impl Config {
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
 	/// - No projects are found
-	pub fn load_projects(&self, git_root: &Path) -> anyhow::Result<Vec<Project>> {
+	pub fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
 		let adapters = self.create_adapters();
-		let projects = package_manager::enumerate_projects(adapters, git_root)?;
+		let projects = package_manager::enumerate_projects(adapters)?;
 
 		if projects.is_empty() {
 			bail!("No projects found. Check that your package manager configuration is correct.");
@@ -87,17 +113,36 @@ impl Config {
 
 		Ok(projects)
 	}
+
+	/// Saves the configuration to `.chronicle/config.toml`.
+	///
+	/// Creates the `.chronicle` directory if it doesn't exist.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the directory cannot be created or the file cannot be written.
+	pub fn save(&self) -> anyhow::Result<PathBuf> {
+		let path = path(&self.git_workdir);
+		if let Some(parent) = path.parent() {
+			std::fs::create_dir_all(parent)
+				.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
+		}
+		let contents = toml::to_string_pretty(self).context("Failed to serialize config")?;
+		std::fs::write(&path, contents)
+			.with_context(|| format!("Failed to create config: {}", path.display()))?;
+		Ok(path)
+	}
 }
 
-fn path(git_root: &Path) -> PathBuf {
-	git_root.join(".chronicle/config.toml")
+fn path(git_workdir: &Path) -> PathBuf {
+	git_workdir.join(".chronicle/config.toml")
 }
 
 /// Checks if a Chronicle configuration file exists in the repository.
 ///
 /// Returns `true` if `.chronicle/config.toml` exists at the given git root.
-pub fn exists(git_root: &Path) -> bool {
-	path(git_root).exists()
+pub fn exists(git_workdir: &Path) -> bool {
+	path(git_workdir).exists()
 }
 
 /// Loads the Chronicle configuration from the repository.
@@ -107,15 +152,15 @@ pub fn exists(git_root: &Path) -> bool {
 /// # Errors
 ///
 /// Returns an error if the config file cannot be read or parsed.
-pub fn load(git_root: &Path) -> anyhow::Result<Config> {
-	if !exists(git_root) {
+pub fn load(git_workdir: &Path) -> anyhow::Result<Config> {
+	if !exists(git_workdir) {
 		bail!("No configuration found. Run 'chronicle init' to create one.");
 	}
 
-	let path = path(git_root);
+	let path = path(git_workdir);
 	let contents = std::fs::read_to_string(&path)
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
-	let config: Config =
+	let mut config: Config =
 		toml::from_str(&contents).with_context(|| "Failed to parse config.toml")?;
 
 	// Validate that at least one package manager is enabled
@@ -123,27 +168,10 @@ pub fn load(git_root: &Path) -> anyhow::Result<Config> {
 		bail!("Configuration must have at least one package manager enabled");
 	}
 
-	Ok(config)
-}
+	// Set the git root
+	config.git_workdir = git_workdir.to_path_buf();
 
-/// Creates a new Chronicle configuration file in the repository.
-///
-/// Writes the configuration to `.chronicle/config.toml`, creating the
-/// `.chronicle` directory if it doesn't exist.
-///
-/// # Errors
-///
-/// Returns an error if the directory cannot be created or the file cannot be written.
-pub fn create(git_root: &Path, config: &Config) -> anyhow::Result<PathBuf> {
-	let path = path(git_root);
-	if let Some(parent) = path.parent() {
-		std::fs::create_dir_all(parent)
-			.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
-	}
-	let contents = toml::to_string_pretty(config).context("Failed to serialize config")?;
-	std::fs::write(&path, contents)
-		.with_context(|| format!("Failed to create config: {}", path.display()))?;
-	Ok(path)
+	Ok(config)
 }
 
 #[cfg(test)]
@@ -164,16 +192,16 @@ mod tests {
 	#[test]
 	fn exists_returns_true_when_config_exists() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Cargo);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		config.save().unwrap();
 		assert!(exists(dir.path()));
 	}
 
 	#[test]
 	fn create_creates_config_file() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Npm);
-		let path = create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		let path = config.save().unwrap();
 		assert!(path.exists());
 		assert_eq!(path, dir.path().join(".chronicle/config.toml"));
 	}
@@ -181,16 +209,16 @@ mod tests {
 	#[test]
 	fn create_creates_directory_if_needed() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Cargo);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		config.save().unwrap();
 		assert!(dir.path().join(".chronicle").is_dir());
 	}
 
 	#[test]
 	fn load_reads_config_file() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Npm);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		config.save().unwrap();
 
 		let loaded = load(dir.path()).unwrap();
 		assert_eq!(loaded, config);
@@ -201,10 +229,12 @@ mod tests {
 		let dir = temp_dir();
 		let result = load(dir.path());
 		assert!(result.is_err());
-		assert!(result
-			.unwrap_err()
-			.to_string()
-			.contains("No configuration found"));
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("No configuration found")
+		);
 	}
 
 	#[test]
@@ -227,17 +257,19 @@ mod tests {
 
 		let result = load(dir.path());
 		assert!(result.is_err());
-		assert!(result
-			.unwrap_err()
-			.to_string()
-			.contains("at least one package manager"));
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("at least one package manager")
+		);
 	}
 
 	#[test]
 	fn load_succeeds_with_one_package_manager() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Cargo);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		config.save().unwrap();
 
 		let loaded = load(dir.path()).unwrap();
 		assert_eq!(loaded, config);
@@ -245,49 +277,65 @@ mod tests {
 
 	#[test]
 	fn config_defaults_all_disabled() {
-		let config = Config::default();
+		let config = Config {
+			npm: NpmConfig::default(),
+			cargo: CargoConfig::default(),
+			git_workdir: PathBuf::new(),
+		};
 		assert!(!config.npm.enabled);
 		assert!(!config.cargo.enabled);
 	}
 
 	#[test]
-	fn config_with_package_manager_enables_npm() {
-		let config = Config::with_package_manager(PackageManager::Npm);
+	fn config_with_npm_enables_npm() {
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
 		assert!(config.npm.enabled);
 		assert!(!config.cargo.enabled);
 	}
 
 	#[test]
-	fn config_with_package_manager_enables_cargo() {
-		let config = Config::with_package_manager(PackageManager::Cargo);
+	fn config_with_cargo_enables_cargo() {
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
 		assert!(!config.npm.enabled);
 		assert!(config.cargo.enabled);
 	}
 
 	#[test]
 	fn enabled_package_managers_returns_empty_when_none_enabled() {
-		let config = Config::default();
+		let config = Config {
+			npm: NpmConfig::default(),
+			cargo: CargoConfig::default(),
+			git_workdir: PathBuf::new(),
+		};
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
 		assert!(enabled.is_empty());
 	}
 
 	#[test]
 	fn enabled_package_managers_returns_npm_when_enabled() {
-		let config = Config::with_package_manager(PackageManager::Npm);
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![PackageManager::Npm]);
 	}
 
 	#[test]
 	fn enabled_package_managers_returns_cargo_when_enabled() {
-		let config = Config::with_package_manager(PackageManager::Cargo);
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![PackageManager::Cargo]);
 	}
 
 	#[test]
 	fn enabled_package_managers_returns_both_when_both_enabled() {
-		let mut config = Config::default();
+		let mut config = Config {
+			npm: NpmConfig::default(),
+			cargo: CargoConfig::default(),
+			git_workdir: PathBuf::new(),
+		};
 		config.npm.enabled = true;
 		config.cargo.enabled = true;
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
@@ -296,7 +344,8 @@ mod tests {
 
 	#[test]
 	fn config_serializes_with_sections() {
-		let config = Config::with_package_manager(PackageManager::Npm);
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("[npm]"));
 		assert!(toml_str.contains("enabled = true"));
@@ -363,14 +412,16 @@ mod tests {
 
 	#[test]
 	fn serialize_config_omits_none_path() {
-		let config = Config::with_package_manager(PackageManager::Npm);
+		let dir = temp_dir();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(!toml_str.contains("path"), "None path should be omitted");
 	}
 
 	#[test]
 	fn serialize_config_includes_some_path() {
-		let mut config = Config::with_package_manager(PackageManager::Npm);
+		let dir = temp_dir();
+		let mut config = Config::new(dir.path()).with_npm(NpmConfig::default());
 		config.npm.path = Some("frontend".to_string());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(
@@ -382,9 +433,9 @@ mod tests {
 	#[test]
 	fn config_roundtrip_with_path() {
 		let dir = temp_dir();
-		let mut config = Config::with_package_manager(PackageManager::Npm);
+		let mut config = Config::new(dir.path()).with_npm(NpmConfig::default());
 		config.npm.path = Some("frontend".to_string());
-		create(dir.path(), &config).unwrap();
+		config.save().unwrap();
 		let loaded = load(dir.path()).unwrap();
 		assert_eq!(loaded.npm.path, Some("frontend".to_string()));
 	}
@@ -394,8 +445,11 @@ mod tests {
 		let dir = temp_dir();
 
 		for pm in [PackageManager::Npm, PackageManager::Cargo] {
-			let config = Config::with_package_manager(pm);
-			create(dir.path(), &config).unwrap();
+			let config = match pm {
+				PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
+				PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+			};
+			config.save().unwrap();
 			let loaded = load(dir.path()).unwrap();
 			let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 			assert_eq!(enabled, vec![pm]);
@@ -405,8 +459,8 @@ mod tests {
 	#[test]
 	fn load_projects_succeeds_with_cargo_manifest() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Cargo);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test-package\"\nversion = \"0.1.0\"\n",
@@ -414,7 +468,7 @@ mod tests {
 		.unwrap();
 
 		let config = load(dir.path()).unwrap();
-		let projects = config.load_projects(dir.path()).unwrap();
+		let projects = config.load_projects().unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -422,8 +476,8 @@ mod tests {
 	#[test]
 	fn load_projects_succeeds_with_npm_manifest() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Npm);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_npm(NpmConfig::default());
+		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("package.json"),
 			r#"{"name": "test-package", "version": "0.1.0"}"#,
@@ -431,7 +485,7 @@ mod tests {
 		.unwrap();
 
 		let config = load(dir.path()).unwrap();
-		let projects = config.load_projects(dir.path()).unwrap();
+		let projects = config.load_projects().unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -439,16 +493,18 @@ mod tests {
 	#[test]
 	fn load_projects_fails_when_no_projects_found() {
 		let dir = temp_dir();
-		let config = Config::with_package_manager(PackageManager::Cargo);
-		create(dir.path(), &config).unwrap();
+		let config = Config::new(dir.path()).with_cargo(CargoConfig::default());
+		config.save().unwrap();
 		// No Cargo.toml file, so no projects will be found
 
 		let config = load(dir.path()).unwrap();
-		let result = config.load_projects(dir.path());
+		let result = config.load_projects();
 		assert!(result.is_err());
-		assert!(result
-			.unwrap_err()
-			.to_string()
-			.contains("No projects found"));
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("No projects found")
+		);
 	}
 }

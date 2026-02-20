@@ -120,7 +120,7 @@ pub fn parse_changeset(input: &str) -> anyhow::Result<Changeset> {
 	Ok(Changeset { packages, message })
 }
 
-/// Writes a changeset file to `{git_root}/.chronicle/{name}.md`.
+/// Writes a changeset file to `{git_workdir}/.chronicle/{name}.md`.
 ///
 /// Creates the `.chronicle` directory if it doesn't exist. Returns the
 /// path to the written file.
@@ -128,8 +128,8 @@ pub fn parse_changeset(input: &str) -> anyhow::Result<Changeset> {
 /// # Errors
 ///
 /// Returns an error if the directory cannot be created or the file cannot be written.
-pub fn write_changeset(git_root: &Path, changeset: &Changeset) -> anyhow::Result<PathBuf> {
-	let chronicle_dir = git_root.join(".chronicle");
+pub fn write_changeset(git_workdir: &Path, changeset: &Changeset) -> anyhow::Result<PathBuf> {
+	let chronicle_dir = git_workdir.join(".chronicle");
 	std::fs::create_dir_all(&chronicle_dir)
 		.with_context(|| format!("Failed to create directory: {}", chronicle_dir.display()))?;
 
@@ -149,8 +149,8 @@ pub fn write_changeset(git_root: &Path, changeset: &Changeset) -> anyhow::Result
 /// # Errors
 ///
 /// Returns an error if any changeset file cannot be read or parsed.
-pub fn read_all_changesets(git_root: &Path) -> anyhow::Result<Vec<(PathBuf, Changeset)>> {
-	let chronicle_dir = git_root.join(".chronicle");
+pub fn read_all_changesets(git_workdir: &Path) -> anyhow::Result<Vec<(PathBuf, Changeset)>> {
+	let chronicle_dir = git_workdir.join(".chronicle");
 	if !chronicle_dir.is_dir() {
 		return Ok(Vec::new());
 	}

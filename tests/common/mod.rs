@@ -2,7 +2,8 @@
 
 #![allow(dead_code)]
 
-use chronicle::model::config::{self, Config, PackageManager};
+use chronicle::model::config::{Config, PackageManager};
+use chronicle::package_manager::{CargoConfig, NpmConfig};
 use tempfile::TempDir;
 
 /// Creates a temporary directory with a `.git` folder to simulate a git repository.
@@ -13,16 +14,24 @@ pub fn temp_git_repo() -> TempDir {
 }
 
 /// Creates a temporary git repository with a Chronicle config file.
-pub fn temp_git_repo_with_config(config: &Config) -> TempDir {
+pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
-	config::create(dir.path(), config).unwrap();
+	let config = match pm {
+		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
+		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+	};
+	config.save().unwrap();
 	dir
 }
 
 /// Creates a temporary git repository with a config and matching package manifest.
 pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
-	let config = Config::with_package_manager(pm);
-	let dir = temp_git_repo_with_config(&config);
+	let dir = temp_git_repo();
+	let config = match pm {
+		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
+		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+	};
+	config.save().unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(
@@ -47,12 +56,16 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 
 /// Creates a temporary git repository with a config and package manifest in a subfolder.
 pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &str) -> TempDir {
-	let mut config = Config::with_package_manager(pm);
+	let dir = temp_git_repo();
+	let mut config = match pm {
+		PackageManager::Npm => Config::new(dir.path()).with_npm(NpmConfig::default()),
+		PackageManager::Cargo => Config::new(dir.path()).with_cargo(CargoConfig::default()),
+	};
 	match pm {
 		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),
 		PackageManager::Cargo => config.cargo.path = Some(subfolder.to_string()),
 	}
-	let dir = temp_git_repo_with_config(&config);
+	config.save().unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	match pm {

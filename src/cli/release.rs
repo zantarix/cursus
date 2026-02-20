@@ -48,10 +48,10 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 /// Runs the `release` subcommand.
 pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects(git_workdir)?;
+	let projects = config.load_projects()?;
 
 	// Read all pending changesets
-	let changesets = changeset::read_all_changesets(git_workdir)?;
+	let changesets = changeset::read_all_changesets(config.git_workdir())?;
 	if changesets.is_empty() {
 		println!("No pending changesets found. Nothing to release.");
 		return Ok(ExitCode::SUCCESS);
@@ -103,14 +103,14 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 				format!("Package '{pkg_name}' from changeset not found in projects")
 			})?;
 
-		let current_version = project.read_version(git_workdir)?;
+		let current_version = project.read_version()?;
 		let new_version = bump_version(&current_version, *change_type);
 
 		if args.dry_run {
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		} else {
-			project.write_version(git_workdir, &new_version)?;
-			project.update_lock_file(git_workdir)?;
+			project.write_version(&new_version)?;
+			project.update_lock_file()?;
 
 			// Generate changelog
 			let changes = changes_per_package
@@ -119,7 +119,7 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 				.unwrap_or_default()
 				.to_vec();
 			Changelog::new(new_version.clone(), changes, project.path().to_path_buf())
-				.update(git_workdir)?;
+				.update(config.git_workdir())?;
 
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		}
@@ -197,10 +197,9 @@ mod tests {
 	fn cmd_release_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::with_package_manager(
-			crate::model::config::PackageManager::Cargo,
-		);
-		crate::model::config::create(dir.path(), &config).unwrap();
+		let config = crate::model::config::Config::new(dir.path())
+			.with_cargo(crate::package_manager::CargoConfig::default());
+		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
@@ -216,10 +215,9 @@ mod tests {
 	fn cmd_release_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::with_package_manager(
-			crate::model::config::PackageManager::Cargo,
-		);
-		crate::model::config::create(dir.path(), &config).unwrap();
+		let config = crate::model::config::Config::new(dir.path())
+			.with_cargo(crate::package_manager::CargoConfig::default());
+		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
@@ -248,10 +246,9 @@ mod tests {
 	fn cmd_release_package_flag_filters_packages() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::with_package_manager(
-			crate::model::config::PackageManager::Cargo,
-		);
-		crate::model::config::create(dir.path(), &config).unwrap();
+		let config = crate::model::config::Config::new(dir.path())
+			.with_cargo(crate::package_manager::CargoConfig::default());
+		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
@@ -291,10 +288,9 @@ mod tests {
 	fn cmd_release_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::with_package_manager(
-			crate::model::config::PackageManager::Cargo,
-		);
-		crate::model::config::create(dir.path(), &config).unwrap();
+		let config = crate::model::config::Config::new(dir.path())
+			.with_cargo(crate::package_manager::CargoConfig::default());
+		config.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",

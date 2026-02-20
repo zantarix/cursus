@@ -92,29 +92,29 @@ impl Project {
 	/// Reads the current version of this project from its manifest file.
 	///
 	/// Delegates to the underlying package manager adapter.
-	pub fn read_version(&self, git_root: &Path) -> anyhow::Result<Version> {
-		self.adapter.read_version(git_root, &self.info)
+	pub fn read_version(&self) -> anyhow::Result<Version> {
+		self.adapter.read_version(&self.info)
 	}
 
 	/// Writes a new version to this project's manifest file.
 	///
 	/// Delegates to the underlying package manager adapter.
-	pub fn write_version(&self, git_root: &Path, version: &Version) -> anyhow::Result<()> {
-		self.adapter.write_version(git_root, &self.info, version)
+	pub fn write_version(&self, version: &Version) -> anyhow::Result<()> {
+		self.adapter.write_version(&self.info, version)
 	}
 
 	/// Updates the lock file for this project after a version change.
 	///
 	/// Delegates to the underlying package manager adapter.
-	pub fn update_lock_file(&self, git_root: &Path) -> anyhow::Result<()> {
-		self.adapter.update_lock_file(git_root, &self.info)
+	pub fn update_lock_file(&self) -> anyhow::Result<()> {
+		self.adapter.update_lock_file(&self.info)
 	}
 
 	/// Publishes this project to its package registry.
 	///
 	/// Delegates to the underlying package manager adapter.
-	pub fn publish(&self, git_root: &Path, dry_run: bool) -> anyhow::Result<PublishOutcome> {
-		self.adapter.publish(git_root, &self.info, dry_run)
+	pub fn publish(&self, dry_run: bool) -> anyhow::Result<PublishOutcome> {
+		self.adapter.publish(&self.info, dry_run)
 	}
 
 	/// Returns the name of the registry this project would be published to.
@@ -135,44 +135,33 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// For single-package repositories, this returns a single project.
 	/// For monorepos, this returns all workspace packages.
 	///
-	/// # Arguments
-	///
-	/// * `git_root` - The root directory of the git repository.
-	///
 	/// # Errors
 	///
 	/// Returns an error if project enumeration fails (e.g., invalid manifest files).
-	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>>;
+	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>>;
 
 	/// Reads the current version of a project from its manifest file.
 	///
 	/// # Arguments
 	///
-	/// * `git_root` - The root directory of the git repository.
 	/// * `project` - The project to read the version for.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the manifest file cannot be read or the version cannot be parsed.
-	fn read_version(&self, git_root: &Path, project: &ProjectInfo) -> anyhow::Result<Version>;
+	fn read_version(&self, project: &ProjectInfo) -> anyhow::Result<Version>;
 
 	/// Writes a new version to a project's manifest file, preserving formatting.
 	///
 	/// # Arguments
 	///
-	/// * `git_root` - The root directory of the git repository.
 	/// * `project` - The project to update.
 	/// * `version` - The new version to write.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the manifest file cannot be read or written.
-	fn write_version(
-		&self,
-		git_root: &Path,
-		project: &ProjectInfo,
-		version: &Version,
-	) -> anyhow::Result<()>;
+	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()>;
 
 	/// Updates the lock file for a project after a version change.
 	///
@@ -182,13 +171,12 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// # Arguments
 	///
-	/// * `git_root` - The root directory of the git repository.
 	/// * `project` - The project whose lock file should be updated.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the lock file update command fails.
-	fn update_lock_file(&self, git_root: &Path, project: &ProjectInfo) -> anyhow::Result<()>;
+	fn update_lock_file(&self, project: &ProjectInfo) -> anyhow::Result<()>;
 
 	/// Publishes a project to its package registry.
 	///
@@ -197,7 +185,6 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// # Arguments
 	///
-	/// * `git_root` - The root directory of the git repository.
 	/// * `project` - The project to publish.
 	/// * `dry_run` - If true, simulate the publish without actually uploading.
 	///
@@ -205,12 +192,7 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// Returns an error if the publish operation fails for reasons other than
 	/// the package already existing.
-	fn publish(
-		&self,
-		git_root: &Path,
-		project: &ProjectInfo,
-		dry_run: bool,
-	) -> anyhow::Result<PublishOutcome>;
+	fn publish(&self, project: &ProjectInfo, dry_run: bool) -> anyhow::Result<PublishOutcome>;
 
 	/// Returns the name of the registry this adapter publishes to.
 	///
@@ -226,7 +208,6 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// # Arguments
 	///
-	/// * `git_root` - The root directory of the git repository.
 	/// * `projects` - All projects in the workspace to analyze.
 	///
 	/// # Errors
@@ -234,7 +215,6 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// Returns an error if manifest files cannot be read or parsed.
 	fn intra_dependencies(
 		&self,
-		git_root: &Path,
 		projects: &[&ProjectInfo],
 	) -> anyhow::Result<Vec<(String, String)>>;
 }
@@ -388,19 +368,18 @@ impl DependencyGraph {
 /// # Arguments
 ///
 /// * `adapters` - The package manager adapters to use.
-/// * `git_root` - The root directory of the git repository.
+/// * `git_workdir` - The root directory of the git repository.
 ///
 /// # Errors
 ///
 /// Returns an error if any adapter fails to enumerate its projects.
 pub fn enumerate_projects(
 	adapters: impl IntoIterator<Item = Arc<dyn PackageManagerAdapter>>,
-	git_root: &Path,
 ) -> anyhow::Result<Vec<Project>> {
 	adapters
 		.into_iter()
 		.map(|adapter| {
-			adapter.enumerate_projects(git_root).map(|infos| {
+			adapter.enumerate_projects().map(|infos| {
 				infos
 					.into_iter()
 					.map(|info| Project {
@@ -423,16 +402,12 @@ pub fn enumerate_projects(
 ///
 /// # Arguments
 ///
-/// * `git_root` - The root directory of the git repository.
 /// * `projects` - All projects in the workspace to analyze.
 ///
 /// # Errors
 ///
 /// Returns an error if dependency analysis fails (e.g., manifest files cannot be read).
-pub fn build_dependency_graph(
-	git_root: &Path,
-	projects: &[Project],
-) -> anyhow::Result<DependencyGraph> {
+pub fn build_dependency_graph(projects: &[Project]) -> anyhow::Result<DependencyGraph> {
 	// Group projects by adapter using Arc pointer equality
 	let mut adapter_groups: Vec<(Arc<dyn PackageManagerAdapter>, Vec<&ProjectInfo>)> = Vec::new();
 	for project in projects {
@@ -449,7 +424,7 @@ pub fn build_dependency_graph(
 	// Collect edges from each adapter group
 	let mut all_edges = Vec::new();
 	for (adapter, project_infos) in &adapter_groups {
-		let edges = adapter.intra_dependencies(git_root, project_infos)?;
+		let edges = adapter.intra_dependencies(project_infos)?;
 		all_edges.extend(edges);
 	}
 
@@ -462,8 +437,10 @@ mod tests {
 
 	/// Creates a test project with a dummy adapter.
 	fn test_project(name: &str, path: &str) -> Project {
-		let adapter: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(NpmConfig::default()));
+		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			std::path::PathBuf::from("."),
+		));
 		Project {
 			info: ProjectInfo {
 				name: name.to_string(),
@@ -509,9 +486,11 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
 
-		let adapter: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(NpmConfig::default()));
-		let projects = enumerate_projects([adapter.clone()], dir.path()).unwrap();
+		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			dir.path().to_path_buf(),
+		));
+		let projects = enumerate_projects([adapter.clone()]).unwrap();
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test");
@@ -525,12 +504,16 @@ mod tests {
 		std::fs::write(dir.path().join("package.json"), r#"{"name": "npm-pkg"}"#).unwrap();
 
 		// Two adapters pointing at the same directory (both will find the package)
-		let adapter1: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(NpmConfig::default()));
-		let adapter2: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(NpmConfig::default()));
+		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			dir.path().to_path_buf(),
+		));
+		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			dir.path().to_path_buf(),
+		));
 
-		let projects = enumerate_projects([adapter1, adapter2], dir.path()).unwrap();
+		let projects = enumerate_projects([adapter1, adapter2]).unwrap();
 
 		// Both adapters find the same package, so we get 2 projects
 		assert_eq!(projects.len(), 2);
@@ -540,9 +523,9 @@ mod tests {
 
 	#[test]
 	fn enumerate_projects_empty_adapters_returns_empty() {
-		let dir = tempfile::tempdir().unwrap();
+		let _dir = tempfile::tempdir().unwrap();
 		let adapters: [Arc<dyn PackageManagerAdapter>; 0] = [];
-		let projects = enumerate_projects(adapters, dir.path()).unwrap();
+		let projects = enumerate_projects(adapters).unwrap();
 		assert!(projects.is_empty());
 	}
 
@@ -674,10 +657,12 @@ mod tests {
 		)
 		.unwrap();
 
-		let adapter: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(NpmConfig::default()));
-		let projects = enumerate_projects([adapter], dir.path()).unwrap();
-		let graph = build_dependency_graph(dir.path(), &projects).unwrap();
+		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			dir.path().to_path_buf(),
+		));
+		let projects = enumerate_projects([adapter]).unwrap();
+		let graph = build_dependency_graph(&projects).unwrap();
 
 		// Single package with no dependencies should result in trivial sorting
 		let names: Vec<String> = projects.iter().map(|p| p.name().to_string()).collect();
@@ -710,10 +695,12 @@ mod tests {
 		)
 		.unwrap();
 
-		let adapter: Arc<dyn PackageManagerAdapter> =
-			Arc::new(NpmAdapter::new(NpmConfig::default()));
-		let projects = enumerate_projects([adapter], dir.path()).unwrap();
-		let graph = build_dependency_graph(dir.path(), &projects).unwrap();
+		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			dir.path().to_path_buf(),
+		));
+		let projects = enumerate_projects([adapter]).unwrap();
+		let graph = build_dependency_graph(&projects).unwrap();
 
 		// app depends on lib, so lib should come before app
 		let names: Vec<String> = projects.iter().map(|p| p.name().to_string()).collect();

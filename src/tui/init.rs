@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::model::config::{Config, PackageManager};
+use crate::package_manager::{CargoConfig, NpmConfig};
 
 /// Options that can be pre-filled to skip interactive steps.
 #[derive(Debug, Clone, Default)]
@@ -31,17 +32,17 @@ enum Screen {
 enum KeyResult {
 	/// Continue with updated screen state.
 	Continue(Screen),
-	/// Setup completed with a configuration.
-	Complete(Config),
+	/// Setup completed with a package manager selection.
+	Complete(PackageManager),
 	/// Setup cancelled by user.
 	Cancelled,
 }
 
-fn detect_package_manager(git_root: &Path) -> PackageManager {
+fn detect_package_manager(git_workdir: &Path) -> PackageManager {
 	// Prefer NPM as tie breaker, so check for it first
-	if git_root.join("package.json").exists() {
+	if git_workdir.join("package.json").exists() {
 		PackageManager::Npm
-	} else if git_root.join("Cargo.toml").exists() {
+	} else if git_workdir.join("Cargo.toml").exists() {
 		PackageManager::Cargo
 	} else {
 		PackageManager::Npm
@@ -65,7 +66,7 @@ fn handle_key(
 				if yes {
 					// If package manager is pre-filled, skip to completion
 					if let Some(pm) = options.package_manager {
-						KeyResult::Complete(Config::with_package_manager(pm))
+						KeyResult::Complete(pm)
 					} else {
 						KeyResult::Continue(Screen::SelectPackageManager(detected))
 					}
@@ -88,7 +89,7 @@ fn handle_key(
 				};
 				KeyResult::Continue(Screen::SelectPackageManager(new_selected))
 			}
-			KeyCode::Enter => KeyResult::Complete(Config::with_package_manager(selected)),
+			KeyCode::Enter => KeyResult::Complete(selected),
 			KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
 			_ => KeyResult::Continue(screen),
 		},
@@ -111,8 +112,8 @@ fn handle_key(
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
-pub fn run(git_root: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
-	let detected = detect_package_manager(git_root);
+pub fn run(git_workdir: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
+	let detected = detect_package_manager(git_workdir);
 
 	enable_raw_mode()?;
 	io::stdout().execute(EnterAlternateScreen)?;
@@ -128,7 +129,7 @@ pub fn run(git_root: &Path, options: &InitOptions) -> anyhow::Result<Option<Conf
 		{
 			match handle_key(screen, key.code, detected, options) {
 				KeyResult::Continue(new_screen) => screen = new_screen,
-				KeyResult::Complete(config) => break Some(config),
+				KeyResult::Complete(pm) => break Some(pm),
 				KeyResult::Cancelled => break None,
 			}
 		}
@@ -137,7 +138,10 @@ pub fn run(git_root: &Path, options: &InitOptions) -> anyhow::Result<Option<Conf
 	disable_raw_mode()?;
 	io::stdout().execute(LeaveAlternateScreen)?;
 
-	Ok(result)
+	Ok(result.map(|pm| match pm {
+		PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::default()),
+		PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::default()),
+	}))
 }
 
 fn ui(frame: &mut Frame, screen: &Screen) {
@@ -340,10 +344,7 @@ mod tests {
 			PackageManager::Cargo, // detected doesn't matter when pre-filled
 			&options,
 		);
-		assert_eq!(
-			result,
-			KeyResult::Complete(Config::with_package_manager(PackageManager::Npm))
-		);
+		assert_eq!(result, KeyResult::Complete(PackageManager::Npm));
 	}
 
 	#[test]
@@ -357,10 +358,7 @@ mod tests {
 			PackageManager::Npm,
 			&options,
 		);
-		assert_eq!(
-			result,
-			KeyResult::Complete(Config::with_package_manager(PackageManager::Cargo))
-		);
+		assert_eq!(result, KeyResult::Complete(PackageManager::Cargo));
 	}
 
 	#[test]
@@ -482,10 +480,7 @@ mod tests {
 			KeyCode::Enter,
 			PackageManager::Cargo,
 		);
-		assert_eq!(
-			result,
-			KeyResult::Complete(Config::with_package_manager(PackageManager::Npm))
-		);
+		assert_eq!(result, KeyResult::Complete(PackageManager::Npm));
 	}
 
 	#[test]
@@ -495,10 +490,7 @@ mod tests {
 			KeyCode::Enter,
 			PackageManager::Npm,
 		);
-		assert_eq!(
-			result,
-			KeyResult::Complete(Config::with_package_manager(PackageManager::Cargo))
-		);
+		assert_eq!(result, KeyResult::Complete(PackageManager::Cargo));
 	}
 
 	#[test]
@@ -553,10 +545,7 @@ mod tests {
 			KeyCode::Enter,
 			PackageManager::Npm,
 		);
-		assert_eq!(
-			result,
-			KeyResult::Complete(Config::with_package_manager(PackageManager::Npm))
-		);
+		assert_eq!(result, KeyResult::Complete(PackageManager::Npm));
 	}
 
 	#[test]
@@ -591,10 +580,7 @@ mod tests {
 
 		// Confirm cargo
 		let result = handle_key_default(screen, KeyCode::Enter, PackageManager::Cargo);
-		assert_eq!(
-			result,
-			KeyResult::Complete(Config::with_package_manager(PackageManager::Cargo))
-		);
+		assert_eq!(result, KeyResult::Complete(PackageManager::Cargo));
 	}
 
 	// UI rendering tests using TestBackend

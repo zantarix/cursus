@@ -39,12 +39,12 @@ pub struct NpmConfig {
 impl NpmConfig {
 	/// Returns the resolved root directory for this package manager.
 	///
-	/// If a `path` is configured, returns `git_root` joined with that path.
-	/// Otherwise, returns a copy of `git_root`.
-	pub fn resolve_root(&self, git_root: &Path) -> PathBuf {
+	/// If a `path` is configured, returns `git_workdir` joined with that path.
+	/// Otherwise, returns a copy of `git_workdir`.
+	fn resolve_root(&self, git_workdir: &Path) -> PathBuf {
 		match &self.path {
-			Some(path) => git_root.join(path),
-			None => git_root.to_path_buf(),
+			Some(path) => git_workdir.join(path),
+			None => git_workdir.to_path_buf(),
 		}
 	}
 }
@@ -56,12 +56,22 @@ impl NpmConfig {
 pub struct NpmAdapter {
 	/// Configuration for this package manager.
 	config: NpmConfig,
+	/// Git repository root path.
+	git_workdir: PathBuf,
 }
 
 impl NpmAdapter {
 	/// Creates a new npm adapter with the given configuration.
-	pub fn new(config: NpmConfig) -> Self {
-		Self { config }
+	pub fn new(config: NpmConfig, git_workdir: PathBuf) -> Self {
+		Self {
+			config,
+			git_workdir,
+		}
+	}
+
+	/// Returns the resolved root directory for this package manager.
+	fn resolve_root(&self) -> PathBuf {
+		self.config.resolve_root(&self.git_workdir)
 	}
 }
 
@@ -118,8 +128,8 @@ fn read_package_json(dir: &Path) -> anyhow::Result<Option<PackageJson>> {
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(workspace))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_pnpm_workspace(git_root: &Path) -> anyhow::Result<Option<PnpmWorkspace>> {
-	let path = git_root.join("pnpm-workspace.yaml");
+fn read_pnpm_workspace(git_workdir: &Path) -> anyhow::Result<Option<PnpmWorkspace>> {
+	let path = git_workdir.join("pnpm-workspace.yaml");
 	if !path.exists() {
 		return Ok(None);
 	}
@@ -156,7 +166,7 @@ fn get_workspace_patterns(
 ///
 /// Returns `Ok(None)` if the path is not a valid workspace (not a directory or no package.json).
 fn read_workspace_project(
-	git_root: &Path,
+	git_workdir: &Path,
 	workspace_path: &Path,
 ) -> anyhow::Result<Option<ProjectInfo>> {
 	if !workspace_path.is_dir() {
@@ -169,7 +179,7 @@ fn read_workspace_project(
 
 	let name = package.name.unwrap_or_else(|| "unnamed".to_string());
 	let path = workspace_path
-		.strip_prefix(git_root)
+		.strip_prefix(git_workdir)
 		.context("Workspace path is not under git root")?
 		.to_path_buf();
 
@@ -179,9 +189,9 @@ fn read_workspace_project(
 /// Expands a workspace glob pattern and returns all matching projects.
 ///
 /// Globs are resolved relative to `pm_root`, but paths in the returned
-/// [`ProjectInfo`] are stripped relative to `git_root`.
+/// [`ProjectInfo`] are stripped relative to `git_workdir`.
 fn expand_workspace_pattern(
-	git_root: &Path,
+	git_workdir: &Path,
 	pm_root: &Path,
 	pattern: &str,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
@@ -195,15 +205,15 @@ fn expand_workspace_pattern(
 		.map(|entry| {
 			let workspace_path = entry
 				.with_context(|| format!("Failed to read glob entry for pattern: {}", pattern))?;
-			read_workspace_project(git_root, &workspace_path)
+			read_workspace_project(git_workdir, &workspace_path)
 		})
 		.filter_map(Result::transpose)
 		.collect()
 }
 
 impl PackageManagerAdapter for NpmAdapter {
-	fn read_version(&self, git_root: &Path, project: &ProjectInfo) -> anyhow::Result<Version> {
-		let manifest_path = git_root.join(&project.path).join("package.json");
+	fn read_version(&self, project: &ProjectInfo) -> anyhow::Result<Version> {
+		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let json: serde_json::Value = serde_json::from_str(&contents)
@@ -216,13 +226,8 @@ impl PackageManagerAdapter for NpmAdapter {
 			.with_context(|| format!("Invalid semver version: {version_str}"))
 	}
 
-	fn write_version(
-		&self,
-		git_root: &Path,
-		project: &ProjectInfo,
-		version: &Version,
-	) -> anyhow::Result<()> {
-		let manifest_path = git_root.join(&project.path).join("package.json");
+	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
+		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let mut json: serde_json::Value = serde_json::from_str(&contents)
@@ -235,15 +240,15 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(())
 	}
 
-	fn enumerate_projects(&self, git_root: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		let pm_root = self.config.resolve_root(git_root);
+	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
+		let pm_root = self.resolve_root();
 		let Some(root_package) = read_package_json(&pm_root)? else {
 			return Ok(Vec::new());
 		};
 		let pnpm_workspace = read_pnpm_workspace(&pm_root)?;
 
 		let pm_relative_path = pm_root
-			.strip_prefix(git_root)
+			.strip_prefix(&self.git_workdir)
 			.unwrap_or(Path::new(""))
 			.to_path_buf();
 
@@ -269,7 +274,7 @@ impl PackageManagerAdapter for NpmAdapter {
 			.chain(
 				workspace_patterns
 					.iter()
-					.map(|pattern| expand_workspace_pattern(git_root, &pm_root, pattern))
+					.map(|pattern| expand_workspace_pattern(&self.git_workdir, &pm_root, pattern))
 					.collect::<anyhow::Result<Vec<_>>>()?
 					.into_iter()
 					.flatten(),
@@ -282,8 +287,8 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self, git_root: &Path, _project: &ProjectInfo) -> anyhow::Result<()> {
-		let workspace_root = self.config.resolve_root(git_root);
+	fn update_lock_file(&self, _project: &ProjectInfo) -> anyhow::Result<()> {
+		let workspace_root = self.resolve_root();
 
 		// If a custom lock command is configured, use it
 		if let Some(ref lock_command) = self.config.lock_command {
@@ -384,13 +389,8 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(())
 	}
 
-	fn publish(
-		&self,
-		git_root: &Path,
-		project: &ProjectInfo,
-		dry_run: bool,
-	) -> anyhow::Result<PublishOutcome> {
-		let project_dir = git_root.join(&project.path);
+	fn publish(&self, project: &ProjectInfo, dry_run: bool) -> anyhow::Result<PublishOutcome> {
+		let project_dir = self.git_workdir.join(&project.path);
 
 		let mut cmd = std::process::Command::new("npm");
 		cmd.arg("publish").current_dir(&project_dir);
@@ -431,7 +431,6 @@ impl PackageManagerAdapter for NpmAdapter {
 
 	fn intra_dependencies(
 		&self,
-		git_root: &Path,
 		projects: &[&ProjectInfo],
 	) -> anyhow::Result<Vec<(String, String)>> {
 		let project_names: std::collections::HashSet<_> =
@@ -440,7 +439,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		let mut edges = Vec::new();
 
 		for &project in projects {
-			let manifest_path = git_root.join(&project.path).join("package.json");
+			let manifest_path = self.git_workdir.join(&project.path).join("package.json");
 			let contents = std::fs::read_to_string(&manifest_path)
 				.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 			let json: serde_json::Value = serde_json::from_str(&contents)
@@ -477,17 +476,20 @@ mod tests {
 
 	/// Helper to enumerate projects using the adapter with no configured path.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		NpmAdapter::new(NpmConfig::default()).enumerate_projects(dir)
+		NpmAdapter::new(NpmConfig::default(), dir.to_path_buf()).enumerate_projects()
 	}
 
 	/// Helper to enumerate projects using the adapter with a configured path.
 	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-		NpmAdapter::new(NpmConfig {
-			enabled: true,
-			path: Some(path.to_string()),
-			..Default::default()
-		})
-		.enumerate_projects(dir)
+		NpmAdapter::new(
+			NpmConfig {
+				enabled: true,
+				path: Some(path.to_string()),
+				..Default::default()
+			},
+			dir.to_path_buf(),
+		)
+		.enumerate_projects()
 	}
 
 	#[test]
@@ -703,10 +705,10 @@ mod tests {
 
 	#[test]
 	fn new_creates_adapter() {
-		let adapter = NpmAdapter::new(NpmConfig::default());
 		let dir = temp_dir();
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		// Should work without panicking
-		let _ = adapter.enumerate_projects(dir.path());
+		let _ = adapter.enumerate_projects();
 	}
 
 	#[test]
@@ -907,9 +909,9 @@ mod tests {
 	fn read_version_from_package_json() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.2.3"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
-		let version = adapter.read_version(dir.path(), &info).unwrap();
+		let version = adapter.read_version(&info).unwrap();
 		assert_eq!(version.to_string(), "1.2.3");
 	}
 
@@ -917,18 +919,18 @@ mod tests {
 	fn read_version_missing_version_field() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
-		let result = adapter.read_version(dir.path(), &info);
+		let result = adapter.read_version(&info);
 		assert!(result.is_err());
 	}
 
 	#[test]
 	fn read_version_file_not_found() {
 		let dir = temp_dir();
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
-		let result = adapter.read_version(dir.path(), &info);
+		let result = adapter.read_version(&info);
 		assert!(result.is_err());
 	}
 
@@ -936,9 +938,9 @@ mod tests {
 	fn read_version_invalid_json() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), "not valid json");
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
-		let result = adapter.read_version(dir.path(), &info);
+		let result = adapter.read_version(&info);
 		assert!(result.is_err());
 	}
 
@@ -949,19 +951,19 @@ mod tests {
 			dir.path(),
 			r#"{"name": "my-app", "version": "not-a-version"}"#,
 		);
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
-		let result = adapter.read_version(dir.path(), &info);
+		let result = adapter.read_version(&info);
 		assert!(result.is_err());
 	}
 
 	#[test]
 	fn write_version_file_not_found() {
 		let dir = temp_dir();
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(dir.path(), &info, &version);
+		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
 	}
 
@@ -969,10 +971,10 @@ mod tests {
 	fn write_version_invalid_json() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), "not valid json");
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(dir.path(), &info, &version);
+		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
 	}
 
@@ -980,12 +982,10 @@ mod tests {
 	fn write_version_updates_package_json() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter
-			.write_version(dir.path(), &info, &new_version)
-			.unwrap();
+		adapter.write_version(&info, &new_version).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
 		assert!(
@@ -999,16 +999,16 @@ mod tests {
 	fn read_write_version_roundtrip() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "0.1.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
 
-		let v = adapter.read_version(dir.path(), &info).unwrap();
+		let v = adapter.read_version(&info).unwrap();
 		assert_eq!(v.to_string(), "0.1.0");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
-		adapter.write_version(dir.path(), &info, &new_v).unwrap();
+		adapter.write_version(&info, &new_v).unwrap();
 
-		let v2 = adapter.read_version(dir.path(), &info).unwrap();
+		let v2 = adapter.read_version(&info).unwrap();
 		assert_eq!(v2.to_string(), "0.2.0");
 	}
 
@@ -1016,11 +1016,11 @@ mod tests {
 	fn update_lock_file_no_op_when_no_lock_file() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
 
 		// Should succeed even without a lock file
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_ok());
 	}
 
@@ -1028,15 +1028,18 @@ mod tests {
 	fn update_lock_file_custom_command_empty_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig {
-			enabled: true,
-			path: None,
-			lock_command: Some("".to_string()),
-			access: None,
-		});
+		let adapter = NpmAdapter::new(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("".to_string()),
+				access: None,
+			},
+			dir.path().to_path_buf(),
+		);
 		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -1050,15 +1053,18 @@ mod tests {
 	fn update_lock_file_custom_command_nonexistent_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig {
-			enabled: true,
-			path: None,
-			lock_command: Some("nonexistent-command-12345".to_string()),
-			access: None,
-		});
+		let adapter = NpmAdapter::new(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("nonexistent-command-12345".to_string()),
+				access: None,
+			},
+			dir.path().to_path_buf(),
+		);
 		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_err());
 	}
 
@@ -1079,9 +1085,9 @@ mod tests {
 			lock_command: None,
 			access: None,
 		};
-		let git_root = Path::new("/repo");
-		let resolved = config.resolve_root(git_root);
-		assert_eq!(resolved, git_root);
+		let git_workdir = Path::new("/repo");
+		let resolved = config.resolve_root(git_workdir);
+		assert_eq!(resolved, git_workdir);
 	}
 
 	#[test]
@@ -1092,8 +1098,8 @@ mod tests {
 			lock_command: None,
 			access: None,
 		};
-		let git_root = Path::new("/repo");
-		let resolved = config.resolve_root(git_root);
+		let git_workdir = Path::new("/repo");
+		let resolved = config.resolve_root(git_workdir);
 		assert_eq!(resolved, Path::new("/repo/frontend"));
 	}
 
@@ -1101,15 +1107,18 @@ mod tests {
 	fn update_lock_file_custom_command_with_exit_code_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig {
-			enabled: true,
-			path: None,
-			lock_command: Some("false".to_string()), // 'false' always exits with 1
-			access: None,
-		});
+		let adapter = NpmAdapter::new(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("false".to_string()), // 'false' always exits with 1
+				access: None,
+			},
+			dir.path().to_path_buf(),
+		);
 		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("Lock command"));
 	}
@@ -1118,15 +1127,18 @@ mod tests {
 	fn update_lock_file_custom_command_succeeds() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig {
-			enabled: true,
-			path: None,
-			lock_command: Some("true".to_string()), // 'true' always exits with 0
-			access: None,
-		});
+		let adapter = NpmAdapter::new(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("true".to_string()), // 'true' always exits with 0
+				access: None,
+			},
+			dir.path().to_path_buf(),
+		);
 		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_ok());
 	}
 
@@ -1138,7 +1150,7 @@ mod tests {
 		std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
 
 		// Use a custom PATH that doesn't include npm
-		let _adapter = NpmAdapter::new(NpmConfig::default());
+		let _adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let _info = project_info("my-app", "");
 
 		// This will fail if npm is not in PATH
@@ -1157,10 +1169,10 @@ mod tests {
 		)
 		.unwrap();
 
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("test-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_ok(), "npm lock file update should succeed");
 	}
 
@@ -1181,10 +1193,10 @@ mod tests {
 		)
 		.unwrap();
 
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("test-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(result.is_ok(), "pnpm lock file update should succeed");
 	}
 
@@ -1199,10 +1211,10 @@ mod tests {
 		)
 		.unwrap();
 
-		let adapter = NpmAdapter::new(NpmConfig::default());
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("test-app", "");
 
-		let result = adapter.update_lock_file(dir.path(), &info);
+		let result = adapter.update_lock_file(&info);
 		assert!(
 			result.is_ok(),
 			"yarn lock file update should succeed: {:?}",

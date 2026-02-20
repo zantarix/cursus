@@ -318,8 +318,9 @@ fn release_unknown_package_in_changeset_fails() {
 fn release_package_flag_filters_packages() {
 	let dir = temp_git_repo();
 	// Create a cargo workspace with two members
-	let config = chronicle::model::config::Config::with_package_manager(PackageManager::Cargo);
-	chronicle::model::config::create(dir.path(), &config).unwrap();
+	let config = chronicle::model::config::Config::new(dir.path())
+		.with_cargo(chronicle::package_manager::CargoConfig::default());
+	config.save().unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",

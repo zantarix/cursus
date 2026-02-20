@@ -4,13 +4,12 @@ mod common;
 
 use std::process::ExitCode;
 
-use chronicle::model::config::{self, Config, PackageManager};
+use chronicle::model::config::{self, PackageManager};
 use common::{temp_git_repo, temp_git_repo_with_config};
 
 #[test]
 fn init_fails_when_config_already_exists() {
-	let config = Config::with_package_manager(PackageManager::Npm);
-	let dir = temp_git_repo_with_config(&config);
+	let dir = temp_git_repo_with_config(PackageManager::Npm);
 	let result = chronicle::run(
 		["chronicle", "--no-interactive", "init", "-p", "npm"],
 		dir.path(),
