@@ -1101,10 +1101,7 @@ mod tests {
 	#[test]
 	fn update_lock_file_yarn_succeeds() {
 		let dir = temp_dir();
-		write_package_json(
-			dir.path(),
-			r#"{"name": "test-app", "version": "1.0.0"}"#,
-		);
+		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 		// Create an initial yarn.lock (yarn 1.x format)
 		std::fs::write(
 			dir.path().join("yarn.lock"),
