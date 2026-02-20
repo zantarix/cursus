@@ -2,10 +2,12 @@
 
 mod change;
 mod init;
+mod publish;
 mod release;
 
 pub use change::{ChangeArgs, cmd_change};
 pub use init::{InitArgs, cmd_init};
+pub use publish::{PublishArgs, cmd_publish};
 pub use release::{ReleaseArgs, cmd_release};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -49,6 +51,8 @@ pub enum Command {
 	Change(ChangeArgs),
 	/// Initialize a new chronicle configuration using the setup wizard
 	Init(InitArgs),
+	/// Publish packages to their registries
+	Publish(PublishArgs),
 	/// Consume pending changesets and release new versions
 	Release(ReleaseArgs),
 }

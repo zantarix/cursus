@@ -7,7 +7,7 @@ use glob::glob;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use super::{PackageManagerAdapter, ProjectInfo};
+use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
 
 /// Configuration for npm package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +28,12 @@ pub struct NpmConfig {
 	/// the package manager adapter will auto-detect the lock file type.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub lock_command: Option<String>,
+	/// Access level for scoped packages ("public" or "restricted").
+	///
+	/// Only used when publishing scoped packages (e.g., @scope/package).
+	/// If not specified, defaults to "restricted" for scoped packages.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub access: Option<String>,
 }
 
 impl NpmConfig {
@@ -376,6 +382,83 @@ impl PackageManagerAdapter for NpmAdapter {
 		// No lock file found - no-op
 
 		Ok(())
+	}
+
+	fn publish(
+		&self,
+		git_root: &Path,
+		project: &ProjectInfo,
+		dry_run: bool,
+	) -> anyhow::Result<PublishOutcome> {
+		let project_dir = git_root.join(&project.path);
+
+		let mut cmd = std::process::Command::new("npm");
+		cmd.arg("publish").current_dir(&project_dir);
+
+		if dry_run {
+			cmd.arg("--dry-run");
+		}
+
+		// For scoped packages, add --access flag
+		if project.name.starts_with('@') {
+			let access = self.config.access.as_deref().unwrap_or("restricted");
+			cmd.arg("--access").arg(access);
+		}
+
+		let output = cmd
+			.output()
+			.with_context(|| format!("Failed to execute npm publish for {}", project.name))?;
+
+		if output.status.success() {
+			return Ok(PublishOutcome::Published);
+		}
+
+		// Check if the failure is because the version already exists
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		if stderr.contains("EPUBLISHCONFLICT")
+			|| stderr.contains("cannot publish over the previously published")
+		{
+			return Ok(PublishOutcome::AlreadyPublished);
+		}
+
+		// Some other error
+		anyhow::bail!("npm publish failed for {}: {}", project.name, stderr);
+	}
+
+	fn registry_name(&self) -> &str {
+		"npm"
+	}
+
+	fn intra_dependencies(
+		&self,
+		git_root: &Path,
+		projects: &[&ProjectInfo],
+	) -> anyhow::Result<Vec<(String, String)>> {
+		let project_names: std::collections::HashSet<_> =
+			projects.iter().map(|p| p.name.as_str()).collect();
+
+		let mut edges = Vec::new();
+
+		for &project in projects {
+			let manifest_path = git_root.join(&project.path).join("package.json");
+			let contents = std::fs::read_to_string(&manifest_path)
+				.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+			let json: serde_json::Value = serde_json::from_str(&contents)
+				.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+
+			// Check all dependency sections
+			for section in ["dependencies", "devDependencies", "peerDependencies"] {
+				if let Some(deps) = json.get(section).and_then(|d| d.as_object()) {
+					for dep_name in deps.keys() {
+						if project_names.contains(dep_name.as_str()) {
+							edges.push((project.name.clone(), dep_name.to_string()));
+						}
+					}
+				}
+			}
+		}
+
+		Ok(edges)
 	}
 }
 
@@ -949,6 +1032,7 @@ mod tests {
 			enabled: true,
 			path: None,
 			lock_command: Some("".to_string()),
+			access: None,
 		});
 		let info = project_info("my-app", "");
 
@@ -970,6 +1054,7 @@ mod tests {
 			enabled: true,
 			path: None,
 			lock_command: Some("nonexistent-command-12345".to_string()),
+			access: None,
 		});
 		let info = project_info("my-app", "");
 
@@ -983,6 +1068,7 @@ mod tests {
 		assert!(!config.enabled);
 		assert_eq!(config.path, None);
 		assert_eq!(config.lock_command, None);
+		assert_eq!(config.access, None);
 	}
 
 	#[test]
@@ -991,6 +1077,7 @@ mod tests {
 			enabled: true,
 			path: None,
 			lock_command: None,
+			access: None,
 		};
 		let git_root = Path::new("/repo");
 		let resolved = config.resolve_root(git_root);
@@ -1003,6 +1090,7 @@ mod tests {
 			enabled: true,
 			path: Some("frontend".to_string()),
 			lock_command: None,
+			access: None,
 		};
 		let git_root = Path::new("/repo");
 		let resolved = config.resolve_root(git_root);
@@ -1017,6 +1105,7 @@ mod tests {
 			enabled: true,
 			path: None,
 			lock_command: Some("false".to_string()), // 'false' always exits with 1
+			access: None,
 		});
 		let info = project_info("my-app", "");
 
@@ -1033,6 +1122,7 @@ mod tests {
 			enabled: true,
 			path: None,
 			lock_command: Some("true".to_string()), // 'true' always exits with 0
+			access: None,
 		});
 		let info = project_info("my-app", "");
 

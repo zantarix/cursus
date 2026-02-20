@@ -35,11 +35,8 @@ pub fn cmd_change(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 ) -> anyhow::Result<ExitCode> {
-	let (_config, projects) = config::load_projects(git_workdir)?;
-
-	if projects.is_empty() {
-		bail!("No projects found. Check that your package manager configuration is correct.");
-	}
+	let config = config::load(git_workdir)?;
+	let projects = config.load_projects(git_workdir)?;
 
 	let project_indices = if !args.projects.is_empty() {
 		let indices: Vec<usize> = args

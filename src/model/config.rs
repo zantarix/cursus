@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +53,40 @@ impl Config {
 		}
 		managers.into_iter()
 	}
+
+	/// Creates package manager adapters for all enabled package managers.
+	///
+	/// Returns a vector of adapter instances wrapped in `Arc` for shared ownership.
+	fn create_adapters(&self) -> Vec<Arc<dyn PackageManagerAdapter>> {
+		self.enabled_package_managers()
+			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
+				match pm {
+					PackageManager::Npm => Arc::new(NpmAdapter::new(self.npm.clone())),
+					PackageManager::Cargo => Arc::new(CargoAdapter::new(self.cargo.clone())),
+				}
+			})
+			.collect()
+	}
+
+	/// Loads all projects using the configuration.
+	///
+	/// Builds package manager adapters and enumerates all projects.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - Projects cannot be enumerated
+	/// - No projects are found
+	pub fn load_projects(&self, git_root: &Path) -> anyhow::Result<Vec<Project>> {
+		let adapters = self.create_adapters();
+		let projects = package_manager::enumerate_projects(adapters, git_root)?;
+
+		if projects.is_empty() {
+			bail!("No projects found. Check that your package manager configuration is correct.");
+		}
+
+		Ok(projects)
+	}
 }
 
 fn path(git_root: &Path) -> PathBuf {
@@ -74,6 +108,10 @@ pub fn exists(git_root: &Path) -> bool {
 ///
 /// Returns an error if the config file cannot be read or parsed.
 pub fn load(git_root: &Path) -> anyhow::Result<Config> {
+	if !exists(git_root) {
+		bail!("No configuration found. Run 'chronicle init' to create one.");
+	}
+
 	let path = path(git_root);
 	let contents = std::fs::read_to_string(&path)
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
@@ -106,41 +144,6 @@ pub fn create(git_root: &Path, config: &Config) -> anyhow::Result<PathBuf> {
 	std::fs::write(&path, contents)
 		.with_context(|| format!("Failed to create config: {}", path.display()))?;
 	Ok(path)
-}
-
-/// Loads the Chronicle configuration and enumerates all projects.
-///
-/// This is a convenience function that:
-/// 1. Checks that a configuration exists
-/// 2. Loads the configuration
-/// 3. Builds package manager adapters
-/// 4. Enumerates all projects
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - No configuration file exists
-/// - The configuration cannot be loaded
-/// - Projects cannot be enumerated
-pub fn load_projects(git_root: &Path) -> anyhow::Result<(Config, Vec<Project>)> {
-	if !exists(git_root) {
-		bail!("No configuration found. Run 'chronicle init' to create one.");
-	}
-	let config = load(git_root)?;
-
-	let adapters: Vec<Arc<dyn PackageManagerAdapter>> = config
-		.enabled_package_managers()
-		.map(|pm| -> Arc<dyn PackageManagerAdapter> {
-			match pm {
-				PackageManager::Npm => Arc::new(NpmAdapter::new(config.npm.clone())),
-				PackageManager::Cargo => Arc::new(CargoAdapter::new(config.cargo.clone())),
-			}
-		})
-		.collect();
-
-	let projects = package_manager::enumerate_projects(adapters, git_root)?;
-
-	Ok((config, projects))
 }
 
 #[cfg(test)]
@@ -198,6 +201,10 @@ mod tests {
 		let dir = temp_dir();
 		let result = load(dir.path());
 		assert!(result.is_err());
+		assert!(result
+			.unwrap_err()
+			.to_string()
+			.contains("No configuration found"));
 	}
 
 	#[test]
@@ -220,12 +227,10 @@ mod tests {
 
 		let result = load(dir.path());
 		assert!(result.is_err());
-		assert!(
-			result
-				.unwrap_err()
-				.to_string()
-				.contains("at least one package manager")
-		);
+		assert!(result
+			.unwrap_err()
+			.to_string()
+			.contains("at least one package manager"));
 	}
 
 	#[test]
@@ -398,19 +403,6 @@ mod tests {
 	}
 
 	#[test]
-	fn load_projects_fails_when_no_config() {
-		let dir = temp_dir();
-		let result = load_projects(dir.path());
-		assert!(result.is_err());
-		assert!(
-			result
-				.unwrap_err()
-				.to_string()
-				.contains("No configuration found")
-		);
-	}
-
-	#[test]
 	fn load_projects_succeeds_with_cargo_manifest() {
 		let dir = temp_dir();
 		let config = Config::with_package_manager(PackageManager::Cargo);
@@ -421,8 +413,8 @@ mod tests {
 		)
 		.unwrap();
 
-		let (loaded_config, projects) = load_projects(dir.path()).unwrap();
-		assert_eq!(loaded_config, config);
+		let config = load(dir.path()).unwrap();
+		let projects = config.load_projects(dir.path()).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -438,9 +430,25 @@ mod tests {
 		)
 		.unwrap();
 
-		let (loaded_config, projects) = load_projects(dir.path()).unwrap();
-		assert_eq!(loaded_config, config);
+		let config = load(dir.path()).unwrap();
+		let projects = config.load_projects(dir.path()).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
+	}
+
+	#[test]
+	fn load_projects_fails_when_no_projects_found() {
+		let dir = temp_dir();
+		let config = Config::with_package_manager(PackageManager::Cargo);
+		create(dir.path(), &config).unwrap();
+		// No Cargo.toml file, so no projects will be found
+
+		let config = load(dir.path()).unwrap();
+		let result = config.load_projects(dir.path());
+		assert!(result.is_err());
+		assert!(result
+			.unwrap_err()
+			.to_string()
+			.contains("No projects found"));
 	}
 }

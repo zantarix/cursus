@@ -4,14 +4,14 @@ default_to_workspace = false
 [tasks.coverage]
 clear = true
 command = "cargo"
-args = ["llvm-cov", "--text", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
+args = ["llvm-cov", "--summary-only", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 # Note: Branch coverage target is 80%, but cargo-llvm-cov doesn't support --fail-under-branches
 # Manually verify branch coverage in the output
 
 [tasks.coverage-html]
 clear = true
 command = "cargo"
-args = ["llvm-cov", "--html", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
+args = ["llvm-cov", "--html", "--open", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 
 [tasks.release-x86_64]
 command = "cargo"

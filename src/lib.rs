@@ -53,6 +53,7 @@ where
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
 		Some(cli::Command::Change(args)) => cli::cmd_change(&git_workdir, &args, &cli.global),
+		Some(cli::Command::Publish(args)) => cli::cmd_publish(&args, &git_workdir),
 		Some(cli::Command::Release(args)) => cli::cmd_release(&git_workdir, &args),
 		None => cli::cmd_change(&git_workdir, &cli::ChangeArgs::default(), &cli.global),
 	}

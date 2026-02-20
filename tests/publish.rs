@@ -1,0 +1,201 @@
+//! Integration tests for the `publish` command.
+
+use std::path::Path;
+
+/// Helper to run chronicle commands.
+fn run_chronicle(args: &[&str], cwd: &Path) -> anyhow::Result<std::process::ExitCode> {
+	let args_with_bin = std::iter::once("chronicle")
+		.chain(args.iter().copied())
+		.collect::<Vec<_>>();
+	chronicle::run(args_with_bin, cwd)
+}
+
+#[test]
+fn publish_with_no_config_fails() {
+	let dir = tempfile::tempdir().unwrap();
+	// Create git repo
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(result.is_err());
+	assert!(
+		result
+			.unwrap_err()
+			.to_string()
+			.contains("No configuration found")
+	);
+}
+
+#[test]
+fn publish_dry_run_with_unknown_package_fails() {
+	let dir = tempfile::tempdir().unwrap();
+	// Create git repo
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	// Create config
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		r#"
+[npm]
+enabled = true
+"#,
+	)
+	.unwrap();
+
+	// Create package.json
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "test-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	let result = run_chronicle(
+		&[
+			"publish",
+			"--no-interactive",
+			"--dry-run",
+			"--package",
+			"nonexistent",
+		],
+		dir.path(),
+	);
+
+	assert!(result.is_err());
+	assert!(
+		result
+			.unwrap_err()
+			.to_string()
+			.contains("not found in workspace")
+	);
+}
+
+#[test]
+fn publish_dry_run_basic() {
+	let dir = tempfile::tempdir().unwrap();
+	// Create git repo
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	// Create config
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		r#"
+[npm]
+enabled = true
+"#,
+	)
+	.unwrap();
+
+	// Create package.json
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "test-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(result.is_ok());
+	let exit_code = result.unwrap();
+	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_with_package_filter() {
+	let dir = tempfile::tempdir().unwrap();
+	// Create git repo
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	// Create config
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		r#"
+[npm]
+enabled = true
+"#,
+	)
+	.unwrap();
+
+	// Create root package.json with workspaces
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	// Create workspace packages
+	std::fs::create_dir_all(dir.path().join("packages/pkg-a")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/pkg-a/package.json"),
+		r#"{"name": "pkg-a", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/pkg-b")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/pkg-b/package.json"),
+		r#"{"name": "pkg-b", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	let result = run_chronicle(
+		&[
+			"publish",
+			"--no-interactive",
+			"--dry-run",
+			"--package",
+			"pkg-a",
+		],
+		dir.path(),
+	);
+
+	assert!(result.is_ok());
+	let exit_code = result.unwrap();
+	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_cargo_dry_run() {
+	let dir = tempfile::tempdir().unwrap();
+	// Create git repo
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	// Create config
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		r#"
+[cargo]
+enabled = true
+"#,
+	)
+	.unwrap();
+
+	// Create Cargo.toml
+	std::fs::write(
+		dir.path().join("Cargo.toml"),
+		r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+"#,
+	)
+	.unwrap();
+
+	// Create minimal lib.rs
+	std::fs::create_dir(dir.path().join("src")).unwrap();
+	std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+
+	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(result.is_ok());
+	let exit_code = result.unwrap();
+	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+}

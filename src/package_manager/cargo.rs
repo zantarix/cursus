@@ -7,7 +7,7 @@ use glob::glob;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use super::{PackageManagerAdapter, ProjectInfo};
+use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
 
 /// Configuration for Cargo package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -265,6 +265,85 @@ impl PackageManagerAdapter for CargoAdapter {
 		}
 
 		Ok(())
+	}
+
+	fn publish(
+		&self,
+		git_root: &Path,
+		project: &ProjectInfo,
+		dry_run: bool,
+	) -> anyhow::Result<PublishOutcome> {
+		let manifest_path = git_root.join(&project.path).join("Cargo.toml");
+
+		let mut cmd = std::process::Command::new("cargo");
+		cmd.arg("publish")
+			.arg("--manifest-path")
+			.arg(&manifest_path);
+
+		if dry_run {
+			cmd.arg("--dry-run");
+		}
+
+		let output = cmd.output().with_context(|| {
+			format!(
+				"Failed to execute cargo publish for {}",
+				manifest_path.display()
+			)
+		})?;
+
+		if output.status.success() {
+			return Ok(PublishOutcome::Published);
+		}
+
+		// Check if the failure is because the version already exists
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		if stderr.contains("is already uploaded") || stderr.contains("already exists") {
+			return Ok(PublishOutcome::AlreadyPublished);
+		}
+
+		// Some other error
+		anyhow::bail!(
+			"cargo publish failed for {}: {}",
+			manifest_path.display(),
+			stderr
+		);
+	}
+
+	fn registry_name(&self) -> &str {
+		"crates.io"
+	}
+
+	fn intra_dependencies(
+		&self,
+		git_root: &Path,
+		projects: &[&ProjectInfo],
+	) -> anyhow::Result<Vec<(String, String)>> {
+		let project_names: std::collections::HashSet<_> =
+			projects.iter().map(|p| p.name.as_str()).collect();
+
+		let mut edges = Vec::new();
+
+		for &project in projects {
+			let manifest_path = git_root.join(&project.path).join("Cargo.toml");
+			let contents = std::fs::read_to_string(&manifest_path)
+				.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+			let doc = contents
+				.parse::<toml_edit::DocumentMut>()
+				.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+
+			// Check all dependency sections
+			for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+				if let Some(deps) = doc.get(section).and_then(|d| d.as_table()) {
+					for (dep_name, _) in deps.iter() {
+						if project_names.contains(dep_name) {
+							edges.push((project.name.clone(), dep_name.to_string()));
+						}
+					}
+				}
+			}
+		}
+
+		Ok(edges)
 	}
 }
 

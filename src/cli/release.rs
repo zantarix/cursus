@@ -47,7 +47,8 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 
 /// Runs the `release` subcommand.
 pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<ExitCode> {
-	let (_config, projects) = config::load_projects(git_workdir)?;
+	let config = config::load(git_workdir)?;
+	let projects = config.load_projects(git_workdir)?;
 
 	// Read all pending changesets
 	let changesets = changeset::read_all_changesets(git_workdir)?;
