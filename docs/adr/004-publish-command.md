@@ -94,3 +94,7 @@ Failed to publish @mscharley/chronicle@0.2.0 to npm: authentication required
 - Chronicle must detect "version already exists" errors from each package manager's CLI output, which couples it to their error message formats. These messages are stable in practice but are not a formal API.
 - Dependency-ordered publishing for Cargo workspaces adds complexity but is necessary for correctness. The npm ecosystem is more tolerant of publish ordering.
 - Future package managers can be supported by implementing the publish logic on the `PackageManagerAdapter` trait.
+
+## Errata
+
+**2026-02-21**: ADR-008 establishes a project-wide invariant that `--dry-run` must never perform remote operations. This supersedes the dry-run approach described in this ADR's "Dry-run support" section: `publish --dry-run` no longer delegates to the underlying package manager (e.g., `cargo publish --dry-run`). Instead, Chronicle skips the publish invocation entirely and prints a summary of what would have been published. See ADR-008 for full details.

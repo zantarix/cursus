@@ -48,10 +48,12 @@ This separation is a core principle. Chronicle defaults to filesystem-only chang
 - Tag format: `pkg-name@version` for multi-package, `v{version}` for single-package
 - Dependency-ordered publishing for Cargo workspaces
 
-## Dry-Run Convention
-- `--dry-run` supported on release and publish commands
+## Dry-Run Convention (ADR-008)
+- `--dry-run` is strictly local-only: no remote operations, no network calls, no subprocess invocations that contact external services
 - Prints what would happen without modifying anything
-- Passed through to underlying tools where applicable (cargo publish --dry-run)
+- Chronicle does NOT delegate dry-run to external tools (e.g., `cargo publish --dry-run`) — it skips the operation entirely and prints a summary
+- This is a safety/security invariant: users must be able to trust that `--dry-run` is completely non-destructive
+- Trade-off: loses local validation that external tools' dry-run modes provide (e.g., build checks from `cargo publish --dry-run`)
 
 ## Upstream Convention Reuse
 - Prefer reading existing ecosystem fields over inventing Chronicle-specific config
