@@ -529,4 +529,27 @@ mod tests {
 	fn change_type_display_patch() {
 		assert_eq!(format!("{}", ChangeType::Patch), "patch");
 	}
+
+	#[test]
+	fn partial_ord_for_change_type() {
+		assert_eq!(
+			ChangeType::Major.partial_cmp(&ChangeType::Minor),
+			Some(std::cmp::Ordering::Greater)
+		);
+		assert_eq!(
+			ChangeType::Minor.partial_cmp(&ChangeType::Patch),
+			Some(std::cmp::Ordering::Greater)
+		);
+		assert_eq!(
+			ChangeType::Patch.partial_cmp(&ChangeType::Major),
+			Some(std::cmp::Ordering::Less)
+		);
+	}
+
+	#[test]
+	fn change_type_rank_values() {
+		assert_eq!(ChangeType::Patch.rank(), 0);
+		assert_eq!(ChangeType::Minor.rank(), 1);
+		assert_eq!(ChangeType::Major.rank(), 2);
+	}
 }

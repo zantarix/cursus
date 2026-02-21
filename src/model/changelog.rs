@@ -171,4 +171,41 @@ mod tests {
 		let content = std::fs::read_to_string(sub.join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("## 1.0.0"));
 	}
+
+	#[test]
+	fn update_changelog_fails_when_cannot_read_existing() {
+		let dir = tempfile::tempdir().unwrap();
+		let changelog_path = dir.path().join("CHANGELOG.md");
+		// Create a directory with the same name as the file we want to read
+		std::fs::create_dir(&changelog_path).unwrap();
+
+		let changes = vec![(ChangeType::Minor, Some("New".to_string()))];
+		let changelog = Changelog::new("1.0.0".parse().unwrap(), changes, PathBuf::new());
+		let result = changelog.update(dir.path());
+
+		// Should fail because CHANGELOG.md is a directory, not a file
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn update_changelog_fails_when_cannot_write() {
+		use std::os::unix::fs::PermissionsExt;
+		let dir = tempfile::tempdir().unwrap();
+		// Make directory read-only
+		let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
+		perms.set_mode(0o444);
+		std::fs::set_permissions(dir.path(), perms).unwrap();
+
+		let changes = vec![(ChangeType::Patch, Some("Fix".to_string()))];
+		let changelog = Changelog::new("1.0.0".parse().unwrap(), changes, PathBuf::new());
+		let result = changelog.update(dir.path());
+
+		// Restore permissions before assertions for cleanup
+		let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
+		perms.set_mode(0o755);
+		std::fs::set_permissions(dir.path(), perms).unwrap();
+
+		// Should fail because directory is read-only
+		assert!(result.is_err());
+	}
 }
