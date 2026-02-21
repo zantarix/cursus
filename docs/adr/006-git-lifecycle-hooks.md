@@ -15,6 +15,7 @@ Chronicle's release workflow is currently a three-step manual process:
 ADR-003 explicitly states that Chronicle "intentionally does not handle the commit step" because "users run different CI systems, may want different commit strategies, and may require GPG signing or other policies that Chronicle should not assume."
 
 Without git automation, there is a manual gap between steps 1 and 3. After running `chronicle release`, users must manually:
+
 - Stage the modified files
 - Create a commit
 - Create git tags for each released package
@@ -59,7 +60,7 @@ tag_format = "auto"  # "auto" | "prefixed" | "simple"
 
 `chronicle release` accepts a `--no-git` flag that disables all git operations for that invocation, regardless of the `[git]` configuration:
 
-```
+```text
 chronicle release --no-git
 ```
 
@@ -82,9 +83,11 @@ The hooks run in this order:
   - Deleted changeset files (`.chronicle/*.md`)
   - Modified lock files (`Cargo.lock`, `package-lock.json`, etc.)
 - **Commit message format**:
-  ```
+
+  ```text
   chore(release): <pkg1>@<version1>, <pkg2>@<version2>
   ```
+
   Examples:
   - Single package: `chore(release): chronicle-cli@0.2.0`
   - Multiple packages: `chore(release): chronicle-cli@0.2.0, @mscharley/chronicle@1.0.0`
@@ -110,12 +113,14 @@ The hooks run in this order:
 ### Dry-run support
 
 When `chronicle release --dry-run` is invoked:
+
 - All filesystem modifications are skipped (existing ADR-003 behaviour)
 - All git operations are skipped
 - Summary output includes what **would** have been committed, tagged, and pushed
 
 Example dry-run output:
-```
+
+```text
 Would release:
   chronicle-cli: 0.1.0 -> 0.2.0 (minor)
   @mscharley/chronicle: 0.1.0 -> 0.2.0 (minor)
@@ -132,6 +137,7 @@ Would push to origin
 Git operations may fail for various reasons (uncommitted conflicts, no remote configured, authentication required, etc.).
 
 **Chronicle's error handling policy:**
+
 - Filesystem modifications are NOT rolled back on git failure
 - The release has already happened from Chronicle's perspective (versions bumped, changelogs written, changesets deleted)
 - Git failures are reported clearly with the underlying git error message
@@ -145,6 +151,7 @@ Git operations may fail for various reasons (uncommitted conflicts, no remote co
 ADR-003 (Accepted) states: "Chronicle intentionally does not handle the commit step."
 
 This ADR introduces an **opt-in alternative** to that position while preserving ADR-003's behaviour as the default:
+
 - The default behaviour remains unchanged: git operations are disabled by default, preserving ADR-003's filesystem-only approach
 - Users who prefer manual git control (the ADR-003 stance) simply leave `[git].enabled = false` or omit the `[git]` section entirely
 - Users who want automation opt in explicitly
@@ -156,17 +163,20 @@ This ADR introduces an **opt-in alternative** to that position while preserving 
 ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, identified by git tags. The two ADRs share responsibility for tag naming and creation.
 
 **Tag format configuration:**
+
 - `tag_format` lives in `[git]` because git tags are a git concept, not a GitHub-specific concept
 - ADR-005's GitHub Releases reference `[git].tag_format` when determining which tag corresponds to each release
 - For backward compatibility, if `[github].tag_format` is present but `[git].tag_format` is not, Chronicle uses the value from `[github]` and prints a deprecation warning
 
 **Tag creation:**
+
 - When `[git].enabled = true` and `[git].tag = true`, Chronicle creates git tags during `chronicle release`
 - When `[git].enabled = false`, tags must already exist before running `chronicle publish`, and the user or CI is responsible for creating them
 
 ## Consequences
 
 ### Benefits
+
 - **Reduces manual steps**: Users no longer need to remember the correct tag format, stage the right files, or manually push after every release
 - **Opt-in by default**: The feature is disabled unless explicitly enabled (or `[github].enabled = true`), preserving ADR-003's conservative stance
 - **Granular control**: Users can enable commit but disable push (for local-only workflows), or enable tag but disable commit (for pre-existing commits)
@@ -174,16 +184,19 @@ ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, id
 - **Improves GitHub Releases workflow**: When combined with ADR-005, users can go from changesets to published packages with GitHub Releases in a single command sequence: `chronicle release && chronicle publish`
 
 ### Drawbacks
+
 - **Couples Chronicle to git**: Chronicle now invokes git commands and must handle git failures. Previously, Chronicle was filesystem-only.
 - **Not suitable for all workflows**: Users with complex commit requirements (GPG signing, multi-commit strategies, custom commit messages) must continue managing git manually
 - **Error handling complexity**: Git operations can fail in many ways (network errors, authentication, conflicts). Chronicle must detect and report these clearly without losing the release work.
 - **Implicit behaviour**: When `[github].enabled = true`, `[git].enabled` defaults to `true`, which may surprise users who expected Chronicle to remain filesystem-only
 
 ### Compatibility
+
 - **Backward compatible**: Existing configurations with no `[git]` section behave identically to before (no git operations)
 - **Forward compatible**: Adding `[git]` configuration to an existing repository opts into the new behaviour without breaking existing workflows
 
 ### Testing considerations
+
 - **Unit tests**: Test commit message formatting, tag name generation, and dry-run output
 - **Integration tests**: Must set up temporary git repositories and verify git operations are performed correctly
 - **Error path tests**: Simulate git failures (no remote, authentication required, merge conflicts) and verify Chronicle reports errors without rolling back the release

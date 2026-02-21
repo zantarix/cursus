@@ -1,6 +1,7 @@
 # ADR-007: Honor Private Package Markers During Publish
 
 ## Status
+
 Proposed
 
 ## Context
@@ -90,6 +91,7 @@ This decision introduces no new fields in `.chronicle/config.toml`. The behavior
 ## Consequences
 
 ### Positive
+
 - GitHub Actions and other git-distributed packages work naturally with Chronicle's full workflow without requiring workarounds or publish errors.
 - Reuses existing npm and Cargo conventions that developers already know. No new Chronicle-specific configuration to learn.
 - Per-package granularity allows mixed repositories where some packages publish to registries and others do not.
@@ -97,24 +99,30 @@ This decision introduces no new fields in `.chronicle/config.toml`. The behavior
 - The `PublishOutcome::Skipped` variant provides a clean internal distinction for future use (e.g., machine-readable output, metrics).
 
 ### Negative
+
 - Chronicle now reads and interprets an additional field from each manifest file during publish, adding a small amount of coupling to the manifest schema. Both fields (`private` in npm, `publish` in Cargo) are stable and well-established.
 - Silent skipping means that if a user accidentally sets `"private": true`, they will get no indication from Chronicle that the package was excluded. However, this matches the behavior developers expect from these fields, and `npm publish` itself would also refuse to publish.
 - The Cargo `publish` field supports registry lists (`publish = ["my-registry"]`), which this implementation does not interpret. A crate restricted to a specific non-default registry will still be published to whatever registry `cargo publish` targets by default. This can be addressed in a future enhancement if needed.
 
 ### Neutral
+
 - This decision is complementary to ADR-005 (GitHub Releases). A GitHub Action repository would typically enable `[github]` for releases and set `"private": true` in `package.json` to skip npm publishing. The two features compose naturally.
 - Future package manager adapters should follow the same pattern: check for the ecosystem's native "do not publish" marker before attempting to publish.
 
 ## Alternatives Considered
 
 ### Chronicle-specific configuration in `.chronicle/config.toml`
+
 A field like `[npm] skip_publish = true` or a per-package `[[packages]]` section with publish control. This was rejected because it duplicates information that already exists in the upstream manifest, requires users to learn a Chronicle-specific mechanism, and creates a risk of the two configurations diverging (e.g., `package.json` says private but Chronicle config says publish). The upstream manifest should be the single source of truth for publishability.
 
 ### Auto-detection based on GitHub Action metadata
+
 Chronicle could detect the presence of `action.yml` or `action.yaml` in a package directory and infer that the package should not be published to npm. This was rejected because it couples Chronicle to GitHub Actions specifically rather than honoring a general-purpose convention. The `"private": true` field covers GitHub Actions and any other non-publishable npm package (internal tools, monorepo root packages, etc.) without special-casing.
 
 ### Printing a "Skipped (private)" message during publish
+
 Rather than silently excluding private packages, Chronicle could print a line like `Skipped my-action@1.2.0 (private)` in the publish output. This was rejected because it adds noise to every publish run for packages that are never intended to be published. The information is not actionable. Users who want to verify which packages are private can inspect their manifest files directly.
 
 ### Erroring when `--package` explicitly names a private package
+
 Chronicle could treat an explicit `--package my-private-pkg` as an error, on the theory that the user made a mistake. This was rejected because it makes CI scripts fragile. A common pattern is to pass all package names to `--package` without filtering, and erroring on private packages would force scripts to maintain a separate exclusion list that duplicates information already in the manifest.

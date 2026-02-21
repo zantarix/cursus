@@ -31,7 +31,7 @@ The `chronicle change` command (also the default when no subcommand is given) re
 
 Changesets use Hugo-style `+++` TOML frontmatter:
 
-```
+```markdown
 +++
 package-name = "minor"
 another-package = "patch"

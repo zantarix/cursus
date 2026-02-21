@@ -74,14 +74,14 @@ Like `chronicle release`, the publish command does not require a TUI. It is a ba
 
 After publishing, Chronicle prints a summary:
 
-```
+```text
 Published chronicle-cli@0.2.0 to crates.io
 Published @mscharley/chronicle@0.2.0 to npm
 ```
 
 Or on partial failure:
 
-```
+```text
 Published chronicle-cli@0.2.0 to crates.io
 Failed to publish @mscharley/chronicle@0.2.0 to npm: authentication required
 ```

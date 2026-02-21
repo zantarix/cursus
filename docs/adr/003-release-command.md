@@ -106,7 +106,7 @@ Delete all processed `.chronicle/*.md` files. The `.chronicle/` directory and `c
 
 Output a summary of what was released:
 
-```
+```text
 chronicle-cli: 0.1.0 -> 0.2.0 (minor)
 @mscharley/chronicle: 0.1.0 -> 0.2.0 (minor)
 ```

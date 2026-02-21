@@ -1,6 +1,7 @@
 # ADR-008: Dry-Run Must Be Strictly Local-Only
 
 ## Status
+
 Accepted
 
 ## Context
@@ -59,17 +60,20 @@ When `--dry-run` is active, Chronicle will print a human-readable summary of all
 ## Consequences
 
 ### Positive
+
 - Users can trust that `--dry-run` is completely safe in all contexts: local development, CI pipelines, shared environments, and production release workflows.
 - Eliminates an entire class of potential incidents where a dry-run accidentally publishes a package or pushes a tag due to a third-party tool's behavior change.
 - Creates a clear, enforceable invariant that is easy to reason about when implementing new commands or adapters: if dry-run is set, do not call anything remote.
 - Simplifies testing of dry-run paths: no need to mock external services or set up credentials for dry-run integration tests.
 
 ### Negative
+
 - `publish --dry-run` no longer performs local validation that `cargo publish --dry-run` would provide (e.g., verifying the package builds, checking manifest completeness). Users who want this validation must run it separately.
 - Future package manager adapters cannot leverage their tool's native `--dry-run` mode, even if that mode is genuinely local-only. The policy is conservative by design.
 - The dry-run output for `publish` becomes less detailed since Chronicle is not invoking the underlying tool. It can only report what it would invoke, not what the tool would have reported.
 
 ### Neutral
+
 - This ADR does not change the behavior of `release --dry-run` or the git hooks dry-run path, as they already comply with this invariant.
 - An errata note will be added to ADR-004 to document that `publish --dry-run` no longer delegates to the underlying package manager, referencing this ADR.
 - Local filesystem reads (e.g., reading manifest files to determine what would be published) are still permitted during dry-run. Only writes and remote operations are prohibited.
@@ -77,10 +81,13 @@ When `--dry-run` is active, Chronicle will print a human-readable summary of all
 ## Alternatives Considered
 
 ### Continue delegating to external tools' dry-run modes
+
 Maintain the ADR-004 approach of passing `--dry-run` through to `cargo publish --dry-run` and `npm publish --dry-run`. This was rejected because it makes Chronicle's safety guarantee dependent on third-party behavior. While these tools' dry-run modes are currently local-only, Chronicle cannot enforce that contract, and a change in behavior would silently violate user expectations. The risk is disproportionate to the benefit.
 
 ### Allow network operations that are read-only
+
 Permit dry-run to make read-only network requests (e.g., checking if a version already exists on a registry) while prohibiting write operations. This was rejected because the distinction between read-only and write network operations is difficult to verify for external tools, and even read-only requests can leak information (e.g., revealing that a release is being prepared) or trigger rate limits. A blanket prohibition is simpler to enforce and reason about.
 
 ### Make the behavior configurable
+
 Add a flag like `--dry-run=local` vs `--dry-run=validate` to let users choose between a strict local-only mode and a mode that delegates to external tools for validation. This was rejected because it adds complexity to the CLI surface, splits the mental model of what `--dry-run` means, and creates a risk that the less-safe mode becomes the default in practice. A single, strict `--dry-run` is easier to document, teach, and trust.

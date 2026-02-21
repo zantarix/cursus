@@ -126,7 +126,7 @@ When `chronicle publish --dry-run` is invoked, GitHub Releases are **not** creat
 
 After publishing, Chronicle's summary output includes GitHub Release creation:
 
-```
+```text
 Published chronicle-cli@0.2.0 to crates.io
 Created GitHub Release for chronicle-cli@0.2.0
 Published @mscharley/chronicle@0.2.0 to npm
@@ -135,7 +135,7 @@ Created GitHub Release for @mscharley/chronicle@0.2.0
 
 Or on partial failure:
 
-```
+```text
 Published chronicle-cli@0.2.0 to crates.io
 Failed to create GitHub Release for chronicle-cli@0.2.0: missing GITHUB_TOKEN
 ```

@@ -32,6 +32,7 @@ enabled = true
 ```
 
 Each package manager section has:
+
 - `enabled` (bool, default `false`) — whether this package manager is active
 - `path` (optional string) — subdirectory for the package manager root, relative to the git root; omitted when not needed
 
@@ -42,11 +43,13 @@ Unknown fields are rejected (`deny_unknown_fields`), ensuring configuration erro
 Chronicle discovers packages by delegating to package manager adapters that implement the `PackageManagerAdapter` trait. Each adapter's `enumerate_projects()` method reads manifest files and returns a list of `ProjectInfo` structs.
 
 **Cargo adapter:**
+
 - Single crate: returns one project from `[package].name`
 - Workspace with `[workspace].members`: expands glob patterns, reads each member's `Cargo.toml`, returns all non-virtual crates
 - Root crate in a workspace is included if it has a `[package]` section
 
 **npm adapter:**
+
 - Single package: returns one project from `"name"` in `package.json`
 - Monorepo with `"workspaces"`: expands glob patterns, reads each workspace's `package.json`
 - pnpm support: also reads `pnpm-workspace.yaml`; pnpm workspace list takes precedence when present
