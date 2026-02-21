@@ -3,5 +3,8 @@
 	"extends": [
 		"github>mscharley/renovate-config",
 		":pinDependencies"
-	]
+	],
+	"nix": {
+		"enabled": true
+	}
 }
