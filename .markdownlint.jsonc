@@ -1,0 +1,4 @@
+{
+	// Disable line length, use soft wrapping
+	"MD013": false
+}

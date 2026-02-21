@@ -54,13 +54,21 @@
 
 				devShells.default = pkgs.mkShell ({
 					buildInputs = with pkgs; [
+						# Rust toolchain
 						rustToolchain
 						rust-analyzer
 						cargo-deny
 						cargo-make
 						cargo-llvm-cov
+
+						# Cross-compilation tools
 						zig
 						cargo-zigbuild
+
+						# Lint tools
+						markdownlint-cli
+
+						# Other package managers that may be needed for testing
 						nodejs
 						nodePackages.pnpm
 						nodePackages.yarn  # yarn 1.x
