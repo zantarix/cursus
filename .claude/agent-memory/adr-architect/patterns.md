@@ -52,3 +52,9 @@ This separation is a core principle. Chronicle defaults to filesystem-only chang
 - `--dry-run` supported on release and publish commands
 - Prints what would happen without modifying anything
 - Passed through to underlying tools where applicable (cargo publish --dry-run)
+
+## Upstream Convention Reuse
+- Prefer reading existing ecosystem fields over inventing Chronicle-specific config
+- npm `"private": true` and Cargo `publish = false` honored during publish (ADR-007)
+- This avoids config duplication and divergence risk
+- New adapters should follow the same pattern: check native "do not publish" markers

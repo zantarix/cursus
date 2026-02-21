@@ -14,6 +14,10 @@ Key differences from old style:
 ## Key Architectural Patterns
 - See `patterns.md` for detailed patterns extracted from ADRs.
 
+## ADR Process Notes
+- Always ask clarifying questions before writing. Do not assume the scope or preferred approach.
+- The user values precision: understand the exact use case before proposing a solution.
+
 ## Project ADR Rules (from CLAUDE.md)
 - ADRs are immutable once accepted — do not edit accepted ADRs
 - Use Errata sections when new requirements contradict an older ADR
