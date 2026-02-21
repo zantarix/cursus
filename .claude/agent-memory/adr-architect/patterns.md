@@ -8,7 +8,7 @@
 This separation is a core principle. Chronicle defaults to filesystem-only changes.
 
 ## Adapter Trait Pattern
-`PackageManagerAdapter` trait handles: `enumerate_projects`, `read_version`, `write_version`, `update_lock_file`
+`PackageManagerAdapter` trait handles: `enumerate_projects`, `read_version`, `write_version`, `update_lock_file`, `is_publishable`
 - Cargo and npm adapters implement this
 - GitHub is explicitly NOT a package manager adapter (ADR-005) — it's a post-publish action
 - Future package managers extend via this trait

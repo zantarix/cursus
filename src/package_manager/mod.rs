@@ -118,6 +118,13 @@ impl Project {
 	pub fn registry_name(&self) -> &str {
 		self.adapter.registry_name()
 	}
+
+	/// Returns whether this project is publishable (not marked as private).
+	///
+	/// Delegates to the underlying package manager adapter.
+	pub fn is_publishable(&self) -> anyhow::Result<bool> {
+		self.adapter.is_publishable(&self.info)
+	}
 }
 
 /// Trait for package manager adapters.
@@ -191,6 +198,23 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// Used for display purposes in CLI output (e.g., "crates.io", "npm").
 	fn registry_name(&self) -> &str;
+
+	/// Returns whether this project is publishable (not marked as private).
+	///
+	/// Checks package-manager-specific markers:
+	/// - npm: `"private": true` in package.json
+	/// - Cargo: `publish = false` or `publish = []` in Cargo.toml
+	///
+	/// # Arguments
+	///
+	/// * `_project` - The project to check.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the manifest file cannot be read or parsed.
+	fn is_publishable(&self, _project: &ProjectInfo) -> anyhow::Result<bool> {
+		Ok(true)
+	}
 
 	/// Returns intra-workspace dependency edges between projects.
 	///

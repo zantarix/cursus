@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-02-21)
 
 ## Context
 
@@ -30,31 +30,23 @@ In a mixed monorepo (e.g., a publishable npm library alongside a GitHub Action),
 
 We will read upstream package manager privacy/publish markers and silently exclude private packages from `chronicle publish`.
 
+### Publishability check via `is_publishable()` trait method
+
+We will add an `is_publishable()` method to the `PackageManagerAdapter` trait, separate from the existing `publish()` method. The publish workflow will call `is_publishable()` for each project before calling `publish()`. This separates publishability checks from publish operations: `publish()` need not know about private packages, and `is_publishable()` can be called independently (e.g., in dry-run mode without constructing publish commands).
+
+The default implementation returns `Ok(true)`, so future package manager adapters that lack a privacy concept work out of the box without implementing the method. Each adapter overrides this method to check its ecosystem's native marker.
+
 ### npm: Honor `"private": true`
 
-When the npm adapter's `publish()` method is called for a project, it will first read the `package.json` and check the `"private"` field. If `"private": true` is set, the adapter will return `Ok(PublishOutcome::Skipped)` without invoking `npm publish`.
+The npm adapter will implement `is_publishable()` to read `package.json` and check the `"private"` field. If `"private": true` is set, the package is excluded from publishing.
 
 This reuses the existing npm convention. Developers already understand that `"private": true` means "do not publish to npm." No Chronicle-specific configuration is needed.
 
 ### Cargo: Honor `publish = false`
 
-When the Cargo adapter's `publish()` method is called for a project, it will first read the `Cargo.toml` and check the `[package].publish` field. If `publish = false` is set, the adapter will return `Ok(PublishOutcome::Skipped)` without invoking `cargo publish`.
+The Cargo adapter will implement `is_publishable()` to parse `Cargo.toml` and check the `[package].publish` field using safe field access to uphold the project's no-panic policy. If `publish = false` is set, the package is excluded from publishing.
 
-The `publish` field in Cargo can also be a list of allowed registries (e.g., `publish = ["my-registry"]`). Chronicle will not interpret registry lists in this initial implementation; only the boolean `false` value triggers the skip. An empty list (`publish = []`) is equivalent to `publish = false` in Cargo's semantics and will also be treated as a skip.
-
-### New `PublishOutcome` variant
-
-A new `Skipped` variant will be added to the `PublishOutcome` enum:
-
-```rust
-pub enum PublishOutcome {
-    Published,
-    AlreadyPublished,
-    Skipped,
-}
-```
-
-This distinguishes "private package, intentionally not published" from "already published" and "successfully published." The distinction matters for the summary output and for potential future machine-readable output.
+The `publish` field in Cargo can also be a list of allowed registries (e.g., `publish = ["my-registry"]`). Chronicle will not interpret registry lists; only the boolean `false` value and an empty list (`publish = []`, which is equivalent to `publish = false` in Cargo's semantics) trigger the skip. All other values (including `publish = true`, a non-empty registry list, or an absent field) are treated as publishable.
 
 ### Behavior in `chronicle publish`
 
@@ -96,7 +88,7 @@ This decision introduces no new fields in `.chronicle/config.toml`. The behavior
 - Reuses existing npm and Cargo conventions that developers already know. No new Chronicle-specific configuration to learn.
 - Per-package granularity allows mixed repositories where some packages publish to registries and others do not.
 - Silent exclusion keeps CI output clean. Private packages do not clutter the publish summary with skip messages that would appear on every run.
-- The `PublishOutcome::Skipped` variant provides a clean internal distinction for future use (e.g., machine-readable output, metrics).
+- The `is_publishable()` trait method with a default `Ok(true)` implementation means new adapters work without explicitly handling publishability, while adapters with native privacy markers can opt in cleanly.
 
 ### Negative
 

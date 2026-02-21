@@ -17,6 +17,10 @@ Key differences from old style:
 ## ADR Process Notes
 - Always ask clarifying questions before writing. Do not assume the scope or preferred approach.
 - The user values precision: understand the exact use case before proposing a solution.
+- ADRs in "Proposed" status may be amended directly. Only "Accepted" ADRs are immutable.
+- Never add "Implementation" sections to ADRs. Design choices discovered during implementation should be folded into the Decision section. Test results, coverage metrics, and file lists are outcomes, not decisions -- they do not belong in an ADR.
+- After editing an ADR, the resulting document must conform to the standard ADR template. No new sections should be added. This ensures consistency across the entire ADR corpus regardless of whether an ADR was just created or amended later.
+- Keep ADRs at the right abstraction level. Discussing implementation approaches is fine, but do not reference specific lines of code. ADRs capture architectural and design decisions conceptually, not as code documentation. For example: "Use `.get()` chain to avoid panics when accessing TOML fields" is appropriate, but "In line 173, use `doc.get("package").and_then(|p| p.get("publish"))`" is too specific. Similarly, "Separate publishability checks from publish operations via trait method" is good, but spelling out exact function signatures is too granular.
 
 ## Project ADR Rules (from CLAUDE.md)
 - ADRs are immutable once accepted — do not edit accepted ADRs

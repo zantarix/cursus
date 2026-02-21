@@ -6,5 +6,5 @@
 - **ADR-004** (Accepted): Publish Command
 - **ADR-005** (Proposed): GitHub Releases
 - **ADR-006** (Proposed): Git Lifecycle Hooks
-- **ADR-007** (Proposed): Honor Private Package Markers During Publish
+- **ADR-007** (Accepted): Honor Private Package Markers During Publish
 - **ADR-008** (Accepted): Dry-Run Must Be Strictly Local-Only. Errata added to ADR-004.

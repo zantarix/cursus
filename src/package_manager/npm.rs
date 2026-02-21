@@ -434,6 +434,22 @@ impl PackageManagerAdapter for NpmAdapter {
 		"npm"
 	}
 
+	fn is_publishable(&self, project: &ProjectInfo) -> anyhow::Result<bool> {
+		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
+		let contents = std::fs::read_to_string(&manifest_path)
+			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+		let json: serde_json::Value = serde_json::from_str(&contents)
+			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+
+		// Check for "private": true
+		if let Some(private) = json.get("private").and_then(|v| v.as_bool()) {
+			return Ok(!private);
+		}
+
+		// No "private" field means publishable
+		Ok(true)
+	}
+
 	fn intra_dependencies(
 		&self,
 		projects: &[&ProjectInfo],
@@ -1225,6 +1241,76 @@ mod tests {
 			result.is_ok(),
 			"yarn lock file update should succeed: {:?}",
 			result.err()
+		);
+	}
+
+	#[test]
+	fn is_publishable_private_true() {
+		let dir = temp_dir();
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "private": true}"#,
+		);
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-app", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			!publishable,
+			"Package with private: true should not be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_private_false() {
+		let dir = temp_dir();
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "private": false}"#,
+		);
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-app", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			publishable,
+			"Package with private: false should be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_no_private_field() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-app", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			publishable,
+			"Package without private field should be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_file_not_found() {
+		let dir = temp_dir();
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-app", "");
+		let result = adapter.is_publishable(&info);
+		assert!(
+			result.is_err(),
+			"Should return error when package.json not found"
+		);
+	}
+
+	#[test]
+	fn is_publishable_invalid_json() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), "not valid json");
+		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-app", "");
+		let result = adapter.is_publishable(&info);
+		assert!(
+			result.is_err(),
+			"Should return error when package.json is invalid"
 		);
 	}
 }

@@ -318,6 +318,35 @@ impl PackageManagerAdapter for CargoAdapter {
 		"crates.io"
 	}
 
+	fn is_publishable(&self, project: &ProjectInfo) -> anyhow::Result<bool> {
+		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
+		let contents = std::fs::read_to_string(&manifest_path)
+			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+		let doc = contents
+			.parse::<toml_edit::DocumentMut>()
+			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+
+		// Check package.publish field
+		let publish_value = doc.get("package").and_then(|p| p.get("publish"));
+
+		if let Some(value) = publish_value {
+			// Check for `publish = false`
+			if let Some(false) = value.as_bool() {
+				return Ok(false);
+			}
+
+			// Check for `publish = []` (empty array)
+			if let Some(arr) = value.as_array()
+				&& arr.is_empty()
+			{
+				return Ok(false);
+			}
+		}
+
+		// No publish field, or publish = true, or publish = ["crates-io"] means publishable
+		Ok(true)
+	}
+
 	fn intra_dependencies(
 		&self,
 		projects: &[&ProjectInfo],
@@ -952,6 +981,135 @@ path = "src/lib.rs"
 		assert!(
 			dir.path().join("Cargo.lock").exists(),
 			"Cargo.lock should be created"
+		);
+	}
+
+	#[test]
+	fn is_publishable_publish_false() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+publish = false
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			!publishable,
+			"Crate with publish = false should not be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_publish_empty_array() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+publish = []
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			!publishable,
+			"Crate with publish = [] should not be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_publish_true() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+publish = true
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			publishable,
+			"Crate with publish = true should be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_publish_with_registry() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+publish = ["crates-io"]
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			publishable,
+			"Crate with publish = [\"crates-io\"] should be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_no_publish_field() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+"#,
+		);
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let publishable = adapter.is_publishable(&info).unwrap();
+		assert!(
+			publishable,
+			"Crate without publish field should be publishable"
+		);
+	}
+
+	#[test]
+	fn is_publishable_file_not_found() {
+		let dir = temp_dir();
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let result = adapter.is_publishable(&info);
+		assert!(
+			result.is_err(),
+			"Should return error when Cargo.toml not found"
+		);
+	}
+
+	#[test]
+	fn is_publishable_invalid_toml() {
+		let dir = temp_dir();
+		write_cargo_toml(dir.path(), "not valid toml [[[");
+		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let info = project_info("my-crate", "");
+		let result = adapter.is_publishable(&info);
+		assert!(
+			result.is_err(),
+			"Should return error when Cargo.toml is invalid"
 		);
 	}
 }

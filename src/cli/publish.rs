@@ -7,6 +7,16 @@ use clap::Args;
 use crate::model::config;
 use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
 
+/// Result of attempting to publish a package.
+enum PublishResult {
+	/// Package was successfully published.
+	Published,
+	/// Package was already published (skipped).
+	Skipped,
+	/// Publish failed.
+	Failed,
+}
+
 /// Arguments for the publish subcommand.
 #[derive(Args, Default)]
 pub struct PublishArgs {
@@ -46,9 +56,37 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 		}
 	}
 
-	// Dry run: just print what would be published and exit
-	if args.dry_run {
-		for project in &sorted_projects {
+	publish_projects(&sorted_projects, args.dry_run)
+}
+
+/// Publishes the given projects to their registries, tracking outcomes.
+///
+/// Projects should be pre-sorted in dependency order (leaves first).
+/// Private packages (marked with `private: true` in npm or `publish = false` in Cargo)
+/// are silently skipped.
+///
+/// # Arguments
+///
+/// * `projects` - Projects to publish, pre-sorted in dependency order.
+/// * `dry_run` - If true, only print what would be published without actually publishing.
+fn publish_projects(
+	projects: &[package_manager::Project],
+	dry_run: bool,
+) -> anyhow::Result<ExitCode> {
+	let mut published_count = 0;
+	let mut skipped_count = 0;
+	let mut failed = false;
+
+	for project in projects {
+		// Check if the project is publishable (not private)
+		let is_publishable = project.is_publishable()?;
+		if !is_publishable {
+			// Silently skip private packages
+			continue;
+		}
+
+		if dry_run {
+			// Dry run: just print what would be published
 			let version = project.read_version()?;
 			let registry = project.registry_name();
 			println!(
@@ -57,57 +95,68 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 				version,
 				registry
 			);
-		}
-		return Ok(ExitCode::SUCCESS);
-	}
-
-	publish_projects(&sorted_projects)
-}
-
-/// Publishes the given projects to their registries, tracking outcomes.
-///
-/// Projects should be pre-sorted in dependency order (leaves first).
-#[coverage(off)]
-fn publish_projects(projects: &[package_manager::Project]) -> anyhow::Result<ExitCode> {
-	let mut published_count = 0;
-	let mut skipped_count = 0;
-	let mut failed = false;
-
-	for project in projects {
-		let version = project.read_version()?;
-		let registry = project.registry_name();
-
-		match project.publish() {
-			Ok(PublishOutcome::Published) => {
-				println!("Published {}@{} to {}", project.name(), version, registry);
-				published_count += 1;
-			}
-			Ok(PublishOutcome::AlreadyPublished) => {
-				println!(
-					"Skipped {}@{} (already published to {})",
-					project.name(),
-					version,
-					registry
-				);
-				skipped_count += 1;
-			}
-			Err(e) => {
-				eprintln!("Failed to publish {}@{}: {}", project.name(), version, e);
-				failed = true;
+		} else {
+			// Real publish: delegate to do_publish which handles everything
+			match do_publish(project) {
+				PublishResult::Published => published_count += 1,
+				PublishResult::Skipped => skipped_count += 1,
+				PublishResult::Failed => failed = true,
 			}
 		}
 	}
 
 	println!();
-	println!(
-		"Summary: {} published, {} skipped",
-		published_count, skipped_count
-	);
+	if dry_run {
+		println!(
+			"Summary: {} would be published, {} would be skipped",
+			published_count, skipped_count
+		);
+	} else {
+		println!(
+			"Summary: {} published, {} skipped",
+			published_count, skipped_count
+		);
+	}
 
 	if failed {
 		Ok(ExitCode::FAILURE)
 	} else {
 		Ok(ExitCode::SUCCESS)
+	}
+}
+
+/// Executes the actual publish operation for a project, handling output and errors.
+///
+/// This is marked with `#[coverage(off)]` because it shells out to package managers.
+#[coverage(off)]
+fn do_publish(project: &package_manager::Project) -> PublishResult {
+	let version = match project.read_version() {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("Failed to read version for {}: {}", project.name(), e);
+			return PublishResult::Failed;
+		}
+	};
+	let registry = project.registry_name();
+
+	match project.publish() {
+		Ok(PublishOutcome::Published) => {
+			println!("Published {}@{} to {}", project.name(), version, registry);
+			PublishResult::Published
+		}
+		Ok(PublishOutcome::AlreadyPublished) => {
+			println!(
+				"Skipped {}@{} (already published to {})",
+				project.name(),
+				version,
+				registry
+			);
+			PublishResult::Skipped
+		}
+		Err(e) => {
+			eprintln!("Failed to publish {}@{}: {}", project.name(), version, e);
+			PublishResult::Failed
+		}
 	}
 }
 
