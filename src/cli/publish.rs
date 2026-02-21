@@ -87,7 +87,7 @@ fn publish_projects(
 
 		if dry_run {
 			// Dry run: just print what would be published
-			let version = project.read_version()?;
+			let version = project.version();
 			let registry = project.registry_name();
 			println!(
 				"Would publish {}@{} to {}",
@@ -130,13 +130,7 @@ fn publish_projects(
 /// This is marked with `#[coverage(off)]` because it shells out to package managers.
 #[coverage(off)]
 fn do_publish(project: &package_manager::Project) -> PublishResult {
-	let version = match project.read_version() {
-		Ok(v) => v,
-		Err(e) => {
-			eprintln!("Failed to read version for {}: {}", project.name(), e);
-			return PublishResult::Failed;
-		}
-	};
+	let version = project.version();
 	let registry = project.registry_name();
 
 	match project.publish() {

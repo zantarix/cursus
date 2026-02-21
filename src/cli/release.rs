@@ -101,8 +101,8 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 				format!("Package '{pkg_name}' from changeset not found in projects")
 			})?;
 
-		let current_version = project.read_version()?;
-		let new_version = bump_version(&current_version, *change_type);
+		let current_version = project.version();
+		let new_version = bump_version(current_version, *change_type);
 
 		if args.dry_run {
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");

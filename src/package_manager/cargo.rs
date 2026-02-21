@@ -76,12 +76,27 @@ impl CargoAdapter {
 struct CargoToml {
 	package: Option<Package>,
 	workspace: Option<Workspace>,
+	dependencies: Option<std::collections::HashMap<String, toml::Value>>,
+	#[serde(rename = "dev-dependencies")]
+	dev_dependencies: Option<std::collections::HashMap<String, toml::Value>>,
+	#[serde(rename = "build-dependencies")]
+	build_dependencies: Option<std::collections::HashMap<String, toml::Value>>,
 }
 
 /// The [package] section of Cargo.toml.
 #[derive(Debug, Deserialize)]
 struct Package {
 	name: String,
+	version: Option<String>,
+	publish: Option<PublishField>,
+}
+
+/// The publish field can be either a boolean or an array of registry names.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PublishField {
+	Bool(bool),
+	Registries(Vec<String>),
 }
 
 /// The [workspace] section of Cargo.toml.
@@ -106,6 +121,45 @@ fn read_cargo_toml(dir: &Path) -> anyhow::Result<Option<CargoToml>> {
 	Ok(Some(cargo))
 }
 
+/// Extracts project metadata from a parsed Cargo.toml.
+///
+/// Returns version, publishable status, and dependency names.
+fn extract_project_metadata(
+	cargo: &CargoToml,
+	package: &Package,
+) -> anyhow::Result<(Version, bool, Vec<String>)> {
+	// Extract version
+	let version_str = package
+		.version
+		.as_deref()
+		.context("Missing version in package section")?;
+	let version = version_str
+		.parse::<Version>()
+		.with_context(|| format!("Invalid semver version: {version_str}"))?;
+
+	// Determine if publishable
+	let publishable = match &package.publish {
+		Some(PublishField::Bool(false)) => false,
+		Some(PublishField::Registries(registries)) if registries.is_empty() => false,
+		_ => true,
+	};
+
+	// Collect dependency names from all dependency sections
+	let mut dependency_names = Vec::new();
+	for deps_map in [
+		&cargo.dependencies,
+		&cargo.dev_dependencies,
+		&cargo.build_dependencies,
+	]
+	.into_iter()
+	.flatten()
+	{
+		dependency_names.extend(deps_map.keys().cloned());
+	}
+
+	Ok((version, publishable, dependency_names))
+}
+
 /// Attempts to create a ProjectInfo from a workspace member directory.
 ///
 /// Returns `Ok(None)` if the path is not a valid crate (not a directory or no Cargo.toml).
@@ -121,7 +175,7 @@ fn read_workspace_member(
 		return Ok(None);
 	};
 
-	let Some(package) = cargo.package else {
+	let Some(ref package) = cargo.package else {
 		// Virtual manifest (workspace-only Cargo.toml without [package])
 		return Ok(None);
 	};
@@ -131,9 +185,21 @@ fn read_workspace_member(
 		.context("Member path is not under git root")?
 		.to_path_buf();
 
+	let manifest_path = member_path.join("Cargo.toml");
+	let (version, publishable, dependency_names) = extract_project_metadata(&cargo, package)
+		.with_context(|| {
+			format!(
+				"Failed to extract metadata from {}",
+				manifest_path.display()
+			)
+		})?;
+
 	Ok(Some(ProjectInfo {
-		name: package.name,
+		name: package.name.clone(),
 		path,
+		version,
+		publishable,
+		dependency_names,
 	}))
 }
 
@@ -163,23 +229,6 @@ fn expand_member_pattern(
 }
 
 impl PackageManagerAdapter for CargoAdapter {
-	fn read_version(&self, project: &ProjectInfo) -> anyhow::Result<Version> {
-		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
-		let contents = std::fs::read_to_string(&manifest_path)
-			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let doc = contents
-			.parse::<toml_edit::DocumentMut>()
-			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		let version_str = doc
-			.get("package")
-			.and_then(|p| p.get("version"))
-			.and_then(|v| v.as_str())
-			.context("Missing package.version in Cargo.toml")?;
-		version_str
-			.parse::<Version>()
-			.with_context(|| format!("Invalid semver version: {version_str}"))
-	}
-
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
 		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
 		let contents = std::fs::read_to_string(&manifest_path)
@@ -208,6 +257,8 @@ impl PackageManagerAdapter for CargoAdapter {
 			.unwrap_or(Path::new(""))
 			.to_path_buf();
 
+		let root_manifest_path = pm_root.join("Cargo.toml");
+
 		// Check for workspace members
 		let workspace_members = root_cargo
 			.workspace
@@ -217,13 +268,23 @@ impl PackageManagerAdapter for CargoAdapter {
 
 		let Some(members) = workspace_members else {
 			// Single crate repository
-			let Some(package) = root_cargo.package else {
+			let Some(ref package) = root_cargo.package else {
 				// Virtual manifest with no members - nothing to enumerate
 				return Ok(Vec::new());
 			};
+			let (version, publishable, dependency_names) =
+				extract_project_metadata(&root_cargo, package).with_context(|| {
+					format!(
+						"Failed to extract metadata from {}",
+						root_manifest_path.display()
+					)
+				})?;
 			return Ok(vec![ProjectInfo {
-				name: package.name,
+				name: package.name.clone(),
 				path: pm_relative_path,
+				version,
+				publishable,
+				dependency_names,
 			}]);
 		};
 
@@ -237,12 +298,22 @@ impl PackageManagerAdapter for CargoAdapter {
 			.collect();
 
 		// Include root package if it exists (some workspaces have a root crate too)
-		if let Some(package) = root_cargo.package {
+		if let Some(ref package) = root_cargo.package {
+			let (version, publishable, dependency_names) =
+				extract_project_metadata(&root_cargo, package).with_context(|| {
+					format!(
+						"Failed to extract metadata from {}",
+						root_manifest_path.display()
+					)
+				})?;
 			projects.insert(
 				0,
 				ProjectInfo {
-					name: package.name,
+					name: package.name.clone(),
 					path: pm_relative_path,
+					version,
+					publishable,
+					dependency_names,
 				},
 			);
 		}
@@ -316,67 +387,6 @@ impl PackageManagerAdapter for CargoAdapter {
 
 	fn registry_name(&self) -> &str {
 		"crates.io"
-	}
-
-	fn is_publishable(&self, project: &ProjectInfo) -> anyhow::Result<bool> {
-		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
-		let contents = std::fs::read_to_string(&manifest_path)
-			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let doc = contents
-			.parse::<toml_edit::DocumentMut>()
-			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-
-		// Check package.publish field
-		let publish_value = doc.get("package").and_then(|p| p.get("publish"));
-
-		if let Some(value) = publish_value {
-			// Check for `publish = false`
-			if let Some(false) = value.as_bool() {
-				return Ok(false);
-			}
-
-			// Check for `publish = []` (empty array)
-			if let Some(arr) = value.as_array()
-				&& arr.is_empty()
-			{
-				return Ok(false);
-			}
-		}
-
-		// No publish field, or publish = true, or publish = ["crates-io"] means publishable
-		Ok(true)
-	}
-
-	fn intra_dependencies(
-		&self,
-		projects: &[&ProjectInfo],
-	) -> anyhow::Result<Vec<(String, String)>> {
-		let project_names: std::collections::HashSet<_> =
-			projects.iter().map(|p| p.name.as_str()).collect();
-
-		let mut edges = Vec::new();
-
-		for &project in projects {
-			let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
-			let contents = std::fs::read_to_string(&manifest_path)
-				.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-			let doc = contents
-				.parse::<toml_edit::DocumentMut>()
-				.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-
-			// Check all dependency sections
-			for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-				if let Some(deps) = doc.get(section).and_then(|d| d.as_table()) {
-					for (dep_name, _) in deps.iter() {
-						if project_names.contains(dep_name) {
-							edges.push((project.name.clone(), dep_name.to_string()));
-						}
-					}
-				}
-			}
-		}
-
-		Ok(edges)
 	}
 }
 
@@ -748,11 +758,12 @@ version = "0.1.0"
 		ProjectInfo {
 			name: name.to_string(),
 			path: std::path::PathBuf::from(path),
+			..Default::default()
 		}
 	}
 
 	#[test]
-	fn read_version_from_cargo_toml() {
+	fn enumerate_includes_version() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -762,14 +773,13 @@ name = "my-crate"
 version = "1.2.3"
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let version = adapter.read_version(&info).unwrap();
-		assert_eq!(version.to_string(), "1.2.3");
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].version.to_string(), "1.2.3");
 	}
 
 	#[test]
-	fn read_version_missing_version_field() {
+	fn enumerate_missing_version_fails() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -778,33 +788,12 @@ version = "1.2.3"
 name = "my-crate"
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let result = adapter.read_version(&info);
+		let result = enumerate(dir.path());
 		assert!(result.is_err());
 	}
 
 	#[test]
-	fn read_version_file_not_found() {
-		let dir = temp_dir();
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let result = adapter.read_version(&info);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn read_version_invalid_toml() {
-		let dir = temp_dir();
-		write_cargo_toml(dir.path(), "not valid toml [[[");
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let result = adapter.read_version(&info);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn read_version_invalid_semver() {
+	fn enumerate_invalid_semver_fails() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -814,9 +803,7 @@ name = "my-crate"
 version = "not-a-version"
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let result = adapter.read_version(&info);
+		let result = enumerate(dir.path());
 		assert!(result.is_err());
 	}
 
@@ -882,7 +869,7 @@ edition = "2024"
 	}
 
 	#[test]
-	fn read_write_version_roundtrip() {
+	fn write_version_roundtrip() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -895,14 +882,13 @@ version = "0.1.0"
 		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-crate", "");
 
-		let v = adapter.read_version(&info).unwrap();
-		assert_eq!(v.to_string(), "0.1.0");
-
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
 		adapter.write_version(&info, &new_v).unwrap();
 
-		let v2 = adapter.read_version(&info).unwrap();
-		assert_eq!(v2.to_string(), "0.2.0");
+		// Re-enumerate to verify the write
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].version.to_string(), "0.2.0");
 	}
 
 	#[test]
@@ -985,7 +971,26 @@ path = "src/lib.rs"
 	}
 
 	#[test]
-	fn is_publishable_publish_false() {
+	fn enumerate_includes_publishable_status() {
+		let dir = temp_dir();
+		write_cargo_toml(
+			dir.path(),
+			r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert!(
+			projects[0].publishable,
+			"Crate without publish field should be publishable"
+		);
+	}
+
+	#[test]
+	fn enumerate_publishable_false_for_publish_false() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -996,17 +1001,16 @@ version = "1.0.0"
 publish = false
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			!publishable,
+			!projects[0].publishable,
 			"Crate with publish = false should not be publishable"
 		);
 	}
 
 	#[test]
-	fn is_publishable_publish_empty_array() {
+	fn enumerate_publishable_false_for_empty_array() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -1017,17 +1021,16 @@ version = "1.0.0"
 publish = []
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			!publishable,
+			!projects[0].publishable,
 			"Crate with publish = [] should not be publishable"
 		);
 	}
 
 	#[test]
-	fn is_publishable_publish_true() {
+	fn enumerate_publishable_true_for_publish_true() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -1038,17 +1041,16 @@ version = "1.0.0"
 publish = true
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			publishable,
+			projects[0].publishable,
 			"Crate with publish = true should be publishable"
 		);
 	}
 
 	#[test]
-	fn is_publishable_publish_with_registry() {
+	fn enumerate_publishable_true_for_registry_array() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -1059,17 +1061,16 @@ version = "1.0.0"
 publish = ["crates-io"]
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			publishable,
+			projects[0].publishable,
 			"Crate with publish = [\"crates-io\"] should be publishable"
 		);
 	}
 
 	#[test]
-	fn is_publishable_no_publish_field() {
+	fn enumerate_includes_dependency_names() {
 		let dir = temp_dir();
 		write_cargo_toml(
 			dir.path(),
@@ -1077,39 +1078,24 @@ publish = ["crates-io"]
 [package]
 name = "my-crate"
 version = "1.0.0"
+
+[dependencies]
+serde = "1.0"
+tokio = "1.0"
+
+[dev-dependencies]
+tempfile = "3.0"
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].dependency_names.len(), 3);
+		assert!(projects[0].dependency_names.contains(&"serde".to_string()));
+		assert!(projects[0].dependency_names.contains(&"tokio".to_string()));
 		assert!(
-			publishable,
-			"Crate without publish field should be publishable"
-		);
-	}
-
-	#[test]
-	fn is_publishable_file_not_found() {
-		let dir = temp_dir();
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let result = adapter.is_publishable(&info);
-		assert!(
-			result.is_err(),
-			"Should return error when Cargo.toml not found"
-		);
-	}
-
-	#[test]
-	fn is_publishable_invalid_toml() {
-		let dir = temp_dir();
-		write_cargo_toml(dir.path(), "not valid toml [[[");
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
-		let result = adapter.is_publishable(&info);
-		assert!(
-			result.is_err(),
-			"Should return error when Cargo.toml is invalid"
+			projects[0]
+				.dependency_names
+				.contains(&"tempfile".to_string())
 		);
 	}
 }

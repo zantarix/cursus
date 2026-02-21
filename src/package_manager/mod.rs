@@ -15,7 +15,7 @@ pub use npm::{NpmAdapter, NpmConfig};
 use std::path::Path;
 use std::sync::Arc;
 
-use semver::Version;
+use semver::{BuildMetadata, Prerelease, Version};
 
 /// Raw project data returned by package manager adapters.
 ///
@@ -27,6 +27,30 @@ pub struct ProjectInfo {
 	pub name: String,
 	/// The path to the project root, relative to the git root.
 	pub path: std::path::PathBuf,
+	/// The current version of the project.
+	pub version: Version,
+	/// Whether the project is publishable (not marked as private).
+	pub publishable: bool,
+	/// Names of intra-workspace dependencies.
+	pub dependency_names: Vec<String>,
+}
+
+impl Default for ProjectInfo {
+	fn default() -> Self {
+		Self {
+			name: String::new(),
+			path: std::path::PathBuf::new(),
+			version: Version {
+				major: 0,
+				minor: 0,
+				patch: 0,
+				pre: Prerelease::new("development").unwrap(),
+				build: BuildMetadata::EMPTY,
+			},
+			publishable: true,
+			dependency_names: Vec::new(),
+		}
+	}
 }
 
 /// Outcome of a package publish operation.
@@ -91,11 +115,11 @@ impl Project {
 		&self.info
 	}
 
-	/// Reads the current version of this project from its manifest file.
+	/// Returns the current version of this project.
 	///
-	/// Delegates to the underlying package manager adapter.
-	pub fn read_version(&self) -> anyhow::Result<Version> {
-		self.adapter.read_version(&self.info)
+	/// The version is cached from when the project was enumerated.
+	pub fn version(&self) -> &Version {
+		&self.info.version
 	}
 
 	/// Writes a new version to this project's manifest file.
@@ -121,9 +145,16 @@ impl Project {
 
 	/// Returns whether this project is publishable (not marked as private).
 	///
-	/// Delegates to the underlying package manager adapter.
+	/// The publishable status is cached from when the project was enumerated.
 	pub fn is_publishable(&self) -> anyhow::Result<bool> {
-		self.adapter.is_publishable(&self.info)
+		Ok(self.info.publishable)
+	}
+
+	/// Returns the names of intra-workspace dependencies for this project.
+	///
+	/// The dependency names are cached from when the project was enumerated.
+	pub fn dependency_names(&self) -> &[String] {
+		&self.info.dependency_names
 	}
 }
 
@@ -137,21 +168,15 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// For single-package repositories, this returns a single project.
 	/// For monorepos, this returns all workspace packages.
 	///
+	/// The returned `ProjectInfo` instances include:
+	/// - `version`: The current version from the manifest
+	/// - `publishable`: Whether the project is publishable (not private)
+	/// - `dependency_names`: Names of intra-workspace dependencies
+	///
 	/// # Errors
 	///
 	/// Returns an error if project enumeration fails (e.g., invalid manifest files).
 	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>>;
-
-	/// Reads the current version of a project from its manifest file.
-	///
-	/// # Arguments
-	///
-	/// * `project` - The project to read the version for.
-	///
-	/// # Errors
-	///
-	/// Returns an error if the manifest file cannot be read or the version cannot be parsed.
-	fn read_version(&self, project: &ProjectInfo) -> anyhow::Result<Version>;
 
 	/// Writes a new version to a project's manifest file, preserving formatting.
 	///
@@ -198,42 +223,6 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// Used for display purposes in CLI output (e.g., "crates.io", "npm").
 	fn registry_name(&self) -> &str;
-
-	/// Returns whether this project is publishable (not marked as private).
-	///
-	/// Checks package-manager-specific markers:
-	/// - npm: `"private": true` in package.json
-	/// - Cargo: `publish = false` or `publish = []` in Cargo.toml
-	///
-	/// # Arguments
-	///
-	/// * `_project` - The project to check.
-	///
-	/// # Errors
-	///
-	/// Returns an error if the manifest file cannot be read or parsed.
-	fn is_publishable(&self, _project: &ProjectInfo) -> anyhow::Result<bool> {
-		Ok(true)
-	}
-
-	/// Returns intra-workspace dependency edges between projects.
-	///
-	/// This method analyzes the dependency declarations in all projects to find
-	/// which workspace projects depend on other workspace projects. The returned
-	/// edges are in the form `(dependent, dependency)`, meaning the first project
-	/// depends on the second.
-	///
-	/// # Arguments
-	///
-	/// * `projects` - All projects in the workspace to analyze.
-	///
-	/// # Errors
-	///
-	/// Returns an error if manifest files cannot be read or parsed.
-	fn intra_dependencies(
-		&self,
-		projects: &[&ProjectInfo],
-	) -> anyhow::Result<Vec<(String, String)>>;
 }
 
 /// A directed graph for dependency ordering.
@@ -446,10 +435,8 @@ pub fn enumerate_projects(
 
 /// Builds a dependency graph for the given projects.
 ///
-/// This function analyzes all intra-workspace dependencies by grouping projects
-/// by their adapter and calling `intra_dependencies()` on each unique adapter
-/// with only its own projects. This ensures adapters only analyze manifests
-/// they understand.
+/// This function uses cached dependency names from each project to construct
+/// the dependency graph. An edge `(A, B)` means project A depends on project B.
 ///
 /// # Arguments
 ///
@@ -459,27 +446,19 @@ pub fn enumerate_projects(
 ///
 /// Returns an error if dependency analysis fails (e.g., manifest files cannot be read).
 pub fn build_dependency_graph(projects: &[Project]) -> anyhow::Result<DependencyGraph> {
-	// Group projects by adapter using Arc pointer equality
-	let mut adapter_groups: Vec<(Arc<dyn PackageManagerAdapter>, Vec<&ProjectInfo>)> = Vec::new();
+	let project_names: std::collections::HashSet<_> = projects.iter().map(|p| p.name()).collect();
+
+	let mut edges = Vec::new();
 	for project in projects {
-		if let Some(group) = adapter_groups
-			.iter_mut()
-			.find(|(a, _)| Arc::ptr_eq(a, &project.adapter))
-		{
-			group.1.push(&project.info);
-		} else {
-			adapter_groups.push((Arc::clone(&project.adapter), vec![&project.info]));
+		for dep_name in project.dependency_names() {
+			// Only create edges for intra-workspace dependencies
+			if project_names.contains(dep_name.as_str()) {
+				edges.push((project.name().to_string(), dep_name.clone()));
+			}
 		}
 	}
 
-	// Collect edges from each adapter group
-	let mut all_edges = Vec::new();
-	for (adapter, project_infos) in &adapter_groups {
-		let edges = adapter.intra_dependencies(project_infos)?;
-		all_edges.extend(edges);
-	}
-
-	Ok(DependencyGraph::from_edges(all_edges))
+	Ok(DependencyGraph::from_edges(edges))
 }
 
 #[cfg(test)]
@@ -496,6 +475,7 @@ mod tests {
 			info: ProjectInfo {
 				name: name.to_string(),
 				path: std::path::PathBuf::from(path),
+				..Default::default()
 			},
 			adapter,
 		}
@@ -535,7 +515,11 @@ mod tests {
 	#[test]
 	fn enumerate_projects_attaches_adapter() {
 		let dir = tempfile::tempdir().unwrap();
-		std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
+		std::fs::write(
+			dir.path().join("package.json"),
+			r#"{"name": "test", "version": "0.1.0"}"#,
+		)
+		.unwrap();
 
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
@@ -552,7 +536,11 @@ mod tests {
 	#[test]
 	fn enumerate_projects_flattens_multiple_adapters() {
 		let dir = tempfile::tempdir().unwrap();
-		std::fs::write(dir.path().join("package.json"), r#"{"name": "npm-pkg"}"#).unwrap();
+		std::fs::write(
+			dir.path().join("package.json"),
+			r#"{"name": "npm-pkg", "version": "0.1.0"}"#,
+		)
+		.unwrap();
 
 		// Two adapters pointing at the same directory (both will find the package)
 		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(

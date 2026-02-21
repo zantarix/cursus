@@ -88,6 +88,13 @@ impl NpmAdapter {
 struct PackageJson {
 	name: Option<String>,
 	workspaces: Option<Workspaces>,
+	version: Option<String>,
+	private: Option<bool>,
+	dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
+	#[serde(rename = "devDependencies")]
+	dev_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
+	#[serde(rename = "peerDependencies")]
+	peer_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 /// Workspaces can be either an array of globs or an object with a packages field.
@@ -170,6 +177,38 @@ fn get_workspace_patterns(
 		.map(|ws| ws.patterns().to_vec())
 }
 
+/// Extracts project metadata from a parsed package.json.
+///
+/// Returns version, publishable status, and dependency names.
+fn extract_project_metadata(package: &PackageJson) -> anyhow::Result<(Version, bool, Vec<String>)> {
+	// Extract version
+	let version_str = package
+		.version
+		.as_deref()
+		.context("Missing version in package.json")?;
+	let version = version_str
+		.parse::<Version>()
+		.with_context(|| format!("Invalid semver version: {version_str}"))?;
+
+	// Determine if publishable (private: true means not publishable)
+	let publishable = !package.private.unwrap_or(false);
+
+	// Collect dependency names from all dependency sections
+	let mut dependency_names = Vec::new();
+	for deps_map in [
+		&package.dependencies,
+		&package.dev_dependencies,
+		&package.peer_dependencies,
+	]
+	.into_iter()
+	.flatten()
+	{
+		dependency_names.extend(deps_map.keys().cloned());
+	}
+
+	Ok((version, publishable, dependency_names))
+}
+
 /// Attempts to create a ProjectInfo from a workspace directory path.
 ///
 /// Returns `Ok(None)` if the path is not a valid workspace (not a directory or no package.json).
@@ -185,13 +224,31 @@ fn read_workspace_project(
 		return Ok(None);
 	};
 
-	let name = package.name.unwrap_or_else(|| "unnamed".to_string());
+	let name = package.name.clone().with_context(|| {
+		let manifest_path = workspace_path.join("package.json");
+		format!("Missing name in {}", manifest_path.display())
+	})?;
 	let path = workspace_path
 		.strip_prefix(git_workdir)
 		.context("Workspace path is not under git root")?
 		.to_path_buf();
 
-	Ok(Some(ProjectInfo { name, path }))
+	let (version, publishable, dependency_names) = extract_project_metadata(&package)
+		.with_context(|| {
+			let manifest_path = workspace_path.join("package.json");
+			format!(
+				"Failed to extract metadata from {}",
+				manifest_path.display()
+			)
+		})?;
+
+	Ok(Some(ProjectInfo {
+		name,
+		path,
+		version,
+		publishable,
+		dependency_names,
+	}))
 }
 
 /// Expands a workspace glob pattern and returns all matching projects.
@@ -220,20 +277,6 @@ fn expand_workspace_pattern(
 }
 
 impl PackageManagerAdapter for NpmAdapter {
-	fn read_version(&self, project: &ProjectInfo) -> anyhow::Result<Version> {
-		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
-		let contents = std::fs::read_to_string(&manifest_path)
-			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let json: serde_json::Value = serde_json::from_str(&contents)
-			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		let version_str = json["version"]
-			.as_str()
-			.context("Missing version in package.json")?;
-		version_str
-			.parse::<Version>()
-			.with_context(|| format!("Invalid semver version: {version_str}"))
-	}
-
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
 		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
@@ -260,22 +303,50 @@ impl PackageManagerAdapter for NpmAdapter {
 			.unwrap_or(Path::new(""))
 			.to_path_buf();
 
+		let root_manifest_path = pm_root.join("package.json");
+
 		let Some(workspace_patterns) =
 			get_workspace_patterns(pnpm_workspace.as_ref(), &root_package)
 		else {
 			// Single package repository
-			let name = root_package.name.unwrap_or_else(|| "unnamed".to_string());
+			let name = root_package
+				.name
+				.clone()
+				.with_context(|| format!("Missing name in {}", root_manifest_path.display()))?;
+			let (version, publishable, dependency_names) = extract_project_metadata(&root_package)
+				.with_context(|| {
+					format!(
+						"Failed to extract metadata from {}",
+						root_manifest_path.display()
+					)
+				})?;
 			return Ok(vec![ProjectInfo {
 				name,
 				path: pm_relative_path,
+				version,
+				publishable,
+				dependency_names,
 			}]);
 		};
 
 		// Monorepo with workspaces - include root project first
-		let root_name = root_package.name.unwrap_or_else(|| "unnamed".to_string());
+		let root_name = root_package
+			.name
+			.clone()
+			.with_context(|| format!("Missing name in {}", root_manifest_path.display()))?;
+		let (version, publishable, dependency_names) = extract_project_metadata(&root_package)
+			.with_context(|| {
+				format!(
+					"Failed to extract metadata from {}",
+					root_manifest_path.display()
+				)
+			})?;
 		let root_project = ProjectInfo {
 			name: root_name,
 			path: pm_relative_path,
+			version,
+			publishable,
+			dependency_names,
 		};
 
 		let mut projects: Vec<ProjectInfo> = std::iter::once(root_project)
@@ -433,53 +504,6 @@ impl PackageManagerAdapter for NpmAdapter {
 	fn registry_name(&self) -> &str {
 		"npm"
 	}
-
-	fn is_publishable(&self, project: &ProjectInfo) -> anyhow::Result<bool> {
-		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
-		let contents = std::fs::read_to_string(&manifest_path)
-			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let json: serde_json::Value = serde_json::from_str(&contents)
-			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-
-		// Check for "private": true
-		if let Some(private) = json.get("private").and_then(|v| v.as_bool()) {
-			return Ok(!private);
-		}
-
-		// No "private" field means publishable
-		Ok(true)
-	}
-
-	fn intra_dependencies(
-		&self,
-		projects: &[&ProjectInfo],
-	) -> anyhow::Result<Vec<(String, String)>> {
-		let project_names: std::collections::HashSet<_> =
-			projects.iter().map(|p| p.name.as_str()).collect();
-
-		let mut edges = Vec::new();
-
-		for &project in projects {
-			let manifest_path = self.git_workdir.join(&project.path).join("package.json");
-			let contents = std::fs::read_to_string(&manifest_path)
-				.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-			let json: serde_json::Value = serde_json::from_str(&contents)
-				.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-
-			// Check all dependency sections
-			for section in ["dependencies", "devDependencies", "peerDependencies"] {
-				if let Some(deps) = json.get(section).and_then(|d| d.as_object()) {
-					for dep_name in deps.keys() {
-						if project_names.contains(dep_name.as_str()) {
-							edges.push((project.name.clone(), dep_name.to_string()));
-						}
-					}
-				}
-			}
-		}
-
-		Ok(edges)
-	}
 }
 
 #[cfg(test)]
@@ -523,7 +547,7 @@ mod tests {
 	#[test]
 	fn enumerate_single_package() {
 		let dir = temp_dir();
-		write_package_json(dir.path(), r#"{"name": "my-app"}"#);
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -533,14 +557,15 @@ mod tests {
 	}
 
 	#[test]
-	fn enumerate_single_package_without_name() {
+	fn enumerate_single_package_without_name_fails() {
 		let dir = temp_dir();
-		write_package_json(dir.path(), r#"{}"#);
+		write_package_json(dir.path(), r#"{"version": "0.1.0"}"#);
 
-		let projects = enumerate(dir.path()).unwrap();
-
-		assert_eq!(projects.len(), 1);
-		assert_eq!(projects[0].name, "unnamed");
+		let result = enumerate(dir.path());
+		assert!(result.is_err());
+		let err_msg = result.unwrap_err().to_string();
+		assert!(err_msg.contains("Missing name in"));
+		assert!(err_msg.contains("package.json"));
 	}
 
 	#[test]
@@ -548,7 +573,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "monorepo", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "monorepo", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 
 		// Create workspace packages
@@ -556,8 +581,8 @@ mod tests {
 		let pkg_b = dir.path().join("packages/pkg-b");
 		std::fs::create_dir_all(&pkg_a).unwrap();
 		std::fs::create_dir_all(&pkg_b).unwrap();
-		write_package_json(&pkg_a, r#"{"name": "@scope/pkg-a"}"#);
-		write_package_json(&pkg_b, r#"{"name": "@scope/pkg-b"}"#);
+		write_package_json(&pkg_a, r#"{"name": "@scope/pkg-a", "version": "0.1.0"}"#);
+		write_package_json(&pkg_b, r#"{"name": "@scope/pkg-b", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -576,12 +601,12 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": {"packages": ["packages/*"]}}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": {"packages": ["packages/*"]}}"#,
 		);
 
 		let pkg = dir.path().join("packages/my-pkg");
 		std::fs::create_dir_all(&pkg).unwrap();
-		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
+		write_package_json(&pkg, r#"{"name": "my-pkg", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -592,21 +617,23 @@ mod tests {
 	}
 
 	#[test]
-	fn enumerate_workspace_without_root_name() {
+	fn enumerate_workspace_without_root_name_fails() {
 		let dir = temp_dir();
 		// Root package without a name field
-		write_package_json(dir.path(), r#"{"workspaces": ["packages/*"]}"#);
+		write_package_json(
+			dir.path(),
+			r#"{"version": "0.1.0", "workspaces": ["packages/*"]}"#,
+		);
 
 		let pkg = dir.path().join("packages/my-pkg");
 		std::fs::create_dir_all(&pkg).unwrap();
-		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
+		write_package_json(&pkg, r#"{"name": "my-pkg", "version": "0.1.0"}"#);
 
-		let projects = enumerate(dir.path()).unwrap();
-
-		assert_eq!(projects.len(), 2);
-		assert_eq!(projects[0].name, "unnamed");
-		assert_eq!(projects[0].path, Path::new(""));
-		assert_eq!(projects[1].name, "my-pkg");
+		let result = enumerate(dir.path());
+		assert!(result.is_err());
+		let err_msg = result.unwrap_err().to_string();
+		assert!(err_msg.contains("Missing name in"));
+		assert!(err_msg.contains("package.json"));
 	}
 
 	#[test]
@@ -614,15 +641,15 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "monorepo", "workspaces": ["packages/*", "apps/*"]}"#,
+			r#"{"name": "monorepo", "version": "0.1.0", "workspaces": ["packages/*", "apps/*"]}"#,
 		);
 
 		let pkg = dir.path().join("packages/lib");
 		let app = dir.path().join("apps/web");
 		std::fs::create_dir_all(&pkg).unwrap();
 		std::fs::create_dir_all(&app).unwrap();
-		write_package_json(&pkg, r#"{"name": "lib"}"#);
-		write_package_json(&app, r#"{"name": "web"}"#);
+		write_package_json(&pkg, r#"{"name": "lib", "version": "0.1.0"}"#);
+		write_package_json(&app, r#"{"name": "web", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -641,14 +668,14 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 
 		let pkg = dir.path().join("packages/valid");
 		let no_pkg = dir.path().join("packages/no-package-json");
 		std::fs::create_dir_all(&pkg).unwrap();
 		std::fs::create_dir_all(&no_pkg).unwrap();
-		write_package_json(&pkg, r#"{"name": "valid"}"#);
+		write_package_json(&pkg, r#"{"name": "valid", "version": "0.1.0"}"#);
 		// no_pkg has no package.json
 
 		let projects = enumerate(dir.path()).unwrap();
@@ -663,7 +690,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 
 		std::fs::create_dir_all(dir.path().join("packages")).unwrap();
@@ -682,12 +709,12 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": ["packages/*/subpackages/*"]}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*/subpackages/*"]}"#,
 		);
 
 		let nested = dir.path().join("packages/group/subpackages/nested-pkg");
 		std::fs::create_dir_all(&nested).unwrap();
-		write_package_json(&nested, r#"{"name": "nested-pkg"}"#);
+		write_package_json(&nested, r#"{"name": "nested-pkg", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -713,7 +740,10 @@ mod tests {
 	#[test]
 	fn enumerate_fails_on_invalid_workspace_package_json() {
 		let dir = temp_dir();
-		write_package_json(dir.path(), r#"{"workspaces": ["packages/*"]}"#);
+		write_package_json(
+			dir.path(),
+			r#"{"version": "0.1.0", "workspaces": ["packages/*"]}"#,
+		);
 
 		let pkg = dir.path().join("packages/bad");
 		std::fs::create_dir_all(&pkg).unwrap();
@@ -753,12 +783,15 @@ mod tests {
 	#[test]
 	fn enumerate_pnpm_workspace() {
 		let dir = temp_dir();
-		write_package_json(dir.path(), r#"{"name": "pnpm-monorepo"}"#);
+		write_package_json(
+			dir.path(),
+			r#"{"name": "pnpm-monorepo", "version": "0.1.0"}"#,
+		);
 		write_pnpm_workspace(dir.path(), "packages:\n  - 'packages/*'\n");
 
 		let pkg = dir.path().join("packages/my-pkg");
 		std::fs::create_dir_all(&pkg).unwrap();
-		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
+		write_package_json(&pkg, r#"{"name": "my-pkg", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -772,15 +805,15 @@ mod tests {
 	#[test]
 	fn enumerate_pnpm_workspace_multiple_patterns() {
 		let dir = temp_dir();
-		write_package_json(dir.path(), r#"{"name": "root"}"#);
+		write_package_json(dir.path(), r#"{"name": "root", "version": "0.1.0"}"#);
 		write_pnpm_workspace(dir.path(), "packages:\n  - 'packages/*'\n  - 'apps/*'\n");
 
 		let pkg = dir.path().join("packages/lib");
 		let app = dir.path().join("apps/web");
 		std::fs::create_dir_all(&pkg).unwrap();
 		std::fs::create_dir_all(&app).unwrap();
-		write_package_json(&pkg, r#"{"name": "lib"}"#);
-		write_package_json(&app, r#"{"name": "web"}"#);
+		write_package_json(&pkg, r#"{"name": "lib", "version": "0.1.0"}"#);
+		write_package_json(&app, r#"{"name": "web", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -794,7 +827,10 @@ mod tests {
 	fn enumerate_pnpm_workspace_takes_precedence_over_package_json() {
 		let dir = temp_dir();
 		// package.json has workspaces pointing to different location
-		write_package_json(dir.path(), r#"{"name": "root", "workspaces": ["other/*"]}"#);
+		write_package_json(
+			dir.path(),
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["other/*"]}"#,
+		);
 		// pnpm-workspace.yaml should take precedence
 		write_pnpm_workspace(dir.path(), "packages:\n  - 'packages/*'\n");
 
@@ -802,8 +838,8 @@ mod tests {
 		let other = dir.path().join("other/from-npm");
 		std::fs::create_dir_all(&pkg).unwrap();
 		std::fs::create_dir_all(&other).unwrap();
-		write_package_json(&pkg, r#"{"name": "from-pnpm"}"#);
-		write_package_json(&other, r#"{"name": "from-npm"}"#);
+		write_package_json(&pkg, r#"{"name": "from-pnpm", "version": "0.1.0"}"#);
+		write_package_json(&other, r#"{"name": "from-npm", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -818,14 +854,14 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 		// pnpm-workspace.yaml with empty packages
 		write_pnpm_workspace(dir.path(), "packages: []\n");
 
 		let pkg = dir.path().join("packages/my-pkg");
 		std::fs::create_dir_all(&pkg).unwrap();
-		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
+		write_package_json(&pkg, r#"{"name": "my-pkg", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -839,7 +875,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 		// Invalid YAML
 		write_pnpm_workspace(dir.path(), "not: valid: yaml: [[");
@@ -854,14 +890,14 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
-			r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 		// pnpm-workspace.yaml without packages field
 		write_pnpm_workspace(dir.path(), "other_field: true\n");
 
 		let pkg = dir.path().join("packages/my-pkg");
 		std::fs::create_dir_all(&pkg).unwrap();
-		write_package_json(&pkg, r#"{"name": "my-pkg"}"#);
+		write_package_json(&pkg, r#"{"name": "my-pkg", "version": "0.1.0"}"#);
 
 		let projects = enumerate(dir.path()).unwrap();
 
@@ -875,7 +911,7 @@ mod tests {
 		let dir = temp_dir();
 		let subfolder = dir.path().join("frontend");
 		std::fs::create_dir_all(&subfolder).unwrap();
-		write_package_json(&subfolder, r#"{"name": "my-app"}"#);
+		write_package_json(&subfolder, r#"{"name": "my-app", "version": "0.1.0"}"#);
 
 		let projects = enumerate_with_path(dir.path(), "frontend").unwrap();
 
@@ -891,15 +927,15 @@ mod tests {
 		std::fs::create_dir_all(&subfolder).unwrap();
 		write_package_json(
 			&subfolder,
-			r#"{"name": "monorepo", "workspaces": ["packages/*"]}"#,
+			r#"{"name": "monorepo", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
 		);
 
 		let pkg_a = subfolder.join("packages/pkg-a");
 		let pkg_b = subfolder.join("packages/pkg-b");
 		std::fs::create_dir_all(&pkg_a).unwrap();
 		std::fs::create_dir_all(&pkg_b).unwrap();
-		write_package_json(&pkg_a, r#"{"name": "@scope/pkg-a"}"#);
-		write_package_json(&pkg_b, r#"{"name": "@scope/pkg-b"}"#);
+		write_package_json(&pkg_a, r#"{"name": "@scope/pkg-a", "version": "0.1.0"}"#);
+		write_package_json(&pkg_b, r#"{"name": "@scope/pkg-b", "version": "0.1.0"}"#);
 
 		let projects = enumerate_with_path(dir.path(), "frontend").unwrap();
 
@@ -923,58 +959,35 @@ mod tests {
 		ProjectInfo {
 			name: name.to_string(),
 			path: std::path::PathBuf::from(path),
+			..Default::default()
 		}
 	}
 
 	#[test]
-	fn read_version_from_package_json() {
+	fn enumerate_includes_version() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.2.3"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let version = adapter.read_version(&info).unwrap();
-		assert_eq!(version.to_string(), "1.2.3");
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].version.to_string(), "1.2.3");
 	}
 
 	#[test]
-	fn read_version_missing_version_field() {
+	fn enumerate_missing_version_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let result = adapter.read_version(&info);
+		let result = enumerate(dir.path());
 		assert!(result.is_err());
 	}
 
 	#[test]
-	fn read_version_file_not_found() {
-		let dir = temp_dir();
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let result = adapter.read_version(&info);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn read_version_invalid_json() {
-		let dir = temp_dir();
-		write_package_json(dir.path(), "not valid json");
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let result = adapter.read_version(&info);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn read_version_invalid_semver() {
+	fn enumerate_invalid_semver_fails() {
 		let dir = temp_dir();
 		write_package_json(
 			dir.path(),
 			r#"{"name": "my-app", "version": "not-a-version"}"#,
 		);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let result = adapter.read_version(&info);
+		let result = enumerate(dir.path());
 		assert!(result.is_err());
 	}
 
@@ -1017,20 +1030,19 @@ mod tests {
 	}
 
 	#[test]
-	fn read_write_version_roundtrip() {
+	fn write_version_roundtrip() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "0.1.0"}"#);
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 		let info = project_info("my-app", "");
 
-		let v = adapter.read_version(&info).unwrap();
-		assert_eq!(v.to_string(), "0.1.0");
-
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
 		adapter.write_version(&info, &new_v).unwrap();
 
-		let v2 = adapter.read_version(&info).unwrap();
-		assert_eq!(v2.to_string(), "0.2.0");
+		// Re-enumerate to verify the write
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].version.to_string(), "0.2.0");
 	}
 
 	#[test]
@@ -1245,72 +1257,77 @@ mod tests {
 	}
 
 	#[test]
-	fn is_publishable_private_true() {
-		let dir = temp_dir();
-		write_package_json(
-			dir.path(),
-			r#"{"name": "my-app", "version": "1.0.0", "private": true}"#,
-		);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
-		assert!(
-			!publishable,
-			"Package with private: true should not be publishable"
-		);
-	}
-
-	#[test]
-	fn is_publishable_private_false() {
-		let dir = temp_dir();
-		write_package_json(
-			dir.path(),
-			r#"{"name": "my-app", "version": "1.0.0", "private": false}"#,
-		);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
-		assert!(
-			publishable,
-			"Package with private: false should be publishable"
-		);
-	}
-
-	#[test]
-	fn is_publishable_no_private_field() {
+	fn enumerate_includes_publishable_status() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let publishable = adapter.is_publishable(&info).unwrap();
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			publishable,
+			projects[0].publishable,
 			"Package without private field should be publishable"
 		);
 	}
 
 	#[test]
-	fn is_publishable_file_not_found() {
+	fn enumerate_publishable_false_for_private_true() {
 		let dir = temp_dir();
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let result = adapter.is_publishable(&info);
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "private": true}"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			result.is_err(),
-			"Should return error when package.json not found"
+			!projects[0].publishable,
+			"Package with private: true should not be publishable"
 		);
 	}
 
 	#[test]
-	fn is_publishable_invalid_json() {
+	fn enumerate_publishable_true_for_private_false() {
 		let dir = temp_dir();
-		write_package_json(dir.path(), "not valid json");
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
-		let result = adapter.is_publishable(&info);
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "private": false}"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
 		assert!(
-			result.is_err(),
-			"Should return error when package.json is invalid"
+			projects[0].publishable,
+			"Package with private: false should be publishable"
+		);
+	}
+
+	#[test]
+	fn enumerate_includes_dependency_names() {
+		let dir = temp_dir();
+		write_package_json(
+			dir.path(),
+			r#"{
+				"name": "my-app",
+				"version": "1.0.0",
+				"dependencies": {
+					"react": "^18.0.0",
+					"lodash": "^4.17.21"
+				},
+				"devDependencies": {
+					"jest": "^29.0.0"
+				},
+				"peerDependencies": {
+					"typescript": "^5.0.0"
+				}
+			}"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].dependency_names.len(), 4);
+		assert!(projects[0].dependency_names.contains(&"react".to_string()));
+		assert!(projects[0].dependency_names.contains(&"lodash".to_string()));
+		assert!(projects[0].dependency_names.contains(&"jest".to_string()));
+		assert!(
+			projects[0]
+				.dependency_names
+				.contains(&"typescript".to_string())
 		);
 	}
 }
