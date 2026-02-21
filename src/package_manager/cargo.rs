@@ -253,7 +253,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self, _project: &ProjectInfo) -> anyhow::Result<()> {
+	fn update_lock_file(&self) -> anyhow::Result<()> {
 		// For Cargo, always regenerate the lock file at the workspace root
 		let workspace_root = self.resolve_root();
 
@@ -920,9 +920,8 @@ version = "0.1.0"
 		let dir = temp_dir();
 		write_cargo_toml(dir.path(), "not valid toml [[[");
 		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-crate", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_err());
 	}
 
@@ -946,9 +945,8 @@ path = "src/lib.rs"
 		std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
 
 		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
-		let info = project_info("test-crate", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(
 			result.is_ok(),
 			"cargo generate-lockfile should succeed: {:?}",

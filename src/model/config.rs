@@ -76,7 +76,7 @@ impl Config {
 	/// Creates package manager adapters for all enabled package managers.
 	///
 	/// Returns a vector of adapter instances wrapped in `Arc` for shared ownership.
-	fn create_adapters(&self) -> Vec<Arc<dyn PackageManagerAdapter>> {
+	pub fn create_adapters(&self) -> Vec<Arc<dyn PackageManagerAdapter>> {
 		self.enabled_package_managers()
 			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
 				match pm {
@@ -92,6 +92,28 @@ impl Config {
 			.collect()
 	}
 
+	/// Loads all projects for the given adapters.
+	///
+	/// Enumerates all projects from the provided adapters.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - Projects cannot be enumerated
+	/// - No projects are found
+	pub fn load_projects_for_adapters(
+		&self,
+		adapters: &[Arc<dyn PackageManagerAdapter>],
+	) -> anyhow::Result<Vec<Project>> {
+		let projects = package_manager::enumerate_projects(adapters.to_vec())?;
+
+		if projects.is_empty() {
+			bail!("No projects found. Check that your package manager configuration is correct.");
+		}
+
+		Ok(projects)
+	}
+
 	/// Loads all projects using the configuration.
 	///
 	/// Builds package manager adapters and enumerates all projects.
@@ -103,13 +125,7 @@ impl Config {
 	/// - No projects are found
 	pub fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
 		let adapters = self.create_adapters();
-		let projects = package_manager::enumerate_projects(adapters)?;
-
-		if projects.is_empty() {
-			bail!("No projects found. Check that your package manager configuration is correct.");
-		}
-
-		Ok(projects)
+		self.load_projects_for_adapters(&adapters)
 	}
 
 	/// Saves the configuration to `.chronicle/config.toml`.

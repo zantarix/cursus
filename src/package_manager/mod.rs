@@ -103,13 +103,6 @@ impl Project {
 		self.adapter.write_version(&self.info, version)
 	}
 
-	/// Updates the lock file for this project after a version change.
-	///
-	/// Delegates to the underlying package manager adapter.
-	pub fn update_lock_file(&self) -> anyhow::Result<()> {
-		self.adapter.update_lock_file(&self.info)
-	}
-
 	/// Publishes this project to its package registry.
 	///
 	/// Delegates to the underlying package manager adapter.
@@ -163,20 +156,19 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the manifest file cannot be read or written.
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()>;
 
-	/// Updates the lock file for a project after a version change.
+	/// Updates the lock file after version changes.
 	///
 	/// This method should regenerate or update the lock file to reflect the new
 	/// version information. The implementation may use a custom command from the
 	/// configuration or fall back to package-manager-specific defaults.
 	///
-	/// # Arguments
-	///
-	/// * `project` - The project whose lock file should be updated.
+	/// This is a workspace-level operation and should be called once per adapter
+	/// after all version writes are complete.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the lock file update command fails.
-	fn update_lock_file(&self, project: &ProjectInfo) -> anyhow::Result<()>;
+	fn update_lock_file(&self) -> anyhow::Result<()>;
 
 	/// Publishes a project to its package registry.
 	///

@@ -48,7 +48,8 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 /// Runs the `release` subcommand.
 pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects()?;
+	let adapters = config.create_adapters();
+	let projects = config.load_projects_for_adapters(&adapters)?;
 
 	// Read all pending changesets
 	let changesets = changeset::read_all_changesets(config.git_workdir())?;
@@ -110,7 +111,6 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		} else {
 			project.write_version(&new_version)?;
-			project.update_lock_file()?;
 
 			// Generate changelog
 			let changes = changes_per_package
@@ -122,6 +122,13 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 				.update(config.git_workdir())?;
 
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
+		}
+	}
+
+	// Update lock files once per adapter after all version writes
+	if !args.dry_run {
+		for adapter in &adapters {
+			adapter.update_lock_file()?;
 		}
 	}
 

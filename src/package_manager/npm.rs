@@ -295,7 +295,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self, _project: &ProjectInfo) -> anyhow::Result<()> {
+	fn update_lock_file(&self) -> anyhow::Result<()> {
 		let workspace_root = self.resolve_root();
 
 		// If a custom lock command is configured, use it
@@ -1025,10 +1025,9 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("my-app", "");
 
 		// Should succeed even without a lock file
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_ok());
 	}
 
@@ -1045,9 +1044,8 @@ mod tests {
 			},
 			dir.path().to_path_buf(),
 		);
-		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_err());
 		assert!(
 			result
@@ -1070,9 +1068,8 @@ mod tests {
 			},
 			dir.path().to_path_buf(),
 		);
-		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_err());
 	}
 
@@ -1133,9 +1130,8 @@ mod tests {
 			},
 			dir.path().to_path_buf(),
 		);
-		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("Lock command"));
 	}
@@ -1153,9 +1149,8 @@ mod tests {
 			},
 			dir.path().to_path_buf(),
 		);
-		let info = project_info("my-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_ok());
 	}
 
@@ -1187,9 +1182,8 @@ mod tests {
 		.unwrap();
 
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("test-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_ok(), "npm lock file update should succeed");
 	}
 
@@ -1211,9 +1205,8 @@ mod tests {
 		.unwrap();
 
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("test-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(result.is_ok(), "pnpm lock file update should succeed");
 	}
 
@@ -1229,9 +1222,8 @@ mod tests {
 		.unwrap();
 
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let info = project_info("test-app", "");
 
-		let result = adapter.update_lock_file(&info);
+		let result = adapter.update_lock_file();
 		assert!(
 			result.is_ok(),
 			"yarn lock file update should succeed: {:?}",
