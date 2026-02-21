@@ -67,7 +67,7 @@ enabled = true
 		result
 			.unwrap_err()
 			.to_string()
-			.contains("not found in workspace")
+			.contains("Unknown package: nonexistent")
 	);
 }
 
@@ -155,6 +155,107 @@ enabled = true
 	assert!(result.is_ok());
 	let exit_code = result.unwrap();
 	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_dry_run_with_workspace_dependencies() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	// Create config
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	// Create root package.json with workspaces
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	// Create lib package (dependency)
+	std::fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/lib/package.json"),
+		r#"{"name": "@chronicle-test/lib", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	// Create app package (depends on lib)
+	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/app/package.json"),
+		r#"{"name": "@chronicle-test/app", "version": "1.0.0", "dependencies": {"@chronicle-test/lib": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	// Dry-run exercises dependency graph building and ordering without contacting registries
+	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_dry_run_with_workspace_dependencies_filtered() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	// Three packages: utils <- lib <- app
+	std::fs::create_dir_all(dir.path().join("packages/utils")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/utils/package.json"),
+		r#"{"name": "@chronicle-test/utils", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/lib/package.json"),
+		r#"{"name": "@chronicle-test/lib", "version": "1.0.0", "dependencies": {"@chronicle-test/utils": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/app/package.json"),
+		r#"{"name": "@chronicle-test/app", "version": "1.0.0", "dependencies": {"@chronicle-test/lib": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	// Publish only app and lib (not utils) — graph should still order lib before app
+	let result = run_chronicle(
+		&[
+			"publish",
+			"--no-interactive",
+			"--dry-run",
+			"--package",
+			"@chronicle-test/lib",
+			"--package",
+			"@chronicle-test/app",
+		],
+		dir.path(),
+	);
+
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
 #[test]

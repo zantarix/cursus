@@ -38,7 +38,7 @@ where
 		Err(e) => {
 			// clap returns errors for help/version requests too
 			// Use clap's error printing to handle them correctly
-			e.print().expect("Failed to print clap error");
+			e.print().context("Failed to print clap error")?;
 			let exit_code = if e.use_stderr() {
 				ExitCode::FAILURE
 			} else {

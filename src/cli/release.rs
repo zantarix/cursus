@@ -4,12 +4,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use clap::Args;
 
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{self, ChangeType};
 use crate::model::config;
+use crate::package_manager::filter_projects_by_name;
 
 /// Arguments for the `release` subcommand.
 #[derive(Args, Default)]
@@ -84,11 +85,7 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 	// Filter by --package flags if specified
 	if !args.packages.is_empty() {
 		// Validate all requested packages exist
-		for pkg_name in &args.packages {
-			if !projects.iter().any(|p| p.name() == pkg_name) {
-				bail!("Unknown package: {pkg_name}");
-			}
-		}
+		filter_projects_by_name(&projects, &args.packages)?;
 
 		// Filter aggregated and changes_per_package to only include requested packages
 		aggregated.retain(|name, _| args.packages.contains(name));

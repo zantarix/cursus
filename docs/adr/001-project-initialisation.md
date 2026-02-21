@@ -63,5 +63,9 @@ The `.chronicle/` directory at the git root serves as the home for both configur
 - Configuration is explicit and committed to source control, ensuring all contributors and CI use the same package manager settings.
 - Multiple package managers can be enabled simultaneously, supporting polyglot monorepos.
 - Package enumeration is decoupled from configuration via the adapter trait, making it straightforward to add new package managers in the future.
-- The `deny_unknown_fields` constraint means adding new configuration options is a breaking change to the config format, but prevents silent misconfiguration.
+- The `deny_unknown_fields` constraint prevents silent misconfiguration from typos or stale fields.
 - The optional `path` field allows Chronicle to work in repositories where package manager roots don't coincide with the git root (e.g., a Rust backend in `backend/` alongside a frontend).
+
+## Errata
+
+The original consequences section stated that `deny_unknown_fields` makes adding new configuration options a breaking change. This is incorrect. Adding new fields is non-breaking: existing config files simply won't contain the new field, and `serde(default)` provides sensible defaults. The constraint only prevents *users* from having fields in their config that Chronicle doesn't recognise, catching typos and stale configuration. *Removing* a previously supported field would be breaking, since existing configs referencing it would fail to parse.

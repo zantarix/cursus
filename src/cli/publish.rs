@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::Args;
 
 use crate::model::config;
-use crate::package_manager::{self, PublishOutcome};
+use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
 
 /// Arguments for the publish subcommand.
 #[derive(Args, Default)]
@@ -25,21 +25,7 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 	let projects = config.load_projects()?;
 
 	// Filter projects by --package flags if specified
-	let selected_projects: Vec<_> = if args.packages.is_empty() {
-		projects.clone()
-	} else {
-		let mut selected = Vec::new();
-		for package_name in &args.packages {
-			let project = projects
-				.iter()
-				.find(|p| p.name() == package_name)
-				.ok_or_else(|| {
-					anyhow::anyhow!("Package '{}' not found in workspace", package_name)
-				})?;
-			selected.push(project.clone());
-		}
-		selected
-	};
+	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
 
 	// Build dependency graph from all projects (not just selected ones)
 	// We need the full graph to correctly order the selected subset
@@ -50,7 +36,7 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 		.iter()
 		.map(|p| p.name().to_string())
 		.collect();
-	let sorted_names = graph.sort_leaves_first(&selected_names);
+	let sorted_names = graph.sort_leaves_first(&selected_names)?;
 
 	// Reorder selected_projects to match sorted_names
 	let mut sorted_projects = Vec::new();
@@ -60,18 +46,38 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 		}
 	}
 
-	// Track outcomes
+	// Dry run: just print what would be published and exit
+	if args.dry_run {
+		for project in &sorted_projects {
+			let version = project.read_version()?;
+			let registry = project.registry_name();
+			println!(
+				"Would publish {}@{} to {}",
+				project.name(),
+				version,
+				registry
+			);
+		}
+		return Ok(ExitCode::SUCCESS);
+	}
+
+	publish_projects(&sorted_projects)
+}
+
+/// Publishes the given projects to their registries, tracking outcomes.
+///
+/// Projects should be pre-sorted in dependency order (leaves first).
+#[coverage(off)]
+fn publish_projects(projects: &[package_manager::Project]) -> anyhow::Result<ExitCode> {
 	let mut published_count = 0;
 	let mut skipped_count = 0;
 	let mut failed = false;
 
-	// Publish each project in order
-	for project in &sorted_projects {
-		// Read current version
+	for project in projects {
 		let version = project.read_version()?;
 		let registry = project.registry_name();
 
-		match project.publish(args.dry_run) {
+		match project.publish() {
 			Ok(PublishOutcome::Published) => {
 				println!("Published {}@{} to {}", project.name(), version, registry);
 				published_count += 1;
@@ -92,7 +98,6 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 		}
 	}
 
-	// Print summary
 	println!();
 	println!(
 		"Summary: {} published, {} skipped",

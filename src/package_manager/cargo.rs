@@ -280,17 +280,14 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(())
 	}
 
-	fn publish(&self, project: &ProjectInfo, dry_run: bool) -> anyhow::Result<PublishOutcome> {
+	#[coverage(off)]
+	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
 
 		let mut cmd = std::process::Command::new("cargo");
 		cmd.arg("publish")
 			.arg("--manifest-path")
 			.arg(&manifest_path);
-
-		if dry_run {
-			cmd.arg("--dry-run");
-		}
 
 		let output = cmd.output().with_context(|| {
 			format!(

@@ -397,15 +397,12 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(())
 	}
 
-	fn publish(&self, project: &ProjectInfo, dry_run: bool) -> anyhow::Result<PublishOutcome> {
+	#[coverage(off)]
+	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let project_dir = self.git_workdir.join(&project.path);
 
 		let mut cmd = std::process::Command::new("npm");
 		cmd.arg("publish").current_dir(&project_dir);
-
-		if dry_run {
-			cmd.arg("--dry-run");
-		}
 
 		// For scoped packages, add --access flag
 		if project.name.starts_with('@') {
