@@ -38,7 +38,7 @@ Never write production code that panics. Avoid `unwrap()`, `expect()`, `panic!()
 
 Big decisions are documented in ADR format in the `docs/adr/` folder.
 
-ADR's are a running log of decisions and should not be edited once marked accepted. Currency is also important, so when new requirements are added that contradict an older ADR then a note should be added in a new Errata section. If the ADR is no longer relevant at all, then the status should be updated to be "Superceded by ADR #number" instead, noting the ADR that conflicts with it.
+Any changes to the `docs/adr/` folder should be handled by delegating to the `@adr-architect` agent.
 
 ## Testing
 
