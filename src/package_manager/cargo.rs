@@ -352,6 +352,7 @@ impl PackageManagerAdapter for CargoAdapter {
 	}
 
 	#[coverage(off)]
+	#[mutants::skip]
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
 

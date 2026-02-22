@@ -469,6 +469,7 @@ impl PackageManagerAdapter for NpmAdapter {
 	}
 
 	#[coverage(off)]
+	#[mutants::skip]
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let project_dir = self.git_workdir.join(&project.path);
 

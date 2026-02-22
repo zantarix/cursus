@@ -129,6 +129,7 @@ fn publish_projects(
 ///
 /// This is marked with `#[coverage(off)]` because it shells out to package managers.
 #[coverage(off)]
+#[mutants::skip]
 fn do_publish(project: &package_manager::Project) -> PublishResult {
 	let version = project.version();
 	let registry = project.registry_name();

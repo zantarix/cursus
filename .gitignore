@@ -1,7 +1,10 @@
+# Direnv
 .direnv/
-result
 
+# Nix build output
+/result/
 
-# Added by cargo
-
-/target
+# Cargo output folders
+/mutants.out/
+/mutants.out.old/
+/target/

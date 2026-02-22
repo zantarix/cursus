@@ -49,8 +49,7 @@
 						nodePackages.yarn
 						yarnBerryWrapper
 					];
-
-					};
+				};
 
 				devShells.default = pkgs.mkShell ({
 					buildInputs = with pkgs; [
@@ -59,6 +58,7 @@
 						rust-analyzer
 						cargo-deny
 						cargo-make
+						cargo-mutants
 						cargo-llvm-cov
 
 						# Cross-compilation tools
