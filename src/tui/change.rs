@@ -1,19 +1,17 @@
 //! TUI for selecting projects and the type of change (major, minor, patch).
 
-use std::io;
-
-use crossterm::{
-	ExecutableCommand,
-	event::{Event, KeyCode, KeyEventKind},
-	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::KeyCode;
 use ratatui::{
 	prelude::*,
 	widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
+use super::widgets::{self, KeyResult};
 use crate::model::changeset::ChangeType;
 use crate::package_manager::Project;
+
+/// Shorthand for the handle_key return type used by the internal state machine.
+type HandleResult = KeyResult<Screen, ChangeType>;
 
 impl ChangeType {
 	/// Returns the next change type when cycling through options in the TUI.
@@ -63,18 +61,16 @@ enum Screen {
 	SelectChangeType(ChangeType),
 }
 
-/// Result of processing a key press in the selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum KeyResult {
-	/// Continue with updated screen state.
-	Continue(Screen),
-	/// Selection completed with selected project indices and change type.
-	Complete(Vec<usize>, ChangeType),
-	/// Selection cancelled by user.
-	Cancelled,
+/// Encapsulates the full TUI state for the run_tui loop.
+struct ChangeState {
+	/// The currently displayed wizard screen.
+	screen: Screen,
+	/// Indices into the projects slice for the user's project selection.
+	/// Populated when leaving `SelectProjects`; carried forward to completion.
+	selected_indices: Vec<usize>,
 }
 
-fn handle_key(screen: &Screen, key: KeyCode) -> KeyResult {
+fn handle_key(screen: &Screen, key: KeyCode) -> HandleResult {
 	match screen {
 		Screen::SelectProjects {
 			selected, cursor, ..
@@ -83,7 +79,7 @@ fn handle_key(screen: &Screen, key: KeyCode) -> KeyResult {
 	}
 }
 
-fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) -> KeyResult {
+fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) -> HandleResult {
 	let len = selected.len();
 	match key {
 		KeyCode::Up | KeyCode::Char('k') => {
@@ -140,7 +136,7 @@ fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) ->
 	}
 }
 
-fn handle_key_change_type(current: ChangeType, key: KeyCode) -> KeyResult {
+fn handle_key_change_type(current: ChangeType, key: KeyCode) -> HandleResult {
 	match key {
 		KeyCode::Left | KeyCode::Char('h') => {
 			KeyResult::Continue(Screen::SelectChangeType(current.prev()))
@@ -148,10 +144,10 @@ fn handle_key_change_type(current: ChangeType, key: KeyCode) -> KeyResult {
 		KeyCode::Right | KeyCode::Tab | KeyCode::Char('l') => {
 			KeyResult::Continue(Screen::SelectChangeType(current.next()))
 		}
-		KeyCode::Enter => KeyResult::Complete(vec![], current),
-		KeyCode::Char('m') => KeyResult::Complete(vec![], ChangeType::Major),
-		KeyCode::Char('i') => KeyResult::Complete(vec![], ChangeType::Minor),
-		KeyCode::Char('p') => KeyResult::Complete(vec![], ChangeType::Patch),
+		KeyCode::Enter => KeyResult::Complete(current),
+		KeyCode::Char('m') => KeyResult::Complete(ChangeType::Major),
+		KeyCode::Char('i') => KeyResult::Complete(ChangeType::Minor),
+		KeyCode::Char('p') => KeyResult::Complete(ChangeType::Patch),
 		KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
 		_ => KeyResult::Continue(Screen::SelectChangeType(current)),
 	}
@@ -195,10 +191,6 @@ pub fn run(projects: &[Project], options: &ChangeOptions) -> anyhow::Result<Opti
 		}));
 	}
 
-	enable_raw_mode()?;
-	io::stdout().execute(EnterAlternateScreen)?;
-	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-
 	let project_names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
 
 	let initial_screen = if have_projects {
@@ -211,60 +203,65 @@ pub fn run(projects: &[Project], options: &ChangeOptions) -> anyhow::Result<Opti
 		}
 	};
 
-	let mut screen = initial_screen;
-	let mut selected_indices = project_indices;
-
-	let result = loop {
-		terminal.draw(|frame| ui(frame, &screen, &project_names))?;
-
-		if let Event::Key(key) = crossterm::event::read()?
-			&& key.kind == KeyEventKind::Press
-		{
-			match handle_key(&screen, key.code) {
-				KeyResult::Continue(new_screen) => {
-					// When transitioning from projects to change type, capture selected indices
-					if matches!(new_screen, Screen::SelectChangeType(_))
-						&& let Screen::SelectProjects { ref selected, .. } = screen
-					{
-						selected_indices = selected
-							.iter()
-							.enumerate()
-							.filter(|&(_, &s)| s)
-							.map(|(i, _)| i)
-							.collect();
-					}
-					screen = new_screen;
-				}
-				KeyResult::Complete(_, change_type) => {
-					break Some(ChangeResult {
-						projects: selected_indices
-							.iter()
-							.map(|&i| projects[i].clone())
-							.collect(),
-						change_type,
-					});
-				}
-				KeyResult::Cancelled => break None,
-			}
-		}
+	let initial_state = ChangeState {
+		screen: initial_screen,
+		selected_indices: project_indices,
 	};
 
-	disable_raw_mode()?;
-	io::stdout().execute(LeaveAlternateScreen)?;
+	let result = widgets::run_tui(
+		initial_state,
+		|frame, state| ui(frame, &state.screen, &project_names),
+		|state, key| {
+			let ChangeState {
+				screen,
+				selected_indices,
+			} = state;
+			match handle_key(&screen, key) {
+				KeyResult::Continue(new_screen) => {
+					// When transitioning from projects to change type, capture selected indices
+					let new_indices = if let Screen::SelectChangeType(_) = &new_screen {
+						if let Screen::SelectProjects { ref selected, .. } = screen {
+							selected
+								.iter()
+								.enumerate()
+								.filter(|&(_, &s)| s)
+								.map(|(i, _)| i)
+								.collect()
+						} else {
+							selected_indices
+						}
+					} else {
+						selected_indices
+					};
+					KeyResult::Continue(ChangeState {
+						screen: new_screen,
+						selected_indices: new_indices,
+					})
+				}
+				KeyResult::Complete(change_type) => KeyResult::Complete(ChangeResult {
+					projects: selected_indices
+						.iter()
+						.map(|&i| projects[i].clone())
+						.collect(),
+					change_type,
+				}),
+				KeyResult::Cancelled => KeyResult::Cancelled,
+			}
+		},
+	)?;
 
 	Ok(result)
 }
 
 fn ui(frame: &mut Frame, screen: &Screen, project_names: &[&str]) {
-	let chunks = Layout::default()
-		.direction(Direction::Vertical)
-		.margin(2)
-		.constraints([
+	let chunks = widgets::wizard_layout(
+		frame,
+		&[
 			Constraint::Length(3),
 			Constraint::Min(5),
 			Constraint::Length(1),
-		])
-		.split(frame.area());
+		],
+	);
 
 	match screen {
 		Screen::SelectProjects {
@@ -294,10 +291,7 @@ fn render_select_projects(
 		"Which projects does this change apply to?"
 	};
 	let question_color = if error { Color::Red } else { Color::Yellow };
-	let question = Paragraph::new(question_text)
-		.style(Style::default().fg(question_color))
-		.block(Block::default().borders(Borders::ALL));
-	frame.render_widget(question, chunks[0]);
+	widgets::render_question(frame, chunks[0], question_text, question_color);
 
 	let items: Vec<ListItem> = project_names
 		.iter()
@@ -325,36 +319,38 @@ fn render_select_projects(
 	);
 	frame.render_widget(list, chunks[1]);
 
-	let help = Paragraph::new(
+	widgets::render_help(
+		frame,
+		chunks[2],
 		"↑/↓/j/k: navigate | Space: toggle | a: toggle all | Enter: confirm | Esc: cancel",
-	)
-	.style(Style::default().fg(Color::DarkGray));
-	frame.render_widget(help, chunks[2]);
+	);
 }
 
 fn render_select_change_type(frame: &mut Frame, chunks: &[Rect], selected: ChangeType) {
-	let question = Paragraph::new("What type of change is this?")
-		.style(Style::default().fg(Color::Yellow))
-		.block(Block::default().borders(Borders::ALL));
-	frame.render_widget(question, chunks[0]);
+	widgets::render_question(
+		frame,
+		chunks[0],
+		"What type of change is this?",
+		Color::Yellow,
+	);
 
 	let buttons = Line::from(
 		std::iter::once(Span::raw("  "))
-			.chain(button_spans(
+			.chain(widgets::button_spans(
 				" ",
 				"M",
 				"ajor ",
 				selected == ChangeType::Major,
 			))
 			.chain(std::iter::once(Span::raw("   ")))
-			.chain(button_spans(
+			.chain(widgets::button_spans(
 				" M",
 				"i",
 				"nor ",
 				selected == ChangeType::Minor,
 			))
 			.chain(std::iter::once(Span::raw("   ")))
-			.chain(button_spans(
+			.chain(widgets::button_spans(
 				" ",
 				"P",
 				"atch ",
@@ -367,39 +363,16 @@ fn render_select_change_type(frame: &mut Frame, chunks: &[Rect], selected: Chang
 		Paragraph::new(buttons).block(Block::default().borders(Borders::ALL).title("Change Type"));
 	frame.render_widget(button_para, chunks[1]);
 
-	let help = Paragraph::new("←/→/Tab: switch | m/i/p: select | Enter: confirm | Esc: cancel")
-		.style(Style::default().fg(Color::DarkGray));
-	frame.render_widget(help, chunks[2]);
-}
-
-fn button_style(selected: bool) -> Style {
-	if selected {
-		Style::default()
-			.fg(Color::Green)
-			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
-	} else {
-		Style::default().fg(Color::Gray)
-	}
-}
-
-fn button_spans<'a>(
-	prefix: &'a str,
-	shortcut: &'a str,
-	suffix: &'a str,
-	selected: bool,
-) -> impl Iterator<Item = Span<'a>> {
-	let base = button_style(selected);
-	let underlined = base.add_modifier(Modifier::UNDERLINED);
-	[
-		Span::styled(prefix, base),
-		Span::styled(shortcut, underlined),
-		Span::styled(suffix, base),
-	]
-	.into_iter()
+	widgets::render_help(
+		frame,
+		chunks[2],
+		"←/→/Tab: switch | m/i/p: select | Enter: confirm | Esc: cancel",
+	);
 }
 
 #[cfg(test)]
 mod tests {
+	use super::super::test_utils::{buffer_to_string, create_test_terminal};
 	use super::*;
 
 	// ChangeType navigation tests
@@ -472,36 +445,36 @@ mod tests {
 	fn change_type_enter_completes_with_selected() {
 		let screen = Screen::SelectChangeType(ChangeType::Major);
 		let result = handle_key(&screen, KeyCode::Enter);
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Major));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Major));
 
 		let screen = Screen::SelectChangeType(ChangeType::Minor);
 		let result = handle_key(&screen, KeyCode::Enter);
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Minor));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
 
 		let screen = Screen::SelectChangeType(ChangeType::Patch);
 		let result = handle_key(&screen, KeyCode::Enter);
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Patch));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Patch));
 	}
 
 	#[test]
 	fn change_type_m_selects_major() {
 		let screen = Screen::SelectChangeType(ChangeType::Patch);
 		let result = handle_key(&screen, KeyCode::Char('m'));
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Major));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Major));
 	}
 
 	#[test]
 	fn change_type_i_selects_minor() {
 		let screen = Screen::SelectChangeType(ChangeType::Patch);
 		let result = handle_key(&screen, KeyCode::Char('i'));
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Minor));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
 	}
 
 	#[test]
 	fn change_type_p_selects_patch() {
 		let screen = Screen::SelectChangeType(ChangeType::Major);
 		let result = handle_key(&screen, KeyCode::Char('p'));
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Patch));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Patch));
 	}
 
 	#[test]
@@ -723,23 +696,6 @@ mod tests {
 	}
 
 	// UI rendering tests
-	fn create_test_terminal() -> Terminal<ratatui::backend::TestBackend> {
-		let backend = ratatui::backend::TestBackend::new(80, 24);
-		Terminal::new(backend).unwrap()
-	}
-
-	fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-		(0..buffer.area.height)
-			.map(|y| {
-				(0..buffer.area.width)
-					.map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
-					.collect::<String>()
-			})
-			.collect::<Vec<_>>()
-			.join("\n")
-			+ "\n"
-	}
-
 	#[test]
 	fn ui_renders_select_projects_screen() {
 		let mut terminal = create_test_terminal();
@@ -829,6 +785,6 @@ mod tests {
 
 		// Select minor
 		let result = handle_key(&screen, KeyCode::Char('i'));
-		assert_eq!(result, KeyResult::Complete(vec![], ChangeType::Minor));
+		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
 	}
 }

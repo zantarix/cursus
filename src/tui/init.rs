@@ -1,16 +1,9 @@
-use std::io;
 use std::path::Path;
 
-use crossterm::{
-	ExecutableCommand,
-	event::{Event, KeyCode, KeyEventKind},
-	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{
-	prelude::*,
-	widgets::{Block, Borders, Paragraph},
-};
+use crossterm::event::KeyCode;
+use ratatui::prelude::*;
 
+use super::widgets::{self, ButtonDef, KeyResult};
 use crate::model::config::{Config, PackageManager};
 use crate::package_manager::{CargoConfig, NpmConfig};
 
@@ -25,17 +18,6 @@ pub struct InitOptions {
 enum Screen {
 	Confirm(bool),
 	SelectPackageManager(PackageManager),
-}
-
-/// Result of processing a key press in the setup wizard.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum KeyResult {
-	/// Continue with updated screen state.
-	Continue(Screen),
-	/// Setup completed with a package manager selection.
-	Complete(PackageManager),
-	/// Setup cancelled by user.
-	Cancelled,
 }
 
 fn detect_package_manager(git_workdir: &Path) -> PackageManager {
@@ -54,7 +36,7 @@ fn handle_key(
 	key: KeyCode,
 	detected: PackageManager,
 	options: &InitOptions,
-) -> KeyResult {
+) -> KeyResult<Screen, PackageManager> {
 	match screen {
 		Screen::Confirm(yes) => match key {
 			KeyCode::Left
@@ -114,133 +96,101 @@ fn handle_key(
 /// Returns an error if terminal setup or I/O operations fail.
 pub fn run(git_workdir: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
 	let detected = detect_package_manager(git_workdir);
-
-	enable_raw_mode()?;
-	io::stdout().execute(EnterAlternateScreen)?;
-	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-
-	let mut screen = Screen::Confirm(true);
-
-	let result = loop {
-		terminal.draw(|frame| ui(frame, &screen))?;
-
-		if let Event::Key(key) = crossterm::event::read()?
-			&& key.kind == KeyEventKind::Press
-		{
-			match handle_key(screen, key.code, detected, options) {
-				KeyResult::Continue(new_screen) => screen = new_screen,
-				KeyResult::Complete(pm) => break Some(pm),
-				KeyResult::Cancelled => break None,
-			}
-		}
-	};
-
-	disable_raw_mode()?;
-	io::stdout().execute(LeaveAlternateScreen)?;
-
-	Ok(result.map(|pm| match pm {
+	let pm_opt = widgets::run_tui(Screen::Confirm(true), ui, |screen, key| {
+		handle_key(screen, key, detected, options)
+	})?;
+	Ok(pm_opt.map(|pm| match pm {
 		PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::enabled()),
 		PackageManager::Cargo => Config::new(git_workdir).with_cargo(CargoConfig::enabled()),
 	}))
 }
 
 fn ui(frame: &mut Frame, screen: &Screen) {
-	let chunks = Layout::default()
-		.direction(Direction::Vertical)
-		.margin(2)
-		.constraints([
+	let chunks = widgets::wizard_layout(
+		frame,
+		&[
 			Constraint::Length(3),
 			Constraint::Length(3),
 			Constraint::Min(1),
-		])
-		.split(frame.area());
+		],
+	);
 
 	match screen {
 		Screen::Confirm(yes) => render_confirm(frame, &chunks, *yes),
 		Screen::SelectPackageManager(selected) => render_package_manager(frame, &chunks, *selected),
 	}
 
-	let help = Paragraph::new("Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel")
-		.style(Style::default().fg(Color::DarkGray));
-	frame.render_widget(help, chunks[2]);
+	widgets::render_help(
+		frame,
+		chunks[2],
+		"Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel",
+	);
 }
 
 fn render_confirm(frame: &mut Frame, chunks: &[Rect], yes: bool) {
-	let question = Paragraph::new("No configuration found. Set up Chronicle for this repository?")
-		.style(Style::default().fg(Color::Yellow))
-		.block(Block::default().borders(Borders::ALL));
-	frame.render_widget(question, chunks[0]);
-
-	let yes_style = if yes {
-		Style::default()
-			.fg(Color::Green)
-			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
-	} else {
-		Style::default().fg(Color::Gray)
-	};
-	let no_style = if !yes {
-		Style::default()
-			.fg(Color::Red)
-			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
-	} else {
-		Style::default().fg(Color::Gray)
-	};
-
-	let buttons = Line::from(vec![
-		Span::raw("  "),
-		Span::styled(" Yes ", yes_style),
-		Span::raw("   "),
-		Span::styled(" No ", no_style),
-		Span::raw("  "),
-	]);
-	let button_para =
-		Paragraph::new(buttons).block(Block::default().borders(Borders::ALL).title("Choose"));
-	frame.render_widget(button_para, chunks[1]);
+	widgets::render_question(
+		frame,
+		chunks[0],
+		"No configuration found. Set up Chronicle for this repository?",
+		Color::Yellow,
+	);
+	widgets::render_button_row(
+		frame,
+		chunks[1],
+		"Choose",
+		&[
+			ButtonDef {
+				label: "Yes",
+				selected: yes,
+				color: None,
+			},
+			ButtonDef {
+				label: "No",
+				selected: !yes,
+				color: Some(Color::Red),
+			},
+		],
+	);
 }
 
 fn render_package_manager(frame: &mut Frame, chunks: &[Rect], selected: PackageManager) {
-	let question = Paragraph::new("Which package manager does this project use?")
-		.style(Style::default().fg(Color::Yellow))
-		.block(Block::default().borders(Borders::ALL));
-	frame.render_widget(question, chunks[0]);
-
-	let cargo_style = if selected == PackageManager::Cargo {
-		Style::default()
-			.fg(Color::Green)
-			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
-	} else {
-		Style::default().fg(Color::Gray)
-	};
-	let npm_style = if selected == PackageManager::Npm {
-		Style::default()
-			.fg(Color::Green)
-			.add_modifier(Modifier::BOLD | Modifier::REVERSED)
-	} else {
-		Style::default().fg(Color::Gray)
-	};
-
-	let buttons = Line::from(vec![
-		Span::raw("  "),
-		Span::styled(" Cargo ", cargo_style),
-		Span::raw("   "),
-		Span::styled(" NPM ", npm_style),
-		Span::raw("  "),
-	]);
-	let button_para = Paragraph::new(buttons).block(
-		Block::default()
-			.borders(Borders::ALL)
-			.title("Package Manager"),
+	widgets::render_question(
+		frame,
+		chunks[0],
+		"Which package manager does this project use?",
+		Color::Yellow,
 	);
-	frame.render_widget(button_para, chunks[1]);
+	widgets::render_button_row(
+		frame,
+		chunks[1],
+		"Package Manager",
+		&[
+			ButtonDef {
+				label: "Cargo",
+				selected: selected == PackageManager::Cargo,
+				color: None,
+			},
+			ButtonDef {
+				label: "NPM",
+				selected: selected == PackageManager::Npm,
+				color: None,
+			},
+		],
+	);
 }
 
 #[cfg(test)]
 mod tests {
+	use super::super::test_utils::{buffer_to_string, create_test_terminal};
 	use super::*;
 	use tempfile::TempDir;
 
 	/// Helper to call handle_key with no pre-filled options (default behavior).
-	fn handle_key_default(screen: Screen, key: KeyCode, detected: PackageManager) -> KeyResult {
+	fn handle_key_default(
+		screen: Screen,
+		key: KeyCode,
+		detected: PackageManager,
+	) -> KeyResult<Screen, PackageManager> {
 		handle_key(screen, key, detected, &InitOptions::default())
 	}
 
@@ -584,11 +534,6 @@ mod tests {
 	}
 
 	// UI rendering tests using TestBackend
-	fn create_test_terminal() -> Terminal<ratatui::backend::TestBackend> {
-		let backend = ratatui::backend::TestBackend::new(80, 24);
-		Terminal::new(backend).unwrap()
-	}
-
 	#[test]
 	fn ui_renders_confirm_screen_yes_selected() {
 		let mut terminal = create_test_terminal();
@@ -639,17 +584,5 @@ mod tests {
 		assert!(content.contains("Package Manager"));
 		assert!(content.contains("Cargo"));
 		assert!(content.contains("NPM"));
-	}
-
-	fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-		(0..buffer.area.height)
-			.map(|y| {
-				(0..buffer.area.width)
-					.map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
-					.collect::<String>()
-			})
-			.collect::<Vec<_>>()
-			.join("\n")
-			+ "\n"
 	}
 }
