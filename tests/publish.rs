@@ -442,3 +442,52 @@ fn publish_dry_run_explicitly_naming_private_package() {
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
+
+#[test]
+fn publish_dry_run_cyclic_npm_workspace() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	// Create root with workspaces
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	// Create types package that depends on utils
+	std::fs::create_dir_all(dir.path().join("packages/types")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/types/package.json"),
+		r#"{"name": "@test/types", "version": "1.0.0", "dependencies": {"@test/utils": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	// Create utils package that depends on types (circular dependency)
+	std::fs::create_dir_all(dir.path().join("packages/utils")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/utils/package.json"),
+		r#"{"name": "@test/utils", "version": "1.0.0", "dependencies": {"@test/types": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	// Create app package that depends on both
+	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/app/package.json"),
+		r#"{"name": "@test/app", "version": "1.0.0", "dependencies": {"@test/types": "1.0.0", "@test/utils": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	// Should succeed despite circular dependencies
+	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+}

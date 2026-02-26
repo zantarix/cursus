@@ -41,6 +41,23 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 	// We need the full graph to correctly order the selected subset
 	let graph = package_manager::build_dependency_graph(&projects)?;
 
+	// Emit cycle warnings if cycles exist and warnings are not disabled
+	if !config.global.disable_dependency_cycle_warnings {
+		let cycle_groups = graph.cycle_groups();
+		if !cycle_groups.is_empty() {
+			for group in &cycle_groups {
+				eprintln!(
+					"Warning: circular dependencies detected between: {}",
+					group.join(", ")
+				);
+			}
+			eprintln!(
+				"To disable this warning, set `disable_dependency_cycle_warnings = true` in the [global] section of .chronicle/config.toml"
+			);
+			eprintln!();
+		}
+	}
+
 	// Sort all projects in leaves-first order (dependencies before dependents)
 	let all_sorted_names = graph.sort_leaves_first()?;
 

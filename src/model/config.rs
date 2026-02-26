@@ -9,6 +9,14 @@ use crate::package_manager::{
 	self, CargoAdapter, CargoConfig, NpmAdapter, NpmConfig, PackageManagerAdapter, Project,
 };
 
+/// Global configuration settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GlobalConfig {
+	/// Disable warnings about circular dependencies in monorepos.
+	pub disable_dependency_cycle_warnings: bool,
+}
+
 /// Supported package managers for project configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -23,6 +31,9 @@ pub enum PackageManager {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+	/// Global configuration settings.
+	#[serde(default)]
+	pub global: GlobalConfig,
 	/// Configuration for npm package manager.
 	#[serde(default)]
 	pub npm: NpmConfig,
@@ -38,10 +49,17 @@ impl Config {
 	/// Creates a new config with all package managers disabled.
 	pub fn new(git_workdir: &Path) -> Self {
 		Self {
+			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git_workdir: git_workdir.to_path_buf(),
 		}
+	}
+
+	/// Sets global configuration (builder pattern).
+	pub fn with_global(mut self, config: GlobalConfig) -> Self {
+		self.global = config;
+		self
 	}
 
 	/// Sets npm configuration (builder pattern).
@@ -292,6 +310,7 @@ mod tests {
 	#[test]
 	fn config_defaults_all_disabled() {
 		let config = Config {
+			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git_workdir: PathBuf::new(),
@@ -335,6 +354,7 @@ mod tests {
 	#[test]
 	fn enabled_package_managers_returns_empty_when_none_enabled() {
 		let config = Config {
+			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git_workdir: PathBuf::new(),
@@ -362,6 +382,7 @@ mod tests {
 	#[test]
 	fn enabled_package_managers_returns_both_when_both_enabled() {
 		let mut config = Config {
+			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git_workdir: PathBuf::new(),
@@ -535,6 +556,65 @@ mod tests {
 				.unwrap_err()
 				.to_string()
 				.contains("No projects found")
+		);
+	}
+
+	#[test]
+	fn global_config_defaults_to_warnings_enabled() {
+		let global = GlobalConfig::default();
+		assert!(!global.disable_dependency_cycle_warnings);
+	}
+
+	#[test]
+	fn config_deserializes_without_global_section() {
+		let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+		assert!(config.npm.enabled);
+		assert!(!config.global.disable_dependency_cycle_warnings);
+	}
+
+	#[test]
+	fn config_deserializes_with_global_section() {
+		let toml_str = r#"
+[global]
+disable_dependency_cycle_warnings = true
+
+[npm]
+enabled = true
+"#;
+		let config: Config = toml::from_str(toml_str).unwrap();
+		assert!(config.npm.enabled);
+		assert!(config.global.disable_dependency_cycle_warnings);
+	}
+
+	#[test]
+	fn config_roundtrip_with_global() {
+		let dir = temp_dir();
+		let mut global = GlobalConfig::default();
+		global.disable_dependency_cycle_warnings = true;
+		let config = Config::new(dir.path())
+			.with_global(global)
+			.with_npm(NpmConfig::enabled());
+		config.save().unwrap();
+		let loaded = load(dir.path()).unwrap();
+		assert!(loaded.global.disable_dependency_cycle_warnings);
+	}
+
+	#[test]
+	fn global_config_unknown_field_fails() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[global]\nunknown_field = true\n[npm]\nenabled = true",
+		)
+		.unwrap();
+
+		let err = load(dir.path()).unwrap_err();
+		let chain = format!("{err:#}");
+		assert!(
+			chain.contains("unknown field"),
+			"Expected 'unknown field' error, got: {chain}"
 		);
 	}
 }
