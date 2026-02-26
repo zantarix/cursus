@@ -223,16 +223,39 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	fn registry_name(&self) -> &str;
 }
 
+/// Mutable state threaded through Tarjan's iterative SCC algorithm.
+struct TarjanState {
+	index: usize,
+	indices: std::collections::HashMap<String, usize>,
+	lowlinks: std::collections::HashMap<String, usize>,
+	on_stack: std::collections::HashSet<String>,
+	stack: Vec<String>,
+	sccs: Vec<Vec<String>>,
+}
+
+impl TarjanState {
+	fn new() -> Self {
+		Self {
+			index: 0,
+			indices: std::collections::HashMap::new(),
+			lowlinks: std::collections::HashMap::new(),
+			on_stack: std::collections::HashSet::new(),
+			stack: Vec::new(),
+			sccs: Vec::new(),
+		}
+	}
+}
+
 /// A directed graph for dependency ordering.
 ///
 /// Stores an adjacency list where each node maps to its dependencies.
-/// SCCs are computed lazily on first access and cached for reuse.
+/// SCCs are computed eagerly during construction.
 #[derive(Debug, Clone)]
 pub struct DependencyGraph {
 	/// Adjacency list: dependent -> [dependencies]
 	adjacency: std::collections::HashMap<String, Vec<String>>,
-	/// Cached strongly connected components (computed lazily)
-	sccs: std::cell::OnceCell<Vec<Vec<String>>>,
+	/// Strongly connected components in reverse topological order (leaves first).
+	sccs: Vec<Vec<String>>,
 }
 
 impl DependencyGraph {
@@ -244,76 +267,41 @@ impl DependencyGraph {
 	/// Dependencies that don't appear as keys are considered external and are ignored
 	/// during topological sorting.
 	///
-	/// SCCs are computed lazily on first access and cached for subsequent calls.
+	/// SCCs are computed eagerly during construction.
 	///
 	/// # Arguments
 	///
 	/// * `adjacency` - Adjacency list mapping `dependent -> [dependencies]`.
 	pub fn from_adjacency(adjacency: std::collections::HashMap<String, Vec<String>>) -> Self {
-		Self {
-			adjacency,
-			sccs: std::cell::OnceCell::new(),
-		}
+		let sccs = Self::compute_sccs(&adjacency);
+		Self { adjacency, sccs }
 	}
 
-	/// Returns whether the SCC cache has been populated.
+	/// Computes strongly connected components from an adjacency list.
 	///
-	/// This is primarily useful for testing to verify caching behavior.
-	#[cfg(test)]
-	fn is_sccs_cached(&self) -> bool {
-		self.sccs.get().is_some()
-	}
-
-	/// Finds strongly connected components using Tarjan's algorithm.
-	///
-	/// Returns a reference to cached SCCs in reverse topological order (leaves first).
-	/// Each SCC is a vector of node names sorted alphabetically for determinism.
-	///
-	/// SCCs are computed on first call and cached for subsequent calls.
-	fn find_sccs(&self) -> &Vec<Vec<String>> {
-		self.sccs.get_or_init(|| {
-			let mut index = 0usize;
-			let mut indices = std::collections::HashMap::new();
-			let mut lowlinks = std::collections::HashMap::new();
-			let mut on_stack = std::collections::HashSet::new();
-			let mut stack = Vec::new();
-			let mut sccs = Vec::new();
-
-			// Sort keys for deterministic output
-			let mut nodes: Vec<_> = self.adjacency.keys().cloned().collect();
-			nodes.sort();
-
-			for node in nodes {
-				if !indices.contains_key(&node) {
-					self.strongconnect(
-						&node,
-						&mut index,
-						&mut indices,
-						&mut lowlinks,
-						&mut on_stack,
-						&mut stack,
-						&mut sccs,
-					);
-				}
+	/// Returns SCCs in reverse topological order (leaves first).
+	/// Each SCC is sorted alphabetically for determinism.
+	fn compute_sccs(
+		adjacency: &std::collections::HashMap<String, Vec<String>>,
+	) -> Vec<Vec<String>> {
+		let mut state = TarjanState::new();
+		let mut nodes: Vec<_> = adjacency.keys().cloned().collect();
+		nodes.sort();
+		for node in nodes {
+			if !state.indices.contains_key(&node) {
+				Self::strongconnect(adjacency, &node, &mut state);
 			}
-
-			sccs
-		})
+		}
+		state.sccs
 	}
 
 	/// Iterative helper for Tarjan's algorithm to avoid stack overflow.
 	///
 	/// This uses an explicit work stack to simulate the recursive call stack.
-	#[allow(clippy::too_many_arguments)]
 	fn strongconnect(
-		&self,
+		adjacency: &std::collections::HashMap<String, Vec<String>>,
 		start: &str,
-		index: &mut usize,
-		indices: &mut std::collections::HashMap<String, usize>,
-		lowlinks: &mut std::collections::HashMap<String, usize>,
-		on_stack: &mut std::collections::HashSet<String>,
-		stack: &mut Vec<String>,
-		sccs: &mut Vec<Vec<String>>,
+		state: &mut TarjanState,
 	) {
 		// Work item: (node, phase)
 		// Phase 0 = first visit (initialize and push children)
@@ -329,40 +317,40 @@ impl DependencyGraph {
 			match phase {
 				Phase::FirstVisit => {
 					// Skip if already visited
-					if indices.contains_key(&v) {
+					if state.indices.contains_key(&v) {
 						continue;
 					}
 
 					// Initialize this node
-					let current_index = *index;
-					indices.insert(v.clone(), current_index);
-					lowlinks.insert(v.clone(), current_index);
-					*index += 1;
-					stack.push(v.clone());
-					on_stack.insert(v.clone());
+					let current_index = state.index;
+					state.indices.insert(v.clone(), current_index);
+					state.lowlinks.insert(v.clone(), current_index);
+					state.index += 1;
+					state.stack.push(v.clone());
+					state.on_stack.insert(v.clone());
 
 					// Schedule second visit for after children are processed
 					work_stack.push((v.clone(), Phase::SecondVisit));
 
 					// Push children onto work stack in reverse order for deterministic processing
-					if let Some(deps) = self.adjacency.get(&v) {
+					if let Some(deps) = adjacency.get(&v) {
 						let mut sorted_deps: Vec<_> = deps.iter().collect();
 						sorted_deps.sort();
 
 						// Process in reverse so first child is processed first
 						for w in sorted_deps.into_iter().rev() {
 							// Skip external dependencies
-							if !self.adjacency.contains_key(w) {
+							if !adjacency.contains_key(w) {
 								continue;
 							}
 
-							if !indices.contains_key(w) {
+							if !state.indices.contains_key(w) {
 								// Not yet visited - schedule for processing
 								work_stack.push((w.clone(), Phase::FirstVisit));
-							} else if on_stack.contains(w) {
+							} else if state.on_stack.contains(w) {
 								// Back edge - update lowlink immediately
-								if let Some(&w_index) = indices.get(w)
-									&& let Some(v_lowlink) = lowlinks.get_mut(&v)
+								if let Some(&w_index) = state.indices.get(w)
+									&& let Some(v_lowlink) = state.lowlinks.get_mut(&v)
 								{
 									*v_lowlink = (*v_lowlink).min(w_index);
 								}
@@ -372,22 +360,22 @@ impl DependencyGraph {
 				}
 				Phase::SecondVisit => {
 					// Update lowlinks from children
-					if let Some(deps) = self.adjacency.get(&v) {
+					if let Some(deps) = adjacency.get(&v) {
 						for w in deps {
 							// Skip external dependencies
-							if !self.adjacency.contains_key(w) {
+							if !adjacency.contains_key(w) {
 								continue;
 							}
 
 							// Update from child's lowlink (not a back edge)
-							if !on_stack.contains(w) {
+							if !state.on_stack.contains(w) {
 								continue;
 							}
 
 							// Get w's lowlink and update v's if needed
-							if let Some(&w_lowlink) = lowlinks.get(w)
-								&& let Some(v_lowlink) = lowlinks.get_mut(&v)
-								&& let Some(&v_index) = indices.get(&v)
+							if let Some(&w_lowlink) = state.lowlinks.get(w)
+								&& let Some(v_lowlink) = state.lowlinks.get_mut(&v)
+								&& let Some(&v_index) = state.indices.get(&v)
 								&& w_lowlink < *v_lowlink
 								&& w_lowlink < v_index
 							{
@@ -398,7 +386,7 @@ impl DependencyGraph {
 
 					// Check if v is a root of an SCC
 					let is_scc_root = if let (Some(&v_index), Some(&v_lowlink)) =
-						(indices.get(&v), lowlinks.get(&v))
+						(state.indices.get(&v), state.lowlinks.get(&v))
 					{
 						v_index == v_lowlink
 					} else {
@@ -408,8 +396,8 @@ impl DependencyGraph {
 					if is_scc_root {
 						// Pop the SCC from the stack
 						let mut scc = Vec::new();
-						while let Some(w) = stack.pop() {
-							on_stack.remove(&w);
+						while let Some(w) = state.stack.pop() {
+							state.on_stack.remove(&w);
 							let is_root = w == v;
 							scc.push(w);
 							if is_root {
@@ -418,7 +406,7 @@ impl DependencyGraph {
 						}
 						// Sort SCC members alphabetically for determinism
 						scc.sort();
-						sccs.push(scc);
+						state.sccs.push(scc);
 					}
 				}
 			}
@@ -435,21 +423,17 @@ impl DependencyGraph {
 	///
 	/// A vector of cycle groups, where each group is a vector of package names.
 	pub fn cycle_groups(&self) -> Vec<Vec<String>> {
-		self.find_sccs()
+		self.sccs
 			.iter()
 			.filter(|scc| {
 				if scc.len() > 1 {
 					true
-				} else if scc.len() == 1 {
-					// Check for self-loop
-					let node = &scc[0];
-					if let Some(deps) = self.adjacency.get(node) {
-						deps.contains(node)
-					} else {
-						false
-					}
 				} else {
-					false
+					// scc.len() == 1 guaranteed by Tarjan's algorithm; check for self-loop
+					let node = &scc[0];
+					self.adjacency
+						.get(node)
+						.is_some_and(|deps| deps.contains(node))
 				}
 			})
 			.cloned()
@@ -468,11 +452,9 @@ impl DependencyGraph {
 	/// # Returns
 	///
 	/// A topologically sorted list where dependencies appear before dependents.
-	pub fn sort_leaves_first(&self) -> anyhow::Result<Vec<String>> {
-		// find_sccs() returns cached SCCs in reverse topological order (leaves first)
-		// Each SCC is already sorted alphabetically
-		let sccs = self.find_sccs();
-		Ok(sccs.iter().flatten().cloned().collect())
+	pub fn sort_leaves_first(&self) -> Vec<String> {
+		// SCCs are in reverse topological order (leaves first), each sorted alphabetically
+		self.sccs.iter().flatten().cloned().collect()
 	}
 
 	/// Topologically sorts all nodes in the graph with roots (dependents) first.
@@ -486,10 +468,10 @@ impl DependencyGraph {
 	/// # Returns
 	///
 	/// A topologically sorted list where dependents appear before dependencies.
-	pub fn sort_roots_first(&self) -> anyhow::Result<Vec<String>> {
-		let mut result = self.sort_leaves_first()?;
+	pub fn sort_roots_first(&self) -> Vec<String> {
+		let mut result = self.sort_leaves_first();
 		result.reverse();
-		Ok(result)
+		result
 	}
 }
 
@@ -732,7 +714,7 @@ mod tests {
 	#[test]
 	fn dependency_graph_empty() {
 		let graph = DependencyGraph::from_adjacency(std::collections::HashMap::new());
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 		assert!(sorted.is_empty());
 	}
 
@@ -741,7 +723,7 @@ mod tests {
 		let mut adjacency = std::collections::HashMap::new();
 		adjacency.insert("a".to_string(), vec![]);
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 		assert_eq!(sorted, vec!["a"]);
 	}
 
@@ -755,11 +737,11 @@ mod tests {
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		let leaves_first = graph.sort_leaves_first().unwrap();
+		let leaves_first = graph.sort_leaves_first();
 		// c is the leaf (no dependencies), then b, then a
 		assert_eq!(leaves_first, vec!["c", "b", "a"]);
 
-		let roots_first = graph.sort_roots_first().unwrap();
+		let roots_first = graph.sort_roots_first();
 		// a is the root (no dependents), then b, then c
 		assert_eq!(roots_first, vec!["a", "b", "c"]);
 	}
@@ -775,14 +757,14 @@ mod tests {
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		let leaves_first = graph.sort_leaves_first().unwrap();
+		let leaves_first = graph.sort_leaves_first();
 		// d must come first, then b and c (in either order), then a
 		assert_eq!(leaves_first[0], "d");
 		assert_eq!(leaves_first[3], "a");
 		assert!(leaves_first[1..3].contains(&"b".to_string()));
 		assert!(leaves_first[1..3].contains(&"c".to_string()));
 
-		let roots_first = graph.sort_roots_first().unwrap();
+		let roots_first = graph.sort_roots_first();
 		// a must come first, then b and c (in either order), then d
 		assert_eq!(roots_first[0], "a");
 		assert_eq!(roots_first[3], "d");
@@ -799,11 +781,11 @@ mod tests {
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		let leaves_first = graph.sort_leaves_first().unwrap();
+		let leaves_first = graph.sort_leaves_first();
 		// b (leaf) must come before a (dependent)
 		assert_eq!(leaves_first, vec!["b", "a"]);
 
-		let roots_first = graph.sort_roots_first().unwrap();
+		let roots_first = graph.sort_roots_first();
 		// Exact reverse of leaves_first
 		assert_eq!(roots_first, vec!["a", "b"]);
 	}
@@ -817,11 +799,9 @@ mod tests {
 		adjacency.insert("c".to_string(), vec!["a".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let result = graph.sort_leaves_first();
-		assert!(result.is_ok());
 
 		// All three nodes should be in the output, sorted alphabetically within their SCC
-		let sorted = result.unwrap();
+		let sorted = graph.sort_leaves_first();
 		assert_eq!(sorted.len(), 3);
 		assert!(sorted.contains(&"a".to_string()));
 		assert!(sorted.contains(&"b".to_string()));
@@ -835,7 +815,7 @@ mod tests {
 		adjacency.insert("a".to_string(), vec!["a".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 		assert_eq!(sorted, vec!["a"]);
 
 		// cycle_groups should detect the self-loop
@@ -852,7 +832,7 @@ mod tests {
 		adjacency.insert("b".to_string(), vec!["a".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// Both should appear, alphabetically sorted within SCC
 		assert_eq!(sorted.len(), 2);
@@ -874,7 +854,7 @@ mod tests {
 		adjacency.insert("d".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// d should come first (leaf), then b and c (cycle, alphabetical), then a (root)
 		assert_eq!(sorted[0], "d");
@@ -899,7 +879,7 @@ mod tests {
 		adjacency.insert("d".to_string(), vec!["c".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// All four should appear
 		assert_eq!(sorted.len(), 4);
@@ -930,7 +910,7 @@ mod tests {
 		adjacency.insert("c".to_string(), vec!["b".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// b and c should come before a
 		// b and c should be sorted alphabetically
@@ -969,9 +949,9 @@ mod tests {
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
 		// Run multiple times to verify determinism
-		let first = graph.sort_leaves_first().unwrap();
+		let first = graph.sort_leaves_first();
 		for _ in 0..10 {
-			let result = graph.sort_leaves_first().unwrap();
+			let result = graph.sort_leaves_first();
 			assert_eq!(result, first, "Sorting should be deterministic");
 		}
 
@@ -980,7 +960,7 @@ mod tests {
 	}
 
 	#[test]
-	fn dependency_graph_caches_sccs() {
+	fn dependency_graph_consistent_results() {
 		// Create a graph with cycles
 		let mut adjacency = std::collections::HashMap::new();
 		adjacency.insert("a".to_string(), vec!["b".to_string()]);
@@ -990,36 +970,16 @@ mod tests {
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		// Initially, cache should be empty
-		assert!(!graph.is_sccs_cached(), "Cache should be empty on creation");
-
-		// Call sort_leaves_first() which computes SCCs
-		let sorted1 = graph.sort_leaves_first().unwrap();
-
-		// Now cache should be populated
-		assert!(
-			graph.is_sccs_cached(),
-			"Cache should be populated after first call"
-		);
-
-		// Call cycle_groups() which should reuse cached SCCs (not recompute)
+		let sorted1 = graph.sort_leaves_first();
 		let cycles = graph.cycle_groups();
+		let sorted2 = graph.sort_leaves_first();
 
-		// Cache should still be populated (not cleared)
-		assert!(
-			graph.is_sccs_cached(),
-			"Cache should remain populated after cycle_groups"
-		);
-
-		// Call sort_leaves_first() again - should return same result using cache
-		let sorted2 = graph.sort_leaves_first().unwrap();
-
-		// Verify results are consistent
+		// Results must be consistent across repeated calls
 		assert_eq!(sorted1, sorted2);
 		assert_eq!(cycles.len(), 1);
 		assert_eq!(cycles[0], vec!["a", "b"]);
 
-		// Verify both d and the cycle are in the sorted output
+		// All nodes must appear in sorted output
 		assert!(sorted1.contains(&"d".to_string()));
 		assert!(sorted1.contains(&"a".to_string()));
 		assert!(sorted1.contains(&"b".to_string()));
@@ -1027,31 +987,17 @@ mod tests {
 	}
 
 	#[test]
-	fn dependency_graph_clone_preserves_cache() {
+	fn dependency_graph_clone_returns_same_results() {
 		// Create a graph
 		let mut adjacency = std::collections::HashMap::new();
 		adjacency.insert("a".to_string(), vec!["b".to_string()]);
 		adjacency.insert("b".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-
-		// Populate the cache
-		let _sorted = graph.sort_leaves_first().unwrap();
-		assert!(graph.is_sccs_cached(), "Cache should be populated");
-
-		// Clone the graph
 		let cloned = graph.clone();
 
-		// Cloned graph should also have the cache populated
-		assert!(
-			cloned.is_sccs_cached(),
-			"Cloned graph should preserve the cache"
-		);
-
-		// Both should return the same results
-		let original_sorted = graph.sort_leaves_first().unwrap();
-		let cloned_sorted = cloned.sort_leaves_first().unwrap();
-		assert_eq!(original_sorted, cloned_sorted);
+		// Clone must return the same results as the original
+		assert_eq!(graph.sort_leaves_first(), cloned.sort_leaves_first());
 	}
 
 	#[test]
@@ -1068,7 +1014,7 @@ mod tests {
 		adjacency.insert("lib".to_string(), vec!["react".to_string()]); // External
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// Should only include internal nodes, external deps are ignored
 		assert_eq!(sorted.len(), 2);
@@ -1096,7 +1042,7 @@ mod tests {
 		adjacency.insert("d".to_string(), vec!["c".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// c,d (SCC2) should come before a,b (SCC1)
 		let c_idx = sorted.iter().position(|n| n == "c").unwrap();
@@ -1120,7 +1066,7 @@ mod tests {
 		adjacency.insert("app".to_string(), vec!["standalone".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// standalone has no deps, should come first
 		assert_eq!(sorted[0], "standalone");
@@ -1145,7 +1091,7 @@ mod tests {
 		adjacency.insert("g".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// g is the deepest leaf
 		assert_eq!(sorted[0], "g");
@@ -1178,7 +1124,7 @@ mod tests {
 		adjacency.insert("c".to_string(), vec!["a".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// All three in one SCC, alphabetically sorted
 		assert_eq!(sorted, vec!["a", "b", "c"]);
@@ -1199,7 +1145,7 @@ mod tests {
 		adjacency.insert("c".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// c must come first
 		assert_eq!(sorted[0], "c");
@@ -1219,7 +1165,7 @@ mod tests {
 		adjacency.insert("c".to_string(), vec!["a".to_string()]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// All in one SCC
 		assert_eq!(sorted.len(), 3);
@@ -1241,7 +1187,7 @@ mod tests {
 		adjacency.insert("f".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// Should be f, e, d, c, b, a (reverse order)
 		assert_eq!(sorted, vec!["f", "e", "d", "c", "b", "a"]);
@@ -1269,7 +1215,7 @@ mod tests {
 		adjacency.insert("e".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// All leaves should come before a
 		let a_idx = sorted.iter().position(|n| n == "a").unwrap();
@@ -1297,7 +1243,7 @@ mod tests {
 		adjacency.insert("f".to_string(), vec![]);
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// Verify ordering within each chain
 		let a_idx = sorted.iter().position(|n| n == "a").unwrap();
@@ -1318,31 +1264,16 @@ mod tests {
 	fn strongconnect_handles_missing_node_in_adjacency() {
 		// Test: strongconnect called on node not in adjacency map
 		let adjacency = std::collections::HashMap::new();
-		let graph = DependencyGraph::from_adjacency(adjacency);
-
-		let mut index = 0;
-		let mut indices = std::collections::HashMap::new();
-		let mut lowlinks = std::collections::HashMap::new();
-		let mut on_stack = std::collections::HashSet::new();
-		let mut stack = Vec::new();
-		let mut sccs = Vec::new();
+		let mut state = TarjanState::new();
 
 		// Call strongconnect with a node that doesn't exist in the graph
-		graph.strongconnect(
-			"nonexistent",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		DependencyGraph::strongconnect(&adjacency, "nonexistent", &mut state);
 
 		// Should create SCC with just this node (defensive behavior)
-		assert_eq!(sccs.len(), 1);
-		assert_eq!(sccs[0], vec!["nonexistent"]);
-		assert!(indices.contains_key("nonexistent"));
-		assert!(lowlinks.contains_key("nonexistent"));
+		assert_eq!(state.sccs.len(), 1);
+		assert_eq!(state.sccs[0], vec!["nonexistent"]);
+		assert!(state.indices.contains_key("nonexistent"));
+		assert!(state.lowlinks.contains_key("nonexistent"));
 	}
 
 	#[test]
@@ -1352,34 +1283,19 @@ mod tests {
 		adjacency.insert("a".to_string(), vec!["b".to_string()]);
 		adjacency.insert("b".to_string(), vec![]);
 
-		let graph = DependencyGraph::from_adjacency(adjacency);
-
-		let mut index = 0;
-		let mut indices = std::collections::HashMap::new();
-		let mut lowlinks = std::collections::HashMap::new();
-		let mut on_stack = std::collections::HashSet::new();
-		let mut stack = Vec::new();
-		let mut sccs = Vec::new();
+		let mut state = TarjanState::new();
 
 		// Pre-populate indices for "b" but NOT lowlinks (violates invariant)
-		indices.insert("b".to_string(), 99);
-		on_stack.insert("b".to_string());
+		state.indices.insert("b".to_string(), 99);
+		state.on_stack.insert("b".to_string());
 
 		// Call strongconnect on "a" which depends on "b"
-		// The defensive check `if let Some(&w_lowlink) = lowlinks.get(w)` will fail for "b"
-		graph.strongconnect(
-			"a",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		// The defensive check `if let Some(&w_lowlink) = state.lowlinks.get(w)` will fail for "b"
+		DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
 		// Should still complete without panic - defensive code skips the update
-		assert!(indices.contains_key("a"));
-		assert!(lowlinks.contains_key("a"));
+		assert!(state.indices.contains_key("a"));
+		assert!(state.lowlinks.contains_key("a"));
 	}
 
 	#[test]
@@ -1389,41 +1305,18 @@ mod tests {
 		adjacency.insert("a".to_string(), vec!["b".to_string()]);
 		adjacency.insert("b".to_string(), vec![]);
 
-		let graph = DependencyGraph::from_adjacency(adjacency);
-
-		let mut index = 0;
-		let mut indices = std::collections::HashMap::new();
-		let mut lowlinks = std::collections::HashMap::new();
-		let mut on_stack = std::collections::HashSet::new();
-		let mut stack = Vec::new();
-		let mut sccs = Vec::new();
+		let mut state = TarjanState::new();
 
 		// First call - normal processing
-		graph.strongconnect(
-			"a",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
-		let initial_sccs_count = sccs.len();
+		let initial_sccs_count = state.sccs.len();
 
 		// Second call on already-visited node - should skip
-		graph.strongconnect(
-			"a",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
 		// Should not create duplicate SCC
-		assert_eq!(sccs.len(), initial_sccs_count);
+		assert_eq!(state.sccs.len(), initial_sccs_count);
 	}
 
 	#[test]
@@ -1434,29 +1327,14 @@ mod tests {
 		adjacency.insert("b".to_string(), vec![]);
 		adjacency.insert("c".to_string(), vec![]);
 
-		let graph = DependencyGraph::from_adjacency(adjacency);
-
-		let mut index = 0;
-		let mut indices = std::collections::HashMap::new();
-		let mut lowlinks = std::collections::HashMap::new();
-		let mut on_stack = std::collections::HashSet::new();
-		let mut stack = Vec::new();
-		let mut sccs = Vec::new();
+		let mut state = TarjanState::new();
 
 		// Process normally - "b" will be visited and removed from stack before "c"
-		graph.strongconnect(
-			"a",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
 		// Should handle cross-edges where dependency is already processed
-		// The `if !on_stack.contains(w)` branch is exercised
-		assert!(sccs.len() >= 1);
+		// The `if !state.on_stack.contains(w)` branch is exercised
+		assert!(state.sccs.len() >= 1);
 	}
 
 	#[test]
@@ -1468,28 +1346,13 @@ mod tests {
 		adjacency.insert("b".to_string(), vec!["c".to_string()]);
 		adjacency.insert("c".to_string(), vec!["b".to_string()]); // Back edge
 
-		let graph = DependencyGraph::from_adjacency(adjacency);
+		let mut state = TarjanState::new();
 
-		let mut index = 0;
-		let mut indices = std::collections::HashMap::new();
-		let mut lowlinks = std::collections::HashMap::new();
-		let mut on_stack = std::collections::HashSet::new();
-		let mut stack = Vec::new();
-		let mut sccs = Vec::new();
-
-		graph.strongconnect(
-			"a",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
 		// The condition `w_lowlink < *v_lowlink` will be false in some cases
 		// Defensive code handles this gracefully
-		assert!(sccs.len() > 0);
+		assert!(!state.sccs.is_empty());
 	}
 
 	#[test]
@@ -1504,32 +1367,17 @@ mod tests {
 			],
 		);
 
-		let graph = DependencyGraph::from_adjacency(adjacency);
+		let mut state = TarjanState::new();
 
-		let mut index = 0;
-		let mut indices = std::collections::HashMap::new();
-		let mut lowlinks = std::collections::HashMap::new();
-		let mut on_stack = std::collections::HashSet::new();
-		let mut stack = Vec::new();
-		let mut sccs = Vec::new();
-
-		graph.strongconnect(
-			"a",
-			&mut index,
-			&mut indices,
-			&mut lowlinks,
-			&mut on_stack,
-			&mut stack,
-			&mut sccs,
-		);
+		DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
 		// Should handle self-loop and skip external dependency
-		assert_eq!(sccs.len(), 1);
-		assert_eq!(sccs[0], vec!["a"]);
+		assert_eq!(state.sccs.len(), 1);
+		assert_eq!(state.sccs[0], vec!["a"]);
 
 		// "external" should not appear in any data structures
-		assert!(!indices.contains_key("external"));
-		assert!(!sccs[0].contains(&"external".to_string()));
+		assert!(!state.indices.contains_key("external"));
+		assert!(!state.sccs[0].contains(&"external".to_string()));
 	}
 
 	#[test]
@@ -1542,13 +1390,13 @@ mod tests {
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		let leaves_first = graph.sort_leaves_first().unwrap();
+		let leaves_first = graph.sort_leaves_first();
 		// c first, then a and b in either order
 		assert_eq!(leaves_first[0], "c");
 		assert!(leaves_first[1..3].contains(&"a".to_string()));
 		assert!(leaves_first[1..3].contains(&"b".to_string()));
 
-		let roots_first = graph.sort_roots_first().unwrap();
+		let roots_first = graph.sort_roots_first();
 		// a and b first (in either order), then c
 		assert_eq!(roots_first[2], "c");
 		assert!(roots_first[0..2].contains(&"a".to_string()));
@@ -1566,7 +1414,7 @@ mod tests {
 
 		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		let leaves_first = graph.sort_leaves_first().unwrap();
+		let leaves_first = graph.sort_leaves_first();
 		// b must come before a, d must come before c
 		let b_index = leaves_first.iter().position(|n| n == "b").unwrap();
 		let a_index = leaves_first.iter().position(|n| n == "a").unwrap();
@@ -1575,7 +1423,7 @@ mod tests {
 		assert!(b_index < a_index, "b should come before a");
 		assert!(d_index < c_index, "d should come before c");
 
-		let roots_first = graph.sort_roots_first().unwrap();
+		let roots_first = graph.sort_roots_first();
 		// Exact reverse: a before b, c before d
 		let a_index = roots_first.iter().position(|n| n == "a").unwrap();
 		let b_index = roots_first.iter().position(|n| n == "b").unwrap();
@@ -1607,7 +1455,7 @@ mod tests {
 		let graph = build_dependency_graph(&projects).unwrap();
 
 		// Single package with no dependencies should result in trivial sorting
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 		assert_eq!(sorted, vec!["test-package"]);
 	}
 
@@ -1644,7 +1492,7 @@ mod tests {
 		let graph = build_dependency_graph(&projects).unwrap();
 
 		// app depends on lib, so lib should come before app
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// lib should be published before app (lib is a dependency of app)
 		let lib_index = sorted.iter().position(|n| n == "lib").unwrap();
@@ -1694,7 +1542,7 @@ mod tests {
 		assert!(!graph.adjacency.contains_key("react"));
 
 		// Verify topological sort still works correctly
-		let sorted = graph.sort_leaves_first().unwrap();
+		let sorted = graph.sort_leaves_first();
 
 		// react should not appear in the sorted output
 		assert!(!sorted.contains(&"react".to_string()));

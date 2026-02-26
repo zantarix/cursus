@@ -10,6 +10,21 @@ fn run_chronicle(args: &[&str], cwd: &Path) -> anyhow::Result<std::process::Exit
 	chronicle::run(args_with_bin, cwd)
 }
 
+/// Helper to run chronicle as a subprocess, capturing stdout and stderr.
+///
+/// Returns `(success, stdout, stderr)`.
+fn run_chronicle_subprocess(args: &[&str], cwd: &Path) -> (bool, String, String) {
+	let bin = env!("CARGO_BIN_EXE_chronicle");
+	let output = std::process::Command::new(bin)
+		.args(args)
+		.current_dir(cwd)
+		.output()
+		.expect("Failed to spawn chronicle subprocess");
+	let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+	let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+	(output.status.success(), stdout, stderr)
+}
+
 #[test]
 fn publish_with_no_config_fails() {
 	let dir = tempfile::tempdir().unwrap();
@@ -486,8 +501,80 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	)
 	.unwrap();
 
+	// Run as subprocess to capture stdout/stderr output
+	let (success, stdout, stderr) =
+		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
 	// Should succeed despite circular dependencies
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
-	assert!(result.is_ok());
-	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+	assert!(success, "Expected success, stderr: {stderr}");
+
+	// Should warn about circular dependencies on stderr
+	assert!(
+		stderr.contains("circular dependencies detected between"),
+		"Expected cycle warning in stderr, got: {stderr}"
+	);
+	assert!(
+		stderr.contains("@test/types") && stderr.contains("@test/utils"),
+		"Expected cycle members in warning, got: {stderr}"
+	);
+
+	// @test/app (dependent) must appear after @test/types and @test/utils (the cycle group)
+	let pos_types = stdout
+		.find("@test/types")
+		.expect("@test/types not in stdout");
+	let pos_utils = stdout
+		.find("@test/utils")
+		.expect("@test/utils not in stdout");
+	let pos_app = stdout.find("@test/app").expect("@test/app not in stdout");
+	assert!(
+		pos_types < pos_app && pos_utils < pos_app,
+		"Expected @test/types and @test/utils before @test/app in stdout"
+	);
+}
+
+#[test]
+fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n\n[global]\ndisable_dependency_cycle_warnings = true\n",
+	)
+	.unwrap();
+
+	// Create root with workspaces
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	// Create two packages with a circular dependency between them
+	std::fs::create_dir_all(dir.path().join("packages/alpha")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/alpha/package.json"),
+		r#"{"name": "@test/alpha", "version": "1.0.0", "dependencies": {"@test/beta": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/beta")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/beta/package.json"),
+		r#"{"name": "@test/beta", "version": "1.0.0", "dependencies": {"@test/alpha": "1.0.0"}}"#,
+	)
+	.unwrap();
+
+	let (success, _stdout, stderr) =
+		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	// Should succeed
+	assert!(success, "Expected success, stderr: {stderr}");
+
+	// Should NOT emit any cycle warning when disable_dependency_cycle_warnings = true
+	assert!(
+		!stderr.contains("circular dependencies detected between"),
+		"Expected no cycle warning in stderr, got: {stderr}"
+	);
 }

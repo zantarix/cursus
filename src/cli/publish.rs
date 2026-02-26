@@ -59,7 +59,7 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 	}
 
 	// Sort all projects in leaves-first order (dependencies before dependents)
-	let all_sorted_names = graph.sort_leaves_first()?;
+	let all_sorted_names = graph.sort_leaves_first();
 
 	// Filter to only include selected projects, maintaining sorted order
 	let selected_names_set: std::collections::HashSet<_> =
