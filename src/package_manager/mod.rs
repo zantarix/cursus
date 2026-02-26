@@ -4,8 +4,6 @@
 //! allowing Chronicle to work with various ecosystems (npm, Cargo, etc.) through
 //! a unified interface.
 
-use anyhow::Context;
-
 mod cargo;
 mod npm;
 
@@ -227,74 +225,66 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 
 /// A directed graph for dependency ordering.
 ///
-/// Stores edges in the form `(dependent, dependency)` meaning the first node
-/// depends on the second.
+/// Stores an adjacency list where each node maps to its dependencies,
+/// along with in-degree counts for efficient topological sorting.
 #[derive(Debug, Clone)]
 pub struct DependencyGraph {
-	edges: Vec<(String, String)>,
+	/// Adjacency list: dependent -> [dependencies]
+	adjacency: std::collections::HashMap<String, Vec<String>>,
+	/// How many dependents point to each node
+	in_degree: std::collections::HashMap<String, usize>,
 }
 
 impl DependencyGraph {
-	/// Creates a new dependency graph from a list of edges.
+	/// Creates a new dependency graph from an adjacency list.
+	///
+	/// The adjacency list maps each node to its list of dependencies.
+	/// In-degree counts are computed automatically from the adjacency list.
+	///
+	/// Only nodes that appear as keys in the adjacency list are part of the graph.
+	/// Dependencies that don't appear as keys are considered external and are tracked
+	/// in the in-degree map but not added to the adjacency list.
 	///
 	/// # Arguments
 	///
-	/// * `edges` - Dependency edges in the form `(dependent, dependency)`.
-	pub fn from_edges(edges: Vec<(String, String)>) -> Self {
-		Self { edges }
+	/// * `adjacency` - Adjacency list mapping `dependent -> [dependencies]`.
+	pub fn from_adjacency(adjacency: std::collections::HashMap<String, Vec<String>>) -> Self {
+		// Compute in-degree for each node
+		let mut in_degree: std::collections::HashMap<String, usize> =
+			adjacency.keys().map(|k| (k.clone(), 0)).collect();
+
+		// Count in-degrees for all dependencies
+		for dependencies in adjacency.values() {
+			for dep in dependencies {
+				*in_degree.entry(dep.clone()).or_insert(0) += 1;
+			}
+		}
+
+		Self {
+			adjacency,
+			in_degree,
+		}
 	}
 
-	/// Returns all unique nodes in the graph.
-	fn all_nodes(&self) -> std::collections::HashSet<String> {
-		self.edges
-			.iter()
-			.flat_map(|(a, b)| [a.clone(), b.clone()])
-			.collect()
-	}
-
-	/// Topologically sorts nodes with leaves (dependencies) first.
+	/// Topologically sorts all nodes in the graph with roots (dependents) first.
 	///
-	/// This ordering ensures that dependencies are processed before their dependents,
-	/// which is appropriate for operations like publishing packages (publish
-	/// dependencies before dependents).
-	///
-	/// Nodes not in the graph are included at the beginning of the result.
-	///
-	/// # Arguments
-	///
-	/// * `names` - The set of names to sort. Names not in the graph edges are
-	///   included at the start of the result.
+	/// This ordering ensures that dependents are processed before their dependencies,
+	/// which might be useful for operations like uninstalling (remove dependents
+	/// before dependencies).
 	///
 	/// # Returns
 	///
-	/// A topologically sorted list where dependencies appear before dependents.
+	/// A topologically sorted list where dependents appear before dependencies.
 	///
 	/// # Errors
 	///
-	/// Returns an error if the graph contains cycles or has inconsistent edges.
-	pub fn sort_leaves_first(&self, names: &[String]) -> anyhow::Result<Vec<String>> {
+	/// Returns an error if the graph contains cycles.
+	pub fn sort_roots_first(&self) -> anyhow::Result<Vec<String>> {
 		// Kahn's algorithm for topological sort
-		let nodes_in_graph = self.all_nodes();
-		let mut in_degree: std::collections::HashMap<String, usize> =
-			nodes_in_graph.iter().map(|n| (n.clone(), 0)).collect();
+		// Clone in_degree since Kahn's algorithm is destructive
+		let mut in_degree = self.in_degree.clone();
 
-		// Calculate in-degrees (how many things depend on each node)
-		for (_, dependency) in &self.edges {
-			*in_degree
-				.get_mut(dependency)
-				.with_context(|| format!("Edge references unknown node: {dependency}"))? += 1;
-		}
-
-		// Build adjacency list (dependent -> [dependencies])
-		let mut adj: std::collections::HashMap<String, Vec<String>> =
-			nodes_in_graph.iter().map(|n| (n.clone(), vec![])).collect();
-		for (dependent, dependency) in &self.edges {
-			adj.get_mut(dependent)
-				.with_context(|| format!("Edge references unknown node: {dependent}"))?
-				.push(dependency.clone());
-		}
-
-		// Start with nodes that have no incoming edges (dependents with no dependencies in this graph)
+		// Start with nodes that have no incoming edges (roots)
 		let mut queue: Vec<String> = in_degree
 			.iter()
 			.filter(|(_, deg)| **deg == 0)
@@ -307,68 +297,45 @@ impl DependencyGraph {
 			result.push(node.clone());
 
 			// For each dependency of this node, reduce its in-degree
-			if let Some(dependencies) = adj.get(&node) {
+			if let Some(dependencies) = self.adjacency.get(&node) {
 				for dep in dependencies {
-					let degree = in_degree
-						.get_mut(dep)
-						.with_context(|| format!("Edge references unknown node: {dep}"))?;
-					*degree -= 1;
-					if *degree == 0 {
-						queue.push(dep.clone());
+					if let Some(degree) = in_degree.get_mut(dep) {
+						*degree -= 1;
+						if *degree == 0 {
+							queue.push(dep.clone());
+						}
 					}
 				}
 			}
 		}
 
 		// Check for cycles
-		if result.len() != nodes_in_graph.len() {
+		if result.len() != self.adjacency.len() {
 			anyhow::bail!("Dependency graph contains a cycle");
 		}
 
-		// Reverse to get leaves (dependencies) first
-		result.reverse();
-
-		// Prepend nodes that aren't in the graph at all
-		let result_set: std::collections::HashSet<_> = result.iter().cloned().collect();
-		let mut final_result: Vec<String> = names
-			.iter()
-			.filter(|n| !result_set.contains(*n))
-			.cloned()
-			.collect();
-		final_result.extend(result);
-
-		Ok(final_result)
+		Ok(result)
 	}
 
-	/// Topologically sorts nodes with roots (dependents) first.
+	/// Topologically sorts all nodes in the graph with leaves (dependencies) first.
 	///
-	/// This ordering ensures that dependents are processed before their dependencies,
-	/// which might be useful for operations like uninstalling (remove dependents
-	/// before dependencies).
+	/// This ordering ensures that dependencies are processed before their dependents,
+	/// which is appropriate for operations like publishing packages (publish
+	/// dependencies before dependents).
 	///
-	/// Nodes not in the graph are included at the beginning of the result.
-	///
-	/// # Arguments
-	///
-	/// * `names` - The set of names to sort. Names not in the graph edges are
-	///   included at the start of the result.
+	/// This is the exact reverse of `sort_roots_first`.
 	///
 	/// # Returns
 	///
-	/// A topologically sorted list where dependents appear before dependencies.
+	/// A topologically sorted list where dependencies appear before dependents.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the graph contains cycles.
-	pub fn sort_roots_first(&self, names: &[String]) -> anyhow::Result<Vec<String>> {
-		// Simply reverse the edges and call sort_leaves_first
-		let reversed_edges: Vec<_> = self
-			.edges
-			.iter()
-			.map(|(a, b)| (b.clone(), a.clone()))
-			.collect();
-		let reversed_graph = DependencyGraph::from_edges(reversed_edges);
-		reversed_graph.sort_leaves_first(names)
+	pub fn sort_leaves_first(&self) -> anyhow::Result<Vec<String>> {
+		let mut result = self.sort_roots_first()?;
+		result.reverse();
+		Ok(result)
 	}
 }
 
@@ -436,7 +403,7 @@ pub fn enumerate_projects(
 /// Builds a dependency graph for the given projects.
 ///
 /// This function uses cached dependency names from each project to construct
-/// the dependency graph. An edge `(A, B)` means project A depends on project B.
+/// the dependency graph. The adjacency list maps each project to its dependencies.
 ///
 /// # Arguments
 ///
@@ -448,17 +415,19 @@ pub fn enumerate_projects(
 pub fn build_dependency_graph(projects: &[Project]) -> anyhow::Result<DependencyGraph> {
 	let project_names: std::collections::HashSet<_> = projects.iter().map(|p| p.name()).collect();
 
-	let mut edges = Vec::new();
+	let mut adjacency = std::collections::HashMap::new();
 	for project in projects {
+		let mut dependencies = Vec::new();
 		for dep_name in project.dependency_names() {
-			// Only create edges for intra-workspace dependencies
+			// Only include intra-workspace dependencies
 			if project_names.contains(dep_name.as_str()) {
-				edges.push((project.name().to_string(), dep_name.clone()));
+				dependencies.push(dep_name.clone());
 			}
 		}
+		adjacency.insert(project.name().to_string(), dependencies);
 	}
 
-	Ok(DependencyGraph::from_edges(edges))
+	Ok(DependencyGraph::from_adjacency(adjacency))
 }
 
 #[cfg(test)]
@@ -608,34 +577,35 @@ mod tests {
 
 	#[test]
 	fn dependency_graph_empty() {
-		let graph = DependencyGraph::from_edges(vec![]);
-		let sorted = graph.sort_leaves_first(&[]).unwrap();
+		let graph = DependencyGraph::from_adjacency(std::collections::HashMap::new());
+		let sorted = graph.sort_leaves_first().unwrap();
 		assert!(sorted.is_empty());
 	}
 
 	#[test]
-	fn dependency_graph_single_node_no_edges() {
-		let graph = DependencyGraph::from_edges(vec![]);
-		let names = vec!["a".to_string()];
-		let sorted = graph.sort_leaves_first(&names).unwrap();
+	fn dependency_graph_single_node() {
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec![]);
+		let graph = DependencyGraph::from_adjacency(adjacency);
+		let sorted = graph.sort_leaves_first().unwrap();
 		assert_eq!(sorted, vec!["a"]);
 	}
 
 	#[test]
 	fn dependency_graph_linear_chain() {
 		// a -> b -> c (a depends on b, b depends on c)
-		let edges = vec![
-			("a".to_string(), "b".to_string()),
-			("b".to_string(), "c".to_string()),
-		];
-		let graph = DependencyGraph::from_edges(edges);
-		let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec!["c".to_string()]);
+		adjacency.insert("c".to_string(), vec![]);
 
-		let leaves_first = graph.sort_leaves_first(&names).unwrap();
+		let graph = DependencyGraph::from_adjacency(adjacency);
+
+		let leaves_first = graph.sort_leaves_first().unwrap();
 		// c is the leaf (no dependencies), then b, then a
 		assert_eq!(leaves_first, vec!["c", "b", "a"]);
 
-		let roots_first = graph.sort_roots_first(&names).unwrap();
+		let roots_first = graph.sort_roots_first().unwrap();
 		// a is the root (no dependents), then b, then c
 		assert_eq!(roots_first, vec!["a", "b", "c"]);
 	}
@@ -643,28 +613,22 @@ mod tests {
 	#[test]
 	fn dependency_graph_diamond() {
 		// a -> b, a -> c, b -> d, c -> d (diamond: a depends on b and c, both depend on d)
-		let edges = vec![
-			("a".to_string(), "b".to_string()),
-			("a".to_string(), "c".to_string()),
-			("b".to_string(), "d".to_string()),
-			("c".to_string(), "d".to_string()),
-		];
-		let graph = DependencyGraph::from_edges(edges);
-		let names = vec![
-			"a".to_string(),
-			"b".to_string(),
-			"c".to_string(),
-			"d".to_string(),
-		];
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string(), "c".to_string()]);
+		adjacency.insert("b".to_string(), vec!["d".to_string()]);
+		adjacency.insert("c".to_string(), vec!["d".to_string()]);
+		adjacency.insert("d".to_string(), vec![]);
 
-		let leaves_first = graph.sort_leaves_first(&names).unwrap();
+		let graph = DependencyGraph::from_adjacency(adjacency);
+
+		let leaves_first = graph.sort_leaves_first().unwrap();
 		// d must come first, then b and c (in either order), then a
 		assert_eq!(leaves_first[0], "d");
 		assert_eq!(leaves_first[3], "a");
 		assert!(leaves_first[1..3].contains(&"b".to_string()));
 		assert!(leaves_first[1..3].contains(&"c".to_string()));
 
-		let roots_first = graph.sort_roots_first(&names).unwrap();
+		let roots_first = graph.sort_roots_first().unwrap();
 		// a must come first, then b and c (in either order), then d
 		assert_eq!(roots_first[0], "a");
 		assert_eq!(roots_first[3], "d");
@@ -673,32 +637,33 @@ mod tests {
 	}
 
 	#[test]
-	fn dependency_graph_disconnected_nodes() {
-		// a -> b, c is disconnected
-		let edges = vec![("a".to_string(), "b".to_string())];
-		let graph = DependencyGraph::from_edges(edges);
-		let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+	fn dependency_graph_simple_dependency() {
+		// a -> b (a depends on b)
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec![]);
 
-		let leaves_first = graph.sort_leaves_first(&names).unwrap();
-		// c (not in graph) comes first, then b (leaf), then a
-		assert_eq!(leaves_first, vec!["c", "b", "a"]);
+		let graph = DependencyGraph::from_adjacency(adjacency);
 
-		let roots_first = graph.sort_roots_first(&names).unwrap();
-		// c (not in graph) comes first, then a (root), then b
-		assert_eq!(roots_first, vec!["c", "a", "b"]);
+		let leaves_first = graph.sort_leaves_first().unwrap();
+		// b (leaf) must come before a (dependent)
+		assert_eq!(leaves_first, vec!["b", "a"]);
+
+		let roots_first = graph.sort_roots_first().unwrap();
+		// Exact reverse of leaves_first
+		assert_eq!(roots_first, vec!["a", "b"]);
 	}
 
 	#[test]
 	fn dependency_graph_cycle_returns_error() {
 		// a -> b -> c -> a (cycle)
-		let edges = vec![
-			("a".to_string(), "b".to_string()),
-			("b".to_string(), "c".to_string()),
-			("c".to_string(), "a".to_string()),
-		];
-		let graph = DependencyGraph::from_edges(edges);
-		let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-		let result = graph.sort_leaves_first(&names);
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec!["c".to_string()]);
+		adjacency.insert("c".to_string(), vec!["a".to_string()]);
+
+		let graph = DependencyGraph::from_adjacency(adjacency);
+		let result = graph.sort_leaves_first();
 		assert!(result.is_err());
 		assert!(
 			result
@@ -711,24 +676,59 @@ mod tests {
 	#[test]
 	fn dependency_graph_multiple_roots() {
 		// a -> c, b -> c (two roots, one leaf)
-		let edges = vec![
-			("a".to_string(), "c".to_string()),
-			("b".to_string(), "c".to_string()),
-		];
-		let graph = DependencyGraph::from_edges(edges);
-		let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["c".to_string()]);
+		adjacency.insert("b".to_string(), vec!["c".to_string()]);
+		adjacency.insert("c".to_string(), vec![]);
 
-		let leaves_first = graph.sort_leaves_first(&names).unwrap();
+		let graph = DependencyGraph::from_adjacency(adjacency);
+
+		let leaves_first = graph.sort_leaves_first().unwrap();
 		// c first, then a and b in either order
 		assert_eq!(leaves_first[0], "c");
 		assert!(leaves_first[1..3].contains(&"a".to_string()));
 		assert!(leaves_first[1..3].contains(&"b".to_string()));
 
-		let roots_first = graph.sort_roots_first(&names).unwrap();
+		let roots_first = graph.sort_roots_first().unwrap();
 		// a and b first (in either order), then c
 		assert_eq!(roots_first[2], "c");
 		assert!(roots_first[0..2].contains(&"a".to_string()));
 		assert!(roots_first[0..2].contains(&"b".to_string()));
+	}
+
+	#[test]
+	fn dependency_graph_disconnected_subgraphs() {
+		// Two independent chains: a -> b, c -> d
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec![]);
+		adjacency.insert("c".to_string(), vec!["d".to_string()]);
+		adjacency.insert("d".to_string(), vec![]);
+
+		let graph = DependencyGraph::from_adjacency(adjacency);
+
+		let leaves_first = graph.sort_leaves_first().unwrap();
+		// b must come before a, d must come before c
+		let b_index = leaves_first.iter().position(|n| n == "b").unwrap();
+		let a_index = leaves_first.iter().position(|n| n == "a").unwrap();
+		let d_index = leaves_first.iter().position(|n| n == "d").unwrap();
+		let c_index = leaves_first.iter().position(|n| n == "c").unwrap();
+		assert!(b_index < a_index, "b should come before a");
+		assert!(d_index < c_index, "d should come before c");
+
+		let roots_first = graph.sort_roots_first().unwrap();
+		// Exact reverse: a before b, c before d
+		let a_index = roots_first.iter().position(|n| n == "a").unwrap();
+		let b_index = roots_first.iter().position(|n| n == "b").unwrap();
+		let c_index = roots_first.iter().position(|n| n == "c").unwrap();
+		let d_index = roots_first.iter().position(|n| n == "d").unwrap();
+		assert!(a_index < b_index, "a should come before b");
+		assert!(c_index < d_index, "c should come before d");
+
+		// Verify it's truly the exact reverse
+		let mut reversed_leaves = leaves_first.clone();
+		reversed_leaves.reverse();
+		assert_eq!(roots_first, reversed_leaves);
 	}
 
 	#[test]
@@ -748,8 +748,7 @@ mod tests {
 		let graph = build_dependency_graph(&projects).unwrap();
 
 		// Single package with no dependencies should result in trivial sorting
-		let names: Vec<String> = projects.iter().map(|p| p.name().to_string()).collect();
-		let sorted = graph.sort_leaves_first(&names).unwrap();
+		let sorted = graph.sort_leaves_first().unwrap();
 		assert_eq!(sorted, vec!["test-package"]);
 	}
 
@@ -786,10 +785,63 @@ mod tests {
 		let graph = build_dependency_graph(&projects).unwrap();
 
 		// app depends on lib, so lib should come before app
-		let names: Vec<String> = projects.iter().map(|p| p.name().to_string()).collect();
-		let sorted = graph.sort_leaves_first(&names).unwrap();
+		let sorted = graph.sort_leaves_first().unwrap();
 
 		// lib should be published before app (lib is a dependency of app)
+		let lib_index = sorted.iter().position(|n| n == "lib").unwrap();
+		let app_index = sorted.iter().position(|n| n == "app").unwrap();
+		assert!(lib_index < app_index, "lib should come before app");
+	}
+
+	#[test]
+	fn build_dependency_graph_excludes_external_dependencies() {
+		let dir = tempfile::tempdir().unwrap();
+
+		// Create workspace where app depends on both workspace lib and external react
+		std::fs::write(
+			dir.path().join("package.json"),
+			r#"{"name": "root", "version": "0.1.0", "workspaces": ["packages/*"]}"#,
+		)
+		.unwrap();
+
+		std::fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
+		std::fs::write(
+			dir.path().join("packages/lib/package.json"),
+			r#"{"name": "lib", "version": "0.1.0"}"#,
+		)
+		.unwrap();
+
+		std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
+		std::fs::write(
+			dir.path().join("packages/app/package.json"),
+			r#"{"name": "app", "version": "0.1.0", "dependencies": {"lib": "0.1.0", "react": "^18.0.0"}}"#,
+		)
+		.unwrap();
+
+		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
+			NpmConfig::default(),
+			dir.path().to_path_buf(),
+		));
+		let projects = enumerate_projects([adapter]).unwrap();
+		let graph = build_dependency_graph(&projects).unwrap();
+
+		// Verify that app's adjacency list only includes lib, not react
+		assert_eq!(
+			graph.adjacency.get("app").unwrap(),
+			&vec!["lib".to_string()]
+		);
+
+		// Verify react is not in the graph at all
+		assert!(!graph.adjacency.contains_key("react"));
+		assert!(!graph.in_degree.contains_key("react"));
+
+		// Verify topological sort still works correctly
+		let sorted = graph.sort_leaves_first().unwrap();
+
+		// react should not appear in the sorted output
+		assert!(!sorted.contains(&"react".to_string()));
+
+		// lib should come before app
 		let lib_index = sorted.iter().position(|n| n == "lib").unwrap();
 		let app_index = sorted.iter().position(|n| n == "app").unwrap();
 		assert!(lib_index < app_index, "lib should come before app");

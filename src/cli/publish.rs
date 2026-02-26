@@ -41,12 +41,16 @@ pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow:
 	// We need the full graph to correctly order the selected subset
 	let graph = package_manager::build_dependency_graph(&projects)?;
 
-	// Sort selected projects in leaves-first order (dependencies before dependents)
-	let selected_names: Vec<String> = selected_projects
-		.iter()
-		.map(|p| p.name().to_string())
+	// Sort all projects in leaves-first order (dependencies before dependents)
+	let all_sorted_names = graph.sort_leaves_first()?;
+
+	// Filter to only include selected projects, maintaining sorted order
+	let selected_names_set: std::collections::HashSet<_> =
+		selected_projects.iter().map(|p| p.name()).collect();
+	let sorted_names: Vec<_> = all_sorted_names
+		.into_iter()
+		.filter(|name| selected_names_set.contains(name.as_str()))
 		.collect();
-	let sorted_names = graph.sort_leaves_first(&selected_names)?;
 
 	// Reorder selected_projects to match sorted_names
 	let mut sorted_projects = Vec::new();
