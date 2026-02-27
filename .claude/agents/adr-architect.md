@@ -1,6 +1,30 @@
 ---
 name: adr-architect
-description: "Use this agent when the user requests creation of a new Architecture Decision Record (ADR), needs to document a significant architectural decision, asks to formalize a design choice, or when a discussion has led to an important technical decision that should be preserved. Examples:\\n\\n<example>\\nContext: User has just made a significant architectural decision about how to handle version bumping.\\nuser: \"I think we should aggregate changesets by package and apply the highest change type to determine the version bump.\"\\nassistant: <commentary>This is a significant architectural decision that should be documented. Use the Task tool to launch the adr-architect agent to create an ADR capturing this decision.</commentary>\\n\"Let me use the adr-architect agent to document this architectural decision in an ADR.\"\\n</example>\\n\\n<example>\\nContext: User is discussing whether to use a particular library or pattern.\\nuser: \"Should we use toml_edit or a different TOML library?\"\\nassistant: <provides analysis and recommendation>\\nuser: \"Let's go with toml_edit then.\"\\nassistant: <commentary>A technical decision has been made. Use the Task tool to launch the adr-architect agent to document this choice in an ADR.</commentary>\\n\"I'll use the adr-architect agent to create an ADR documenting this library selection decision.\"\\n</example>\\n\\n<example>\\nContext: User explicitly asks for ADR creation.\\nuser: \"Please write an ADR for our decision to use the adapter pattern for package managers.\"\\nassistant: <commentary>User explicitly requested ADR creation. Use the Task tool to launch the adr-architect agent.</commentary>\\n\"I'll use the adr-architect agent to create that ADR.\"\\n</example>"
+description: |-
+   Use this agent when the user requests creation of a new Architecture Decision Record (ADR), needs to document a significant architectural decision, asks to formalize a design choice, or when a discussion has led to an important technical decision that should be preserved. Examples:
+
+   <example>
+   Context: User has just made a significant architectural decision about how to handle version bumping.
+   user: "I think we should aggregate changesets by package and apply the highest change type to determine the version bump."
+   assistant: <commentary>This is a significant architectural decision that should be documented. Use the Task tool to launch the adr-architect agent to create an ADR capturing this decision.</commentary>
+   "Let me use the adr-architect agent to document this architectural decision in an ADR."
+   </example>
+
+   <example>
+   Context: User is discussing whether to use a particular library or pattern.
+   user: "Should we use toml_edit or a different TOML library?"
+   assistant: <provides analysis and recommendation>
+   user: "Let's go with toml_edit then."
+   assistant: <commentary>A technical decision has been made. Use the Task tool to launch the adr-architect agent to document this choice in an ADR.</commentary>
+   "I'll use the adr-architect agent to create an ADR documenting this library selection decision."
+   </example>
+
+   <example>
+   Context: User explicitly asks for ADR creation.
+   user: "Please write an ADR for our decision to use the adapter pattern for package managers."
+   assistant: <commentary>User explicitly requested ADR creation. Use the Task tool to launch the adr-architect agent.</commentary>
+   "I'll use the adr-architect agent to create that ADR."
+   </example>
 tools: Glob, Grep, Read, WebFetch, WebSearch, ListMcpResourcesTool, ReadMcpResourceTool, Edit, Write
 model: opus
 color: purple

@@ -1,6 +1,34 @@
 ---
 name: code-reviewer
-description: "Use this agent when the user wants a thorough code review of changes, a pull request, a module, or a specific file. This agent analyses code for correctness, safety, style, test coverage, and architectural fit. Examples:\n\n<example>\nContext: User has just implemented a new feature and wants feedback before committing.\nuser: \"Can you review the changes I just made to src/cli/release.rs?\"\nassistant: <commentary>The user wants a code review. Launch the code-reviewer agent.</commentary>\n\"I'll launch the code-reviewer agent to give you thorough feedback.\"\n</example>\n\n<example>\nContext: User wants a review of a broader module.\nuser: \"Review the package_manager module for me.\"\nassistant: <commentary>A module-level review is requested. Launch the code-reviewer agent.</commentary>\n\"Let me delegate that to the code-reviewer agent.\"\n</example>\n\n<example>\nContext: User asks for a review after finishing a task.\nuser: \"Review my work.\"\nassistant: <commentary>A general review of recent changes is requested. Launch the code-reviewer agent.</commentary>\n\"I'll have the code-reviewer agent look over the recent changes.\"\n</example>"
+description: |-
+   Use this agent when the user wants a thorough code review of changes, a pull request, a module, or a specific file.
+   This agent analyses code for correctness, safety, style, test coverage, and architectural fit.
+
+   Proactively use this agent to review code you've created if you have added or modified more than two functions, or
+   whenever you complete an implementation plan.
+
+   Examples:
+
+   <example>
+   Context: User has just implemented a new feature and wants feedback before committing.
+   user: "Can you review the changes I just made to src/cli/release.rs?"
+   assistant: <commentary>The user wants a code review. Launch the code-reviewer agent.</commentary>
+   "I'll launch the code-reviewer agent to give you thorough feedback."
+   </example>
+
+   <example>
+   Context: User wants a review of a broader module.
+   user: "Review the package_manager module for me."
+   assistant: <commentary>A module-level review is requested. Launch the code-reviewer agent.</commentary>
+   "Let me delegate that to the code-reviewer agent."
+   </example>
+
+   <example>
+   Context: User asks for a review after finishing a task.
+   user: "Review my work."
+   assistant: <commentary>A general review of recent changes is requested. Launch the code-reviewer agent.</commentary>
+   "I'll have the code-reviewer agent look over the recent changes."
+   </example>
 tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
 model: opus
 color: cyan
@@ -48,6 +76,7 @@ This is **Chronicle**, a Rust CLI tool for release management (see `CLAUDE.md` f
    - **Style**: Non-functional style where functional is idiomatic, verbose code that could be simplified
    - **Naming**: Unclear variable/function names
    - **Dead code**: Unused imports, variables, or functions
+   - **Code duplication**: Actively try to find and report cases where new code duplicates existing code and could be simplified
 
    ### 🟢 Suggestions (optional improvements)
 
