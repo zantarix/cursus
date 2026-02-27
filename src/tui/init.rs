@@ -97,7 +97,7 @@ fn handle_key(
 pub fn run(git_workdir: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
 	let detected = detect_package_manager(git_workdir);
 	let pm_opt = widgets::run_tui(Screen::Confirm(true), ui, |screen, key| {
-		handle_key(screen, key, detected, options)
+		Ok(handle_key(screen, key, detected, options))
 	})?;
 	Ok(pm_opt.map(|pm| match pm {
 		PackageManager::Npm => Config::new(git_workdir).with_npm(NpmConfig::enabled()),

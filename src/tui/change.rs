@@ -6,12 +6,14 @@ use ratatui::{
 	widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
+use anyhow::Context as _;
+
 use super::widgets::{self, KeyResult};
 use crate::model::changeset::ChangeType;
 use crate::package_manager::Project;
 
 /// Shorthand for the handle_key return type used by the internal state machine.
-type HandleResult = KeyResult<Screen, ChangeType>;
+type HandleResult = KeyResult<Screen, ChangeResult>;
 
 impl ChangeType {
 	/// Returns the next change type when cycling through options in the TUI.
@@ -58,24 +60,21 @@ enum Screen {
 		cursor: usize,
 		error: bool,
 	},
-	SelectChangeType(ChangeType),
+	SelectChangeType {
+		change_type: ChangeType,
+		selected_indices: Vec<usize>,
+	},
 }
 
-/// Encapsulates the full TUI state for the run_tui loop.
-struct ChangeState {
-	/// The currently displayed wizard screen.
-	screen: Screen,
-	/// Indices into the projects slice for the user's project selection.
-	/// Populated when leaving `SelectProjects`; carried forward to completion.
-	selected_indices: Vec<usize>,
-}
-
-fn handle_key(screen: &Screen, key: KeyCode) -> HandleResult {
+fn handle_key(screen: &Screen, key: KeyCode, projects: &[Project]) -> anyhow::Result<HandleResult> {
 	match screen {
 		Screen::SelectProjects {
 			selected, cursor, ..
-		} => handle_key_select_projects(selected, *cursor, key),
-		Screen::SelectChangeType(change_type) => handle_key_change_type(*change_type, key),
+		} => Ok(handle_key_select_projects(selected, *cursor, key)),
+		Screen::SelectChangeType {
+			change_type,
+			selected_indices,
+		} => handle_key_change_type(*change_type, selected_indices, key, projects),
 	}
 }
 
@@ -118,7 +117,16 @@ fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) ->
 		}
 		KeyCode::Enter => {
 			if selected.iter().any(|&s| s) {
-				KeyResult::Continue(Screen::SelectChangeType(ChangeType::Patch))
+				let selected_indices = selected
+					.iter()
+					.enumerate()
+					.filter(|&(_, &s)| s)
+					.map(|(i, _)| i)
+					.collect();
+				KeyResult::Continue(Screen::SelectChangeType {
+					change_type: ChangeType::Patch,
+					selected_indices,
+				})
 			} else {
 				KeyResult::Continue(Screen::SelectProjects {
 					selected: selected.to_vec(),
@@ -136,20 +144,49 @@ fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) ->
 	}
 }
 
-fn handle_key_change_type(current: ChangeType, key: KeyCode) -> HandleResult {
+fn handle_key_change_type(
+	current: ChangeType,
+	selected_indices: &[usize],
+	key: KeyCode,
+	projects: &[Project],
+) -> anyhow::Result<HandleResult> {
+	let complete = |ct: ChangeType| -> anyhow::Result<HandleResult> {
+		let resolved = selected_indices
+			.iter()
+			.map(|&i| {
+				projects.get(i).cloned().with_context(|| {
+					format!(
+						"selected index {i} is out of range ({} projects)",
+						projects.len()
+					)
+				})
+			})
+			.collect::<anyhow::Result<Vec<_>>>()?;
+		Ok(KeyResult::Complete(ChangeResult {
+			projects: resolved,
+			change_type: ct,
+		}))
+	};
 	match key {
-		KeyCode::Left | KeyCode::Char('h') => {
-			KeyResult::Continue(Screen::SelectChangeType(current.prev()))
-		}
+		KeyCode::Left | KeyCode::Char('h') => Ok(KeyResult::Continue(Screen::SelectChangeType {
+			change_type: current.prev(),
+			selected_indices: selected_indices.to_vec(),
+		})),
 		KeyCode::Right | KeyCode::Tab | KeyCode::Char('l') => {
-			KeyResult::Continue(Screen::SelectChangeType(current.next()))
+			Ok(KeyResult::Continue(Screen::SelectChangeType {
+				change_type: current.next(),
+				selected_indices: selected_indices.to_vec(),
+			}))
 		}
-		KeyCode::Enter => KeyResult::Complete(current),
-		KeyCode::Char('m') => KeyResult::Complete(ChangeType::Major),
-		KeyCode::Char('i') => KeyResult::Complete(ChangeType::Minor),
-		KeyCode::Char('p') => KeyResult::Complete(ChangeType::Patch),
-		KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
-		_ => KeyResult::Continue(Screen::SelectChangeType(current)),
+		KeyCode::Enter => complete(current),
+		KeyCode::Char('m') => complete(ChangeType::Major),
+		KeyCode::Char('i') => complete(ChangeType::Minor),
+		KeyCode::Char('p') => complete(ChangeType::Patch),
+		KeyCode::Esc | KeyCode::Char('q') => Ok(KeyResult::Cancelled),
+		_ => Ok(KeyResult::Continue(Screen::SelectChangeType {
+			change_type: current,
+			selected_indices: selected_indices.to_vec(),
+		})),
 	}
 }
 
@@ -194,7 +231,10 @@ pub fn run(projects: &[Project], options: &ChangeOptions) -> anyhow::Result<Opti
 	let project_names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
 
 	let initial_screen = if have_projects {
-		Screen::SelectChangeType(ChangeType::Patch)
+		Screen::SelectChangeType {
+			change_type: ChangeType::Patch,
+			selected_indices: project_indices,
+		}
 	} else {
 		Screen::SelectProjects {
 			selected: vec![true; projects.len()],
@@ -203,51 +243,10 @@ pub fn run(projects: &[Project], options: &ChangeOptions) -> anyhow::Result<Opti
 		}
 	};
 
-	let initial_state = ChangeState {
-		screen: initial_screen,
-		selected_indices: project_indices,
-	};
-
 	let result = widgets::run_tui(
-		initial_state,
-		|frame, state| ui(frame, &state.screen, &project_names),
-		|state, key| {
-			let ChangeState {
-				screen,
-				selected_indices,
-			} = state;
-			match handle_key(&screen, key) {
-				KeyResult::Continue(new_screen) => {
-					// When transitioning from projects to change type, capture selected indices
-					let new_indices = if let Screen::SelectChangeType(_) = &new_screen {
-						if let Screen::SelectProjects { ref selected, .. } = screen {
-							selected
-								.iter()
-								.enumerate()
-								.filter(|&(_, &s)| s)
-								.map(|(i, _)| i)
-								.collect()
-						} else {
-							selected_indices
-						}
-					} else {
-						selected_indices
-					};
-					KeyResult::Continue(ChangeState {
-						screen: new_screen,
-						selected_indices: new_indices,
-					})
-				}
-				KeyResult::Complete(change_type) => KeyResult::Complete(ChangeResult {
-					projects: selected_indices
-						.iter()
-						.map(|&i| projects[i].clone())
-						.collect(),
-					change_type,
-				}),
-				KeyResult::Cancelled => KeyResult::Cancelled,
-			}
-		},
+		initial_screen,
+		|frame, screen| ui(frame, screen, &project_names),
+		|screen, key| handle_key(&screen, key, projects),
 	)?;
 
 	Ok(result)
@@ -271,7 +270,7 @@ fn ui(frame: &mut Frame, screen: &Screen, project_names: &[&str]) {
 		} => {
 			render_select_projects(frame, &chunks, project_names, selected, *cursor, *error);
 		}
-		Screen::SelectChangeType(change_type) => {
+		Screen::SelectChangeType { change_type, .. } => {
 			render_select_change_type(frame, &chunks, *change_type);
 		}
 	}
@@ -375,6 +374,12 @@ mod tests {
 	use super::super::test_utils::{buffer_to_string, create_test_terminal};
 	use super::*;
 
+	fn dummy_projects(n: usize) -> Vec<Project> {
+		(0..n)
+			.map(|i| Project::new_test(&format!("project-{i}"), &format!("projects/project-{i}")))
+			.collect()
+	}
+
 	// ChangeType navigation tests
 	#[test]
 	fn change_type_next_cycles_forward() {
@@ -390,124 +395,7 @@ mod tests {
 		assert_eq!(ChangeType::Patch.prev(), ChangeType::Minor);
 	}
 
-	// handle_key tests - SelectChangeType screen
-	#[test]
-	fn change_type_left_moves_to_previous() {
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
-		let result = handle_key(&screen, KeyCode::Left);
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Major))
-		);
-	}
-
-	#[test]
-	fn change_type_right_moves_to_next() {
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
-		let result = handle_key(&screen, KeyCode::Right);
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Patch))
-		);
-	}
-
-	#[test]
-	fn change_type_tab_moves_to_next() {
-		let screen = Screen::SelectChangeType(ChangeType::Major);
-		let result = handle_key(&screen, KeyCode::Tab);
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Minor))
-		);
-	}
-
-	#[test]
-	fn change_type_h_moves_to_previous() {
-		let screen = Screen::SelectChangeType(ChangeType::Patch);
-		let result = handle_key(&screen, KeyCode::Char('h'));
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Minor))
-		);
-	}
-
-	#[test]
-	fn change_type_l_moves_to_next() {
-		let screen = Screen::SelectChangeType(ChangeType::Major);
-		let result = handle_key(&screen, KeyCode::Char('l'));
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Minor))
-		);
-	}
-
-	#[test]
-	fn change_type_enter_completes_with_selected() {
-		let screen = Screen::SelectChangeType(ChangeType::Major);
-		let result = handle_key(&screen, KeyCode::Enter);
-		assert_eq!(result, KeyResult::Complete(ChangeType::Major));
-
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
-		let result = handle_key(&screen, KeyCode::Enter);
-		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
-
-		let screen = Screen::SelectChangeType(ChangeType::Patch);
-		let result = handle_key(&screen, KeyCode::Enter);
-		assert_eq!(result, KeyResult::Complete(ChangeType::Patch));
-	}
-
-	#[test]
-	fn change_type_m_selects_major() {
-		let screen = Screen::SelectChangeType(ChangeType::Patch);
-		let result = handle_key(&screen, KeyCode::Char('m'));
-		assert_eq!(result, KeyResult::Complete(ChangeType::Major));
-	}
-
-	#[test]
-	fn change_type_i_selects_minor() {
-		let screen = Screen::SelectChangeType(ChangeType::Patch);
-		let result = handle_key(&screen, KeyCode::Char('i'));
-		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
-	}
-
-	#[test]
-	fn change_type_p_selects_patch() {
-		let screen = Screen::SelectChangeType(ChangeType::Major);
-		let result = handle_key(&screen, KeyCode::Char('p'));
-		assert_eq!(result, KeyResult::Complete(ChangeType::Patch));
-	}
-
-	#[test]
-	fn change_type_esc_cancels() {
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
-		let result = handle_key(&screen, KeyCode::Esc);
-		assert_eq!(result, KeyResult::Cancelled);
-	}
-
-	#[test]
-	fn change_type_q_cancels() {
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
-		let result = handle_key(&screen, KeyCode::Char('q'));
-		assert_eq!(result, KeyResult::Cancelled);
-	}
-
-	#[test]
-	fn change_type_other_keys_do_nothing() {
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
-		let result = handle_key(&screen, KeyCode::Char('x'));
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Minor))
-		);
-
-		let result = handle_key(&screen, KeyCode::Up);
-		assert_eq!(
-			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Minor))
-		);
-	}
-
-	// handle_key tests - SelectProjects screen
+	// Helpers
 	fn projects_screen(selected: Vec<bool>, cursor: usize) -> Screen {
 		Screen::SelectProjects {
 			selected,
@@ -516,10 +404,212 @@ mod tests {
 		}
 	}
 
+	fn change_type_screen(change_type: ChangeType, selected_indices: Vec<usize>) -> Screen {
+		Screen::SelectChangeType {
+			change_type,
+			selected_indices,
+		}
+	}
+
+	// handle_key tests - SelectChangeType screen
+	// Navigation tests use empty selected_indices since projects are never indexed during navigation.
+	#[test]
+	fn change_type_left_moves_to_previous() {
+		let screen = change_type_screen(ChangeType::Minor, vec![]);
+		let result = handle_key(&screen, KeyCode::Left, &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Major, vec![]))
+		);
+	}
+
+	#[test]
+	fn change_type_right_moves_to_next() {
+		let screen = change_type_screen(ChangeType::Minor, vec![]);
+		let result = handle_key(&screen, KeyCode::Right, &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Patch, vec![]))
+		);
+	}
+
+	#[test]
+	fn change_type_tab_moves_to_next() {
+		let screen = change_type_screen(ChangeType::Major, vec![]);
+		let result = handle_key(&screen, KeyCode::Tab, &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Minor, vec![]))
+		);
+	}
+
+	#[test]
+	fn change_type_h_moves_to_previous() {
+		let screen = change_type_screen(ChangeType::Patch, vec![]);
+		let result = handle_key(&screen, KeyCode::Char('h'), &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Minor, vec![]))
+		);
+	}
+
+	#[test]
+	fn change_type_l_moves_to_next() {
+		let screen = change_type_screen(ChangeType::Major, vec![]);
+		let result = handle_key(&screen, KeyCode::Char('l'), &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Minor, vec![]))
+		);
+	}
+
+	#[test]
+	fn change_type_enter_completes_with_selected() {
+		let projects = dummy_projects(2);
+
+		let screen = change_type_screen(ChangeType::Major, vec![0]);
+		let result = handle_key(&screen, KeyCode::Enter, &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: vec![projects[0].clone()],
+				change_type: ChangeType::Major,
+			})
+		);
+
+		let screen = change_type_screen(ChangeType::Minor, vec![1]);
+		let result = handle_key(&screen, KeyCode::Enter, &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: vec![projects[1].clone()],
+				change_type: ChangeType::Minor,
+			})
+		);
+
+		let screen = change_type_screen(ChangeType::Patch, vec![0, 1]);
+		let result = handle_key(&screen, KeyCode::Enter, &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: projects.clone(),
+				change_type: ChangeType::Patch,
+			})
+		);
+	}
+
+	#[test]
+	fn change_type_m_selects_major() {
+		let projects = dummy_projects(1);
+		let screen = change_type_screen(ChangeType::Patch, vec![0]);
+		let result = handle_key(&screen, KeyCode::Char('m'), &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: projects.clone(),
+				change_type: ChangeType::Major,
+			})
+		);
+	}
+
+	#[test]
+	fn change_type_i_selects_minor() {
+		let projects = dummy_projects(1);
+		let screen = change_type_screen(ChangeType::Patch, vec![0]);
+		let result = handle_key(&screen, KeyCode::Char('i'), &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: projects.clone(),
+				change_type: ChangeType::Minor,
+			})
+		);
+	}
+
+	#[test]
+	fn change_type_p_selects_patch() {
+		let projects = dummy_projects(1);
+		let screen = change_type_screen(ChangeType::Major, vec![0]);
+		let result = handle_key(&screen, KeyCode::Char('p'), &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: projects.clone(),
+				change_type: ChangeType::Patch,
+			})
+		);
+	}
+
+	#[test]
+	fn change_type_esc_cancels() {
+		let screen = change_type_screen(ChangeType::Minor, vec![]);
+		let result = handle_key(&screen, KeyCode::Esc, &[]).unwrap();
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn change_type_q_cancels() {
+		let screen = change_type_screen(ChangeType::Minor, vec![]);
+		let result = handle_key(&screen, KeyCode::Char('q'), &[]).unwrap();
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn change_type_other_keys_do_nothing() {
+		let screen = change_type_screen(ChangeType::Minor, vec![]);
+		let result = handle_key(&screen, KeyCode::Char('x'), &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Minor, vec![]))
+		);
+
+		let result = handle_key(&screen, KeyCode::Up, &[]).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Continue(change_type_screen(ChangeType::Minor, vec![]))
+		);
+	}
+
+	#[test]
+	fn change_type_out_of_bounds_index_returns_error() {
+		// selected_indices pointing beyond the projects slice must return Err, not panic
+		let projects = dummy_projects(1);
+		let screen = change_type_screen(ChangeType::Patch, vec![99]);
+		let err = handle_key(&screen, KeyCode::Enter, &projects).unwrap_err();
+		let msg = err.to_string();
+		assert!(
+			msg.contains("99"),
+			"error should mention the bad index: {msg}"
+		);
+		assert!(
+			msg.contains("1 projects"),
+			"error should mention the slice length: {msg}"
+		);
+	}
+
+	// Coverage gap: prefilled projects start the TUI at SelectChangeType directly.
+	// This test verifies that an initial screen constructed with pre-filled indices
+	// (the path taken by run() when have_projects == true) resolves correctly on Enter.
+	#[test]
+	fn prefilled_projects_initial_screen_completes_correctly() {
+		let projects = dummy_projects(3);
+		// Simulates run() initial_screen when have_projects == true with indices [0, 2]
+		let screen = change_type_screen(ChangeType::Patch, vec![0, 2]);
+		let result = handle_key(&screen, KeyCode::Enter, &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: vec![projects[0].clone(), projects[2].clone()],
+				change_type: ChangeType::Patch,
+			})
+		);
+	}
+
+	// handle_key tests - SelectProjects screen
 	#[test]
 	fn projects_up_moves_cursor_up() {
 		let screen = projects_screen(vec![true, true, true], 1);
-		let result = handle_key(&screen, KeyCode::Up);
+		let result = handle_key(&screen, KeyCode::Up, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true, true], 0))
@@ -529,7 +619,7 @@ mod tests {
 	#[test]
 	fn projects_up_wraps_from_top() {
 		let screen = projects_screen(vec![true, true, true], 0);
-		let result = handle_key(&screen, KeyCode::Up);
+		let result = handle_key(&screen, KeyCode::Up, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true, true], 2))
@@ -539,7 +629,7 @@ mod tests {
 	#[test]
 	fn projects_k_moves_cursor_up() {
 		let screen = projects_screen(vec![true, true], 1);
-		let result = handle_key(&screen, KeyCode::Char('k'));
+		let result = handle_key(&screen, KeyCode::Char('k'), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true], 0))
@@ -549,7 +639,7 @@ mod tests {
 	#[test]
 	fn projects_down_moves_cursor_down() {
 		let screen = projects_screen(vec![true, true, true], 0);
-		let result = handle_key(&screen, KeyCode::Down);
+		let result = handle_key(&screen, KeyCode::Down, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true, true], 1))
@@ -559,7 +649,7 @@ mod tests {
 	#[test]
 	fn projects_down_wraps_from_bottom() {
 		let screen = projects_screen(vec![true, true, true], 2);
-		let result = handle_key(&screen, KeyCode::Down);
+		let result = handle_key(&screen, KeyCode::Down, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true, true], 0))
@@ -569,7 +659,7 @@ mod tests {
 	#[test]
 	fn projects_j_moves_cursor_down() {
 		let screen = projects_screen(vec![true, true], 0);
-		let result = handle_key(&screen, KeyCode::Char('j'));
+		let result = handle_key(&screen, KeyCode::Char('j'), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true], 1))
@@ -579,14 +669,14 @@ mod tests {
 	#[test]
 	fn projects_space_toggles_selection() {
 		let screen = projects_screen(vec![true, false, true], 1);
-		let result = handle_key(&screen, KeyCode::Char(' '));
+		let result = handle_key(&screen, KeyCode::Char(' '), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true, true], 1))
 		);
 
 		let screen = projects_screen(vec![true, true, true], 0);
-		let result = handle_key(&screen, KeyCode::Char(' '));
+		let result = handle_key(&screen, KeyCode::Char(' '), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![false, true, true], 0))
@@ -596,7 +686,7 @@ mod tests {
 	#[test]
 	fn projects_a_toggles_all_on() {
 		let screen = projects_screen(vec![true, false, true], 0);
-		let result = handle_key(&screen, KeyCode::Char('a'));
+		let result = handle_key(&screen, KeyCode::Char('a'), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, true, true], 0))
@@ -606,7 +696,7 @@ mod tests {
 	#[test]
 	fn projects_a_toggles_all_off_when_all_selected() {
 		let screen = projects_screen(vec![true, true, true], 0);
-		let result = handle_key(&screen, KeyCode::Char('a'));
+		let result = handle_key(&screen, KeyCode::Char('a'), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![false, false, false], 0))
@@ -616,17 +706,17 @@ mod tests {
 	#[test]
 	fn projects_enter_advances_when_at_least_one_selected() {
 		let screen = projects_screen(vec![false, true, false], 1);
-		let result = handle_key(&screen, KeyCode::Enter);
+		let result = handle_key(&screen, KeyCode::Enter, &[]).unwrap();
 		assert_eq!(
 			result,
-			KeyResult::Continue(Screen::SelectChangeType(ChangeType::Patch))
+			KeyResult::Continue(change_type_screen(ChangeType::Patch, vec![1]))
 		);
 	}
 
 	#[test]
 	fn projects_enter_shows_error_when_none_selected() {
 		let screen = projects_screen(vec![false, false, false], 0);
-		let result = handle_key(&screen, KeyCode::Enter);
+		let result = handle_key(&screen, KeyCode::Enter, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(Screen::SelectProjects {
@@ -640,27 +730,27 @@ mod tests {
 	#[test]
 	fn projects_esc_cancels() {
 		let screen = projects_screen(vec![true, true], 0);
-		let result = handle_key(&screen, KeyCode::Esc);
+		let result = handle_key(&screen, KeyCode::Esc, &[]).unwrap();
 		assert_eq!(result, KeyResult::Cancelled);
 	}
 
 	#[test]
 	fn projects_q_cancels() {
 		let screen = projects_screen(vec![true, true], 0);
-		let result = handle_key(&screen, KeyCode::Char('q'));
+		let result = handle_key(&screen, KeyCode::Char('q'), &[]).unwrap();
 		assert_eq!(result, KeyResult::Cancelled);
 	}
 
 	#[test]
 	fn projects_other_keys_do_nothing() {
 		let screen = projects_screen(vec![true, false], 0);
-		let result = handle_key(&screen, KeyCode::Char('x'));
+		let result = handle_key(&screen, KeyCode::Char('x'), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, false], 0))
 		);
 
-		let result = handle_key(&screen, KeyCode::Left);
+		let result = handle_key(&screen, KeyCode::Left, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, false], 0))
@@ -674,7 +764,7 @@ mod tests {
 			cursor: 0,
 			error: true,
 		};
-		let result = handle_key(&screen, KeyCode::Down);
+		let result = handle_key(&screen, KeyCode::Down, &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![false, false], 1))
@@ -688,7 +778,7 @@ mod tests {
 			cursor: 0,
 			error: true,
 		};
-		let result = handle_key(&screen, KeyCode::Char(' '));
+		let result = handle_key(&screen, KeyCode::Char(' '), &[]).unwrap();
 		assert_eq!(
 			result,
 			KeyResult::Continue(projects_screen(vec![true, false], 0))
@@ -730,7 +820,7 @@ mod tests {
 	fn ui_renders_select_change_type_screen() {
 		let mut terminal = create_test_terminal();
 		let names: Vec<&str> = vec![];
-		let screen = Screen::SelectChangeType(ChangeType::Major);
+		let screen = change_type_screen(ChangeType::Major, vec![]);
 		terminal.draw(|frame| ui(frame, &screen, &names)).unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
@@ -743,7 +833,7 @@ mod tests {
 	fn ui_renders_change_type_with_minor_selected() {
 		let mut terminal = create_test_terminal();
 		let names: Vec<&str> = vec![];
-		let screen = Screen::SelectChangeType(ChangeType::Minor);
+		let screen = change_type_screen(ChangeType::Minor, vec![]);
 		terminal.draw(|frame| ui(frame, &screen, &names)).unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
@@ -754,7 +844,7 @@ mod tests {
 	fn ui_renders_change_type_with_patch_selected() {
 		let mut terminal = create_test_terminal();
 		let names: Vec<&str> = vec![];
-		let screen = Screen::SelectChangeType(ChangeType::Patch);
+		let screen = change_type_screen(ChangeType::Patch, vec![]);
 		terminal.draw(|frame| ui(frame, &screen, &names)).unwrap();
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
@@ -764,27 +854,33 @@ mod tests {
 	// Workflow test
 	#[test]
 	fn workflow_select_projects_then_change_type() {
+		let projects = dummy_projects(3);
+
 		// Start with 3 projects, all selected
 		let screen = projects_screen(vec![true, true, true], 0);
 
 		// Deselect first project
-		let result = handle_key(&screen, KeyCode::Char(' '));
-		let screen = match result {
+		let screen = match handle_key(&screen, KeyCode::Char(' '), &projects).unwrap() {
 			KeyResult::Continue(s) => s,
 			_ => panic!("Expected Continue"),
 		};
 		assert_eq!(screen, projects_screen(vec![false, true, true], 0));
 
 		// Confirm project selection
-		let result = handle_key(&screen, KeyCode::Enter);
-		let screen = match result {
+		let screen = match handle_key(&screen, KeyCode::Enter, &projects).unwrap() {
 			KeyResult::Continue(s) => s,
 			_ => panic!("Expected Continue"),
 		};
-		assert_eq!(screen, Screen::SelectChangeType(ChangeType::Patch));
+		assert_eq!(screen, change_type_screen(ChangeType::Patch, vec![1, 2]));
 
 		// Select minor
-		let result = handle_key(&screen, KeyCode::Char('i'));
-		assert_eq!(result, KeyResult::Complete(ChangeType::Minor));
+		let result = handle_key(&screen, KeyCode::Char('i'), &projects).unwrap();
+		assert_eq!(
+			result,
+			KeyResult::Complete(ChangeResult {
+				projects: vec![projects[1].clone(), projects[2].clone()],
+				change_type: ChangeType::Minor,
+			})
+		);
 	}
 }

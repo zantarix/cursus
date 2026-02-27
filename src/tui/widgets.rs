@@ -159,7 +159,7 @@ pub fn run_tui<S, T, DrawFn, HandleFn>(
 ) -> anyhow::Result<Option<T>>
 where
 	DrawFn: FnMut(&mut Frame, &S),
-	HandleFn: FnMut(S, KeyCode) -> KeyResult<S, T>,
+	HandleFn: FnMut(S, KeyCode) -> anyhow::Result<KeyResult<S, T>>,
 {
 	enable_raw_mode()?;
 	io::stdout().execute(EnterAlternateScreen)?;
@@ -173,9 +173,10 @@ where
 			Err(e) => break Err(e.into()),
 			Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
 				match handle_fn(state, key.code) {
-					KeyResult::Continue(new_state) => state = new_state,
-					KeyResult::Complete(value) => break Ok(Some(value)),
-					KeyResult::Cancelled => break Ok(None),
+					Err(e) => break Err(e),
+					Ok(KeyResult::Continue(new_state)) => state = new_state,
+					Ok(KeyResult::Complete(value)) => break Ok(Some(value)),
+					Ok(KeyResult::Cancelled) => break Ok(None),
 				}
 			}
 			Ok(_) => {}

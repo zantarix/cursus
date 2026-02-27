@@ -154,6 +154,22 @@ impl Project {
 	pub fn dependency_names(&self) -> &[String] {
 		&self.info.dependency_names
 	}
+
+	/// Creates a minimal `Project` with a dummy adapter for use in unit tests.
+	#[cfg(test)]
+	pub fn new_test(name: &str, path: &str) -> Self {
+		Self {
+			info: ProjectInfo {
+				name: name.to_string(),
+				path: std::path::PathBuf::from(path),
+				..Default::default()
+			},
+			adapter: Arc::new(NpmAdapter::new(
+				NpmConfig::default(),
+				std::path::PathBuf::from("."),
+			)),
+		}
+	}
 }
 
 /// Trait for package manager adapters.
@@ -570,27 +586,11 @@ pub fn build_dependency_graph(projects: &[Project]) -> anyhow::Result<Dependency
 mod tests {
 	use super::*;
 
-	/// Creates a test project with a dummy adapter.
-	fn test_project(name: &str, path: &str) -> Project {
-		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
-			NpmConfig::default(),
-			std::path::PathBuf::from("."),
-		));
-		Project {
-			info: ProjectInfo {
-				name: name.to_string(),
-				path: std::path::PathBuf::from(path),
-				..Default::default()
-			},
-			adapter,
-		}
-	}
-
 	#[test]
 	fn project_equality() {
-		let p1 = test_project("test", "packages/test");
-		let p2 = test_project("test", "packages/test");
-		let p3 = test_project("other", "packages/other");
+		let p1 = Project::new_test("test", "packages/test");
+		let p2 = Project::new_test("test", "packages/test");
+		let p3 = Project::new_test("other", "packages/other");
 
 		assert_eq!(p1, p2);
 		assert_ne!(p1, p3);
@@ -598,21 +598,21 @@ mod tests {
 
 	#[test]
 	fn project_debug() {
-		let project = test_project("my-package", "packages/my-package");
+		let project = Project::new_test("my-package", "packages/my-package");
 		let debug = format!("{:?}", project);
 		assert!(debug.contains("my-package"));
 	}
 
 	#[test]
 	fn project_clone() {
-		let project = test_project("test", "src");
+		let project = Project::new_test("test", "src");
 		let cloned = project.clone();
 		assert_eq!(project, cloned);
 	}
 
 	#[test]
 	fn project_getters() {
-		let project = test_project("my-pkg", "packages/my-pkg");
+		let project = Project::new_test("my-pkg", "packages/my-pkg");
 		assert_eq!(project.name(), "my-pkg");
 		assert_eq!(project.path(), Path::new("packages/my-pkg"));
 	}
@@ -676,8 +676,8 @@ mod tests {
 	#[test]
 	fn filter_projects_empty_names_returns_all() {
 		let projects = vec![
-			test_project("a", "packages/a"),
-			test_project("b", "packages/b"),
+			Project::new_test("a", "packages/a"),
+			Project::new_test("b", "packages/b"),
 		];
 		let result = filter_projects_by_name(&projects, &[]).unwrap();
 		assert_eq!(result.len(), 2);
@@ -686,9 +686,9 @@ mod tests {
 	#[test]
 	fn filter_projects_selects_matching() {
 		let projects = vec![
-			test_project("a", "packages/a"),
-			test_project("b", "packages/b"),
-			test_project("c", "packages/c"),
+			Project::new_test("a", "packages/a"),
+			Project::new_test("b", "packages/b"),
+			Project::new_test("c", "packages/c"),
 		];
 		let names = vec!["b".to_string(), "c".to_string()];
 		let result = filter_projects_by_name(&projects, &names).unwrap();
@@ -699,7 +699,7 @@ mod tests {
 
 	#[test]
 	fn filter_projects_unknown_name_returns_error() {
-		let projects = vec![test_project("a", "packages/a")];
+		let projects = vec![Project::new_test("a", "packages/a")];
 		let names = vec!["nonexistent".to_string()];
 		let result = filter_projects_by_name(&projects, &names);
 		assert!(result.is_err());
