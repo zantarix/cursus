@@ -1,14 +1,10 @@
 //! Integration tests for the `publish` command.
 
+mod common;
+
 use std::path::Path;
 
-/// Helper to run chronicle commands.
-fn run_chronicle(args: &[&str], cwd: &Path) -> anyhow::Result<std::process::ExitCode> {
-	let args_with_bin = std::iter::once("chronicle")
-		.chain(args.iter().copied())
-		.collect::<Vec<_>>();
-	chronicle::run(args_with_bin, cwd, chronicle::Env::default())
-}
+use common::temp_git_repo;
 
 /// Helper to run chronicle as a subprocess, capturing stdout and stderr.
 ///
@@ -27,11 +23,12 @@ fn run_chronicle_subprocess(args: &[&str], cwd: &Path) -> (bool, String, String)
 
 #[test]
 fn publish_with_no_config_fails() {
-	let dir = tempfile::tempdir().unwrap();
-	// Create git repo
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
 
 	assert!(result.is_err());
 	assert!(
@@ -44,30 +41,24 @@ fn publish_with_no_config_fails() {
 
 #[test]
 fn publish_dry_run_with_unknown_package_fails() {
-	let dir = tempfile::tempdir().unwrap();
-	// Create git repo
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
-	// Create config
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
 		dir.path().join(".chronicle/config.toml"),
-		r#"
-[npm]
-enabled = true
-"#,
+		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
 
-	// Create package.json
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "test-pkg", "version": "1.0.0"}"#,
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		&[
+	let result = common::run_chronicle(
+		[
+			"chronicle",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -88,60 +79,47 @@ enabled = true
 
 #[test]
 fn publish_dry_run_basic() {
-	let dir = tempfile::tempdir().unwrap();
-	// Create git repo
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
-	// Create config
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
 		dir.path().join(".chronicle/config.toml"),
-		r#"
-[npm]
-enabled = true
-"#,
+		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
 
-	// Create package.json
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "test-pkg", "version": "1.0.0"}"#,
 	)
 	.unwrap();
 
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
 
 	assert!(result.is_ok());
-	let exit_code = result.unwrap();
-	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
 #[test]
 fn publish_with_package_filter() {
-	let dir = tempfile::tempdir().unwrap();
-	// Create git repo
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
-	// Create config
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
 		dir.path().join(".chronicle/config.toml"),
-		r#"
-[npm]
-enabled = true
-"#,
+		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
 
-	// Create root package.json with workspaces
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
 	)
 	.unwrap();
 
-	// Create workspace packages
 	std::fs::create_dir_all(dir.path().join("packages/pkg-a")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/pkg-a/package.json"),
@@ -156,8 +134,9 @@ enabled = true
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		&[
+	let result = common::run_chronicle(
+		[
+			"chronicle",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -168,16 +147,13 @@ enabled = true
 	);
 
 	assert!(result.is_ok());
-	let exit_code = result.unwrap();
-	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
 #[test]
 fn publish_dry_run_with_workspace_dependencies() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
-	// Create config
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
 		dir.path().join(".chronicle/config.toml"),
@@ -185,14 +161,12 @@ fn publish_dry_run_with_workspace_dependencies() {
 	)
 	.unwrap();
 
-	// Create root package.json with workspaces
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
 	)
 	.unwrap();
 
-	// Create lib package (dependency)
 	std::fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/lib/package.json"),
@@ -200,7 +174,6 @@ fn publish_dry_run_with_workspace_dependencies() {
 	)
 	.unwrap();
 
-	// Create app package (depends on lib)
 	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/app/package.json"),
@@ -208,8 +181,10 @@ fn publish_dry_run_with_workspace_dependencies() {
 	)
 	.unwrap();
 
-	// Dry-run exercises dependency graph building and ordering without contacting registries
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
@@ -217,8 +192,7 @@ fn publish_dry_run_with_workspace_dependencies() {
 
 #[test]
 fn publish_dry_run_with_workspace_dependencies_filtered() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -256,8 +230,9 @@ fn publish_dry_run_with_workspace_dependencies_filtered() {
 	.unwrap();
 
 	// Publish only app and lib (not utils) — graph should still order lib before app
-	let result = run_chronicle(
-		&[
+	let result = common::run_chronicle(
+		[
+			"chronicle",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -275,119 +250,7 @@ fn publish_dry_run_with_workspace_dependencies_filtered() {
 
 #[test]
 fn publish_cargo_dry_run() {
-	let dir = tempfile::tempdir().unwrap();
-	// Create git repo
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
-
-	// Create config
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
-	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
-		r#"
-[cargo]
-enabled = true
-"#,
-	)
-	.unwrap();
-
-	// Create Cargo.toml
-	std::fs::write(
-		dir.path().join("Cargo.toml"),
-		r#"
-[package]
-name = "test-crate"
-version = "0.1.0"
-edition = "2024"
-
-[lib]
-path = "src/lib.rs"
-"#,
-	)
-	.unwrap();
-
-	// Create minimal lib.rs
-	std::fs::create_dir(dir.path().join("src")).unwrap();
-	std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
-
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
-
-	assert!(result.is_ok());
-	let exit_code = result.unwrap();
-	assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
-}
-
-#[test]
-fn publish_dry_run_npm_private_package_excluded() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
-
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
-	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
-		"[npm]\nenabled = true\n",
-	)
-	.unwrap();
-
-	// Create a private package
-	std::fs::write(
-		dir.path().join("package.json"),
-		r#"{"name": "private-pkg", "version": "1.0.0", "private": true}"#,
-	)
-	.unwrap();
-
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
-
-	// Should succeed with no output (package silently excluded)
-	assert!(result.is_ok());
-	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
-}
-
-#[test]
-fn publish_dry_run_npm_mixed_workspace() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
-
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
-	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
-		"[npm]\nenabled = true\n",
-	)
-	.unwrap();
-
-	// Create root with workspaces
-	std::fs::write(
-		dir.path().join("package.json"),
-		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
-	)
-	.unwrap();
-
-	// Create one private package
-	std::fs::create_dir_all(dir.path().join("packages/private-pkg")).unwrap();
-	std::fs::write(
-		dir.path().join("packages/private-pkg/package.json"),
-		r#"{"name": "private-pkg", "version": "1.0.0", "private": true}"#,
-	)
-	.unwrap();
-
-	// Create one public package
-	std::fs::create_dir_all(dir.path().join("packages/public-pkg")).unwrap();
-	std::fs::write(
-		dir.path().join("packages/public-pkg/package.json"),
-		r#"{"name": "public-pkg", "version": "1.0.0"}"#,
-	)
-	.unwrap();
-
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
-
-	// Should succeed and only list public packages
-	assert!(result.is_ok());
-	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
-}
-
-#[test]
-fn publish_dry_run_cargo_publish_false_excluded() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -396,36 +259,27 @@ fn publish_dry_run_cargo_publish_false_excluded() {
 	)
 	.unwrap();
 
-	// Create a crate with publish = false
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
-		r#"
-[package]
-name = "private-crate"
-version = "0.1.0"
-edition = "2024"
-publish = false
-
-[lib]
-path = "src/lib.rs"
-"#,
+		"[package]\nname = \"test-crate\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n",
 	)
 	.unwrap();
 
 	std::fs::create_dir(dir.path().join("src")).unwrap();
 	std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
 
-	let result = run_chronicle(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
 
-	// Should succeed with no output (crate silently excluded)
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
 #[test]
-fn publish_dry_run_explicitly_naming_private_package() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+fn publish_dry_run_npm_private_package_excluded() {
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -434,16 +288,113 @@ fn publish_dry_run_explicitly_naming_private_package() {
 	)
 	.unwrap();
 
-	// Create a private package
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "private-pkg", "version": "1.0.0", "private": true}"#,
 	)
 	.unwrap();
 
-	// Explicitly name the private package with --package flag
-	let result = run_chronicle(
-		&[
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+
+	// Should succeed with no output (package silently excluded)
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_dry_run_npm_mixed_workspace() {
+	let dir = temp_git_repo();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/private-pkg")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/private-pkg/package.json"),
+		r#"{"name": "private-pkg", "version": "1.0.0", "private": true}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/public-pkg")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/public-pkg/package.json"),
+		r#"{"name": "public-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+
+	// Should succeed and only list public packages
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_dry_run_cargo_publish_false_excluded() {
+	let dir = temp_git_repo();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[cargo]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("Cargo.toml"),
+		"[package]\nname = \"private-crate\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[lib]\npath = \"src/lib.rs\"\n",
+	)
+	.unwrap();
+
+	std::fs::create_dir(dir.path().join("src")).unwrap();
+	std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+
+	let result = common::run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+
+	// Should succeed with no output (crate silently excluded)
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+}
+
+#[test]
+fn publish_dry_run_explicitly_naming_private_package() {
+	let dir = temp_git_repo();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "private-pkg", "version": "1.0.0", "private": true}"#,
+	)
+	.unwrap();
+
+	let result = common::run_chronicle(
+		[
+			"chronicle",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -460,8 +411,7 @@ fn publish_dry_run_explicitly_naming_private_package() {
 
 #[test]
 fn publish_dry_run_cyclic_npm_workspace() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -470,14 +420,12 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	)
 	.unwrap();
 
-	// Create root with workspaces
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
 	)
 	.unwrap();
 
-	// Create types package that depends on utils
 	std::fs::create_dir_all(dir.path().join("packages/types")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/types/package.json"),
@@ -485,7 +433,6 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	)
 	.unwrap();
 
-	// Create utils package that depends on types (circular dependency)
 	std::fs::create_dir_all(dir.path().join("packages/utils")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/utils/package.json"),
@@ -493,7 +440,6 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	)
 	.unwrap();
 
-	// Create app package that depends on both
 	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/app/package.json"),
@@ -534,8 +480,7 @@ fn publish_dry_run_cyclic_npm_workspace() {
 
 #[test]
 fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -544,14 +489,12 @@ fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 	)
 	.unwrap();
 
-	// Create root with workspaces
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
 	)
 	.unwrap();
 
-	// Create two packages with a circular dependency between them
 	std::fs::create_dir_all(dir.path().join("packages/alpha")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/alpha/package.json"),
@@ -581,8 +524,7 @@ fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 
 #[test]
 fn publish_dry_run_summary_single_public_package() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -613,8 +555,7 @@ fn publish_dry_run_summary_single_public_package() {
 
 #[test]
 fn publish_dry_run_summary_multiple_public_packages() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -655,8 +596,7 @@ fn publish_dry_run_summary_multiple_public_packages() {
 
 #[test]
 fn publish_dry_run_summary_mixed_public_private_packages() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
@@ -698,8 +638,7 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 
 #[test]
 fn publish_dry_run_summary_all_private_packages() {
-	let dir = tempfile::tempdir().unwrap();
-	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
 	std::fs::write(
