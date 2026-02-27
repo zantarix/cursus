@@ -1,6 +1,6 @@
 //! The `release` subcommand.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -139,11 +139,11 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 		}
 	}
 
-	// Delete consumed changesets
+	// Consume changesets: delete fully consumed, rewrite partially consumed.
 	if !args.dry_run {
-		for (path, _) in &changesets {
-			std::fs::remove_file(path)
-				.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
+		let released: BTreeSet<String> = aggregated.keys().cloned().collect();
+		for (path, cs) in &changesets {
+			changeset::consume_changeset(path, cs, &released)?;
 		}
 	}
 
@@ -256,8 +256,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn cmd_release_package_flag_filters_packages() {
+	/// Sets up a temporary Cargo workspace with `pkg-a` (0.1.0) and `pkg-b` (0.2.0).
+	fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let config = crate::model::config::Config::new(dir.path())
@@ -268,25 +268,68 @@ mod tests {
 			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
 		)
 		.unwrap();
-		std::fs::create_dir_all(dir.path().join("pkg-a")).unwrap();
+		std::fs::create_dir_all(dir.path().join("pkg-a/src")).unwrap();
 		std::fs::write(
 			dir.path().join("pkg-a/Cargo.toml"),
-			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n",
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
 		)
 		.unwrap();
-		std::fs::create_dir_all(dir.path().join("pkg-b")).unwrap();
+		std::fs::write(dir.path().join("pkg-a/src/lib.rs"), "").unwrap();
+		std::fs::create_dir_all(dir.path().join("pkg-b/src")).unwrap();
 		std::fs::write(
 			dir.path().join("pkg-b/Cargo.toml"),
-			"[package]\nname = \"pkg-b\"\nversion = \"0.2.0\"\n",
+			"[package]\nname = \"pkg-b\"\nversion = \"0.2.0\"\nedition = \"2024\"\n",
 		)
 		.unwrap();
+		std::fs::write(dir.path().join("pkg-b/src/lib.rs"), "").unwrap();
+		dir
+	}
+
+	#[test]
+	fn cmd_release_package_flag_filters_packages() {
+		let dir = setup_two_package_workspace();
 
 		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		let changeset_path = chronicle_dir.join("test.md");
 		std::fs::write(
-			chronicle_dir.join("test.md"),
+			&changeset_path,
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n",
 		)
 		.unwrap();
+
+		let args = ReleaseArgs {
+			dry_run: false,
+			packages: vec!["pkg-a".to_string()],
+		};
+		let result = cmd_release(dir.path(), &args);
+		assert!(result.is_ok());
+
+		// Changeset should be rewritten with only pkg-b remaining
+		assert!(
+			changeset_path.exists(),
+			"Changeset should still exist (partially consumed)"
+		);
+		let content = std::fs::read_to_string(&changeset_path).unwrap();
+		assert!(
+			content.contains("pkg-b = \"minor\""),
+			"pkg-b should remain in changeset, got: {content}"
+		);
+		assert!(
+			!content.contains("pkg-a"),
+			"pkg-a should be removed from changeset, got: {content}"
+		);
+	}
+
+	#[test]
+	fn cmd_release_package_flag_with_dry_run_leaves_changeset_untouched() {
+		let dir = setup_two_package_workspace();
+
+		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		let changeset_path = chronicle_dir.join("test.md");
+		let original = "+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n";
+		std::fs::write(&changeset_path, original).unwrap();
 
 		let args = ReleaseArgs {
 			dry_run: true,
@@ -294,8 +337,13 @@ mod tests {
 		};
 		let result = cmd_release(dir.path(), &args);
 		assert!(result.is_ok());
-		// Since dry_run doesn't actually write files, we can't verify much more
-		// Integration tests will verify actual behavior
+
+		// Dry-run must not touch the changeset even when scoped
+		let content = std::fs::read_to_string(&changeset_path).unwrap();
+		assert_eq!(
+			content, original,
+			"Changeset should be untouched in dry-run"
+		);
 	}
 
 	#[test]

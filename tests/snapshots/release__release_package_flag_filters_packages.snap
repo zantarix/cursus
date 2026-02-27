@@ -1,0 +1,9 @@
+---
+source: tests/release.rs
+expression: rewritten
+---
++++
+pkg-b = "minor"
++++
+
+Some change

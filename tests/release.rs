@@ -5,7 +5,7 @@ mod common;
 use std::process::ExitCode;
 
 use chronicle::model::config::PackageManager;
-use common::{temp_git_repo, temp_git_repo_with_project};
+use common::{temp_git_repo, temp_git_repo_with_cargo_workspace, temp_git_repo_with_project};
 
 /// Helper to create a changeset file in the .chronicle directory.
 fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
@@ -319,30 +319,7 @@ fn release_unknown_package_in_changeset_fails() {
 
 #[test]
 fn release_package_flag_filters_packages() {
-	let dir = temp_git_repo();
-	// Create a cargo workspace with two members
-	let config = chronicle::model::config::Config::new(dir.path())
-		.with_cargo(chronicle::package_manager::CargoConfig::enabled());
-	config.save().unwrap();
-	std::fs::write(
-		dir.path().join("Cargo.toml"),
-		"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
-	)
-	.unwrap();
-	std::fs::create_dir_all(dir.path().join("pkg-a/src")).unwrap();
-	std::fs::write(
-		dir.path().join("pkg-a/Cargo.toml"),
-		"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-	)
-	.unwrap();
-	std::fs::write(dir.path().join("pkg-a/src/lib.rs"), "").unwrap();
-	std::fs::create_dir_all(dir.path().join("pkg-b/src")).unwrap();
-	std::fs::write(
-		dir.path().join("pkg-b/Cargo.toml"),
-		"[package]\nname = \"pkg-b\"\nversion = \"0.2.0\"\nedition = \"2024\"\n",
-	)
-	.unwrap();
-	std::fs::write(dir.path().join("pkg-b/src/lib.rs"), "").unwrap();
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
 
 	write_changeset(
 		dir.path(),
@@ -377,8 +354,150 @@ fn release_package_flag_filters_packages() {
 		"Expected pkg-b version 0.2.0 (unchanged), got: {pkg_b_toml}"
 	);
 
-	// Changeset should be deleted (consumed by pkg-a release)
-	assert!(!dir.path().join(".chronicle/test-change.md").exists());
+	// Changeset should be partially consumed — rewritten with only pkg-b remaining
+	assert!(
+		dir.path().join(".chronicle/test-change.md").exists(),
+		"Changeset should still exist (partially consumed)"
+	);
+	let rewritten = std::fs::read_to_string(dir.path().join(".chronicle/test-change.md")).unwrap();
+	insta::assert_snapshot!(rewritten);
+}
+
+#[test]
+fn release_scoped_fully_consumed_changeset_is_deleted() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0")]);
+
+	// Changeset only references pkg-a
+	write_changeset(
+		dir.path(),
+		"only-a.md",
+		"+++\npkg-a = \"patch\"\n+++\n\nFix in pkg-a\n",
+	);
+
+	let result = common::run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"release",
+			"--package",
+			"pkg-a",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok());
+
+	// Fully consumed changeset must be deleted
+	assert!(
+		!dir.path().join(".chronicle/only-a.md").exists(),
+		"Fully consumed changeset should be deleted"
+	);
+}
+
+#[test]
+fn release_scoped_sequential_releases() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+
+	// Single changeset covering both packages
+	write_changeset(
+		dir.path(),
+		"shared.md",
+		"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nShared change\n",
+	);
+
+	// First release: only pkg-a
+	let result = common::run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"release",
+			"--package",
+			"pkg-a",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "First release failed: {result:?}");
+
+	// Changeset should be rewritten with only pkg-b
+	assert!(
+		dir.path().join(".chronicle/shared.md").exists(),
+		"Changeset should still exist after first release"
+	);
+	let intermediate = std::fs::read_to_string(dir.path().join(".chronicle/shared.md")).unwrap();
+	insta::assert_snapshot!(intermediate);
+
+	let pkg_a_toml = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
+	assert!(
+		pkg_a_toml.contains("version = \"0.1.1\""),
+		"pkg-a should be at 0.1.1, got: {pkg_a_toml}"
+	);
+
+	// Second release: only pkg-b
+	let result = common::run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"release",
+			"--package",
+			"pkg-b",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Second release failed: {result:?}");
+
+	// Changeset now fully consumed — should be deleted
+	assert!(
+		!dir.path().join(".chronicle/shared.md").exists(),
+		"Changeset should be deleted after second release"
+	);
+	let pkg_b_toml = std::fs::read_to_string(dir.path().join("pkg-b/Cargo.toml")).unwrap();
+	assert!(
+		pkg_b_toml.contains("version = \"0.3.0\""),
+		"pkg-b should be at 0.3.0, got: {pkg_b_toml}"
+	);
+}
+
+#[test]
+fn release_scoped_unrelated_changeset_untouched() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+
+	// One changeset for pkg-a, one for pkg-b
+	let pkg_b_content = "+++\npkg-b = \"minor\"\n+++\n\nPkg-b only change\n";
+	write_changeset(
+		dir.path(),
+		"only-a.md",
+		"+++\npkg-a = \"patch\"\n+++\n\nPkg-a only change\n",
+	);
+	write_changeset(dir.path(), "only-b.md", pkg_b_content);
+
+	// Release only pkg-a
+	let result = common::run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"release",
+			"--package",
+			"pkg-a",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok());
+
+	// pkg-a changeset deleted
+	assert!(
+		!dir.path().join(".chronicle/only-a.md").exists(),
+		"pkg-a changeset should be deleted"
+	);
+
+	// pkg-b changeset untouched
+	assert!(
+		dir.path().join(".chronicle/only-b.md").exists(),
+		"pkg-b changeset should be untouched"
+	);
+	let b_content = std::fs::read_to_string(dir.path().join(".chronicle/only-b.md")).unwrap();
+	assert_eq!(
+		b_content, pkg_b_content,
+		"pkg-b changeset should be unchanged"
+	);
 }
 
 #[test]

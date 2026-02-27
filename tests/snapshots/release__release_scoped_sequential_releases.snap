@@ -1,0 +1,9 @@
+---
+source: tests/release.rs
+expression: intermediate
+---
++++
+pkg-b = "minor"
++++
+
+Shared change

@@ -3,7 +3,7 @@
 //! This module handles creating changeset files with TOML frontmatter
 //! that record which projects are affected and the type of change.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -172,6 +172,51 @@ pub fn read_all_changesets(git_workdir: &Path) -> anyhow::Result<Vec<(PathBuf, C
 			Ok((path, changeset))
 		})
 		.collect()
+}
+
+/// Consumes released package entries from a changeset file.
+///
+/// - If all packages in the changeset were released, deletes the file.
+/// - If only some packages were released, rewrites the file with the
+///   released entries removed and the description preserved.
+/// - If no packages match (changeset is unrelated), leaves the file untouched.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be deleted or rewritten.
+pub fn consume_changeset(
+	path: &Path,
+	changeset: &Changeset,
+	released_packages: &BTreeSet<String>,
+) -> anyhow::Result<()> {
+	let remaining: BTreeMap<String, ChangeType> = changeset
+		.packages
+		.iter()
+		.filter(|(name, _)| !released_packages.contains(*name))
+		.map(|(name, ct)| (name.clone(), *ct))
+		.collect();
+
+	if remaining.len() == changeset.packages.len() {
+		// No packages were released from this changeset — leave it untouched.
+		return Ok(());
+	}
+
+	if remaining.is_empty() {
+		// All packages consumed — delete the file.
+		std::fs::remove_file(path)
+			.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
+	} else {
+		// Partially consumed — rewrite with remaining packages only.
+		let rewritten = Changeset {
+			packages: remaining,
+			message: changeset.message.clone(),
+		};
+		let content = format_changeset(&rewritten);
+		std::fs::write(path, content)
+			.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
+	}
+
+	Ok(())
 }
 
 /// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
@@ -552,6 +597,127 @@ mod tests {
 		assert_eq!(ChangeType::Patch.rank(), 0);
 		assert_eq!(ChangeType::Minor.rank(), 1);
 		assert_eq!(ChangeType::Major.rank(), 2);
+	}
+
+	// consume_changeset tests
+
+	fn make_path_and_changeset(
+		dir: &std::path::Path,
+		filename: &str,
+		content: &str,
+	) -> (std::path::PathBuf, Changeset) {
+		let path = dir.join(filename);
+		std::fs::write(&path, content).unwrap();
+		let changeset = parse_changeset(content).unwrap();
+		(path, changeset)
+	}
+
+	#[test]
+	fn consume_changeset_fully_consumed_deletes_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let (path, cs) = make_path_and_changeset(
+			dir.path(),
+			"change.md",
+			"+++\npkg-a = \"patch\"\n+++\n\nSome message\n",
+		);
+		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
+		consume_changeset(&path, &cs, &released).unwrap();
+		assert!(!path.exists(), "File should be deleted when fully consumed");
+	}
+
+	#[test]
+	fn consume_changeset_partially_consumed_rewrites_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let (path, cs) = make_path_and_changeset(
+			dir.path(),
+			"change.md",
+			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome message\n",
+		);
+		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
+		consume_changeset(&path, &cs, &released).unwrap();
+
+		assert!(
+			path.exists(),
+			"File should still exist when partially consumed"
+		);
+		let content = std::fs::read_to_string(&path).unwrap();
+		assert!(
+			content.contains("pkg-b = \"minor\""),
+			"Remaining package should be present, got: {content}"
+		);
+		assert!(
+			!content.contains("pkg-a"),
+			"Released package should be removed, got: {content}"
+		);
+		assert!(
+			content.contains("Some message"),
+			"Message should be preserved, got: {content}"
+		);
+	}
+
+	#[test]
+	fn consume_changeset_unrelated_leaves_file_untouched() {
+		let dir = tempfile::tempdir().unwrap();
+		let original = "+++\npkg-b = \"minor\"\n+++\n\nUnrelated change\n";
+		let (path, cs) = make_path_and_changeset(dir.path(), "change.md", original);
+		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
+		consume_changeset(&path, &cs, &released).unwrap();
+
+		assert!(path.exists(), "File should be untouched");
+		let content = std::fs::read_to_string(&path).unwrap();
+		assert_eq!(content, original, "File contents should be unchanged");
+	}
+
+	#[test]
+	fn consume_changeset_partial_rewrite_round_trips() {
+		let dir = tempfile::tempdir().unwrap();
+		let (path, cs) = make_path_and_changeset(
+			dir.path(),
+			"change.md",
+			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\npkg-c = \"major\"\n+++\n\nMulti-package change\n",
+		);
+		let released: BTreeSet<String> = ["pkg-a".to_string(), "pkg-c".to_string()].into();
+		consume_changeset(&path, &cs, &released).unwrap();
+
+		let content = std::fs::read_to_string(&path).unwrap();
+		let reparsed = parse_changeset(&content).unwrap();
+		assert_eq!(reparsed.packages.len(), 1);
+		assert_eq!(reparsed.packages["pkg-b"], ChangeType::Minor);
+		assert_eq!(reparsed.message, Some("Multi-package change".to_string()));
+	}
+
+	#[test]
+	fn consume_changeset_delete_fails_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("nonexistent.md");
+		let mut packages = BTreeMap::new();
+		packages.insert("pkg-a".to_string(), ChangeType::Patch);
+		let cs = Changeset {
+			packages,
+			message: None,
+		};
+		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
+		// File doesn't exist, so remove_file should fail
+		let result = consume_changeset(&path, &cs, &released);
+		assert!(result.is_err(), "Should fail when file cannot be deleted");
+	}
+
+	#[test]
+	fn consume_changeset_rewrite_fails_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		// Path inside a non-existent subdirectory — fs::write will fail.
+		let path = dir.path().join("no-such-dir/change.md");
+		let mut packages = BTreeMap::new();
+		packages.insert("pkg-a".to_string(), ChangeType::Patch);
+		packages.insert("pkg-b".to_string(), ChangeType::Minor);
+		let cs = Changeset {
+			packages,
+			message: None,
+		};
+		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
+		// Partially consumed → rewrite branch triggered, but parent dir missing.
+		let result = consume_changeset(&path, &cs, &released);
+		assert!(result.is_err(), "Should fail when file cannot be rewritten");
 	}
 
 	// open_editor tests

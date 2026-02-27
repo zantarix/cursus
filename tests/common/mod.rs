@@ -65,6 +65,41 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	dir
 }
 
+/// Creates a temporary git repository with a Cargo workspace containing named packages.
+///
+/// Each entry in `members` is a `(name, version)` pair. The workspace root
+/// `Cargo.toml` lists all members, and each gets its own `Cargo.toml` and
+/// an empty `src/lib.rs`.
+pub fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
+	let dir = temp_git_repo();
+	let config = Config::new(dir.path()).with_cargo(CargoConfig::enabled());
+	config.save().unwrap();
+
+	let member_list = members
+		.iter()
+		.map(|(name, _)| format!("\"{name}\""))
+		.collect::<Vec<_>>()
+		.join(", ");
+	std::fs::write(
+		dir.path().join("Cargo.toml"),
+		format!("[workspace]\nmembers = [{member_list}]\n"),
+	)
+	.unwrap();
+
+	for (name, version) in members {
+		let pkg_dir = dir.path().join(name);
+		std::fs::create_dir_all(pkg_dir.join("src")).unwrap();
+		std::fs::write(
+			pkg_dir.join("Cargo.toml"),
+			format!("[package]\nname = \"{name}\"\nversion = \"{version}\"\nedition = \"2024\"\n"),
+		)
+		.unwrap();
+		std::fs::write(pkg_dir.join("src/lib.rs"), "").unwrap();
+	}
+
+	dir
+}
+
 /// Creates a temporary git repository with a config and package manifest in a subfolder.
 pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &str) -> TempDir {
 	let dir = temp_git_repo();
