@@ -57,6 +57,7 @@
 						rustToolchain
 						rust-analyzer
 						cargo-deny
+						cargo-insta
 						cargo-make
 						cargo-mutants
 						cargo-llvm-cov

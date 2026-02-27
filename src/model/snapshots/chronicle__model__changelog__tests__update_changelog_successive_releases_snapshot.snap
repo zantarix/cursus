@@ -1,0 +1,23 @@
+---
+source: src/model/changelog.rs
+expression: content
+---
+# Changelog
+
+## 1.0.2 - 2024-01-01
+
+### Bug Fixes
+
+- Third release
+
+## 1.0.1 - 2024-01-01
+
+### Bug Fixes
+
+- Second release
+
+## 1.0.0 - 2024-01-01
+
+### Bug Fixes
+
+- Initial release

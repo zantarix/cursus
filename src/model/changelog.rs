@@ -78,7 +78,10 @@ impl Changelog {
 		let content = if changelog_path.exists() {
 			let existing = std::fs::read_to_string(&changelog_path)
 				.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
-			format!("{entry}\n{existing}")
+			let body = existing
+				.strip_prefix("# Changelog\n\n")
+				.unwrap_or(&existing);
+			format!("# Changelog\n\n{entry}\n{body}")
 		} else {
 			format!("# Changelog\n\n{entry}\n")
 		};
@@ -181,6 +184,59 @@ mod tests {
 		let pos_new = content.find("## 0.2.0").unwrap();
 		let pos_old = content.find("## 0.1.0").unwrap();
 		assert!(pos_new < pos_old);
+		// Header must appear exactly once
+		assert_eq!(content.matches("# Changelog").count(), 1);
+	}
+
+	#[test]
+	fn update_changelog_successive_releases_snapshot() {
+		let dir = tempfile::tempdir().unwrap();
+
+		let make = |version: &str, msg: &str| {
+			Changelog::new(
+				version.parse().unwrap(),
+				"2024-01-01".to_string(),
+				vec![(ChangeType::Patch, Some(msg.to_string()))],
+				PathBuf::new(),
+			)
+		};
+
+		make("1.0.0", "Initial release").update(dir.path()).unwrap();
+		make("1.0.1", "Second release").update(dir.path()).unwrap();
+		make("1.0.2", "Third release").update(dir.path()).unwrap();
+
+		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+		insta::assert_snapshot!(content);
+	}
+
+	#[test]
+	fn update_changelog_no_duplicate_header_on_successive_releases() {
+		let dir = tempfile::tempdir().unwrap();
+
+		let make = |version: &str, msg: &str| {
+			Changelog::new(
+				version.parse().unwrap(),
+				"2024-01-01".to_string(),
+				vec![(ChangeType::Patch, Some(msg.to_string()))],
+				PathBuf::new(),
+			)
+		};
+
+		make("1.0.0", "Initial release").update(dir.path()).unwrap();
+		make("1.0.1", "Second release").update(dir.path()).unwrap();
+		make("1.0.2", "Third release").update(dir.path()).unwrap();
+
+		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+		assert_eq!(content.matches("# Changelog").count(), 1);
+		// All three versions present
+		assert!(content.contains("## 1.0.2"));
+		assert!(content.contains("## 1.0.1"));
+		assert!(content.contains("## 1.0.0"));
+		// Newest first
+		let p2 = content.find("## 1.0.2").unwrap();
+		let p1 = content.find("## 1.0.1").unwrap();
+		let p0 = content.find("## 1.0.0").unwrap();
+		assert!(p2 < p1 && p1 < p0);
 	}
 
 	#[test]

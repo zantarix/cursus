@@ -21,4 +21,5 @@ toml = "=1.0.3"
 toml_edit = "=0.25.3"
 
 [dev-dependencies]
+insta = "1.46.3"
 tempfile = "=3.25.0"
