@@ -175,28 +175,25 @@ ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, id
 
 ## Consequences
 
-### Benefits
+### Positive
 
-- **Reduces manual steps**: Users no longer need to remember the correct tag format, stage the right files, or manually push after every release
-- **Opt-in by default**: The feature is disabled unless explicitly enabled (or `[github].enabled = true`), preserving ADR-003's conservative stance
-- **Granular control**: Users can enable commit but disable push (for local-only workflows), or enable tag but disable commit (for pre-existing commits)
-- **Consistent with existing patterns**: Uses the same config-driven approach as `[npm]`, `[cargo]`, and `[github]` sections
-- **Improves GitHub Releases workflow**: When combined with ADR-005, users can go from changesets to published packages with GitHub Releases in a single command sequence: `chronicle release && chronicle publish`
+- Reduces manual steps: users no longer need to remember the correct tag format, stage the right files, or manually push after every release.
+- Opt-in by default: the feature is disabled unless explicitly enabled (or `[github].enabled = true`), preserving ADR-003's conservative stance.
+- Granular control: users can enable commit but disable push (for local-only workflows), or enable tag but disable commit (for pre-existing commits).
+- Consistent with existing patterns: uses the same config-driven approach as `[npm]`, `[cargo]`, and `[github]` sections.
+- Improves GitHub Releases workflow: when combined with ADR-005, users can go from changesets to published packages with GitHub Releases in a single command sequence: `chronicle release && chronicle publish`.
+- Backward compatible: existing configurations with no `[git]` section behave identically to before (no git operations).
+- Forward compatible: adding `[git]` configuration to an existing repository opts into the new behaviour without breaking existing workflows.
 
-### Drawbacks
+### Negative
 
-- **Couples Chronicle to git**: Chronicle now invokes git commands and must handle git failures. Previously, Chronicle was filesystem-only.
-- **Not suitable for all workflows**: Users with complex commit requirements (GPG signing, multi-commit strategies, custom commit messages) must continue managing git manually
-- **Error handling complexity**: Git operations can fail in many ways (network errors, authentication, conflicts). Chronicle must detect and report these clearly without losing the release work.
-- **Implicit behaviour**: When `[github].enabled = true`, `[git].enabled` defaults to `true`, which may surprise users who expected Chronicle to remain filesystem-only
+- Couples Chronicle to git: Chronicle now invokes git commands and must handle git failures. Previously, Chronicle was filesystem-only.
+- Not suitable for all workflows: users with complex commit requirements (GPG signing, multi-commit strategies, custom commit messages) must continue managing git manually.
+- Error handling complexity: git operations can fail in many ways (network errors, authentication, conflicts). Chronicle must detect and report these clearly without losing the release work.
+- Implicit behaviour: when `[github].enabled = true`, `[git].enabled` defaults to `true`, which may surprise users who expected Chronicle to remain filesystem-only.
 
-### Compatibility
+### Neutral
 
-- **Backward compatible**: Existing configurations with no `[git]` section behave identically to before (no git operations)
-- **Forward compatible**: Adding `[git]` configuration to an existing repository opts into the new behaviour without breaking existing workflows
-
-### Testing considerations
-
-- **Unit tests**: Test commit message formatting, tag name generation, and dry-run output
-- **Integration tests**: Must set up temporary git repositories and verify git operations are performed correctly
-- **Error path tests**: Simulate git failures (no remote, authentication required, merge conflicts) and verify Chronicle reports errors without rolling back the release
+- Unit tests should cover commit message formatting, tag name generation, and dry-run output.
+- Integration tests must set up temporary git repositories and verify git operations are performed correctly.
+- Error path tests should simulate git failures (no remote, authentication required, merge conflicts) and verify Chronicle reports errors without rolling back the release.

@@ -142,12 +142,20 @@ Failed to create GitHub Release for chronicle-cli@0.2.0: missing GITHUB_TOKEN
 
 ## Consequences
 
-- Chronicle becomes responsible for creating GitHub Releases, coupling it to the GitHub API. This API is stable, well-documented, and versioned.
+### Positive
+
 - GitHub Releases are opt-in and disabled by default, preventing surprise API calls or credential requirements for users who don't want this feature.
 - Auto-detection of repository owner and name from the git remote reduces configuration burden. Most users can enable GitHub Releases with just `enabled = true`, without manually specifying repository details.
 - Authentication is delegated to the environment, following the same pattern as registry publishing. Chronicle does not store or manage GitHub tokens.
 - GitHub Releases are modelled as a post-publish action, not as a package manager. This keeps the abstraction boundaries clean and prevents GitHub from being conflated with actual package registries.
 - The release body is sourced from the existing changelog, avoiding duplication of release notes content. Users write the release description once (in changesets), and it flows through to both `CHANGELOG.md` and GitHub Releases.
 - GitHub Release creation failures do not block or roll back package publishing. If a package is published but its GitHub Release fails, the user can manually create the release or re-run the command after fixing the authentication issue.
+
+### Negative
+
+- Chronicle becomes responsible for creating GitHub Releases, coupling it to the GitHub API. This API is stable, well-documented, and versioned, but it is still an external dependency.
 - When git hooks are disabled (the default without `[github].enabled`), Chronicle depends on Git tags already existing in the repository, and the user or CI is responsible for creating and pushing tags. When git hooks are enabled (see ADR-006), Chronicle creates tags automatically as part of `chronicle release`.
+
+### Neutral
+
 - Future enhancements could support attaching release artifacts (binaries, archives) to GitHub Releases, but this is out of scope for the initial implementation.
