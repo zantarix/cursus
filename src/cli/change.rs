@@ -87,12 +87,9 @@ pub fn cmd_change(
 		.map(|p| (p.name().to_string(), result.change_type))
 		.collect();
 
-	let changeset = Changeset {
-		packages,
-		message: args.message.clone(),
-	};
+	let changeset = Changeset::new(packages, args.message.clone());
 
-	let path = changeset::write_changeset(config.git_workdir(), &changeset)?;
+	let path = changeset.write(config.git_workdir())?;
 
 	if !global.no_interactive && args.message.is_none() {
 		changeset::open_editor(&path, env)?;

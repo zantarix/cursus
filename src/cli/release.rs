@@ -8,7 +8,7 @@ use anyhow::Context;
 use clap::Args;
 
 use crate::model::changelog::Changelog;
-use crate::model::changeset::{self, ChangeType};
+use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config;
 use crate::package_manager::filter_projects_by_name;
 
@@ -58,7 +58,7 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 	let projects = config.load_projects_for_adapters(&adapters)?;
 
 	// Read all pending changesets
-	let changesets = changeset::read_all_changesets(config.git_workdir())?;
+	let changesets = Changeset::read_all(config.git_workdir())?;
 	if changesets.is_empty() {
 		println!("No pending changesets found. Nothing to release.");
 		return Ok(ExitCode::SUCCESS);
@@ -143,7 +143,7 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 	if !args.dry_run {
 		let released: BTreeSet<String> = aggregated.keys().cloned().collect();
 		for (path, cs) in &changesets {
-			changeset::consume_changeset(path, cs, &released)?;
+			cs.consume(path, &released)?;
 		}
 	}
 

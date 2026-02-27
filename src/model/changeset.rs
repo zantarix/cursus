@@ -64,159 +64,165 @@ pub struct Changeset {
 	pub message: Option<String>,
 }
 
-/// Generates a random filename for a changeset using petname.
-///
-/// Returns a filename like `evidently-uptown-primate.md`.
-pub fn generate_filename() -> String {
-	let name = petname::petname(3, "-").unwrap_or_else(|| "unnamed-changeset".to_string());
-	format!("{name}.md")
+impl std::fmt::Display for Changeset {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let toml_str = toml::to_string(&self.packages).unwrap_or_default();
+		let body = self.message.as_deref().unwrap_or_default();
+		write!(f, "+++\n{toml_str}+++\n\n{body}\n")
+	}
 }
 
-/// Formats a changeset as a string with Hugo-style `+++` TOML frontmatter.
-///
-/// The output format is:
-/// ```text
-/// +++
-/// my-app = "minor"
-/// +++
-///
-/// Description message here
-/// ```
-pub fn format_changeset(changeset: &Changeset) -> String {
-	let toml_str = toml::to_string(&changeset.packages).unwrap_or_default();
-	let body = changeset.message.as_deref().unwrap_or_default();
-	format!("+++\n{toml_str}+++\n\n{body}\n")
-}
-
-/// Parses a changeset from a string with Hugo-style `+++` TOML frontmatter.
-///
-/// Expected format:
-/// ```text
-/// +++
-/// my-app = "minor"
-/// +++
-///
-/// Description message here
-/// ```
-///
-/// # Errors
-///
-/// Returns an error if the delimiters are missing or the TOML frontmatter is invalid.
-pub fn parse_changeset(input: &str) -> anyhow::Result<Changeset> {
-	let rest = input
-		.strip_prefix("+++\n")
-		.context("Missing opening +++ delimiter")?;
-	let (toml_section, body) = rest
-		.split_once("+++\n")
-		.context("Missing closing +++ delimiter")?;
-	let packages: BTreeMap<String, ChangeType> =
-		toml::from_str(toml_section).context("Invalid TOML frontmatter")?;
-	let trimmed = body.trim();
-	let message = if trimmed.is_empty() {
-		None
-	} else {
-		Some(trimmed.to_string())
-	};
-	Ok(Changeset { packages, message })
-}
-
-/// Writes a changeset file to `{git_workdir}/.chronicle/{name}.md`.
-///
-/// Creates the `.chronicle` directory if it doesn't exist. Returns the
-/// path to the written file.
-///
-/// # Errors
-///
-/// Returns an error if the directory cannot be created or the file cannot be written.
-pub fn write_changeset(git_workdir: &Path, changeset: &Changeset) -> anyhow::Result<PathBuf> {
-	let chronicle_dir = git_workdir.join(".chronicle");
-	std::fs::create_dir_all(&chronicle_dir)
-		.with_context(|| format!("Failed to create directory: {}", chronicle_dir.display()))?;
-
-	let filename = generate_filename();
-	let path = chronicle_dir.join(filename);
-	let content = format_changeset(changeset);
-	std::fs::write(&path, &content)
-		.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
-	Ok(path)
-}
-
-/// Reads all changeset files from the `.chronicle/` directory.
-///
-/// Returns a list of `(path, changeset)` pairs for each `.md` file found.
-/// Returns an empty vec if no changesets exist.
-///
-/// # Errors
-///
-/// Returns an error if any changeset file cannot be read or parsed.
-pub fn read_all_changesets(git_workdir: &Path) -> anyhow::Result<Vec<(PathBuf, Changeset)>> {
-	let chronicle_dir = git_workdir.join(".chronicle");
-	if !chronicle_dir.is_dir() {
-		return Ok(Vec::new());
+impl Changeset {
+	/// Creates a new changeset with the given packages and optional message.
+	pub fn new(packages: BTreeMap<String, ChangeType>, message: Option<String>) -> Self {
+		Self { packages, message }
 	}
 
-	let pattern = chronicle_dir
-		.join("*.md")
-		.to_str()
-		.context("Invalid UTF-8 in .chronicle path")?
-		.to_string();
-
-	glob::glob(&pattern)
-		.context("Invalid glob pattern")?
-		.map(|entry| {
-			let path = entry.context("Failed to read glob entry")?;
-			let contents = std::fs::read_to_string(&path)
-				.with_context(|| format!("Failed to read changeset: {}", path.display()))?;
-			let changeset = parse_changeset(&contents)
-				.with_context(|| format!("Failed to parse changeset: {}", path.display()))?;
-			Ok((path, changeset))
-		})
-		.collect()
-}
-
-/// Consumes released package entries from a changeset file.
-///
-/// - If all packages in the changeset were released, deletes the file.
-/// - If only some packages were released, rewrites the file with the
-///   released entries removed and the description preserved.
-/// - If no packages match (changeset is unrelated), leaves the file untouched.
-///
-/// # Errors
-///
-/// Returns an error if the file cannot be deleted or rewritten.
-pub fn consume_changeset(
-	path: &Path,
-	changeset: &Changeset,
-	released_packages: &BTreeSet<String>,
-) -> anyhow::Result<()> {
-	let remaining: BTreeMap<String, ChangeType> = changeset
-		.packages
-		.iter()
-		.filter(|(name, _)| !released_packages.contains(*name))
-		.map(|(name, ct)| (name.clone(), *ct))
-		.collect();
-
-	if remaining.len() == changeset.packages.len() {
-		// No packages were released from this changeset — leave it untouched.
-		return Ok(());
+	/// Generates a random filename for a changeset using petname.
+	///
+	/// Returns a filename like `evidently-uptown-primate.md`.
+	fn generate_filename() -> String {
+		let name = petname::petname(3, "-").unwrap_or_else(|| "unnamed-changeset".to_string());
+		format!("{name}.md")
 	}
 
-	if remaining.is_empty() {
-		// All packages consumed — delete the file.
-		std::fs::remove_file(path)
-			.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
-	} else {
-		// Partially consumed — rewrite with remaining packages only.
-		let rewritten = Changeset {
-			packages: remaining,
-			message: changeset.message.clone(),
+	/// Formats this changeset as a string with Hugo-style `+++` TOML frontmatter.
+	///
+	/// The output format is:
+	/// ```text
+	/// +++
+	/// my-app = "minor"
+	/// +++
+	///
+	/// Description message here
+	/// ```
+	pub fn format(&self) -> String {
+		self.to_string()
+	}
+
+	/// Parses a changeset from a string with Hugo-style `+++` TOML frontmatter.
+	///
+	/// Expected format:
+	/// ```text
+	/// +++
+	/// my-app = "minor"
+	/// +++
+	///
+	/// Description message here
+	/// ```
+	///
+	/// # Errors
+	///
+	/// Returns an error if the delimiters are missing or the TOML frontmatter is invalid.
+	pub fn parse(input: &str) -> anyhow::Result<Self> {
+		let rest = input
+			.strip_prefix("+++\n")
+			.context("Missing opening +++ delimiter")?;
+		let (toml_section, body) = rest
+			.split_once("+++\n")
+			.context("Missing closing +++ delimiter")?;
+		let packages: BTreeMap<String, ChangeType> =
+			toml::from_str(toml_section).context("Invalid TOML frontmatter")?;
+		let trimmed = body.trim();
+		let message = if trimmed.is_empty() {
+			None
+		} else {
+			Some(trimmed.to_string())
 		};
-		let content = format_changeset(&rewritten);
-		std::fs::write(path, content)
-			.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
+		Ok(Self { packages, message })
 	}
 
-	Ok(())
+	/// Writes this changeset to `{git_workdir}/.chronicle/{name}.md`.
+	///
+	/// Creates the `.chronicle` directory if it doesn't exist. Returns the
+	/// path to the written file.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the directory cannot be created or the file cannot be written.
+	pub fn write(&self, git_workdir: &Path) -> anyhow::Result<PathBuf> {
+		let chronicle_dir = git_workdir.join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir)
+			.with_context(|| format!("Failed to create directory: {}", chronicle_dir.display()))?;
+
+		let filename = Self::generate_filename();
+		let path = chronicle_dir.join(filename);
+		let content = self.to_string();
+		std::fs::write(&path, &content)
+			.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
+		Ok(path)
+	}
+
+	/// Reads all changeset files from the `.chronicle/` directory.
+	///
+	/// Returns a list of `(path, changeset)` pairs for each `.md` file found.
+	/// Returns an empty vec if no changesets exist.
+	///
+	/// # Errors
+	///
+	/// Returns an error if any changeset file cannot be read or parsed.
+	pub fn read_all(git_workdir: &Path) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+		let chronicle_dir = git_workdir.join(".chronicle");
+		if !chronicle_dir.is_dir() {
+			return Ok(Vec::new());
+		}
+
+		let pattern = chronicle_dir
+			.join("*.md")
+			.to_str()
+			.context("Invalid UTF-8 in .chronicle path")?
+			.to_string();
+
+		glob::glob(&pattern)
+			.context("Invalid glob pattern")?
+			.map(|entry| {
+				let path = entry.context("Failed to read glob entry")?;
+				let contents = std::fs::read_to_string(&path)
+					.with_context(|| format!("Failed to read changeset: {}", path.display()))?;
+				let changeset = Self::parse(&contents)
+					.with_context(|| format!("Failed to parse changeset: {}", path.display()))?;
+				Ok((path, changeset))
+			})
+			.collect()
+	}
+
+	/// Consumes released package entries from a changeset file.
+	///
+	/// - If all packages in the changeset were released, deletes the file.
+	/// - If only some packages were released, rewrites the file with the
+	///   released entries removed and the description preserved.
+	/// - If no packages match (changeset is unrelated), leaves the file untouched.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the file cannot be deleted or rewritten.
+	pub fn consume(&self, path: &Path, released_packages: &BTreeSet<String>) -> anyhow::Result<()> {
+		let remaining: BTreeMap<String, ChangeType> = self
+			.packages
+			.iter()
+			.filter(|(name, _)| !released_packages.contains(*name))
+			.map(|(name, ct)| (name.clone(), *ct))
+			.collect();
+
+		if remaining.len() == self.packages.len() {
+			// No packages were released from this changeset — leave it untouched.
+			return Ok(());
+		}
+
+		if remaining.is_empty() {
+			// All packages consumed — delete the file.
+			std::fs::remove_file(path)
+				.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
+		} else {
+			// Partially consumed — rewrite with remaining packages only.
+			let rewritten = Self::new(remaining, self.message.clone());
+			let content = rewritten.to_string();
+			std::fs::write(path, content)
+				.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
+		}
+
+		Ok(())
+	}
 }
 
 /// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
@@ -268,25 +274,19 @@ mod tests {
 	fn single_package_changeset() -> Changeset {
 		let mut packages = BTreeMap::new();
 		packages.insert("my-app".to_string(), ChangeType::Minor);
-		Changeset {
-			packages,
-			message: None,
-		}
+		Changeset::new(packages, None)
 	}
 
 	fn multi_package_changeset() -> Changeset {
 		let mut packages = BTreeMap::new();
 		packages.insert("@my-org/my-app".to_string(), ChangeType::Minor);
 		packages.insert("@my-org/my-lib".to_string(), ChangeType::Patch);
-		Changeset {
-			packages,
-			message: None,
-		}
+		Changeset::new(packages, None)
 	}
 
 	#[test]
 	fn generate_filename_ends_with_md() {
-		let filename = generate_filename();
+		let filename = Changeset::generate_filename();
 		assert!(
 			filename.ends_with(".md"),
 			"Expected .md extension, got: {filename}"
@@ -295,7 +295,7 @@ mod tests {
 
 	#[test]
 	fn generate_filename_has_exactly_two_hyphens() {
-		let filename = generate_filename();
+		let filename = Changeset::generate_filename();
 		let stem = filename.trim_end_matches(".md");
 		let hyphen_count = stem.chars().filter(|&c| c == '-').count();
 		assert_eq!(
@@ -306,7 +306,7 @@ mod tests {
 
 	#[test]
 	fn generate_filename_is_not_empty() {
-		let filename = generate_filename();
+		let filename = Changeset::generate_filename();
 		let stem = filename.trim_end_matches(".md");
 		assert!(!stem.is_empty(), "Filename stem should not be empty");
 	}
@@ -314,7 +314,7 @@ mod tests {
 	#[test]
 	fn format_changeset_single_package() {
 		let changeset = single_package_changeset();
-		let output = format_changeset(&changeset);
+		let output = changeset.format();
 		assert!(output.starts_with("+++\n"), "Should start with +++");
 		assert!(
 			output.contains("my-app = \"minor\""),
@@ -326,7 +326,7 @@ mod tests {
 	#[test]
 	fn format_changeset_multiple_packages() {
 		let changeset = multi_package_changeset();
-		let output = format_changeset(&changeset);
+		let output = changeset.format();
 		assert!(
 			output.contains("\"@my-org/my-app\" = \"minor\""),
 			"Should contain @my-org/my-app, got: {output}"
@@ -341,7 +341,7 @@ mod tests {
 	fn format_changeset_with_message() {
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Added a new feature".to_string());
-		let output = format_changeset(&changeset);
+		let output = changeset.format();
 		assert!(output.contains("Added a new feature"));
 		assert!(output.ends_with("Added a new feature\n"));
 	}
@@ -349,7 +349,7 @@ mod tests {
 	#[test]
 	fn format_changeset_without_message() {
 		let changeset = single_package_changeset();
-		let output = format_changeset(&changeset);
+		let output = changeset.format();
 		let after_frontmatter = output.rsplit_once("+++").unwrap().1;
 		assert_eq!(after_frontmatter.trim(), "");
 	}
@@ -358,11 +358,8 @@ mod tests {
 	fn format_changeset_major_type() {
 		let mut packages = BTreeMap::new();
 		packages.insert("pkg".to_string(), ChangeType::Major);
-		let changeset = Changeset {
-			packages,
-			message: None,
-		};
-		let output = format_changeset(&changeset);
+		let changeset = Changeset::new(packages, None);
+		let output = changeset.format();
 		assert!(
 			output.contains("pkg = \"major\""),
 			"Should contain major type, got: {output}"
@@ -370,10 +367,16 @@ mod tests {
 	}
 
 	#[test]
+	fn changeset_display_delegates_to_format() {
+		let changeset = single_package_changeset();
+		assert_eq!(format!("{changeset}"), changeset.format());
+	}
+
+	#[test]
 	fn write_changeset_creates_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let changeset = single_package_changeset();
-		let path = write_changeset(dir.path(), &changeset).unwrap();
+		let path = changeset.write(dir.path()).unwrap();
 		assert!(path.exists(), "Changeset file should exist");
 		assert!(path.starts_with(dir.path().join(".chronicle")));
 		assert!(path.extension().is_some_and(|ext| ext == "md"));
@@ -383,7 +386,7 @@ mod tests {
 	fn write_changeset_creates_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let changeset = single_package_changeset();
-		write_changeset(dir.path(), &changeset).unwrap();
+		changeset.write(dir.path()).unwrap();
 		assert!(
 			dir.path().join(".chronicle").is_dir(),
 			".chronicle directory should exist"
@@ -395,7 +398,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
-		let path = write_changeset(dir.path(), &changeset).unwrap();
+		let path = changeset.write(dir.path()).unwrap();
 		let content = std::fs::read_to_string(path).unwrap();
 		assert!(content.starts_with("+++\n"));
 		assert!(
@@ -408,8 +411,8 @@ mod tests {
 	#[test]
 	fn parse_changeset_round_trip_without_message() {
 		let changeset = single_package_changeset();
-		let formatted = format_changeset(&changeset);
-		let parsed = parse_changeset(&formatted).unwrap();
+		let formatted = changeset.format();
+		let parsed = Changeset::parse(&formatted).unwrap();
 		assert_eq!(parsed, changeset);
 	}
 
@@ -417,15 +420,15 @@ mod tests {
 	fn parse_changeset_round_trip_with_message() {
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Added a new feature".to_string());
-		let formatted = format_changeset(&changeset);
-		let parsed = parse_changeset(&formatted).unwrap();
+		let formatted = changeset.format();
+		let parsed = Changeset::parse(&formatted).unwrap();
 		assert_eq!(parsed, changeset);
 	}
 
 	#[test]
 	fn parse_changeset_single_package() {
 		let input = "+++\nmy-app = \"minor\"\n+++\n\n";
-		let parsed = parse_changeset(input).unwrap();
+		let parsed = Changeset::parse(input).unwrap();
 		assert_eq!(parsed.packages.len(), 1);
 		assert_eq!(parsed.packages["my-app"], ChangeType::Minor);
 		assert_eq!(parsed.message, None);
@@ -434,7 +437,7 @@ mod tests {
 	#[test]
 	fn parse_changeset_multiple_packages() {
 		let input = "+++\nmy-app = \"minor\"\nmy-lib = \"patch\"\n+++\n\n";
-		let parsed = parse_changeset(input).unwrap();
+		let parsed = Changeset::parse(input).unwrap();
 		assert_eq!(parsed.packages.len(), 2);
 		assert_eq!(parsed.packages["my-app"], ChangeType::Minor);
 		assert_eq!(parsed.packages["my-lib"], ChangeType::Patch);
@@ -443,39 +446,39 @@ mod tests {
 	#[test]
 	fn parse_changeset_with_message() {
 		let input = "+++\npkg = \"major\"\n+++\n\nSome description\n";
-		let parsed = parse_changeset(input).unwrap();
+		let parsed = Changeset::parse(input).unwrap();
 		assert_eq!(parsed.message, Some("Some description".to_string()));
 	}
 
 	#[test]
 	fn parse_changeset_empty_body_is_none() {
 		let input = "+++\npkg = \"patch\"\n+++\n\n\n";
-		let parsed = parse_changeset(input).unwrap();
+		let parsed = Changeset::parse(input).unwrap();
 		assert_eq!(parsed.message, None);
 	}
 
 	#[test]
 	fn parse_changeset_missing_delimiters_is_error() {
 		let input = "pkg = \"minor\"\n";
-		assert!(parse_changeset(input).is_err());
+		assert!(Changeset::parse(input).is_err());
 	}
 
 	#[test]
 	fn parse_changeset_missing_closing_delimiter_is_error() {
 		let input = "+++\npkg = \"minor\"\n";
-		assert!(parse_changeset(input).is_err());
+		assert!(Changeset::parse(input).is_err());
 	}
 
 	#[test]
 	fn parse_changeset_invalid_toml_is_error() {
 		let input = "+++\nnot valid toml {{{\n+++\n\n";
-		assert!(parse_changeset(input).is_err());
+		assert!(Changeset::parse(input).is_err());
 	}
 
 	#[test]
 	fn parse_changeset_invalid_change_type_is_error() {
 		let input = "+++\npkg = \"breaking\"\n+++\n\n";
-		assert!(parse_changeset(input).is_err());
+		assert!(Changeset::parse(input).is_err());
 	}
 
 	#[test]
@@ -493,7 +496,7 @@ mod tests {
 	#[test]
 	fn read_all_changesets_empty_when_no_directory() {
 		let dir = tempfile::tempdir().unwrap();
-		let result = read_all_changesets(dir.path()).unwrap();
+		let result = Changeset::read_all(dir.path()).unwrap();
 		assert!(result.is_empty());
 	}
 
@@ -503,7 +506,7 @@ mod tests {
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("config.toml"), "").unwrap();
-		let result = read_all_changesets(dir.path()).unwrap();
+		let result = Changeset::read_all(dir.path()).unwrap();
 		assert!(result.is_empty());
 	}
 
@@ -518,7 +521,7 @@ mod tests {
 		)
 		.unwrap();
 
-		let result = read_all_changesets(dir.path()).unwrap();
+		let result = Changeset::read_all(dir.path()).unwrap();
 		assert_eq!(result.len(), 1);
 		assert_eq!(result[0].1.packages["my-app"], ChangeType::Minor);
 		assert_eq!(result[0].1.message, Some("A change".to_string()));
@@ -532,7 +535,7 @@ mod tests {
 		std::fs::write(chronicle_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 		std::fs::write(chronicle_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
 
-		let result = read_all_changesets(dir.path()).unwrap();
+		let result = Changeset::read_all(dir.path()).unwrap();
 		assert_eq!(result.len(), 2);
 	}
 
@@ -543,7 +546,7 @@ mod tests {
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("bad.md"), "not a valid changeset").unwrap();
 
-		let result = read_all_changesets(dir.path());
+		let result = Changeset::read_all(dir.path());
 		assert!(result.is_err());
 	}
 
@@ -599,7 +602,7 @@ mod tests {
 		assert_eq!(ChangeType::Major.rank(), 2);
 	}
 
-	// consume_changeset tests
+	// consume tests
 
 	fn make_path_and_changeset(
 		dir: &std::path::Path,
@@ -608,7 +611,7 @@ mod tests {
 	) -> (std::path::PathBuf, Changeset) {
 		let path = dir.join(filename);
 		std::fs::write(&path, content).unwrap();
-		let changeset = parse_changeset(content).unwrap();
+		let changeset = Changeset::parse(content).unwrap();
 		(path, changeset)
 	}
 
@@ -621,7 +624,7 @@ mod tests {
 			"+++\npkg-a = \"patch\"\n+++\n\nSome message\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		consume_changeset(&path, &cs, &released).unwrap();
+		cs.consume(&path, &released).unwrap();
 		assert!(!path.exists(), "File should be deleted when fully consumed");
 	}
 
@@ -634,7 +637,7 @@ mod tests {
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome message\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		consume_changeset(&path, &cs, &released).unwrap();
+		cs.consume(&path, &released).unwrap();
 
 		assert!(
 			path.exists(),
@@ -661,7 +664,7 @@ mod tests {
 		let original = "+++\npkg-b = \"minor\"\n+++\n\nUnrelated change\n";
 		let (path, cs) = make_path_and_changeset(dir.path(), "change.md", original);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		consume_changeset(&path, &cs, &released).unwrap();
+		cs.consume(&path, &released).unwrap();
 
 		assert!(path.exists(), "File should be untouched");
 		let content = std::fs::read_to_string(&path).unwrap();
@@ -677,10 +680,10 @@ mod tests {
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\npkg-c = \"major\"\n+++\n\nMulti-package change\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string(), "pkg-c".to_string()].into();
-		consume_changeset(&path, &cs, &released).unwrap();
+		cs.consume(&path, &released).unwrap();
 
 		let content = std::fs::read_to_string(&path).unwrap();
-		let reparsed = parse_changeset(&content).unwrap();
+		let reparsed = Changeset::parse(&content).unwrap();
 		assert_eq!(reparsed.packages.len(), 1);
 		assert_eq!(reparsed.packages["pkg-b"], ChangeType::Minor);
 		assert_eq!(reparsed.message, Some("Multi-package change".to_string()));
@@ -692,13 +695,10 @@ mod tests {
 		let path = dir.path().join("nonexistent.md");
 		let mut packages = BTreeMap::new();
 		packages.insert("pkg-a".to_string(), ChangeType::Patch);
-		let cs = Changeset {
-			packages,
-			message: None,
-		};
+		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// File doesn't exist, so remove_file should fail
-		let result = consume_changeset(&path, &cs, &released);
+		let result = cs.consume(&path, &released);
 		assert!(result.is_err(), "Should fail when file cannot be deleted");
 	}
 
@@ -710,13 +710,10 @@ mod tests {
 		let mut packages = BTreeMap::new();
 		packages.insert("pkg-a".to_string(), ChangeType::Patch);
 		packages.insert("pkg-b".to_string(), ChangeType::Minor);
-		let cs = Changeset {
-			packages,
-			message: None,
-		};
+		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// Partially consumed → rewrite branch triggered, but parent dir missing.
-		let result = consume_changeset(&path, &cs, &released);
+		let result = cs.consume(&path, &released);
 		assert!(result.is_err(), "Should fail when file cannot be rewritten");
 	}
 
