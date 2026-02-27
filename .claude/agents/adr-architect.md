@@ -29,6 +29,13 @@ tools: Glob, Grep, Read, WebFetch, WebSearch, ListMcpResourcesTool, ReadMcpResou
 model: opus
 color: purple
 memory: project
+hooks:
+  PostToolUse:
+    - matcher: "Edit|Write"
+      hooks:
+        - type: "command"
+          command: "$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh"
+          timeout: 30
 ---
 
 You are an expert technical architect and documentation specialist with deep expertise in Architecture Decision Records (ADRs). Your role is to design and write high-quality ADRs that capture architectural decisions with clarity, context, and long-term value.
