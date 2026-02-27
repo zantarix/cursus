@@ -64,14 +64,6 @@ pub struct Changeset {
 	pub message: Option<String>,
 }
 
-impl std::fmt::Display for Changeset {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let toml_str = toml::to_string(&self.packages).unwrap_or_default();
-		let body = self.message.as_deref().unwrap_or_default();
-		write!(f, "+++\n{toml_str}+++\n\n{body}\n")
-	}
-}
-
 impl Changeset {
 	/// Creates a new changeset with the given packages and optional message.
 	pub fn new(packages: BTreeMap<String, ChangeType>, message: Option<String>) -> Self {
@@ -96,8 +88,15 @@ impl Changeset {
 	///
 	/// Description message here
 	/// ```
-	pub fn format(&self) -> String {
-		self.to_string()
+	///
+	/// # Errors
+	///
+	/// Returns an error if the packages map cannot be serialized to TOML.
+	pub fn format(&self) -> anyhow::Result<String> {
+		let toml_str = toml::to_string(&self.packages)
+			.context("Failed to serialize changeset packages to TOML")?;
+		let body = self.message.as_deref().unwrap_or_default();
+		Ok(format!("+++\n{toml_str}+++\n\n{body}\n"))
 	}
 
 	/// Parses a changeset from a string with Hugo-style `+++` TOML frontmatter.
@@ -147,7 +146,7 @@ impl Changeset {
 
 		let filename = Self::generate_filename();
 		let path = chronicle_dir.join(filename);
-		let content = self.to_string();
+		let content = self.format()?;
 		std::fs::write(&path, &content)
 			.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
 		Ok(path)
@@ -216,7 +215,7 @@ impl Changeset {
 		} else {
 			// Partially consumed — rewrite with remaining packages only.
 			let rewritten = Self::new(remaining, self.message.clone());
-			let content = rewritten.to_string();
+			let content = rewritten.format()?;
 			std::fs::write(path, content)
 				.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
 		}
@@ -314,7 +313,7 @@ mod tests {
 	#[test]
 	fn format_changeset_single_package() {
 		let changeset = single_package_changeset();
-		let output = changeset.format();
+		let output = changeset.format().unwrap();
 		assert!(output.starts_with("+++\n"), "Should start with +++");
 		assert!(
 			output.contains("my-app = \"minor\""),
@@ -326,7 +325,7 @@ mod tests {
 	#[test]
 	fn format_changeset_multiple_packages() {
 		let changeset = multi_package_changeset();
-		let output = changeset.format();
+		let output = changeset.format().unwrap();
 		assert!(
 			output.contains("\"@my-org/my-app\" = \"minor\""),
 			"Should contain @my-org/my-app, got: {output}"
@@ -341,7 +340,7 @@ mod tests {
 	fn format_changeset_with_message() {
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Added a new feature".to_string());
-		let output = changeset.format();
+		let output = changeset.format().unwrap();
 		assert!(output.contains("Added a new feature"));
 		assert!(output.ends_with("Added a new feature\n"));
 	}
@@ -349,7 +348,7 @@ mod tests {
 	#[test]
 	fn format_changeset_without_message() {
 		let changeset = single_package_changeset();
-		let output = changeset.format();
+		let output = changeset.format().unwrap();
 		let after_frontmatter = output.rsplit_once("+++").unwrap().1;
 		assert_eq!(after_frontmatter.trim(), "");
 	}
@@ -359,17 +358,11 @@ mod tests {
 		let mut packages = BTreeMap::new();
 		packages.insert("pkg".to_string(), ChangeType::Major);
 		let changeset = Changeset::new(packages, None);
-		let output = changeset.format();
+		let output = changeset.format().unwrap();
 		assert!(
 			output.contains("pkg = \"major\""),
 			"Should contain major type, got: {output}"
 		);
-	}
-
-	#[test]
-	fn changeset_display_delegates_to_format() {
-		let changeset = single_package_changeset();
-		assert_eq!(format!("{changeset}"), changeset.format());
 	}
 
 	#[test]
@@ -411,7 +404,7 @@ mod tests {
 	#[test]
 	fn parse_changeset_round_trip_without_message() {
 		let changeset = single_package_changeset();
-		let formatted = changeset.format();
+		let formatted = changeset.format().unwrap();
 		let parsed = Changeset::parse(&formatted).unwrap();
 		assert_eq!(parsed, changeset);
 	}
@@ -420,7 +413,7 @@ mod tests {
 	fn parse_changeset_round_trip_with_message() {
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Added a new feature".to_string());
-		let formatted = changeset.format();
+		let formatted = changeset.format().unwrap();
 		let parsed = Changeset::parse(&formatted).unwrap();
 		assert_eq!(parsed, changeset);
 	}
