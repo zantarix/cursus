@@ -578,3 +578,148 @@ fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 		"Expected no cycle warning in stderr, got: {stderr}"
 	);
 }
+
+#[test]
+fn publish_dry_run_summary_single_public_package() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "my-pkg", "version": "1.2.3"}"#,
+	)
+	.unwrap();
+
+	let (success, stdout, stderr) =
+		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(success, "Expected success, stderr: {stderr}");
+	assert!(
+		stdout.contains("Would publish my-pkg@1.2.3"),
+		"Expected per-package line in stdout, got: {stdout}"
+	);
+	assert!(
+		stdout.contains("1 would be published, 0 would be skipped"),
+		"Expected summary '1 would be published, 0 would be skipped' in stdout, got: {stdout}"
+	);
+}
+
+#[test]
+fn publish_dry_run_summary_multiple_public_packages() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "private": true, "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/alpha")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/alpha/package.json"),
+		r#"{"name": "alpha", "version": "2.0.0"}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/beta")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/beta/package.json"),
+		r#"{"name": "beta", "version": "3.0.0"}"#,
+	)
+	.unwrap();
+
+	let (success, stdout, stderr) =
+		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(success, "Expected success, stderr: {stderr}");
+	assert!(
+		stdout.contains("2 would be published, 0 would be skipped"),
+		"Expected summary '2 would be published, 0 would be skipped' in stdout, got: {stdout}"
+	);
+}
+
+#[test]
+fn publish_dry_run_summary_mixed_public_private_packages() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "private": true, "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/public-pkg")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/public-pkg/package.json"),
+		r#"{"name": "public-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/private-pkg")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/private-pkg/package.json"),
+		r#"{"name": "private-pkg", "version": "1.0.0", "private": true}"#,
+	)
+	.unwrap();
+
+	let (success, stdout, stderr) =
+		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(success, "Expected success, stderr: {stderr}");
+	// Only the public package is counted; private is silently excluded
+	assert!(
+		stdout.contains("1 would be published, 0 would be skipped"),
+		"Expected summary '1 would be published, 0 would be skipped' in stdout, got: {stdout}"
+	);
+}
+
+#[test]
+fn publish_dry_run_summary_all_private_packages() {
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::write(
+		dir.path().join(".chronicle/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "private-root", "version": "1.0.0", "private": true}"#,
+	)
+	.unwrap();
+
+	let (success, stdout, stderr) =
+		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+
+	assert!(success, "Expected success, stderr: {stderr}");
+	assert!(
+		stdout.contains("0 would be published, 0 would be skipped"),
+		"Expected summary '0 would be published, 0 would be skipped' in stdout, got: {stdout}"
+	);
+}

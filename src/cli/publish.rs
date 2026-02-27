@@ -116,6 +116,7 @@ fn publish_projects(
 				version,
 				registry
 			);
+			published_count += 1;
 		} else {
 			// Real publish: delegate to do_publish which handles everything
 			match do_publish(project) {
