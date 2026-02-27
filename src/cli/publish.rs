@@ -29,7 +29,7 @@ pub struct PublishArgs {
 }
 
 /// Execute the publish command.
-pub fn cmd_publish(args: &PublishArgs, git_workdir: &std::path::Path) -> anyhow::Result<ExitCode> {
+pub fn cmd_publish(git_workdir: &std::path::Path, args: &PublishArgs) -> anyhow::Result<ExitCode> {
 	// Load configuration and enumerate projects
 	let config = config::load(git_workdir)?;
 	let projects = config.load_projects()?;
