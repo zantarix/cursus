@@ -29,7 +29,7 @@ description: |-
    assistant: <commentary>A general review of recent changes is requested. Launch the code-reviewer agent.</commentary>
    "I'll have the code-reviewer agent look over the recent changes."
    </example>
-tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
+tools: Glob, Grep, Read, Bash, WebFetch, WebSearch, Bash(cargo test:*)
 model: opus
 color: cyan
 ---
