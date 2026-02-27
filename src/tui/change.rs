@@ -80,6 +80,16 @@ fn handle_key(screen: &Screen, key: KeyCode, projects: &[Project]) -> anyhow::Re
 
 fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) -> HandleResult {
 	let len = selected.len();
+	if len == 0 {
+		return match key {
+			KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
+			_ => KeyResult::Continue(Screen::SelectProjects {
+				selected: vec![],
+				cursor: 0,
+				error: false,
+			}),
+		};
+	}
 	match key {
 		KeyCode::Up | KeyCode::Char('k') => {
 			let new_cursor = if cursor == 0 { len - 1 } else { cursor - 1 };
@@ -849,6 +859,43 @@ mod tests {
 		let buffer = terminal.backend().buffer().clone();
 		let content = buffer_to_string(&buffer);
 		assert!(content.contains("Change Type"));
+	}
+
+	// Empty projects guard tests
+	#[test]
+	fn projects_empty_navigation_keys_are_no_ops() {
+		let screen = projects_screen(vec![], 0);
+		for key in [
+			KeyCode::Up,
+			KeyCode::Down,
+			KeyCode::Char('k'),
+			KeyCode::Char('j'),
+			KeyCode::Char(' '),
+			KeyCode::Char('a'),
+			KeyCode::Enter,
+			KeyCode::Char('x'),
+		] {
+			let result = handle_key(&screen, key, &[]).unwrap();
+			assert_eq!(
+				result,
+				KeyResult::Continue(projects_screen(vec![], 0)),
+				"key {key:?} should be a no-op on empty projects"
+			);
+		}
+	}
+
+	#[test]
+	fn projects_empty_esc_cancels() {
+		let screen = projects_screen(vec![], 0);
+		let result = handle_key(&screen, KeyCode::Esc, &[]).unwrap();
+		assert_eq!(result, KeyResult::Cancelled);
+	}
+
+	#[test]
+	fn projects_empty_q_cancels() {
+		let screen = projects_screen(vec![], 0);
+		let result = handle_key(&screen, KeyCode::Char('q'), &[]).unwrap();
+		assert_eq!(result, KeyResult::Cancelled);
 	}
 
 	// Workflow test
