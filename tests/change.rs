@@ -13,7 +13,7 @@ use common::{
 #[test]
 fn change_fails_when_no_config() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -37,7 +37,7 @@ fn change_fails_when_no_config() {
 #[test]
 fn change_fails_when_no_projects_found() {
 	let dir = temp_git_repo_with_config(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -61,7 +61,7 @@ fn change_fails_when_no_projects_found() {
 #[test]
 fn change_succeeds_with_major() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -81,7 +81,7 @@ fn change_succeeds_with_major() {
 #[test]
 fn change_succeeds_with_minor() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -101,7 +101,7 @@ fn change_succeeds_with_minor() {
 #[test]
 fn change_succeeds_with_patch() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -121,7 +121,7 @@ fn change_succeeds_with_patch() {
 #[test]
 fn change_no_interactive_requires_change_type() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		["chronicle", "--no-interactive", "change", "-m", "test"],
 		dir.path(),
 	);
@@ -139,7 +139,7 @@ fn change_is_default_command() {
 	// Running without a subcommand should behave like `change`,
 	// which fails when no config exists
 	let dir = temp_git_repo();
-	let result = chronicle::run(["chronicle", "--no-interactive"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive"], dir.path());
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -152,7 +152,7 @@ fn change_is_default_command() {
 #[test]
 fn change_with_project_flag_selects_specific_project() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -174,7 +174,7 @@ fn change_with_project_flag_selects_specific_project() {
 #[test]
 fn change_with_unknown_project_fails() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -200,7 +200,7 @@ fn change_with_unknown_project_fails() {
 #[test]
 fn change_no_interactive_requires_message() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		["chronicle", "--no-interactive", "change", "-t", "minor"],
 		dir.path(),
 	);
@@ -216,7 +216,7 @@ fn change_no_interactive_requires_message() {
 #[test]
 fn change_with_message_creates_changeset_file() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -260,7 +260,7 @@ fn change_with_message_creates_changeset_file() {
 #[test]
 fn change_with_message_and_project() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -301,7 +301,7 @@ fn change_with_message_and_project() {
 #[test]
 fn change_succeeds_with_npm_project_in_subfolder() {
 	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Npm, "frontend");
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -321,7 +321,7 @@ fn change_succeeds_with_npm_project_in_subfolder() {
 #[test]
 fn change_succeeds_with_cargo_project_in_subfolder() {
 	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Cargo, "backend");
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",

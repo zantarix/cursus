@@ -7,7 +7,7 @@ fn run_chronicle(args: &[&str], cwd: &Path) -> anyhow::Result<std::process::Exit
 	let args_with_bin = std::iter::once("chronicle")
 		.chain(args.iter().copied())
 		.collect::<Vec<_>>();
-	chronicle::run(args_with_bin, cwd)
+	chronicle::run(args_with_bin, cwd, chronicle::Env::default())
 }
 
 /// Helper to run chronicle as a subprocess, capturing stdout and stderr.

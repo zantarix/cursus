@@ -191,18 +191,19 @@ fn find_default_editor() -> Option<String> {
 
 /// Opens the user's editor to edit the changeset file.
 ///
-/// Uses the `VISUAL` environment variable first (for graphical editors),
-/// then `EDITOR`, falling back to the first available editor from
-/// `nano`, `vim`, `vi`.
+/// Resolves the editor from `env.visual` first, then `env.editor`,
+/// falling back to the first available editor from `nano`, `vim`, `vi`.
 ///
 /// # Errors
 ///
 /// Returns an error if no editor is found or the editor process fails.
-pub fn open_editor(path: &Path) -> anyhow::Result<()> {
-	let editor = std::env::var("VISUAL")
-		.ok()
+pub fn open_editor(path: &Path, env: &crate::Env) -> anyhow::Result<()> {
+	let editor = env
+		.visual
+		.as_deref()
 		.filter(|v| !v.is_empty())
-		.or_else(|| std::env::var("EDITOR").ok().filter(|v| !v.is_empty()))
+		.or_else(|| env.editor.as_deref().filter(|v| !v.is_empty()))
+		.map(String::from)
 		.or_else(find_default_editor)
 		.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
 	let status = std::process::Command::new(&editor)
@@ -551,5 +552,85 @@ mod tests {
 		assert_eq!(ChangeType::Patch.rank(), 0);
 		assert_eq!(ChangeType::Minor.rank(), 1);
 		assert_eq!(ChangeType::Major.rank(), 2);
+	}
+
+	// open_editor tests
+	fn make_env(visual: Option<&str>, editor: Option<&str>) -> crate::Env {
+		crate::Env {
+			visual: visual.map(String::from),
+			editor: editor.map(String::from),
+		}
+	}
+
+	#[test]
+	fn open_editor_visual_takes_priority_over_editor() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		// "true" exits 0; "false" exits 1 — VISUAL must win.
+		let result = open_editor(&path, &make_env(Some("true"), Some("false")));
+		assert!(
+			result.is_ok(),
+			"Expected success when VISUAL='true', got: {result:?}"
+		);
+	}
+
+	#[test]
+	fn open_editor_falls_back_to_editor_when_visual_empty() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		// VISUAL is empty string (filtered out), EDITOR = "true"
+		let result = open_editor(&path, &make_env(Some(""), Some("true")));
+		assert!(
+			result.is_ok(),
+			"Expected success when EDITOR='true', got: {result:?}"
+		);
+	}
+
+	#[test]
+	fn open_editor_editor_used_when_visual_absent() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		let result = open_editor(&path, &make_env(None, Some("true")));
+		assert!(
+			result.is_ok(),
+			"Expected success when EDITOR='true', got: {result:?}"
+		);
+	}
+
+	#[test]
+	fn open_editor_editor_exits_nonzero_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		// "false" is a standard POSIX command that always exits 1.
+		let result = open_editor(&path, &make_env(Some("false"), None));
+		assert!(result.is_err(), "Expected error when editor exits non-zero");
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("Editor exited with status"),
+			"Error should mention exit status, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn open_editor_nonexistent_editor_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		let result = open_editor(&path, &make_env(Some("__chronicle_no_such_editor__"), None));
+		assert!(result.is_err(), "Expected error for nonexistent editor");
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("Failed to open editor"),
+			"Error should mention failed to open editor, got: {msg}"
+		);
 	}
 }

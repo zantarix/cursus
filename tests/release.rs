@@ -17,7 +17,7 @@ fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 #[test]
 fn release_fails_when_no_config() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -30,7 +30,7 @@ fn release_fails_when_no_config() {
 #[test]
 fn release_with_no_changesets_is_noop() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -45,7 +45,7 @@ fn release_with_single_changeset_cargo() {
 		"+++\ntest-project = \"minor\"\n+++\n\nAdded a feature\n",
 	);
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -83,7 +83,7 @@ fn release_with_single_changeset_npm() {
 		"+++\ntest-project = \"patch\"\n+++\n\nFixed a bug\n",
 	);
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -112,7 +112,7 @@ fn release_aggregates_to_highest_change_type() {
 		"+++\ntest-project = \"minor\"\n+++\n\nNew feature\n",
 	);
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -139,7 +139,7 @@ fn release_dry_run_does_not_modify_files() {
 
 	let original_cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
 
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		["chronicle", "--no-interactive", "release", "--dry-run"],
 		dir.path(),
 	);
@@ -181,7 +181,7 @@ fn release_major_bump_resets_minor_and_patch() {
 		"+++\ntest-project = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -201,11 +201,11 @@ fn release_idempotent_no_changesets_after_release() {
 	);
 
 	// First release
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
 	// Second release (no changesets)
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
@@ -229,7 +229,7 @@ fn release_changelog_has_proper_sections() {
 		"+++\ntest-project = \"patch\"\n+++\n\nBug fix\n",
 	);
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -263,7 +263,7 @@ fn release_successive_releases_prepend_to_changelog() {
 		"change-1.md",
 		"+++\ntest-project = \"minor\"\n+++\n\nFirst feature\n",
 	);
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
 	// Second release: patch bump 0.2.0 -> 0.2.1
@@ -272,7 +272,7 @@ fn release_successive_releases_prepend_to_changelog() {
 		"change-2.md",
 		"+++\ntest-project = \"patch\"\n+++\n\nA bug fix\n",
 	);
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -305,7 +305,7 @@ fn release_unknown_package_in_changeset_fails() {
 		"+++\nnonexistent-package = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_err());
 	let err = result.unwrap_err();
 	assert!(
@@ -347,7 +347,7 @@ fn release_package_flag_filters_packages() {
 		"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -387,7 +387,7 @@ fn release_unknown_package_flag_fails() {
 		"+++\ntest-project = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		[
 			"chronicle",
 			"--no-interactive",
@@ -420,7 +420,7 @@ fn release_updates_cargo_lock_file() {
 		std::fs::remove_file(&lock_file).unwrap();
 	}
 
-	let result = chronicle::run(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	if let Err(ref err) = result {
 		eprintln!("Release failed: {:#}", err);
 	}

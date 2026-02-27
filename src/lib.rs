@@ -24,11 +24,23 @@ fn find_git_workdir(start: &Path) -> Option<PathBuf> {
 	.find(|dir| dir.join(".git").exists())
 }
 
+/// Environment variables used by Chronicle.
+///
+/// Populated from the process environment at the binary boundary and threaded
+/// into the library so that internal functions never read `std::env` directly.
+#[derive(Debug, Clone, Default)]
+pub struct Env {
+	/// Value of the `VISUAL` environment variable.
+	pub visual: Option<String>,
+	/// Value of the `EDITOR` environment variable.
+	pub editor: Option<String>,
+}
+
 /// Main entry point for the chronicle application.
 ///
 /// Parses CLI arguments from the provided iterator, finds the git root
 /// starting from the given working directory, and dispatches to the appropriate command.
-pub fn run<I, T>(args: I, cwd: &Path) -> anyhow::Result<ExitCode>
+pub fn run<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
@@ -52,10 +64,10 @@ where
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
-		Some(cli::Command::Change(args)) => cli::cmd_change(&git_workdir, &args, &cli.global),
+		Some(cli::Command::Change(args)) => cli::cmd_change(&git_workdir, &args, &cli.global, &env),
 		Some(cli::Command::Publish(args)) => cli::cmd_publish(&git_workdir, &args),
 		Some(cli::Command::Release(args)) => cli::cmd_release(&git_workdir, &args),
-		None => cli::cmd_change(&git_workdir, &cli::ChangeArgs::default(), &cli.global),
+		None => cli::cmd_change(&git_workdir, &cli::ChangeArgs::default(), &cli.global, &env),
 	}
 }
 

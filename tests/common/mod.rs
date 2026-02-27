@@ -2,6 +2,17 @@
 
 #![allow(dead_code)]
 
+/// Runs chronicle with a default (empty) environment, returning the result.
+///
+/// This is the standard way to invoke `chronicle::run` from integration tests.
+/// It passes `Env::default()` so that no real environment variables are read.
+pub fn run_chronicle(
+	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+	cwd: &std::path::Path,
+) -> anyhow::Result<std::process::ExitCode> {
+	chronicle::run(args, cwd, chronicle::Env::default())
+}
+
 use chronicle::model::config::{Config, PackageManager};
 use chronicle::package_manager::{CargoConfig, NpmConfig};
 use tempfile::TempDir;

@@ -12,7 +12,11 @@ fn main() -> ExitCode {
 		}
 	};
 
-	match chronicle::run(std::env::args_os(), &cwd) {
+	let env = chronicle::Env {
+		visual: std::env::var("VISUAL").ok(),
+		editor: std::env::var("EDITOR").ok(),
+	};
+	match chronicle::run(std::env::args_os(), &cwd, env) {
 		Ok(code) => code,
 		Err(e) => {
 			eprintln!("Error: {e:#}");

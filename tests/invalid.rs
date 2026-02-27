@@ -7,7 +7,7 @@ use common::temp_git_repo;
 #[test]
 fn run_fails_with_invalid_command() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		["chronicle", "--no-interactive", "invalid-command"],
 		dir.path(),
 	);
@@ -17,7 +17,7 @@ fn run_fails_with_invalid_command() {
 #[test]
 fn run_fails_with_unknown_flag() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(
+	let result = common::run_chronicle(
 		["chronicle", "--no-interactive", "--unknown-flag"],
 		dir.path(),
 	);
@@ -27,13 +27,13 @@ fn run_fails_with_unknown_flag() {
 #[test]
 fn run_succeeds_with_help_flag() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(["chronicle", "--help"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--help"], dir.path());
 	assert!(result.is_ok_and(|code| code == std::process::ExitCode::SUCCESS));
 }
 
 #[test]
 fn run_succeeds_with_version_flag() {
 	let dir = temp_git_repo();
-	let result = chronicle::run(["chronicle", "--version"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--version"], dir.path());
 	assert!(result.is_ok_and(|code| code == std::process::ExitCode::SUCCESS));
 }

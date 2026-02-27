@@ -34,6 +34,7 @@ pub fn cmd_change(
 	git_workdir: &Path,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
+	env: &crate::Env,
 ) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
 	let projects = config.load_projects()?;
@@ -94,7 +95,7 @@ pub fn cmd_change(
 	let path = changeset::write_changeset(config.git_workdir(), &changeset)?;
 
 	if !global.no_interactive && args.message.is_none() {
-		changeset::open_editor(&path)?;
+		changeset::open_editor(&path, env)?;
 	}
 
 	Ok(ExitCode::SUCCESS)
