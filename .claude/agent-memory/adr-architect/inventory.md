@@ -9,4 +9,4 @@
 - **ADR-007** (Accepted): Honor Private Package Markers During Publish
 - **ADR-008** (Accepted): Dry-Run Must Be Strictly Local-Only. Errata added to ADR-004.
 - **ADR-009** (Accepted): JavaScript Package Manager Strategy for Lockfiles and Publishing
-- **ADR-010** (Proposed): Scoped Release Changeset Consumption — fix silent data loss when using `--package` flag
+- **ADR-010** (Accepted): Scoped Release Changeset Consumption — fix silent data loss when using `--package` flag
