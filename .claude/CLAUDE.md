@@ -81,3 +81,5 @@ All new changes should meet the coverage thresholds:
 - 80% for branches
 
 All functions which are made public from a module should be documented.
+
+All significant changes as described by that agents description should be checked with the `code-reviewer` subagent. This check is separate from any plan approvals by the user as it is intended to validate the implementation of the plan.
