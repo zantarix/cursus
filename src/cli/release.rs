@@ -24,6 +24,11 @@ pub struct ReleaseArgs {
 	pub packages: Vec<String>,
 }
 
+/// Returns today's date as an ISO 8601 string (`YYYY-MM-DD`) in UTC.
+fn today_iso_date() -> String {
+	chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
 /// Bumps a semver version according to the given change type.
 fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::Version {
 	let mut v = version.clone();
@@ -115,8 +120,13 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 				.map(|v| v.as_slice())
 				.unwrap_or_default()
 				.to_vec();
-			Changelog::new(new_version.clone(), changes, project.path().to_path_buf())
-				.update(config.git_workdir())?;
+			Changelog::new(
+				new_version.clone(),
+				today_iso_date(),
+				changes,
+				project.path().to_path_buf(),
+			)
+			.update(config.git_workdir())?;
 
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		}

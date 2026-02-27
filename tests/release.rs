@@ -63,10 +63,11 @@ fn release_with_single_changeset_cargo() {
 	);
 
 	// Verify changelog was created
+	let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	assert!(
-		changelog.contains("## 0.2.0"),
-		"Changelog should contain version header, got: {changelog}"
+		changelog.contains(&format!("## 0.2.0 - {today}")),
+		"Changelog should contain version header with date, got: {changelog}"
 	);
 	assert!(
 		changelog.contains("Added a feature"),
@@ -232,12 +233,13 @@ fn release_changelog_has_proper_sections() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
+	let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 
 	// Major bump aggregates all, version should be 1.0.0
 	assert!(
-		changelog.contains("## 1.0.0"),
-		"Should have major bumped version, got: {changelog}"
+		changelog.contains(&format!("## 1.0.0 - {today}")),
+		"Should have major bumped version with date, got: {changelog}"
 	);
 	assert!(
 		changelog.contains("### Breaking Changes"),
@@ -275,21 +277,22 @@ fn release_successive_releases_prepend_to_changelog() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
+	let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 
 	// Both versions should be present
 	assert!(
-		changelog.contains("## 0.2.1"),
-		"Should contain newer version, got: {changelog}"
+		changelog.contains(&format!("## 0.2.1 - {today}")),
+		"Should contain newer version with date, got: {changelog}"
 	);
 	assert!(
-		changelog.contains("## 0.2.0"),
-		"Should contain older version, got: {changelog}"
+		changelog.contains(&format!("## 0.2.0 - {today}")),
+		"Should contain older version with date, got: {changelog}"
 	);
 
 	// Newer entry must appear before older entry
-	let pos_new = changelog.find("## 0.2.1").unwrap();
-	let pos_old = changelog.find("## 0.2.0").unwrap();
+	let pos_new = changelog.find(&format!("## 0.2.1 - {today}")).unwrap();
+	let pos_old = changelog.find(&format!("## 0.2.0 - {today}")).unwrap();
 	assert!(
 		pos_new < pos_old,
 		"Newer version should appear before older version in changelog, got: {changelog}"

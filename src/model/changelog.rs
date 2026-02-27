@@ -11,6 +11,7 @@ use crate::model::changeset::ChangeType;
 /// A changelog entry for a specific version.
 pub struct Changelog {
 	version: semver::Version,
+	date: String,
 	changes: Vec<(ChangeType, Option<String>)>,
 	project_path: PathBuf,
 }
@@ -19,11 +20,13 @@ impl Changelog {
 	/// Creates a new changelog entry.
 	pub fn new(
 		version: semver::Version,
+		date: String,
 		changes: Vec<(ChangeType, Option<String>)>,
 		project_path: PathBuf,
 	) -> Self {
 		Self {
 			version,
+			date,
 			changes,
 			project_path,
 		}
@@ -41,7 +44,7 @@ impl Changelog {
 			}
 		}
 
-		let mut output = format!("## {}\n", self.version);
+		let mut output = format!("## {} - {}\n", self.version, self.date);
 
 		// Iterate in reverse order (Major first, then Minor, then Patch)
 		for ct in [ChangeType::Major, ChangeType::Minor, ChangeType::Patch] {
@@ -95,9 +98,14 @@ mod tests {
 			(ChangeType::Minor, Some("Added feature X".to_string())),
 			(ChangeType::Patch, Some("Fixed bug Y".to_string())),
 		];
-		let changelog = Changelog::new("1.1.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"1.1.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		let entry = changelog.format_entry();
-		assert!(entry.contains("## 1.1.0"));
+		assert!(entry.contains("## 1.1.0 - 2024-01-15"));
 		assert!(entry.contains("### Features"));
 		assert!(entry.contains("- Added feature X"));
 		assert!(entry.contains("### Bug Fixes"));
@@ -107,16 +115,26 @@ mod tests {
 	#[test]
 	fn format_changelog_entry_no_messages() {
 		let changes: Vec<(ChangeType, Option<String>)> = vec![(ChangeType::Minor, None)];
-		let changelog = Changelog::new("1.1.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"1.1.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		let entry = changelog.format_entry();
-		assert!(entry.contains("## 1.1.0"));
+		assert!(entry.contains("## 1.1.0 - 2024-01-15"));
 		assert!(!entry.contains("###"));
 	}
 
 	#[test]
 	fn format_changelog_entry_major_section() {
 		let changes = vec![(ChangeType::Major, Some("Breaking API change".to_string()))];
-		let changelog = Changelog::new("2.0.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"2.0.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		let entry = changelog.format_entry();
 		assert!(entry.contains("### Breaking Changes"));
 		assert!(entry.contains("- Breaking API change"));
@@ -126,12 +144,17 @@ mod tests {
 	fn update_changelog_creates_new_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let changes = vec![(ChangeType::Minor, Some("Something new".to_string()))];
-		let changelog = Changelog::new("1.0.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"1.0.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		changelog.update(dir.path()).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("# Changelog"));
-		assert!(content.contains("## 1.0.0"));
+		assert!(content.contains("## 1.0.0 - 2024-01-15"));
 	}
 
 	#[test]
@@ -143,11 +166,16 @@ mod tests {
 		)
 		.unwrap();
 		let changes = vec![(ChangeType::Minor, Some("New thing".to_string()))];
-		let changelog = Changelog::new("0.2.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"0.2.0".parse().unwrap(),
+			"2024-06-01".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		changelog.update(dir.path()).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
-		assert!(content.contains("## 0.2.0"));
+		assert!(content.contains("## 0.2.0 - 2024-06-01"));
 		assert!(content.contains("## 0.1.0"));
 		// New entry should come first
 		let pos_new = content.find("## 0.2.0").unwrap();
@@ -163,13 +191,14 @@ mod tests {
 		let changes = vec![(ChangeType::Patch, Some("Release".to_string()))];
 		let changelog = Changelog::new(
 			"1.0.0".parse().unwrap(),
+			"2024-01-15".to_string(),
 			changes,
 			PathBuf::from("packages/my-pkg"),
 		);
 		changelog.update(dir.path()).unwrap();
 
 		let content = std::fs::read_to_string(sub.join("CHANGELOG.md")).unwrap();
-		assert!(content.contains("## 1.0.0"));
+		assert!(content.contains("## 1.0.0 - 2024-01-15"));
 	}
 
 	#[test]
@@ -180,7 +209,12 @@ mod tests {
 		std::fs::create_dir(&changelog_path).unwrap();
 
 		let changes = vec![(ChangeType::Minor, Some("New".to_string()))];
-		let changelog = Changelog::new("1.0.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"1.0.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		let result = changelog.update(dir.path());
 
 		// Should fail because CHANGELOG.md is a directory, not a file
@@ -197,7 +231,12 @@ mod tests {
 		std::fs::set_permissions(dir.path(), perms).unwrap();
 
 		let changes = vec![(ChangeType::Patch, Some("Fix".to_string()))];
-		let changelog = Changelog::new("1.0.0".parse().unwrap(), changes, PathBuf::new());
+		let changelog = Changelog::new(
+			"1.0.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
 		let result = changelog.update(dir.path());
 
 		// Restore permissions before assertions for cleanup
