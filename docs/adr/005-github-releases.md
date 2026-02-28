@@ -31,6 +31,10 @@ GitHub Releases are configured via a new `[github]` section in `.chronicle/confi
 enabled = false        # default: opt-out, user must explicitly enable
 owner = "mscharley"    # optional: GitHub repository owner (user or org)
 repo = "chronicle"     # optional: GitHub repository name
+build_command = ""     # optional: shell command to run before creating the release
+
+[github.artifacts]     # optional: map of release filename to local file path
+# "chronicle-x86_64-linux" = "target/x86_64-unknown-linux-musl/release/chronicle"
 ```
 
 The `[github]` section is optional. If omitted, GitHub Releases are disabled.
@@ -104,6 +108,49 @@ The GitHub Release for version 1.2.0 will have the body:
 
 If the changelog entry cannot be found or is empty, the GitHub Release is created with an empty body.
 
+### Build command and artifact attachment
+
+GitHub Releases can optionally have file artifacts attached (binaries, archives, checksums, etc.). Chronicle supports this via two configuration fields: `build_command` and `artifacts`.
+
+**`build_command`** is an optional shell command that Chronicle executes before creating the GitHub Release. It runs after the version bump has already been applied by `chronicle release` (and after registry publishing), but before the GitHub Release is created. This allows users to produce build artifacts that reference the correct version.
+
+The command is executed via the system shell (`sh -c` on Unix) with the working directory set to the repository root. If the command exits with a non-zero status, Chronicle reports the failure and skips GitHub Release creation for that package, but does not roll back the registry publish.
+
+The build command runs once per `chronicle publish` invocation, not once per package. It is intended for repository-level build steps (e.g., cross-compiling binaries, creating tarballs). If a user needs per-package build logic, they should handle that within the build command itself (e.g., a Makefile or script that builds all necessary targets).
+
+**`artifacts`** is a TOML map where each key is the filename that will appear on the GitHub Release and each value is the path to the file on disk, relative to the repository root. This gives users explicit control over the download names that consumers see, decoupling them from the build system's directory structure.
+
+Example configuration for a project that cross-compiles static binaries:
+
+```toml
+[github]
+enabled = true
+build_command = "cargo make release"
+
+[github.artifacts]
+"chronicle-x86_64-linux" = "target/x86_64-unknown-linux-musl/release/chronicle"
+"chronicle-aarch64-linux" = "target/aarch64-unknown-linux-musl/release/chronicle"
+"chronicle-aarch64-darwin" = "target/aarch64-apple-darwin/release/chronicle"
+```
+
+Example with a build script that produces a tarball and checksum:
+
+```toml
+[github]
+enabled = true
+build_command = "./scripts/build-release.sh"
+
+[github.artifacts]
+"myapp-0.2.0.tar.gz" = "dist/myapp-0.2.0.tar.gz"
+"SHA256SUMS.txt" = "dist/SHA256SUMS.txt"
+```
+
+When `artifacts` is omitted or empty (the default), no files are attached to the GitHub Release. When `build_command` is empty (the default), no build step is executed and only pre-existing files referenced by `artifacts` entries are attached.
+
+If a path listed in `artifacts` does not exist at upload time, Chronicle reports an error for that artifact but continues uploading the remaining artifacts. The GitHub Release is still created.
+
+In a monorepo with multiple packages, artifacts are attached to every GitHub Release created during the publish run. If different packages need different artifacts, the user should manage this through their build command to ensure the correct files are present.
+
 ### Not a PackageManagerAdapter
 
 GitHub is **not** a package manager. It does not enumerate projects, read versions, or write versions. It is a publish-time hook that runs after packages have been successfully published to their actual registries.
@@ -120,7 +167,7 @@ Chronicle reports GitHub Release failures clearly and exits with a non-zero stat
 
 ### Dry-run support
 
-When `chronicle publish --dry-run` is invoked, GitHub Releases are **not** created. The dry-run output includes a note about which GitHub Releases would have been created, but no API calls are made.
+When `chronicle publish --dry-run` is invoked, GitHub Releases are **not** created. The `build_command` is **not** executed, and no artifacts are uploaded. The dry-run output includes a note about which GitHub Releases would have been created and which artifacts are configured, but no API calls or subprocess invocations are made. This is consistent with the dry-run safety guarantee established in ADR-008.
 
 ### Summary output
 
@@ -128,9 +175,14 @@ After publishing, Chronicle's summary output includes GitHub Release creation:
 
 ```text
 Published chronicle-cli@0.2.0 to crates.io
+Running build command: cargo make release
 Created GitHub Release for chronicle-cli@0.2.0
+  Attached: chronicle-x86_64-linux
+  Attached: chronicle-aarch64-linux
 Published @mscharley/chronicle@0.2.0 to npm
 Created GitHub Release for @mscharley/chronicle@0.2.0
+  Attached: chronicle-x86_64-linux
+  Attached: chronicle-aarch64-linux
 ```
 
 Or on partial failure:
@@ -150,12 +202,17 @@ Failed to create GitHub Release for chronicle-cli@0.2.0: missing GITHUB_TOKEN
 - GitHub Releases are modelled as a post-publish action, not as a package manager. This keeps the abstraction boundaries clean and prevents GitHub from being conflated with actual package registries.
 - The release body is sourced from the existing changelog, avoiding duplication of release notes content. Users write the release description once (in changesets), and it flows through to both `CHANGELOG.md` and GitHub Releases.
 - GitHub Release creation failures do not block or roll back package publishing. If a package is published but its GitHub Release fails, the user can manually create the release or re-run the command after fixing the authentication issue.
+- The `build_command` option allows users to produce versioned artifacts as part of the publish workflow without requiring a separate CI step or manual coordination. The build runs after the version bump, so artifacts can reference the correct version.
+- Artifact attachment uses an explicit map of release filename to disk path, giving users full control over the download names that appear on the GitHub Release. This decouples user-facing artifact names from the build system's directory layout.
 
 ### Negative
 
 - Chronicle becomes responsible for creating GitHub Releases, coupling it to the GitHub API. This API is stable, well-documented, and versioned, but it is still an external dependency.
 - When git hooks are disabled (the default without `[github].enabled`), Chronicle depends on Git tags already existing in the repository, and the user or CI is responsible for creating and pushing tags. When git hooks are enabled (see ADR-006), Chronicle creates tags automatically as part of `chronicle release`.
+- The `build_command` is executed as a subprocess via the system shell, which introduces a dependency on the build environment having the correct toolchain installed. Build failures are reported but cannot be retried without re-running the entire publish workflow.
+- In monorepos, artifacts are attached to every GitHub Release in the publish run. There is no per-package artifact configuration. Users with per-package artifact needs must manage this through their build scripts.
+- Each artifact requires an explicit map entry. Users who produce many artifacts (e.g., one per platform per package) must list each one individually, which can be verbose compared to glob-based approaches.
 
 ### Neutral
 
-- Future enhancements could support attaching release artifacts (binaries, archives) to GitHub Releases, but this is out of scope for the initial implementation.
+- The build command runs once per publish invocation, not once per package. This is a deliberate simplification; users who need per-package build logic must handle it within their build command.
