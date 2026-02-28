@@ -216,3 +216,7 @@ Failed to create GitHub Release for chronicle-cli@0.2.0: missing GITHUB_TOKEN
 ### Neutral
 
 - The build command runs once per publish invocation, not once per package. This is a deliberate simplification; users who need per-package build logic must handle it within their build command.
+
+## Errata
+
+**2026-03-01**: ADR-011 (Command Execution Strategy) establishes a project-wide standard for how all user-configurable command fields are executed. The `build_command` execution semantics described in this ADR -- "executed via the system shell (`sh -c` on Unix) with the working directory set to the repository root" -- are consistent with ADR-011's conventions and remain correct. ADR-011 is now the authoritative reference for command execution details including shell choice (`/bin/sh`), working directory, dry-run interaction, and error handling conventions. See ADR-011 for the full standard that applies to `build_command` and all other configurable command fields.
