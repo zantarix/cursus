@@ -35,11 +35,9 @@ Add a new `[git]` section to `.chronicle/config.toml`:
 
 ```toml
 [git]
-enabled = true       # bool — defaults to true if [github].enabled, false otherwise
-commit = true        # create a commit after release (default: true)
-tag = true           # create git tag(s) after commit (default: true)
-push = true          # push commit and tags to remote (default: true)
-tag_format = "auto"  # "auto" | "prefixed" | "simple"
+enabled = false          # bool — master toggle, defaults to false
+run_until = "tag"        # "commit" | "tag" | "push"
+tag_format = "auto"      # "auto" | "prefixed" | "simple"
 ```
 
 **Field semantics:**
@@ -48,12 +46,14 @@ tag_format = "auto"  # "auto" | "prefixed" | "simple"
   - Default value is derived: `true` if `[github].enabled` is `true`, `false` otherwise
   - Explicit configuration always overrides the default
   - When `false`, all git operations are skipped regardless of other settings
-- `commit`, `tag`, `push`: Fine-grained control over which git operations to perform
-  - Each defaults to `true` when `enabled` is `true`
-  - Independently toggleable to support workflows like "commit and tag locally but don't push"
+- `run_until`: Controls how far through the git lifecycle Chronicle proceeds. Git operations are sequential — each step implies all previous steps:
+  - `"commit"`: Create a release commit only (no tags, no push)
+  - `"tag"` (default): Create a release commit and annotated tags
+  - `"push"`: Create a release commit, annotated tags, and push to origin
+  - This enum design eliminates nonsensical configurations that independent booleans would allow (e.g., tagging without committing). The git lifecycle is inherently sequential, so `run_until` models it as a high-water mark rather than independent toggles.
 - `tag_format`: Tag naming strategy, also used by ADR-005's GitHub Releases (see Relationship to ADR-005 below)
-  - `"auto"` (default): Use `pkg-name@version` for multi-package repos, `v{version}` for single-package repos
-  - `"prefixed"`: Always use `pkg-name@version` format
+  - `"auto"` (default): Use `pkg@version` for multi-package repos, `v{version}` for single-package repos. "Multi-package" is determined by the total project count in the workspace, not the number of packages released in a given run.
+  - `"prefixed"`: Always use `pkg@version` format
   - `"simple"`: Always use `v{version}` format (suitable for single-package repos only)
 
 ### CLI override
@@ -72,9 +72,9 @@ This is useful for CI pipelines that handle git operations separately, or for de
 
 Git hooks execute **after** `chronicle release` completes all filesystem modifications (version bumps, changelog generation, changeset deletion) but **before** printing the final summary.
 
-The hooks run in this order:
+The steps run sequentially, up to and including the step specified by `run_until`:
 
-#### 1. Commit (if `git.commit` is `true`)
+#### 1. Commit (always runs when git is enabled)
 
 - **What**: Create a git commit with all Chronicle-modified files
 - **Files staged**: All files modified or deleted by Chronicle during the release:
@@ -93,22 +93,21 @@ The hooks run in this order:
   - Multiple packages: `chore(release): chronicle-cli@0.2.0, @mscharley/chronicle@1.0.0`
 - **Unstaged files**: Chronicle only stages the files it modified. Any other uncommitted changes in the working tree are left untouched.
 
-#### 2. Tag (if `git.tag` is `true`)
+#### 2. Tag (runs when `run_until` is `"tag"` or `"push"`)
 
 - **What**: Create annotated git tags for each released package
 - **Tag name**: Determined by `tag_format` configuration
-- **Tag message**: `Release <package-name> <version>`
-  - Example: `Release chronicle-cli 0.2.0`
-- **Tag target**: The commit created in step 1, or `HEAD` if no commit was created
-- **Dependency**: Requires a commit to exist. If `git.commit` is `false` and no prior commit exists, tagging fails with a clear error message.
+- **Tag message**: `Release {package} version {version}`
+  - Example: `Release chronicle-cli version 0.2.0`
+- **Tag target**: The commit created in step 1
 
-#### 3. Push (if `git.push` is `true`)
+#### 3. Push (runs only when `run_until` is `"push"`)
 
 - **What**: Push the commit and tags to the remote
 - **Remote**: Uses the default remote (`origin`)
 - **Push command**: `git push origin HEAD --follow-tags`
   - Pushes the current branch and all tags reachable from `HEAD`
-- **Dependency**: Requires something to push (either a new commit or new tags). If both `git.commit` and `git.tag` are `false`, push is a no-op.
+- Push is opt-in because it is the only step with external side effects. The push function is marked `#[mutants::skip]` since it cannot be meaningfully tested without a real remote.
 
 ### Dry-run support
 
@@ -116,21 +115,7 @@ When `chronicle release --dry-run` is invoked:
 
 - All filesystem modifications are skipped (existing ADR-003 behaviour)
 - All git operations are skipped
-- Summary output includes what **would** have been committed, tagged, and pushed
-
-Example dry-run output:
-
-```text
-Would release:
-  chronicle-cli: 0.1.0 -> 0.2.0 (minor)
-  @mscharley/chronicle: 0.1.0 -> 0.2.0 (minor)
-
-Would create commit: chore(release): chronicle-cli@0.2.0, @mscharley/chronicle@0.2.0
-Would create tags:
-  chronicle-cli@0.2.0
-  @mscharley/chronicle@0.2.0
-Would push to origin
-```
+- Summary output includes what **would** have been done, up to the configured `run_until` step
 
 ### Error handling
 
@@ -170,7 +155,7 @@ ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, id
 
 **Tag creation:**
 
-- When `[git].enabled = true` and `[git].tag = true`, Chronicle creates git tags during `chronicle release`
+- When `[git].enabled = true` and `run_until` is `"tag"` or `"push"`, Chronicle creates git tags during `chronicle release`
 - When `[git].enabled = false`, tags must already exist before running `chronicle publish`, and the user or CI is responsible for creating them
 
 ## Consequences
@@ -179,7 +164,7 @@ ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, id
 
 - Reduces manual steps: users no longer need to remember the correct tag format, stage the right files, or manually push after every release.
 - Opt-in by default: the feature is disabled unless explicitly enabled (or `[github].enabled = true`), preserving ADR-003's conservative stance.
-- Granular control: users can enable commit but disable push (for local-only workflows), or enable tag but disable commit (for pre-existing commits).
+- Simple mental model: `run_until` eliminates nonsensical configurations (e.g., tagging without committing) by modelling the git lifecycle as a sequential pipeline with a single stopping point.
 - Consistent with existing patterns: uses the same config-driven approach as `[npm]`, `[cargo]`, and `[github]` sections.
 - Improves GitHub Releases workflow: when combined with ADR-005, users can go from changesets to published packages with GitHub Releases in a single command sequence: `chronicle release && chronicle publish`.
 - Backward compatible: existing configurations with no `[git]` section behave identically to before (no git operations).
@@ -190,10 +175,20 @@ ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, id
 - Couples Chronicle to git: Chronicle now invokes git commands and must handle git failures. Previously, Chronicle was filesystem-only.
 - Not suitable for all workflows: users with complex commit requirements (GPG signing, multi-commit strategies, custom commit messages) must continue managing git manually.
 - Error handling complexity: git operations can fail in many ways (network errors, authentication, conflicts). Chronicle must detect and report these clearly without losing the release work.
-- Implicit behaviour: when `[github].enabled = true`, `[git].enabled` defaults to `true`, which may surprise users who expected Chronicle to remain filesystem-only.
+- Less granularity than independent toggles: users cannot, for example, tag without committing. This is by design (such states are nonsensical), but some edge-case workflows may want finer control.
 
 ### Neutral
 
 - Unit tests should cover commit message formatting, tag name generation, and dry-run output.
-- Integration tests must set up temporary git repositories and verify git operations are performed correctly.
+- Integration tests must set up temporary git repositories and verify git operations are performed correctly. Test repos should set `commit.gpgsign = false` and `tag.gpgsign = false` to avoid GPG prompts.
 - Error path tests should simulate git failures (no remote, authentication required, merge conflicts) and verify Chronicle reports errors without rolling back the release.
+
+## Alternatives Considered
+
+### Independent boolean toggles (`commit`, `tag`, `push`)
+
+The original design proposed three independent boolean fields: `commit = true`, `tag = true`, `push = false`. This was rejected because git lifecycle steps are inherently sequential -- you cannot tag without a commit to tag, and pushing without commits or tags is meaningless. Independent booleans allow nonsensical states (e.g., `commit = false, tag = true`) that would require runtime validation to reject. The `run_until` enum makes invalid states unrepresentable at the configuration level, is easier to reason about, and requires no cross-field validation logic.
+
+### No git integration (status quo)
+
+Continuing to rely on manual git operations, as established by ADR-003. This was rejected because the manual workflow is error-prone and tedious, especially in monorepos. The opt-in nature of `[git].enabled` preserves the status quo as the default for users who prefer manual control.
