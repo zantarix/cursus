@@ -5,6 +5,7 @@ use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+use crate::git::GitConfig;
 use crate::package_manager::{
 	self, CargoAdapter, CargoConfig, NpmAdapter, NpmConfig, PackageManagerAdapter, Project,
 };
@@ -40,6 +41,9 @@ pub struct Config {
 	/// Configuration for Cargo package manager.
 	#[serde(default)]
 	pub cargo: CargoConfig,
+	/// Git lifecycle automation configuration.
+	#[serde(default)]
+	pub git: GitConfig,
 	/// Git repository root path.
 	#[serde(skip)]
 	git_workdir: PathBuf,
@@ -52,6 +56,7 @@ impl Config {
 			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
+			git: GitConfig::default(),
 			git_workdir: git_workdir.to_path_buf(),
 		}
 	}
@@ -71,6 +76,12 @@ impl Config {
 	/// Sets cargo configuration (builder pattern).
 	pub fn with_cargo(mut self, config: CargoConfig) -> Self {
 		self.cargo = config;
+		self
+	}
+
+	/// Sets git lifecycle configuration (builder pattern).
+	pub fn with_git(mut self, config: GitConfig) -> Self {
+		self.git = config;
 		self
 	}
 
@@ -313,6 +324,7 @@ mod tests {
 			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
+			git: GitConfig::default(),
 			git_workdir: PathBuf::new(),
 		};
 		assert!(!config.npm.enabled);
@@ -357,6 +369,7 @@ mod tests {
 			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
+			git: GitConfig::default(),
 			git_workdir: PathBuf::new(),
 		};
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
@@ -385,6 +398,7 @@ mod tests {
 			global: GlobalConfig::default(),
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
+			git: GitConfig::default(),
 			git_workdir: PathBuf::new(),
 		};
 		config.npm.enabled = true;

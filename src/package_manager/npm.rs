@@ -366,10 +366,26 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self) -> anyhow::Result<()> {
+	fn lock_file_path(&self) -> Option<std::path::PathBuf> {
+		// Custom commands write to an unknown location — report None.
+		if self.config.lock_command.is_some() {
+			return None;
+		}
+		let workspace_root = self.resolve_root();
+		for name in ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"] {
+			let path = workspace_root.join(name);
+			if path.exists() {
+				return Some(path);
+			}
+		}
+		None
+	}
+
+	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		let workspace_root = self.resolve_root();
 
-		// If a custom lock command is configured, use it
+		// If a custom lock command is configured, use it.
+		// We can't know which file the custom command writes, so return None.
 		if let Some(ref lock_command) = self.config.lock_command {
 			let parts: Vec<&str> = lock_command.split_whitespace().collect();
 			if parts.is_empty() {
@@ -398,7 +414,7 @@ impl PackageManagerAdapter for NpmAdapter {
 				);
 			}
 
-			return Ok(());
+			return Ok(None);
 		}
 
 		// Auto-detect lock file and run appropriate command
@@ -422,6 +438,8 @@ impl PackageManagerAdapter for NpmAdapter {
 					stderr
 				);
 			}
+
+			Ok(Some(workspace_root.join("package-lock.json")))
 		} else if workspace_root.join("pnpm-lock.yaml").exists() {
 			let output = std::process::Command::new("pnpm")
 				.args(["install", "--lockfile-only"])
@@ -442,6 +460,8 @@ impl PackageManagerAdapter for NpmAdapter {
 					stderr
 				);
 			}
+
+			Ok(Some(workspace_root.join("pnpm-lock.yaml")))
 		} else if workspace_root.join("yarn.lock").exists() {
 			let output = std::process::Command::new("yarn")
 				.args(["install", "--mode", "update-lockfile"])
@@ -462,10 +482,12 @@ impl PackageManagerAdapter for NpmAdapter {
 					stderr
 				);
 			}
-		}
-		// No lock file found - no-op
 
-		Ok(())
+			Ok(Some(workspace_root.join("yarn.lock")))
+		} else {
+			// No lock file found - no-op
+			Ok(None)
+		}
 	}
 
 	#[coverage(off)]
@@ -504,6 +526,10 @@ impl PackageManagerAdapter for NpmAdapter {
 
 	fn registry_name(&self) -> &str {
 		"npm"
+	}
+
+	fn manifest_filename(&self) -> &str {
+		"package.json"
 	}
 }
 
@@ -1052,9 +1078,8 @@ mod tests {
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 
-		// Should succeed even without a lock file
-		let result = adapter.update_lock_file();
-		assert!(result.is_ok());
+		// Should succeed and return None when there is no lock file
+		assert_eq!(adapter.update_lock_file().unwrap(), None);
 	}
 
 	#[test]
@@ -1176,8 +1201,8 @@ mod tests {
 			dir.path().to_path_buf(),
 		);
 
-		let result = adapter.update_lock_file();
-		assert!(result.is_ok());
+		// Custom command succeeds but returns None (we don't know which file it wrote)
+		assert_eq!(adapter.update_lock_file().unwrap(), None);
 	}
 
 	#[test]
@@ -1210,7 +1235,11 @@ mod tests {
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 
 		let result = adapter.update_lock_file();
-		assert!(result.is_ok(), "npm lock file update should succeed");
+		assert_eq!(
+			result.unwrap(),
+			Some(dir.path().join("package-lock.json")),
+			"should return the package-lock.json path"
+		);
 	}
 
 	#[test]
@@ -1233,7 +1262,11 @@ mod tests {
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 
 		let result = adapter.update_lock_file();
-		assert!(result.is_ok(), "pnpm lock file update should succeed");
+		assert_eq!(
+			result.unwrap(),
+			Some(dir.path().join("pnpm-lock.yaml")),
+			"should return the pnpm-lock.yaml path"
+		);
 	}
 
 	#[test]
@@ -1250,10 +1283,10 @@ mod tests {
 		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
 
 		let result = adapter.update_lock_file();
-		assert!(
-			result.is_ok(),
-			"yarn lock file update should succeed: {:?}",
-			result.err()
+		assert_eq!(
+			result.unwrap(),
+			Some(dir.path().join("yarn.lock")),
+			"should return the yarn.lock path"
 		);
 	}
 

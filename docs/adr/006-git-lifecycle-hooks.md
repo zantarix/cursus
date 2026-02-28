@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -38,6 +38,7 @@ Add a new `[git]` section to `.chronicle/config.toml`:
 enabled = false          # bool — master toggle, defaults to false
 run_until = "tag"        # "commit" | "tag" | "push"
 tag_format = "auto"      # "auto" | "prefixed" | "simple"
+extra_files = []         # list of paths — additional files to stage before committing
 ```
 
 **Field semantics:**
@@ -55,6 +56,7 @@ tag_format = "auto"      # "auto" | "prefixed" | "simple"
   - `"auto"` (default): Use `pkg@version` for multi-package repos, `v{version}` for single-package repos. "Multi-package" is determined by the total project count in the workspace, not the number of packages released in a given run.
   - `"prefixed"`: Always use `pkg@version` format
   - `"simple"`: Always use `v{version}` format (suitable for single-package repos only)
+- `extra_files`: Additional file paths (relative to the git root) to stage before committing. Paths are resolved against the git working directory and validated to not escape the repository root. Staging an unmodified file is a no-op in git, so it is safe to list files that may not have changed. This is useful when a custom `lock_command` is configured and Chronicle cannot determine which lock file the command writes. Defaults to an empty list.
 
 ### CLI override
 

@@ -3,6 +3,7 @@
 #![feature(coverage_attribute)]
 
 pub mod cli;
+pub mod git;
 pub mod model;
 pub mod package_manager;
 pub mod tui;

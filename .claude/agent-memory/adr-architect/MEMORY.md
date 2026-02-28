@@ -8,7 +8,7 @@ Key differences from old style:
 - **Consequences**: Split into ### Positive / ### Negative / ### Neutral subsections
 - **Alternatives Considered**: Always include this section with named alternatives and rejection rationale
 - **Decision language**: Imperative ("We will...", "The system shall...")
-- The old ADRs are historical records; do not retroactively change them
+- The old ADRs (001-006) are historical records; do not retroactively change them
 
 ## ADR Inventory
 

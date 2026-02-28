@@ -1,12 +1,13 @@
 //! The `release` subcommand.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Context;
 use clap::Args;
 
+use crate::git::{self, ReleaseInfo};
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config;
@@ -22,6 +23,10 @@ pub struct ReleaseArgs {
 	/// Only release specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
+
+	/// Skip git lifecycle automation even if enabled in config
+	#[arg(long)]
+	pub no_git: bool,
 }
 
 /// Returns today's date as an ISO 8601 string (`YYYY-MM-DD`) in UTC.
@@ -97,6 +102,9 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 		changes_per_package.retain(|name, _| args.packages.contains(name));
 	}
 
+	let mut release_infos: Vec<ReleaseInfo> = Vec::new();
+	let mut modified_files: Vec<PathBuf> = Vec::new();
+
 	// Process each affected package
 	for (pkg_name, change_type) in &aggregated {
 		let project = projects
@@ -108,6 +116,10 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 
 		let current_version = project.version();
 		let new_version = bump_version(current_version, *change_type);
+
+		// Always track which files would be staged (used for git lifecycle and dry-run display).
+		modified_files.push(project.manifest_path(git_workdir));
+		modified_files.push(git_workdir.join(project.path()).join("CHANGELOG.md"));
 
 		if args.dry_run {
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
@@ -130,21 +142,48 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 
 			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		}
+
+		release_infos.push(ReleaseInfo {
+			package_name: pkg_name.clone(),
+			new_version,
+		});
 	}
 
-	// Update lock files once per adapter after all version writes
-	if !args.dry_run {
-		for adapter in &adapters {
-			adapter.update_lock_file()?;
+	// Collect lock file paths. During dry-run, use lock_file_path() to predict which
+	// file would be updated without running the update command.
+	for adapter in &adapters {
+		if args.dry_run {
+			if let Some(lock_path) = adapter.lock_file_path() {
+				modified_files.push(lock_path);
+			}
+		} else if let Some(lock_path) = adapter.update_lock_file()? {
+			modified_files.push(lock_path);
 		}
 	}
 
 	// Consume changesets: delete fully consumed, rewrite partially consumed.
-	if !args.dry_run {
-		let released: BTreeSet<String> = aggregated.keys().cloned().collect();
-		for (path, cs) in &changesets {
+	// Always track which changesets would be staged, but only consume during a real release.
+	let released: BTreeSet<String> = aggregated.keys().cloned().collect();
+	for (path, cs) in &changesets {
+		// Only stage changesets that touch at least one released package
+		if cs.packages.keys().any(|name| released.contains(name)) {
+			modified_files.push(path.clone());
+		}
+		if !args.dry_run {
 			cs.consume(path, &released)?;
 		}
+	}
+
+	// Run git lifecycle if enabled and not suppressed
+	if config.git.enabled && !args.no_git {
+		git::run_git_lifecycle(
+			git_workdir,
+			&config.git,
+			&release_infos,
+			&modified_files,
+			projects.len(),
+			args.dry_run,
+		)?;
 	}
 
 	Ok(ExitCode::SUCCESS)
@@ -301,6 +340,7 @@ mod tests {
 		let args = ReleaseArgs {
 			dry_run: false,
 			packages: vec!["pkg-a".to_string()],
+			no_git: true,
 		};
 		let result = cmd_release(dir.path(), &args);
 		assert!(result.is_ok());
@@ -334,6 +374,7 @@ mod tests {
 		let args = ReleaseArgs {
 			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
+			no_git: true,
 		};
 		let result = cmd_release(dir.path(), &args);
 		assert!(result.is_ok());
@@ -369,6 +410,7 @@ mod tests {
 		let args = ReleaseArgs {
 			dry_run: false,
 			packages: vec!["nonexistent".to_string()],
+			no_git: true,
 		};
 		let result = cmd_release(dir.path(), &args);
 		assert!(result.is_err());

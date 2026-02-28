@@ -324,7 +324,11 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self) -> anyhow::Result<()> {
+	fn lock_file_path(&self) -> Option<std::path::PathBuf> {
+		Some(self.resolve_root().join("Cargo.lock"))
+	}
+
+	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		// For Cargo, always regenerate the lock file at the workspace root
 		let workspace_root = self.resolve_root();
 
@@ -348,7 +352,7 @@ impl PackageManagerAdapter for CargoAdapter {
 			);
 		}
 
-		Ok(())
+		Ok(Some(workspace_root.join("Cargo.lock")))
 	}
 
 	#[coverage(off)]
@@ -388,6 +392,10 @@ impl PackageManagerAdapter for CargoAdapter {
 
 	fn registry_name(&self) -> &str {
 		"crates.io"
+	}
+
+	fn manifest_filename(&self) -> &str {
+		"Cargo.toml"
 	}
 }
 
@@ -960,10 +968,10 @@ path = "src/lib.rs"
 		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
 
 		let result = adapter.update_lock_file();
-		assert!(
-			result.is_ok(),
-			"cargo generate-lockfile should succeed: {:?}",
-			result.err()
+		assert_eq!(
+			result.unwrap(),
+			Some(dir.path().join("Cargo.lock")),
+			"should return the Cargo.lock path"
 		);
 		assert!(
 			dir.path().join("Cargo.lock").exists(),

@@ -10,7 +10,7 @@ mod npm;
 pub use cargo::{CargoAdapter, CargoConfig};
 pub use npm::{NpmAdapter, NpmConfig};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use semver::{BuildMetadata, Prerelease, Version};
@@ -155,6 +155,16 @@ impl Project {
 		&self.info.dependency_names
 	}
 
+	/// Returns the absolute path to this project's manifest file.
+	///
+	/// Combines the git working directory with the project's relative path and
+	/// the adapter-specific manifest filename (e.g., `Cargo.toml` or `package.json`).
+	pub fn manifest_path(&self, git_workdir: &Path) -> std::path::PathBuf {
+		git_workdir
+			.join(&self.info.path)
+			.join(self.adapter.manifest_filename())
+	}
+
 	/// Creates a minimal `Project` with a dummy adapter for use in unit tests.
 	#[cfg(test)]
 	pub fn new_test(name: &str, path: &str) -> Self {
@@ -213,10 +223,14 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// This is a workspace-level operation and should be called once per adapter
 	/// after all version writes are complete.
 	///
+	/// Returns `Some(path)` with the lock file path that was updated (so callers
+	/// can stage it for git), or `None` if no lock file exists or the lock file
+	/// location cannot be determined (e.g. when a custom command is used).
+	///
 	/// # Errors
 	///
 	/// Returns an error if the lock file update command fails.
-	fn update_lock_file(&self) -> anyhow::Result<()>;
+	fn update_lock_file(&self) -> anyhow::Result<Option<PathBuf>>;
 
 	/// Publishes a project to its package registry.
 	///
@@ -237,6 +251,20 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// Used for display purposes in CLI output (e.g., "crates.io", "npm").
 	fn registry_name(&self) -> &str;
+
+	/// Returns the filename of the package manifest (e.g., `"Cargo.toml"` or `"package.json"`).
+	fn manifest_filename(&self) -> &str;
+
+	/// Returns the path of the lock file that `update_lock_file` would write, without
+	/// running any commands.
+	///
+	/// Returns `None` when no lock file can be determined in advance — for example, when
+	/// a custom `lock_command` is configured (the command's output file is unknown) or
+	/// when no lock file currently exists in the workspace.
+	///
+	/// This is used during dry-run mode so that Chronicle can report which files *would*
+	/// be staged without actually executing the lock file update.
+	fn lock_file_path(&self) -> Option<PathBuf>;
 }
 
 /// Mutable state threaded through Tarjan's iterative SCC algorithm.
