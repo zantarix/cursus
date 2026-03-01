@@ -1,6 +1,9 @@
 #![feature(coverage_attribute)]
 
 use std::process::ExitCode;
+use std::sync::Arc;
+
+use chronicle::command::RealCommandRunner;
 
 #[coverage(off)]
 fn main() -> ExitCode {
@@ -16,7 +19,8 @@ fn main() -> ExitCode {
 		visual: std::env::var("VISUAL").ok(),
 		editor: std::env::var("EDITOR").ok(),
 	};
-	match chronicle::run(std::env::args_os(), &cwd, env) {
+	let runner = Arc::new(RealCommandRunner);
+	match chronicle::run(std::env::args_os(), &cwd, env, runner) {
 		Ok(code) => code,
 		Err(e) => {
 			eprintln!("Error: {e:#}");

@@ -1,27 +1,36 @@
 //! Low-level git command wrappers.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, bail};
+
+use crate::command::CommandRunner;
 
 /// Stages the given files for the next git commit.
 ///
 /// # Errors
 ///
 /// Returns an error if `git add` exits with a non-zero status.
-pub(crate) fn git_add(git_workdir: &Path, files: &[PathBuf]) -> anyhow::Result<()> {
+pub(crate) fn git_add(
+	runner: &dyn CommandRunner,
+	git_workdir: &Path,
+	files: &[PathBuf],
+) -> anyhow::Result<()> {
 	if files.is_empty() {
 		return Ok(());
 	}
 
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(git_workdir)
-		.arg("add")
-		.arg("--")
-		.args(files)
-		.output()
+	// Convert PathBuf slice to &str slice for the runner.
+	let file_str_storage: Vec<String> = files
+		.iter()
+		.map(|f| f.to_string_lossy().into_owned())
+		.collect();
+	let mut args = vec!["add", "--"];
+	let file_str_refs: Vec<&str> = file_str_storage.iter().map(|s| s.as_str()).collect();
+	args.extend_from_slice(&file_str_refs);
+
+	let output = runner
+		.run("git", &args, git_workdir)
 		.context("Failed to run git add")?;
 
 	if !output.status.success() {
@@ -37,14 +46,13 @@ pub(crate) fn git_add(git_workdir: &Path, files: &[PathBuf]) -> anyhow::Result<(
 /// # Errors
 ///
 /// Returns an error if `git commit` exits with a non-zero status.
-pub(crate) fn git_commit(git_workdir: &Path, message: &str) -> anyhow::Result<()> {
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(git_workdir)
-		.arg("commit")
-		.arg("-m")
-		.arg(message)
-		.output()
+pub(crate) fn git_commit(
+	runner: &dyn CommandRunner,
+	git_workdir: &Path,
+	message: &str,
+) -> anyhow::Result<()> {
+	let output = runner
+		.run("git", &["commit", "-m", message], git_workdir)
 		.context("Failed to run git commit")?;
 
 	if !output.status.success() {
@@ -60,16 +68,14 @@ pub(crate) fn git_commit(git_workdir: &Path, message: &str) -> anyhow::Result<()
 /// # Errors
 ///
 /// Returns an error if `git tag` exits with a non-zero status.
-pub(crate) fn git_tag(git_workdir: &Path, tag_name: &str, message: &str) -> anyhow::Result<()> {
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(git_workdir)
-		.arg("tag")
-		.arg("-a")
-		.arg(tag_name)
-		.arg("-m")
-		.arg(message)
-		.output()
+pub(crate) fn git_tag(
+	runner: &dyn CommandRunner,
+	git_workdir: &Path,
+	tag_name: &str,
+	message: &str,
+) -> anyhow::Result<()> {
+	let output = runner
+		.run("git", &["tag", "-a", tag_name, "-m", message], git_workdir)
 		.context("Failed to run git tag")?;
 
 	if !output.status.success() {
@@ -87,17 +93,13 @@ pub(crate) fn git_tag(git_workdir: &Path, tag_name: &str, message: &str) -> anyh
 /// # Errors
 ///
 /// Returns an error if `git push` exits with a non-zero status.
-#[coverage(off)]
-#[mutants::skip]
-pub(crate) fn git_push(git_workdir: &Path) -> anyhow::Result<()> {
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(git_workdir)
-		.arg("push")
-		.arg("origin")
-		.arg("HEAD")
-		.arg("--follow-tags")
-		.output()
+pub(crate) fn git_push(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
+	let output = runner
+		.run(
+			"git",
+			&["push", "origin", "HEAD", "--follow-tags"],
+			git_workdir,
+		)
 		.context("Failed to run git push")?;
 
 	if !output.status.success() {
@@ -110,45 +112,42 @@ pub(crate) fn git_push(git_workdir: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use std::sync::Arc;
+
 	use tempfile::TempDir;
 
-	fn non_git_dir() -> TempDir {
+	use super::*;
+	use crate::command::test_support::RecordingCommandRunner;
+
+	fn temp_dir() -> TempDir {
 		tempfile::tempdir().expect("Failed to create temp dir")
 	}
 
-	/// Creates a real, minimal git repo with user config and signing disabled.
-	fn real_git_repo() -> TempDir {
-		let dir = non_git_dir();
-		let run = |args: &[&str]| {
-			Command::new("git")
-				.args(args)
-				.current_dir(dir.path())
-				.stdout(std::process::Stdio::null())
-				.stderr(std::process::Stdio::null())
-				.status()
-				.expect("git failed to run")
-		};
-		run(&["init"]);
-		run(&["config", "user.name", "Test"]);
-		run(&["config", "user.email", "test@test.local"]);
-		run(&["config", "commit.gpgsign", "false"]);
-		run(&["config", "tag.gpgsign", "false"]);
-		run(&["commit", "--allow-empty", "-m", "init"]);
-		dir
+	fn recording(exit_code: i32) -> Arc<RecordingCommandRunner> {
+		Arc::new(RecordingCommandRunner::new(exit_code))
+	}
+
+	fn recording_with_stderr(exit_code: i32, stderr: &[u8]) -> Arc<RecordingCommandRunner> {
+		Arc::new(RecordingCommandRunner::new(exit_code).with_stderr(stderr.to_vec()))
 	}
 
 	#[test]
 	fn git_add_empty_files_is_noop() {
-		let dir = non_git_dir();
-		let result = git_add(dir.path(), &[]);
+		let dir = temp_dir();
+		let runner = recording(0);
+		let result = git_add(runner.as_ref(), dir.path(), &[]);
 		assert!(result.is_ok());
+		assert!(
+			runner.invocations().is_empty(),
+			"No command should run for empty file list"
+		);
 	}
 
 	#[test]
-	fn git_add_error_in_non_git_dir() {
-		let dir = non_git_dir();
-		let result = git_add(dir.path(), &[dir.path().join("nonexistent.txt")]);
+	fn git_add_failure_propagates_error() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repository");
+		let result = git_add(runner.as_ref(), dir.path(), &[dir.path().join("file.txt")]);
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -158,9 +157,25 @@ mod tests {
 	}
 
 	#[test]
-	fn git_commit_error_in_non_git_dir() {
-		let dir = non_git_dir();
-		let result = git_commit(dir.path(), "test commit");
+	fn git_add_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let file = dir.path().join("file.txt");
+		git_add(runner.as_ref(), dir.path(), &[file.clone()]).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args[0], "add");
+		assert_eq!(invocations[0].args[1], "--");
+		assert!(invocations[0].args[2].contains("file.txt"));
+		assert_eq!(invocations[0].cwd, dir.path());
+	}
+
+	#[test]
+	fn git_commit_failure_propagates_error() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repository");
+		let result = git_commit(runner.as_ref(), dir.path(), "test commit");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -170,9 +185,25 @@ mod tests {
 	}
 
 	#[test]
-	fn git_tag_error_in_non_git_dir() {
-		let dir = non_git_dir();
-		let result = git_tag(dir.path(), "v1.0.0", "Release 1.0.0");
+	fn git_commit_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		git_commit(runner.as_ref(), dir.path(), "chore(release): my-pkg@1.0.0").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			["commit", "-m", "chore(release): my-pkg@1.0.0"]
+		);
+		assert_eq!(invocations[0].cwd, dir.path());
+	}
+
+	#[test]
+	fn git_tag_failure_propagates_error() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repository");
+		let result = git_tag(runner.as_ref(), dir.path(), "v1.0.0", "Release 1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -182,26 +213,46 @@ mod tests {
 	}
 
 	#[test]
-	fn git_add_success_in_real_repo() {
-		let dir = real_git_repo();
-		std::fs::write(dir.path().join("file.txt"), "content").unwrap();
-		let result = git_add(dir.path(), &[dir.path().join("file.txt")]);
-		assert!(result.is_ok());
+	fn git_tag_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		git_tag(runner.as_ref(), dir.path(), "v1.0.0", "Release 1.0.0").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			["tag", "-a", "v1.0.0", "-m", "Release 1.0.0"]
+		);
+		assert_eq!(invocations[0].cwd, dir.path());
 	}
 
 	#[test]
-	fn git_commit_success_in_real_repo() {
-		let dir = real_git_repo();
-		std::fs::write(dir.path().join("file.txt"), "content").unwrap();
-		git_add(dir.path(), &[dir.path().join("file.txt")]).unwrap();
-		let result = git_commit(dir.path(), "test: add file");
+	fn git_push_invokes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let result = git_push(runner.as_ref(), dir.path());
 		assert!(result.is_ok());
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			["push", "origin", "HEAD", "--follow-tags"]
+		);
+		assert_eq!(invocations[0].cwd, dir.path());
 	}
 
 	#[test]
-	fn git_tag_success_in_real_repo() {
-		let dir = real_git_repo();
-		let result = git_tag(dir.path(), "v1.0.0", "Release 1.0.0");
-		assert!(result.is_ok());
+	fn git_push_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repo");
+		let result = git_push(runner.as_ref(), dir.path());
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git push failed"),
+			"Expected 'git push failed', got: {msg}"
+		);
 	}
 }

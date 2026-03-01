@@ -5,21 +5,25 @@
 #![allow(dead_code)]
 
 use std::process::Command;
+use std::sync::Arc;
 
+use chronicle::command::CommandRunner;
 use chronicle::git::GitConfig;
 use chronicle::model::config::{Config, PackageManager};
 use chronicle::package_manager::{CargoConfig, NpmConfig};
 use tempfile::TempDir;
 
-/// Runs chronicle with a default (empty) environment, returning the result.
+/// Runs chronicle with a default (empty) environment and real command runner, returning the result.
 ///
 /// This is the standard way to invoke `chronicle::run` from integration tests.
-/// It passes `Env::default()` so that no real environment variables are read.
+/// It passes `Env::default()` so that no real environment variables are read,
+/// and uses `RealCommandRunner` so that actual shell commands (git, cargo, npm) execute.
 pub fn run_chronicle(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
-	chronicle::run(args, cwd, chronicle::Env::default())
+	let runner: Arc<dyn CommandRunner> = Arc::new(chronicle::command::RealCommandRunner);
+	chronicle::run(args, cwd, chronicle::Env::default(), runner)
 }
 
 /// Runs a git command in the given directory and panics on failure.

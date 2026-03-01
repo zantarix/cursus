@@ -5,6 +5,7 @@ use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+use crate::command::CommandRunner;
 use crate::git::GitConfig;
 use crate::package_manager::{
 	self, CargoAdapter, CargoConfig, NpmAdapter, NpmConfig, PackageManagerAdapter, Project,
@@ -105,16 +106,22 @@ impl Config {
 	/// Creates package manager adapters for all enabled package managers.
 	///
 	/// Returns a vector of adapter instances wrapped in `Arc` for shared ownership.
-	pub fn create_adapters(&self) -> Vec<Arc<dyn PackageManagerAdapter>> {
+	pub fn create_adapters(
+		&self,
+		runner: Arc<dyn CommandRunner>,
+	) -> Vec<Arc<dyn PackageManagerAdapter>> {
 		self.enabled_package_managers()
 			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
 				match pm {
-					PackageManager::Npm => {
-						Arc::new(NpmAdapter::new(self.npm.clone(), self.git_workdir.clone()))
-					}
+					PackageManager::Npm => Arc::new(NpmAdapter::new(
+						self.npm.clone(),
+						self.git_workdir.clone(),
+						Arc::clone(&runner),
+					)),
 					PackageManager::Cargo => Arc::new(CargoAdapter::new(
 						self.cargo.clone(),
 						self.git_workdir.clone(),
+						Arc::clone(&runner),
 					)),
 				}
 			})
@@ -152,8 +159,8 @@ impl Config {
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
 	/// - No projects are found
-	pub fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
-		let adapters = self.create_adapters();
+	pub fn load_projects(&self, runner: Arc<dyn CommandRunner>) -> anyhow::Result<Vec<Project>> {
+		let adapters = self.create_adapters(runner);
 		self.load_projects_for_adapters(&adapters)
 	}
 
@@ -219,7 +226,10 @@ pub fn load(git_workdir: &Path) -> anyhow::Result<Config> {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
 	use super::*;
+	use crate::command::test_support::RecordingCommandRunner;
 	use tempfile::TempDir;
 
 	fn temp_dir() -> TempDir {
@@ -533,7 +543,8 @@ mod tests {
 		.unwrap();
 
 		let config = load(dir.path()).unwrap();
-		let projects = config.load_projects().unwrap();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let projects = config.load_projects(runner).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -550,7 +561,8 @@ mod tests {
 		.unwrap();
 
 		let config = load(dir.path()).unwrap();
-		let projects = config.load_projects().unwrap();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let projects = config.load_projects(runner).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -563,7 +575,8 @@ mod tests {
 		// No Cargo.toml file, so no projects will be found
 
 		let config = load(dir.path()).unwrap();
-		let result = config.load_projects();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let result = config.load_projects(runner);
 		assert!(result.is_err());
 		assert!(
 			result

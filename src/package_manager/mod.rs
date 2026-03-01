@@ -168,6 +168,7 @@ impl Project {
 	/// Creates a minimal `Project` with a dummy adapter for use in unit tests.
 	#[cfg(test)]
 	pub fn new_test(name: &str, path: &str) -> Self {
+		use crate::command::test_support::RecordingCommandRunner;
 		Self {
 			info: ProjectInfo {
 				name: name.to_string(),
@@ -177,6 +178,7 @@ impl Project {
 			adapter: Arc::new(NpmAdapter::new(
 				NpmConfig::default(),
 				std::path::PathBuf::from("."),
+				Arc::new(RecordingCommandRunner::new(0)),
 			)),
 		}
 	}
@@ -612,6 +614,10 @@ pub fn build_dependency_graph(projects: &[Project]) -> anyhow::Result<Dependency
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
+	use crate::command::test_support::RecordingCommandRunner;
+
 	use super::*;
 
 	#[test]
@@ -657,6 +663,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			dir.path().to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter.clone()]).unwrap();
 
@@ -679,10 +686,12 @@ mod tests {
 		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			dir.path().to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			dir.path().to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(0)),
 		));
 
 		let projects = enumerate_projects([adapter1, adapter2]).unwrap();
@@ -1478,6 +1487,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			dir.path().to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
 		let graph = build_dependency_graph(&projects).unwrap();
@@ -1515,6 +1525,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			dir.path().to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
 		let graph = build_dependency_graph(&projects).unwrap();
@@ -1556,6 +1567,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			dir.path().to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
 		let graph = build_dependency_graph(&projects).unwrap();

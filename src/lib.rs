@@ -3,6 +3,7 @@
 #![feature(coverage_attribute)]
 
 pub mod cli;
+pub mod command;
 pub mod git;
 pub mod model;
 pub mod package_manager;
@@ -11,9 +12,12 @@ pub mod tui;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
+
+use crate::command::CommandRunner;
 
 /// Finds the git working directory by walking up from the given path.
 ///
@@ -41,7 +45,12 @@ pub struct Env {
 ///
 /// Parses CLI arguments from the provided iterator, finds the git root
 /// starting from the given working directory, and dispatches to the appropriate command.
-pub fn run<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
+pub fn run<I, T>(
+	args: I,
+	cwd: &Path,
+	env: Env,
+	runner: Arc<dyn CommandRunner>,
+) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
@@ -65,10 +74,22 @@ where
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
-		Some(cli::Command::Change(args)) => cli::cmd_change(&git_workdir, &args, &cli.global, &env),
-		Some(cli::Command::Publish(args)) => cli::cmd_publish(&git_workdir, &args),
-		Some(cli::Command::Release(args)) => cli::cmd_release(&git_workdir, &args),
-		None => cli::cmd_change(&git_workdir, &cli::ChangeArgs::default(), &cli.global, &env),
+		Some(cli::Command::Change(args)) => {
+			cli::cmd_change(&git_workdir, &args, &cli.global, &env, Arc::clone(&runner))
+		}
+		Some(cli::Command::Publish(args)) => {
+			cli::cmd_publish(&git_workdir, &args, Arc::clone(&runner))
+		}
+		Some(cli::Command::Release(args)) => {
+			cli::cmd_release(&git_workdir, &args, Arc::clone(&runner))
+		}
+		None => cli::cmd_change(
+			&git_workdir,
+			&cli::ChangeArgs::default(),
+			&cli.global,
+			&env,
+			Arc::clone(&runner),
+		),
 	}
 }
 

@@ -3,10 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Args;
 
+use crate::command::CommandRunner;
 use crate::git::{self, ReleaseInfo};
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
@@ -57,9 +59,13 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 }
 
 /// Runs the `release` subcommand.
-pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<ExitCode> {
+pub fn cmd_release(
+	git_workdir: &Path,
+	args: &ReleaseArgs,
+	runner: Arc<dyn CommandRunner>,
+) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
-	let adapters = config.create_adapters();
+	let adapters = config.create_adapters(Arc::clone(&runner));
 	let projects = config.load_projects_for_adapters(&adapters)?;
 
 	// Read all pending changesets
@@ -183,6 +189,7 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 			&modified_files,
 			projects.len(),
 			args.dry_run,
+			runner.as_ref(),
 		)?;
 	}
 
@@ -191,7 +198,15 @@ pub fn cmd_release(git_workdir: &Path, args: &ReleaseArgs) -> anyhow::Result<Exi
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
+	use crate::command::test_support::RecordingCommandRunner;
+
 	use super::*;
+
+	fn make_runner() -> Arc<dyn CommandRunner> {
+		Arc::new(RecordingCommandRunner::new(0))
+	}
 
 	#[test]
 	fn bump_version_major() {
@@ -236,7 +251,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args);
+		let result = cmd_release(dir.path(), &args, make_runner());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -260,7 +275,7 @@ mod tests {
 		.unwrap();
 
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args).unwrap();
+		let result = cmd_release(dir.path(), &args, make_runner()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -285,7 +300,7 @@ mod tests {
 		.unwrap();
 
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args);
+		let result = cmd_release(dir.path(), &args, make_runner());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -342,7 +357,7 @@ mod tests {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 		};
-		let result = cmd_release(dir.path(), &args);
+		let result = cmd_release(dir.path(), &args, make_runner());
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -376,7 +391,7 @@ mod tests {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 		};
-		let result = cmd_release(dir.path(), &args);
+		let result = cmd_release(dir.path(), &args, make_runner());
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -412,7 +427,7 @@ mod tests {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 		};
-		let result = cmd_release(dir.path(), &args);
+		let result = cmd_release(dir.path(), &args, make_runner());
 		assert!(result.is_err());
 		assert!(
 			result

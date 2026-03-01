@@ -1,9 +1,11 @@
 //! Publish command implementation.
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::Args;
 
+use crate::command::CommandRunner;
 use crate::model::config;
 use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
 
@@ -29,10 +31,14 @@ pub struct PublishArgs {
 }
 
 /// Execute the publish command.
-pub fn cmd_publish(git_workdir: &std::path::Path, args: &PublishArgs) -> anyhow::Result<ExitCode> {
+pub fn cmd_publish(
+	git_workdir: &std::path::Path,
+	args: &PublishArgs,
+	runner: Arc<dyn CommandRunner>,
+) -> anyhow::Result<ExitCode> {
 	// Load configuration and enumerate projects
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects()?;
+	let projects = config.load_projects(runner)?;
 
 	// Filter projects by --package flags if specified
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
@@ -148,10 +154,6 @@ fn publish_projects(
 }
 
 /// Executes the actual publish operation for a project, handling output and errors.
-///
-/// This is marked with `#[coverage(off)]` because it shells out to package managers.
-#[coverage(off)]
-#[mutants::skip]
 fn do_publish(project: &package_manager::Project) -> PublishResult {
 	let version = project.version();
 	let registry = project.registry_name();

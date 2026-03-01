@@ -1,6 +1,7 @@
 //! npm package manager adapter.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use glob::glob;
@@ -8,6 +9,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
+use crate::command::CommandRunner;
 
 /// Configuration for npm package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,14 +68,17 @@ pub struct NpmAdapter {
 	config: NpmConfig,
 	/// Git repository root path.
 	git_workdir: PathBuf,
+	/// Command runner for executing npm/pnpm/yarn commands.
+	runner: Arc<dyn CommandRunner>,
 }
 
 impl NpmAdapter {
 	/// Creates a new npm adapter with the given configuration.
-	pub fn new(config: NpmConfig, git_workdir: PathBuf) -> Self {
+	pub fn new(config: NpmConfig, git_workdir: PathBuf, runner: Arc<dyn CommandRunner>) -> Self {
 		Self {
 			config,
 			git_workdir,
+			runner,
 		}
 	}
 
@@ -384,18 +389,16 @@ impl PackageManagerAdapter for NpmAdapter {
 	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		let workspace_root = self.resolve_root();
 
-		// If a custom lock command is configured, use it.
+		// If a custom lock command is configured, execute it via the shell (ADR-011).
 		// We can't know which file the custom command writes, so return None.
 		if let Some(ref lock_command) = self.config.lock_command {
-			let parts: Vec<&str> = lock_command.split_whitespace().collect();
-			if parts.is_empty() {
+			if lock_command.trim().is_empty() {
 				anyhow::bail!("lock_command is empty");
 			}
 
-			let output = std::process::Command::new(parts[0])
-				.args(&parts[1..])
-				.current_dir(&workspace_root)
-				.output()
+			let output = self
+				.runner
+				.run_shell(lock_command, &workspace_root)
 				.with_context(|| {
 					format!(
 						"Failed to execute lock command '{}' in {}",
@@ -419,10 +422,9 @@ impl PackageManagerAdapter for NpmAdapter {
 
 		// Auto-detect lock file and run appropriate command
 		if workspace_root.join("package-lock.json").exists() {
-			let output = std::process::Command::new("npm")
-				.args(["install", "--package-lock-only"])
-				.current_dir(&workspace_root)
-				.output()
+			let output = self
+				.runner
+				.run("npm", &["install", "--package-lock-only"], &workspace_root)
 				.with_context(|| {
 					format!(
 						"Failed to execute npm install --package-lock-only in {}",
@@ -441,10 +443,9 @@ impl PackageManagerAdapter for NpmAdapter {
 
 			Ok(Some(workspace_root.join("package-lock.json")))
 		} else if workspace_root.join("pnpm-lock.yaml").exists() {
-			let output = std::process::Command::new("pnpm")
-				.args(["install", "--lockfile-only"])
-				.current_dir(&workspace_root)
-				.output()
+			let output = self
+				.runner
+				.run("pnpm", &["install", "--lockfile-only"], &workspace_root)
 				.with_context(|| {
 					format!(
 						"Failed to execute pnpm install --lockfile-only in {}",
@@ -463,10 +464,13 @@ impl PackageManagerAdapter for NpmAdapter {
 
 			Ok(Some(workspace_root.join("pnpm-lock.yaml")))
 		} else if workspace_root.join("yarn.lock").exists() {
-			let output = std::process::Command::new("yarn")
-				.args(["install", "--mode", "update-lockfile"])
-				.current_dir(&workspace_root)
-				.output()
+			let output = self
+				.runner
+				.run(
+					"yarn",
+					&["install", "--mode", "update-lockfile"],
+					&workspace_root,
+				)
 				.with_context(|| {
 					format!(
 						"Failed to execute yarn install --mode update-lockfile in {}",
@@ -490,22 +494,26 @@ impl PackageManagerAdapter for NpmAdapter {
 		}
 	}
 
-	#[coverage(off)]
-	#[mutants::skip]
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let project_dir = self.git_workdir.join(&project.path);
 
-		let mut cmd = std::process::Command::new("npm");
-		cmd.arg("publish").current_dir(&project_dir);
+		let mut args = vec!["publish"];
 
 		// For scoped packages, add --access flag
+		let access_owned;
 		if project.name.starts_with('@') {
-			let access = self.config.access.as_deref().unwrap_or("restricted");
-			cmd.arg("--access").arg(access);
+			access_owned = self
+				.config
+				.access
+				.clone()
+				.unwrap_or_else(|| "restricted".to_string());
+			args.push("--access");
+			args.push(&access_owned);
 		}
 
-		let output = cmd
-			.output()
+		let output = self
+			.runner
+			.run("npm", &args, &project_dir)
 			.with_context(|| format!("Failed to execute npm publish for {}", project.name))?;
 
 		if output.status.success() {
@@ -542,24 +550,47 @@ mod tests {
 		tempfile::tempdir().expect("Failed to create temp dir")
 	}
 
+	use std::sync::Arc;
+
+	use crate::command::test_support::RecordingCommandRunner;
+
 	fn write_package_json(dir: &Path, content: &str) {
 		std::fs::write(dir.join("package.json"), content).unwrap();
 	}
 
+	/// Creates a `NpmAdapter` backed by a recording runner with the given exit code.
+	fn recording_adapter_default(config: NpmConfig, dir: &Path, exit_code: i32) -> NpmAdapter {
+		NpmAdapter::new(
+			config,
+			dir.to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(exit_code)),
+		)
+	}
+
+	/// Creates a `NpmAdapter` backed by a recording runner for inspection.
+	fn recording_adapter(
+		config: NpmConfig,
+		dir: &Path,
+		runner: Arc<RecordingCommandRunner>,
+	) -> NpmAdapter {
+		NpmAdapter::new(config, dir.to_path_buf(), runner)
+	}
+
 	/// Helper to enumerate projects using the adapter with no configured path.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		NpmAdapter::new(NpmConfig::default(), dir.to_path_buf()).enumerate_projects()
+		recording_adapter_default(NpmConfig::default(), dir, 0).enumerate_projects()
 	}
 
 	/// Helper to enumerate projects using the adapter with a configured path.
 	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-		NpmAdapter::new(
+		recording_adapter_default(
 			NpmConfig {
 				enabled: true,
 				path: Some(path.to_string()),
 				..Default::default()
 			},
-			dir.to_path_buf(),
+			dir,
+			0,
 		)
 		.enumerate_projects()
 	}
@@ -784,7 +815,7 @@ mod tests {
 	#[test]
 	fn new_creates_adapter() {
 		let dir = temp_dir();
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		// Should work without panicking
 		let _ = adapter.enumerate_projects();
 	}
@@ -1021,7 +1052,7 @@ mod tests {
 	#[test]
 	fn write_version_file_not_found() {
 		let dir = temp_dir();
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info("my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
@@ -1032,7 +1063,7 @@ mod tests {
 	fn write_version_invalid_json() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), "not valid json");
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info("my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
@@ -1043,7 +1074,7 @@ mod tests {
 	fn write_version_updates_package_json() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info("my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
@@ -1060,7 +1091,7 @@ mod tests {
 	fn write_version_roundtrip() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "0.1.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info("my-app", "");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
@@ -1076,7 +1107,7 @@ mod tests {
 	fn update_lock_file_no_op_when_no_lock_file() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 
 		// Should succeed and return None when there is no lock file
 		assert_eq!(adapter.update_lock_file().unwrap(), None);
@@ -1086,14 +1117,15 @@ mod tests {
 	fn update_lock_file_custom_command_empty_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(
+		let adapter = recording_adapter_default(
 			NpmConfig {
 				enabled: true,
 				path: None,
 				lock_command: Some("".to_string()),
 				access: None,
 			},
-			dir.path().to_path_buf(),
+			dir.path(),
+			0,
 		);
 
 		let result = adapter.update_lock_file();
@@ -1110,18 +1142,22 @@ mod tests {
 	fn update_lock_file_custom_command_nonexistent_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(
+		let runner =
+			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"command not found".to_vec()));
+		let adapter = recording_adapter(
 			NpmConfig {
 				enabled: true,
 				path: None,
 				lock_command: Some("nonexistent-command-12345".to_string()),
 				access: None,
 			},
-			dir.path().to_path_buf(),
+			dir.path(),
+			runner,
 		);
 
 		let result = adapter.update_lock_file();
 		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Lock command"));
 	}
 
 	#[test]
@@ -1172,14 +1208,17 @@ mod tests {
 	fn update_lock_file_custom_command_with_exit_code_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(
+		let runner =
+			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"exit status 1".to_vec()));
+		let adapter = recording_adapter(
 			NpmConfig {
 				enabled: true,
 				path: None,
-				lock_command: Some("false".to_string()), // 'false' always exits with 1
+				lock_command: Some("false".to_string()),
 				access: None,
 			},
-			dir.path().to_path_buf(),
+			dir.path(),
+			runner,
 		);
 
 		let result = adapter.update_lock_file();
@@ -1191,14 +1230,15 @@ mod tests {
 	fn update_lock_file_custom_command_succeeds() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		let adapter = NpmAdapter::new(
+		let adapter = recording_adapter_default(
 			NpmConfig {
 				enabled: true,
 				path: None,
-				lock_command: Some("true".to_string()), // 'true' always exits with 0
+				lock_command: Some("true".to_string()),
 				access: None,
 			},
-			dir.path().to_path_buf(),
+			dir.path(),
+			0,
 		);
 
 		// Custom command succeeds but returns None (we don't know which file it wrote)
@@ -1206,88 +1246,110 @@ mod tests {
 	}
 
 	#[test]
-	fn update_lock_file_npm_not_found_fails() {
+	fn update_lock_file_no_lock_file_returns_none() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
-		// Create package-lock.json to trigger npm detection
+		// No lock file present — update_lock_file should return Ok(None)
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(adapter.update_lock_file().unwrap(), None);
+	}
+
+	#[test]
+	fn update_lock_file_npm_passes_correct_args() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 		std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
 
-		// Use a custom PATH that doesn't include npm
-		let _adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-		let _info = project_info("my-app", "");
-
-		// This will fail if npm is not in PATH
-		// We can't reliably test this without manipulating PATH, but we document the behavior
-		// The actual error will come from Command::new("npm").output()
-	}
-
-	#[test]
-	fn update_lock_file_npm_succeeds() {
-		let dir = temp_dir();
-		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
-		// Create an initial package-lock.json
-		std::fs::write(
-			dir.path().join("package-lock.json"),
-			r#"{"name":"test-app","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"test-app","version":"1.0.0"}}}"#,
-		)
-		.unwrap();
-
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
 		let result = adapter.update_lock_file();
-		assert_eq!(
-			result.unwrap(),
-			Some(dir.path().join("package-lock.json")),
-			"should return the package-lock.json path"
-		);
+		assert_eq!(result.unwrap(), Some(dir.path().join("package-lock.json")));
+
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "npm");
+		assert_eq!(invocations[0].args, ["install", "--package-lock-only"]);
 	}
 
 	#[test]
-	fn update_lock_file_pnpm_succeeds() {
+	fn update_lock_file_npm_failure_propagates() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
-		// Create a pnpm-workspace.yaml to avoid pnpm complaints
-		std::fs::write(
-			dir.path().join("pnpm-workspace.yaml"),
-			"packages:\n  - '.'\n",
-		)
-		.unwrap();
-		// Create an initial pnpm-lock.yaml
+		std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
+
+		let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"npm error".to_vec()));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		assert!(adapter.update_lock_file().is_err());
+	}
+
+	#[test]
+	fn update_lock_file_pnpm_passes_correct_args() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 		std::fs::write(
 			dir.path().join("pnpm-lock.yaml"),
 			"lockfileVersion: '6.0'\n",
 		)
 		.unwrap();
 
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
 		let result = adapter.update_lock_file();
+		assert_eq!(result.unwrap(), Some(dir.path().join("pnpm-lock.yaml")));
+
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "pnpm");
+		assert_eq!(invocations[0].args, ["install", "--lockfile-only"]);
+	}
+
+	#[test]
+	fn update_lock_file_pnpm_failure_propagates() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
+		std::fs::write(
+			dir.path().join("pnpm-lock.yaml"),
+			"lockfileVersion: '6.0'\n",
+		)
+		.unwrap();
+
+		let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"pnpm error".to_vec()));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		assert!(adapter.update_lock_file().is_err());
+	}
+
+	#[test]
+	fn update_lock_file_yarn_passes_correct_args() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
+		std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
+
+		let result = adapter.update_lock_file();
+		assert_eq!(result.unwrap(), Some(dir.path().join("yarn.lock")));
+
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "yarn");
 		assert_eq!(
-			result.unwrap(),
-			Some(dir.path().join("pnpm-lock.yaml")),
-			"should return the pnpm-lock.yaml path"
+			invocations[0].args,
+			["install", "--mode", "update-lockfile"]
 		);
 	}
 
 	#[test]
-	fn update_lock_file_yarn_succeeds() {
+	fn update_lock_file_yarn_failure_propagates() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
-		// Create an initial yarn.lock (yarn 1.x format)
-		std::fs::write(
-			dir.path().join("yarn.lock"),
-			"# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.\n# yarn lockfile v1\n",
-		)
-		.unwrap();
+		std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
 
-		let adapter = NpmAdapter::new(NpmConfig::default(), dir.path().to_path_buf());
-
-		let result = adapter.update_lock_file();
-		assert_eq!(
-			result.unwrap(),
-			Some(dir.path().join("yarn.lock")),
-			"should return the yarn.lock path"
-		);
+		let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"yarn error".to_vec()));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		assert!(adapter.update_lock_file().is_err());
 	}
 
 	#[test]
@@ -1363,5 +1425,162 @@ mod tests {
 				.dependency_names
 				.contains(&"typescript".to_string())
 		);
+	}
+
+	// --- publish() tests ---
+
+	#[test]
+	fn publish_success_returns_published() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		let info = project_info("my-app", "");
+		assert_eq!(adapter.publish(&info).unwrap(), PublishOutcome::Published);
+	}
+
+	#[test]
+	fn publish_epublishconflict_returns_already_published() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1).with_stderr(b"npm error code EPUBLISHCONFLICT".to_vec()),
+		);
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		let info = project_info("my-app", "");
+		assert_eq!(
+			adapter.publish(&info).unwrap(),
+			PublishOutcome::AlreadyPublished
+		);
+	}
+
+	#[test]
+	fn publish_cannot_publish_over_returns_already_published() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(
+			b"npm error cannot publish over the previously published version".to_vec(),
+		));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		let info = project_info("my-app", "");
+		assert_eq!(
+			adapter.publish(&info).unwrap(),
+			PublishOutcome::AlreadyPublished
+		);
+	}
+
+	#[test]
+	fn publish_other_failure_returns_error() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1).with_stderr(b"npm error 403 Forbidden".to_vec()),
+		);
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+		let info = project_info("my-app", "");
+		assert!(adapter.publish(&info).is_err());
+	}
+
+	#[test]
+	fn publish_scoped_package_uses_restricted_access_by_default() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
+		let info = project_info("@scope/my-pkg", "");
+		adapter.publish(&info).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		let args = &invocations[0].args;
+		assert!(
+			args.contains(&"--access".to_string()),
+			"Expected --access flag"
+		);
+		assert!(
+			args.contains(&"restricted".to_string()),
+			"Expected restricted access"
+		);
+	}
+
+	#[test]
+	fn publish_scoped_package_respects_custom_access() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: None,
+				access: Some("public".to_string()),
+			},
+			dir.path(),
+			Arc::clone(&runner),
+		);
+		let info = project_info("@scope/my-pkg", "");
+		adapter.publish(&info).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		let args = &invocations[0].args;
+		assert!(args.contains(&"--access".to_string()));
+		assert!(args.contains(&"public".to_string()));
+	}
+
+	#[test]
+	fn publish_non_scoped_package_omits_access_flag() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
+		let info = project_info("my-app", "");
+		adapter.publish(&info).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		let args = &invocations[0].args;
+		assert!(
+			!args.contains(&"--access".to_string()),
+			"Non-scoped package should not have --access flag"
+		);
+	}
+
+	// --- update_lock_file shell execution tests (ADR-011) ---
+
+	#[test]
+	fn update_lock_file_custom_command_uses_shell_execution() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter = recording_adapter(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("custom-lock-cmd --flag".to_string()),
+				access: None,
+			},
+			dir.path(),
+			Arc::clone(&runner),
+		);
+		adapter.update_lock_file().unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(
+			invocations[0].is_shell,
+			"Custom lock_command should use shell execution"
+		);
+		assert_eq!(invocations[0].args[1], "custom-lock-cmd --flag");
+	}
+
+	#[test]
+	fn update_lock_file_custom_command_failure_propagates() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+		let runner =
+			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"command not found".to_vec()));
+		let adapter = recording_adapter(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("bad-cmd".to_string()),
+				access: None,
+			},
+			dir.path(),
+			runner,
+		);
+		let result = adapter.update_lock_file();
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Lock command"));
 	}
 }

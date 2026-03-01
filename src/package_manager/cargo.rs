@@ -1,6 +1,7 @@
 //! Cargo package manager adapter.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use glob::glob;
@@ -8,6 +9,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
+use crate::command::CommandRunner;
 
 /// Configuration for Cargo package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,14 +56,17 @@ pub struct CargoAdapter {
 	config: CargoConfig,
 	/// Git repository root path.
 	git_workdir: PathBuf,
+	/// Command runner for executing cargo commands.
+	runner: Arc<dyn CommandRunner>,
 }
 
 impl CargoAdapter {
 	/// Creates a new Cargo adapter with the given configuration.
-	pub fn new(config: CargoConfig, git_workdir: PathBuf) -> Self {
+	pub fn new(config: CargoConfig, git_workdir: PathBuf, runner: Arc<dyn CommandRunner>) -> Self {
 		Self {
 			config,
 			git_workdir,
+			runner,
 		}
 	}
 
@@ -332,10 +337,9 @@ impl PackageManagerAdapter for CargoAdapter {
 		// For Cargo, always regenerate the lock file at the workspace root
 		let workspace_root = self.resolve_root();
 
-		let output = std::process::Command::new("cargo")
-			.arg("generate-lockfile")
-			.current_dir(&workspace_root)
-			.output()
+		let output = self
+			.runner
+			.run("cargo", &["generate-lockfile"], &workspace_root)
 			.with_context(|| {
 				format!(
 					"Failed to execute cargo generate-lockfile in {}",
@@ -355,22 +359,23 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(Some(workspace_root.join("Cargo.lock")))
 	}
 
-	#[coverage(off)]
-	#[mutants::skip]
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
+		let manifest_str = manifest_path.to_string_lossy();
 
-		let mut cmd = std::process::Command::new("cargo");
-		cmd.arg("publish")
-			.arg("--manifest-path")
-			.arg(&manifest_path);
-
-		let output = cmd.output().with_context(|| {
-			format!(
-				"Failed to execute cargo publish for {}",
-				manifest_path.display()
+		let output = self
+			.runner
+			.run(
+				"cargo",
+				&["publish", "--manifest-path", &manifest_str],
+				&self.git_workdir,
 			)
-		})?;
+			.with_context(|| {
+				format!(
+					"Failed to execute cargo publish for {}",
+					manifest_path.display()
+				)
+			})?;
 
 		if output.status.success() {
 			return Ok(PublishOutcome::Published);
@@ -412,19 +417,42 @@ mod tests {
 		std::fs::write(dir.join("Cargo.toml"), content).unwrap();
 	}
 
+	use std::sync::Arc;
+
+	use crate::command::test_support::RecordingCommandRunner;
+
+	/// Creates a `CargoAdapter` backed by a fresh recording runner with the given exit code.
+	fn recording_adapter(config: CargoConfig, dir: &Path, exit_code: i32) -> CargoAdapter {
+		CargoAdapter::new(
+			config,
+			dir.to_path_buf(),
+			Arc::new(RecordingCommandRunner::new(exit_code)),
+		)
+	}
+
+	/// Creates a `CargoAdapter` backed by a shared recording runner for inspection.
+	fn recording_adapter_inspectable(
+		config: CargoConfig,
+		dir: &Path,
+		runner: Arc<RecordingCommandRunner>,
+	) -> CargoAdapter {
+		CargoAdapter::new(config, dir.to_path_buf(), runner)
+	}
+
 	/// Helper to enumerate projects using the adapter with no configured path.
 	fn enumerate(dir: &Path) -> anyhow::Result<Vec<ProjectInfo>> {
-		CargoAdapter::new(CargoConfig::default(), dir.to_path_buf()).enumerate_projects()
+		recording_adapter(CargoConfig::default(), dir, 0).enumerate_projects()
 	}
 
 	/// Helper to enumerate projects using the adapter with a configured path.
 	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-		CargoAdapter::new(
+		recording_adapter(
 			CargoConfig {
 				enabled: true,
 				path: Some(path.to_string()),
 			},
-			dir.to_path_buf(),
+			dir,
+			0,
 		)
 		.enumerate_projects()
 	}
@@ -688,7 +716,7 @@ members = ["crates/*"]
 	#[test]
 	fn new_creates_adapter() {
 		let dir = temp_dir();
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let _ = adapter.enumerate_projects();
 	}
 
@@ -819,7 +847,7 @@ version = "not-a-version"
 	#[test]
 	fn write_version_file_not_found() {
 		let dir = temp_dir();
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info("my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
@@ -830,7 +858,7 @@ version = "not-a-version"
 	fn write_version_invalid_toml() {
 		let dir = temp_dir();
 		write_cargo_toml(dir.path(), "not valid toml [[[");
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info("my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
@@ -841,7 +869,7 @@ version = "not-a-version"
 	fn write_version_missing_package_section() {
 		let dir = temp_dir();
 		write_cargo_toml(dir.path(), "[dependencies]\n");
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info("my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
@@ -866,7 +894,7 @@ version = "1.0.0"
 edition = "2024"
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info("my-crate", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
@@ -888,7 +916,7 @@ name = "my-crate"
 version = "0.1.0"
 "#,
 		);
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info("my-crate", "");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
@@ -937,46 +965,37 @@ version = "0.1.0"
 	}
 
 	#[test]
-	fn update_lock_file_invalid_cargo_toml_fails() {
+	fn update_lock_file_command_failure_propagates_error() {
 		let dir = temp_dir();
-		write_cargo_toml(dir.path(), "not valid toml [[[");
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1).with_stderr(b"error: invalid manifest".to_vec()),
+		);
+		let adapter = recording_adapter_inspectable(CargoConfig::default(), dir.path(), runner);
 
 		let result = adapter.update_lock_file();
 		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("cargo generate-lockfile failed"),
+			"Expected 'cargo generate-lockfile failed', got: {msg}"
+		);
 	}
 
 	#[test]
-	fn update_lock_file_succeeds() {
+	fn update_lock_file_passes_correct_args() {
 		let dir = temp_dir();
-		write_cargo_toml(
-			dir.path(),
-			r#"
-[package]
-name = "test-crate"
-version = "1.0.0"
-edition = "2024"
-
-[lib]
-path = "src/lib.rs"
-"#,
-		);
-		// Create a minimal lib.rs to make it a valid Rust crate
-		std::fs::create_dir_all(dir.path().join("src")).unwrap();
-		std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
-
-		let adapter = CargoAdapter::new(CargoConfig::default(), dir.path().to_path_buf());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter =
+			recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
 
 		let result = adapter.update_lock_file();
-		assert_eq!(
-			result.unwrap(),
-			Some(dir.path().join("Cargo.lock")),
-			"should return the Cargo.lock path"
-		);
-		assert!(
-			dir.path().join("Cargo.lock").exists(),
-			"Cargo.lock should be created"
-		);
+		assert_eq!(result.unwrap(), Some(dir.path().join("Cargo.lock")));
+
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "cargo");
+		assert_eq!(invocations[0].args, ["generate-lockfile"]);
+		assert_eq!(invocations[0].cwd, dir.path());
 	}
 
 	#[test]
@@ -1105,6 +1124,97 @@ tempfile = "3.0"
 			projects[0]
 				.dependency_names
 				.contains(&"tempfile".to_string())
+		);
+	}
+
+	fn setup_publish_project(dir: &Path) -> ProjectInfo {
+		write_cargo_toml(
+			dir,
+			"[package]\nname = \"my-crate\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
+		);
+		ProjectInfo {
+			name: "my-crate".to_string(),
+			path: std::path::PathBuf::new(),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn publish_success_returns_published() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter =
+			recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "cargo");
+		assert_eq!(invocations[0].args[0], "publish");
+	}
+
+	#[test]
+	fn publish_already_uploaded_returns_already_published() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1)
+				.with_stderr(b"error: crate version is already uploaded".to_vec()),
+		);
+		let adapter =
+			recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::AlreadyPublished);
+	}
+
+	#[test]
+	fn publish_already_exists_returns_already_published() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1)
+				.with_stderr(b"error: package already exists on crates.io".to_vec()),
+		);
+		let adapter =
+			recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::AlreadyPublished);
+	}
+
+	#[test]
+	fn publish_other_failure_returns_error() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1)
+				.with_stderr(b"error: network error connecting to crates.io".to_vec()),
+		);
+		let adapter =
+			recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
+		let result = adapter.publish(&info);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("cargo publish failed"),
+			"Expected 'cargo publish failed', got: {msg}"
+		);
+	}
+
+	#[test]
+	fn publish_passes_manifest_path_arg() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let adapter =
+			recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
+		adapter.publish(&info).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(
+			invocations[0].args.contains(&"--manifest-path".to_string()),
+			"Should pass --manifest-path, got: {:?}",
+			invocations[0].args
 		);
 	}
 }

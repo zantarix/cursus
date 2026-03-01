@@ -3,10 +3,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::bail;
 use clap::Args;
 
+use crate::command::CommandRunner;
 use crate::model::changeset::{self, ChangeType, Changeset};
 use crate::model::config;
 use crate::tui::change;
@@ -35,9 +37,10 @@ pub fn cmd_change(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	env: &crate::Env,
+	runner: Arc<dyn CommandRunner>,
 ) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects()?;
+	let projects = config.load_projects(runner)?;
 
 	let project_indices = if !args.projects.is_empty() {
 		let indices: Vec<usize> = args

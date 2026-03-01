@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use semver::Version;
 
+use crate::command::CommandRunner;
+
 /// Information about a single package that was released.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseInfo {
@@ -68,6 +70,7 @@ pub(crate) fn format_commit_message(releases: &[ReleaseInfo]) -> String {
 /// * `modified_files` - Files to stage before committing.
 /// * `total_project_count` - Total number of projects in the workspace (used for auto tag format).
 /// * `dry_run` - If `true`, only print a summary; do not modify git state.
+/// * `runner` - Command runner for executing git commands.
 ///
 /// # Errors
 ///
@@ -79,6 +82,7 @@ pub fn run_git_lifecycle(
 	modified_files: &[PathBuf],
 	total_project_count: usize,
 	dry_run: bool,
+	runner: &dyn CommandRunner,
 ) -> anyhow::Result<()> {
 	if releases.is_empty() {
 		return Ok(());
@@ -128,9 +132,9 @@ pub fn run_git_lifecycle(
 
 	// Stage and commit
 	if config.run_until.should_commit() {
-		operations::git_add(git_workdir, &all_files)
+		operations::git_add(runner, git_workdir, &all_files)
 			.context("Failed to stage files for git commit")?;
-		operations::git_commit(git_workdir, &commit_message)
+		operations::git_commit(runner, git_workdir, &commit_message)
 			.context("Failed to create git commit")?;
 	}
 
@@ -141,14 +145,14 @@ pub fn run_git_lifecycle(
 				"Release {} version {}",
 				release.package_name, release.new_version
 			);
-			operations::git_tag(git_workdir, tag, &tag_message)
+			operations::git_tag(runner, git_workdir, tag, &tag_message)
 				.with_context(|| format!("Failed to create git tag: {tag}"))?;
 		}
 	}
 
 	// Push
 	if config.run_until.should_push() {
-		operations::git_push(git_workdir).context("Failed to push to remote")?;
+		operations::git_push(runner, git_workdir).context("Failed to push to remote")?;
 	}
 
 	Ok(())
@@ -156,6 +160,8 @@ pub fn run_git_lifecycle(
 
 #[cfg(test)]
 mod tests {
+	use crate::command::test_support::RecordingCommandRunner;
+
 	use super::*;
 
 	#[test]
@@ -262,7 +268,8 @@ mod tests {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
 		}];
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true);
+		let runner = RecordingCommandRunner::new(0);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -284,7 +291,8 @@ mod tests {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
 		}];
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true);
+		let runner = RecordingCommandRunner::new(0);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -302,7 +310,8 @@ mod tests {
 			..Default::default()
 		};
 		// Empty releases → returns Ok immediately without touching git
-		let result = run_git_lifecycle(dir.path(), &config, &[], &[], 1, false);
+		let runner = RecordingCommandRunner::new(0);
+		let result = run_git_lifecycle(dir.path(), &config, &[], &[], 1, false, &runner);
 		assert!(result.is_ok());
 	}
 
@@ -318,7 +327,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		// Dry run should not execute any git commands
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true);
+		let runner = RecordingCommandRunner::new(0);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
 		assert!(result.is_ok());
 	}
 
@@ -335,7 +345,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		// Dry run with push enabled should print "Would push" without running git
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true);
+		let runner = RecordingCommandRunner::new(0);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
 		assert!(result.is_ok());
 	}
 }
