@@ -44,6 +44,7 @@
 
 					# Required for tests that invoke npm/pnpm/yarn
 					nativeBuildInputs = with pkgs; [
+						git
 						nodejs
 						nodePackages.pnpm
 						nodePackages.yarn
