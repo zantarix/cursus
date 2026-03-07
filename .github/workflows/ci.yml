@@ -42,3 +42,7 @@ jobs:
       - name: Check code coverage
         shell: nix develop -c bash -e {0}
         run: cargo make coverage
+
+      - name: Check cross-compilation
+        shell: nix develop -c bash -e {0}
+        run: cargo make release

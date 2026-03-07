@@ -63,7 +63,7 @@ fn release_with_single_changeset_cargo() {
 	);
 
 	// Verify changelog was created
-	let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+	let today = chronicle::utils::today_iso_date();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	assert!(
 		changelog.contains(&format!("## 0.2.0 - {today}")),
@@ -233,7 +233,7 @@ fn release_changelog_has_proper_sections() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
-	let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+	let today = chronicle::utils::today_iso_date();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 
 	// Major bump aggregates all, version should be 1.0.0
@@ -277,7 +277,7 @@ fn release_successive_releases_prepend_to_changelog() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok());
 
-	let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+	let today = chronicle::utils::today_iso_date();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 
 	// Both versions should be present

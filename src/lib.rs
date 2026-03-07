@@ -8,6 +8,7 @@ pub mod git;
 pub mod model;
 pub mod package_manager;
 pub mod tui;
+pub mod utils;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
