@@ -177,6 +177,24 @@ pub fn git_tag_exists(dir: &std::path::Path, tag: &str) -> bool {
 	git_tags(dir).contains(&tag.to_string())
 }
 
+/// Runs chronicle as a real subprocess, capturing stdout and stderr.
+///
+/// Returns `(success, stdout, stderr)`. Use this instead of [`run_chronicle`] when
+/// the command is expected to produce clap-generated output (e.g. `--help`, `--version`,
+/// or invalid flags/subcommands) so that the output is captured rather than leaked to the
+/// test runner's terminal.
+pub fn run_chronicle_subprocess(args: &[&str], cwd: &std::path::Path) -> (bool, String, String) {
+	let bin = env!("CARGO_BIN_EXE_chronicle");
+	let output = Command::new(bin)
+		.args(args)
+		.current_dir(cwd)
+		.output()
+		.expect("Failed to spawn chronicle subprocess");
+	let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+	let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+	(output.status.success(), stdout, stderr)
+}
+
 /// Creates a temporary directory with a `.git` folder to simulate a git repository.
 pub fn temp_git_repo() -> TempDir {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");

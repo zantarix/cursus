@@ -2,24 +2,9 @@
 
 mod common;
 
-use std::path::Path;
-
 use common::temp_git_repo;
 
-/// Helper to run chronicle as a subprocess, capturing stdout and stderr.
-///
-/// Returns `(success, stdout, stderr)`.
-fn run_chronicle_subprocess(args: &[&str], cwd: &Path) -> (bool, String, String) {
-	let bin = env!("CARGO_BIN_EXE_chronicle");
-	let output = std::process::Command::new(bin)
-		.args(args)
-		.current_dir(cwd)
-		.output()
-		.expect("Failed to spawn chronicle subprocess");
-	let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-	let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-	(output.status.success(), stdout, stderr)
-}
+use crate::common::run_chronicle_subprocess;
 
 #[test]
 fn publish_with_no_config_fails() {

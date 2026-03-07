@@ -26,16 +26,13 @@ fn init_fails_when_config_already_exists() {
 #[test]
 fn init_fails_when_not_in_git_repo() {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "init", "-p", "npm"],
-		dir.path(),
-	);
+	let (success, _, stderr) =
+		common::run_chronicle_subprocess(&["--no-interactive", "init", "-p", "npm"], dir.path());
 
-	assert!(result.is_err());
-	let err = result.unwrap_err();
+	assert!(!success);
 	assert!(
-		err.to_string().contains("No git repository found"),
-		"Expected 'No git repository found' error, got: {err}"
+		stderr.contains("No git repository found"),
+		"Expected 'No git repository found' in stderr, got: {stderr}"
 	);
 }
 
@@ -74,12 +71,12 @@ fn init_creates_config_with_cargo() {
 #[test]
 fn init_fails_with_invalid_package_manager() {
 	let dir = temp_git_repo();
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "init", "-p", "invalid"],
+	let (success, _, _) = common::run_chronicle_subprocess(
+		&["--no-interactive", "init", "-p", "invalid"],
 		dir.path(),
 	);
 
-	assert!(result.is_ok_and(|code| code == std::process::ExitCode::FAILURE));
+	assert!(!success);
 }
 
 #[test]
