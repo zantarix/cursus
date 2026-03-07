@@ -56,7 +56,7 @@ impl Changelog {
 				};
 				let _ = writeln!(output, "\n### {heading}\n");
 				for msg in messages {
-					let _ = writeln!(output, "- {msg}");
+					let _ = writeln!(output, "- {}", indent_continuation_lines(msg));
 				}
 			}
 		}
@@ -89,6 +89,25 @@ impl Changelog {
 			.with_context(|| format!("Failed to write {}", changelog_path.display()))?;
 		Ok(())
 	}
+}
+
+/// Indents continuation lines of a multiline string for use in a Markdown list item.
+///
+/// The first line is returned as-is. Subsequent non-empty lines are prefixed with
+/// two spaces to align under the `- ` bullet. Blank lines are left unindented so
+/// they do not produce lines of trailing whitespace.
+fn indent_continuation_lines(text: &str) -> String {
+	text.split('\n')
+		.enumerate()
+		.map(|(i, line)| {
+			if i == 0 || line.is_empty() {
+				line.to_string()
+			} else {
+				format!("  {line}")
+			}
+		})
+		.collect::<Vec<_>>()
+		.join("\n")
 }
 
 /// Splits `content` at the first second-level markdown heading (`## `).
@@ -195,6 +214,40 @@ mod tests {
 		let entry = changelog.format_entry();
 		assert!(entry.contains("## 1.1.0 - 2024-01-15"));
 		assert!(!entry.contains("###"));
+	}
+
+	#[test]
+	fn format_changelog_entry_multiline_message() {
+		let changes = vec![(
+			ChangeType::Minor,
+			Some("First line\nSecond line\nThird line".to_string()),
+		)];
+		let changelog = Changelog::new(
+			"1.1.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
+		let entry = changelog.format_entry();
+		// Continuation lines must be indented so the list item renders correctly
+		assert!(entry.contains("- First line\n  Second line\n  Third line"));
+	}
+
+	#[test]
+	fn format_changelog_entry_multiline_message_blank_lines_not_indented() {
+		let changes = vec![(
+			ChangeType::Minor,
+			Some("First line\n\nSecond paragraph".to_string()),
+		)];
+		let changelog = Changelog::new(
+			"1.1.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			PathBuf::new(),
+		);
+		let entry = changelog.format_entry();
+		// Blank lines must not be indented
+		assert!(entry.contains("- First line\n\n  Second paragraph"));
 	}
 
 	#[test]
