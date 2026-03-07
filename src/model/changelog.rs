@@ -66,8 +66,10 @@ impl Changelog {
 
 	/// Writes or prepends this changelog entry to the project's CHANGELOG.md.
 	///
-	/// If the CHANGELOG.md file exists, the entry is prepended. Otherwise, a new
-	/// file is created with a "# Changelog" header.
+	/// If the CHANGELOG.md file exists, the new entry is inserted before the first
+	/// second-level markdown heading (`## `), preserving any title or introductory
+	/// text above it. If no such heading exists, the entry is appended to the file.
+	/// If the file does not exist, a new file is created with a `# Changelog` header.
 	///
 	/// # Errors
 	///
@@ -78,10 +80,8 @@ impl Changelog {
 		let content = if changelog_path.exists() {
 			let existing = std::fs::read_to_string(&changelog_path)
 				.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
-			let body = existing
-				.strip_prefix("# Changelog\n\n")
-				.unwrap_or(&existing);
-			format!("# Changelog\n\n{entry}\n{body}")
+			let (preamble, rest) = split_at_first_h2(&existing);
+			format!("{preamble}{entry}\n{rest}")
 		} else {
 			format!("# Changelog\n\n{entry}\n")
 		};
@@ -91,9 +91,77 @@ impl Changelog {
 	}
 }
 
+/// Splits `content` at the first second-level markdown heading (`## `).
+///
+/// Returns `(preamble, rest)` where `preamble` is everything up to and including
+/// the newline before the first `## ` line, and `rest` starts at that `## ` line.
+/// If no `## ` heading is found, returns `(content, "")`.
+fn split_at_first_h2(content: &str) -> (&str, &str) {
+	if content.starts_with("## ") {
+		return ("", content);
+	}
+	if let Some(pos) = content.find("\n## ") {
+		(&content[..pos + 1], &content[pos + 1..])
+	} else {
+		(content, "")
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn split_at_first_h2_with_preamble() {
+		let content = "# Changelog\n\nIntro paragraph.\n\n## 1.0.0\n\nOld\n";
+		let (preamble, rest) = split_at_first_h2(content);
+		assert_eq!(preamble, "# Changelog\n\nIntro paragraph.\n\n");
+		assert_eq!(rest, "## 1.0.0\n\nOld\n");
+	}
+
+	#[test]
+	fn split_at_first_h2_starts_with_h2() {
+		let content = "## 1.0.0\n\nOld\n";
+		let (preamble, rest) = split_at_first_h2(content);
+		assert_eq!(preamble, "");
+		assert_eq!(rest, "## 1.0.0\n\nOld\n");
+	}
+
+	#[test]
+	fn split_at_first_h2_no_h2() {
+		let content = "# Changelog\n\nNo versions yet.\n";
+		let (preamble, rest) = split_at_first_h2(content);
+		assert_eq!(preamble, "# Changelog\n\nNo versions yet.\n");
+		assert_eq!(rest, "");
+	}
+
+	#[test]
+	fn split_at_first_h2_empty() {
+		let (preamble, rest) = split_at_first_h2("");
+		assert_eq!(preamble, "");
+		assert_eq!(rest, "");
+	}
+
+	#[test]
+	fn update_changelog_preserves_custom_preamble() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(
+			dir.path().join("CHANGELOG.md"),
+			"# My Custom Title\n\nAn intro paragraph.\n\n## 0.1.0\n\nOld entry\n",
+		)
+		.unwrap();
+		let changes = vec![(ChangeType::Minor, Some("New thing".to_string()))];
+		let changelog = Changelog::new(
+			"0.2.0".parse().unwrap(),
+			"2024-06-01".to_string(),
+			changes,
+			PathBuf::new(),
+		);
+		changelog.update(dir.path()).unwrap();
+
+		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+		insta::assert_snapshot!(content);
+	}
 
 	#[test]
 	fn format_changelog_entry_with_messages() {

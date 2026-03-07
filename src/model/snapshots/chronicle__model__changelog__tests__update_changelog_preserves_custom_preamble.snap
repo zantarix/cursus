@@ -1,0 +1,17 @@
+---
+source: src/model/changelog.rs
+expression: content
+---
+# My Custom Title
+
+An intro paragraph.
+
+## 0.2.0 - 2024-06-01
+
+### Features
+
+- New thing
+
+## 0.1.0
+
+Old entry
