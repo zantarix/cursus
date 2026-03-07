@@ -281,17 +281,46 @@ fn expand_workspace_pattern(
 		.collect()
 }
 
+/// Replaces the value of the `"version"` key in a JSON string in-place,
+/// without re-serializing, thereby preserving key order, indentation, and all
+/// other formatting.
+///
+/// Returns `None` if the `"version"` key cannot be found or the surrounding
+/// syntax is not what was expected (e.g. the key is not at the top level).
+fn replace_json_version(contents: &str, new_version: &str) -> Option<String> {
+	let key = "\"version\"";
+	let key_pos = contents.find(key)?;
+	let rest = &contents[key_pos + key.len()..];
+
+	// Between the key and the opening quote of the value there must be only
+	// optional whitespace and exactly one colon.
+	let open_quote = rest.find('"')?;
+	if rest[..open_quote].trim() != ":" {
+		return None;
+	}
+
+	let value_start = key_pos + key.len() + open_quote + 1;
+	let close_quote = contents[value_start..].find('"')?;
+	let value_end = value_start + close_quote;
+
+	let mut result = contents.to_string();
+	result.replace_range(value_start..value_end, new_version);
+	Some(result)
+}
+
 impl PackageManagerAdapter for NpmAdapter {
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
 		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let mut json: serde_json::Value = serde_json::from_str(&contents)
+		// Validate JSON before attempting the replacement.
+		serde_json::from_str::<serde_json::Value>(&contents)
 			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		json["version"] = serde_json::Value::String(version.to_string());
-		let output =
-			serde_json::to_string_pretty(&json).context("Failed to serialize package.json")?;
-		std::fs::write(&manifest_path, format!("{output}\n"))
+		let output = replace_json_version(&contents, &version.to_string())
+			.with_context(|| format!("Missing 'version' field in {}", manifest_path.display()))?;
+		// Ensure the file always ends with exactly one newline.
+		let output = format!("{}\n", output.trim_end_matches('\n'));
+		std::fs::write(&manifest_path, output)
 			.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		Ok(())
 	}
@@ -1101,6 +1130,118 @@ mod tests {
 		let projects = enumerate(dir.path()).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].version.to_string(), "0.2.0");
+	}
+
+	#[test]
+	fn write_version_only_updates_package_version_not_dependencies() {
+		let dir = temp_dir();
+		// "1.0.0" appears as both the package version and as a dependency version.
+		let json = "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"some-lib\": \"1.0.0\"\n  }\n}\n";
+		write_package_json(dir.path(), json);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let info = project_info("my-app", "");
+		let new_version: semver::Version = "2.0.0".parse().unwrap();
+		adapter.write_version(&info, &new_version).unwrap();
+
+		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+		assert!(
+			contents.contains("\"version\": \"2.0.0\""),
+			"Package version should be updated, got: {contents}"
+		);
+		assert!(
+			contents.contains("\"some-lib\": \"1.0.0\""),
+			"Dependency version should be unchanged, got: {contents}"
+		);
+	}
+
+	#[test]
+	fn write_version_preserves_tab_indent() {
+		let dir = temp_dir();
+		let tab_json = "{\n\t\"name\": \"my-app\",\n\t\"version\": \"1.0.0\"\n}\n";
+		write_package_json(dir.path(), tab_json);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let info = project_info("my-app", "");
+		let new_version: semver::Version = "2.0.0".parse().unwrap();
+		adapter.write_version(&info, &new_version).unwrap();
+
+		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+		assert!(
+			contents.contains("\"2.0.0\""),
+			"Should contain new version, got: {contents}"
+		);
+		assert!(
+			contents.contains("\t\"version\""),
+			"Should preserve tab indentation, got: {contents}"
+		);
+		assert!(
+			!contents.contains("  \"version\""),
+			"Should not have space indentation, got: {contents}"
+		);
+	}
+
+	#[test]
+	fn write_version_preserves_four_space_indent() {
+		let dir = temp_dir();
+		let four_space_json = "{\n    \"name\": \"my-app\",\n    \"version\": \"1.0.0\"\n}\n";
+		write_package_json(dir.path(), four_space_json);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let info = project_info("my-app", "");
+		let new_version: semver::Version = "2.0.0".parse().unwrap();
+		adapter.write_version(&info, &new_version).unwrap();
+
+		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+		assert!(
+			contents.contains("\"2.0.0\""),
+			"Should contain new version, got: {contents}"
+		);
+		assert!(
+			contents.contains("    \"version\""),
+			"Should preserve 4-space indentation, got: {contents}"
+		);
+	}
+
+	#[test]
+	fn replace_json_version_basic() {
+		let json = r#"{"name": "my-app", "version": "1.0.0"}"#;
+		assert_eq!(
+			replace_json_version(json, "2.0.0").unwrap(),
+			r#"{"name": "my-app", "version": "2.0.0"}"#
+		);
+	}
+
+	#[test]
+	fn replace_json_version_missing_key_returns_none() {
+		assert!(replace_json_version(r#"{"name": "my-app"}"#, "1.0.0").is_none());
+	}
+
+	#[test]
+	fn replace_json_version_preserves_surrounding_whitespace() {
+		let json = "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\"\n}";
+		let result = replace_json_version(json, "2.0.0").unwrap();
+		assert!(result.contains("  \"version\": \"2.0.0\""));
+	}
+
+	#[test]
+	fn write_version_preserves_key_order() {
+		let dir = temp_dir();
+		// Keys are in non-alphabetical order: name, version, description.
+		// Alphabetical order would be: description, name, version.
+		let json = "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\",\n  \"description\": \"A test\"\n}\n";
+		write_package_json(dir.path(), json);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let info = project_info("my-app", "");
+		let new_version: semver::Version = "2.0.0".parse().unwrap();
+		adapter.write_version(&info, &new_version).unwrap();
+
+		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+		let name_pos = contents.find("\"name\"").unwrap();
+		let version_pos = contents.find("\"version\"").unwrap();
+		let desc_pos = contents.find("\"description\"").unwrap();
+		assert!(
+			name_pos < version_pos && version_pos < desc_pos,
+			"Key order not preserved: {contents}"
+		);
+		assert!(contents.contains("\"2.0.0\""));
 	}
 
 	#[test]
