@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Chronicle's `release` command performs automatic intra-workspace dependency version propagation. When a package's version is bumped during release, Chronicle scans all other packages in the workspace and updates any dependency references to that package in their manifest files. For npm adapters, this means rewriting version strings in the `dependencies`, `devDependencies`, and `peerDependencies` sections of `package.json`.
+Chronicle's `release` command performs automatic intra-workspace dependency version propagation. When a package's version is bumped during release, Chronicle scans all other packages in the workspace and updates any dependency references to that package in their manifest files. For npm adapters, this means rewriting version strings in the `dependencies`, `devDependencies`, `peerDependencies`, and `optionaDependencies` sections of `package.json`.
 
 The JavaScript ecosystem includes a `workspace:` protocol for referencing packages within the same monorepo. Examples include `"workspace:*"`, `"workspace:^"`, `"workspace:~"`, and `"workspace:^1.0.0"`. This protocol is not standardized across package managers:
 
