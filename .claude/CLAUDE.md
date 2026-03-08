@@ -45,6 +45,7 @@ Any changes to the `docs/adr/` folder should be handled by delegating to the `@a
 Integration tests live in `tests/` and should always use the `--no-interactive` flag to ensure the TUI never runs during tests. They should be full end-to-end tests calling `chronicle::run()` as the entrypoint.
 
 **Non-interactive CLI flags for tests:**
+
 - `change`: `--change-type/-t` (major/minor/patch), `--message/-m`, `--project/-p` (repeatable, defaults to all)
 - `release`: `--dry-run`, `--package/-p` (repeatable, filters which packages to release)
 
@@ -55,6 +56,7 @@ Integration tests live in `tests/` and should always use the `--no-interactive` 
 Chronicle is a Rust CLI tool for release management. It uses an interactive TUI for setup and change recording.
 
 **Key modules:**
+
 - `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`) and subcommands (`init`, `change`, `release`). `change` is the default when no subcommand is given.
 - `src/tui/` - ratatui/crossterm terminal UI wizards
 - `src/model/` - Core domain types:
@@ -66,6 +68,7 @@ Chronicle is a Rust CLI tool for release management. It uses an interactive TUI 
 **TUI pattern:** Each TUI wizard uses a `Screen` enum for state, a pure `handle_key()` function for state transitions (testable without a terminal), and separate `ui()`/`render_*()` functions. Tests use `ratatui::backend::TestBackend`.
 
 **Changeset file format:**
+
 ```
 +++
 package-name = "minor"
@@ -74,9 +77,21 @@ package-name = "minor"
 Description message here
 ```
 
+## Mutation Testing
+
+Mutation tests are run manually by the user with `cargo mutants`. The results appear in `mutants.out/missed.txt`. Use the `analyse-mutations` skill to work through them.
+
+There are two valid ways to address a missed mutant — adding tests is not always the right answer:
+
+1. **Add a test** that exercises the mutated code path and would fail if the mutation were applied.
+2. **Simplify the code** if the mutation is equivalent (i.e. the condition behaves identically either way). For example, a redundant guard condition can simply be removed, or a manual `if x < y { v = x }` pattern can be replaced with `v = v.min(x)`. Prefer this when the code genuinely has no meaningful distinction between the original and the mutant.
+
+Use `#[mutants::skip]` only for entry points like `main()` that cannot meaningfully be tested.
+
 ## Non-functional Requirements
 
 All new changes should meet the coverage thresholds:
+
 - 90% for lines, regions, and functions
 - 80% for branches
 
