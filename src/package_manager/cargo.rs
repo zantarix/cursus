@@ -233,6 +233,116 @@ fn expand_member_pattern(
 		.collect()
 }
 
+/// Updates the version in a `toml_edit::Item` representing a Cargo dependency.
+///
+/// The item may be:
+/// - A string (`"1.0.0"` or `"^1.0.0"`): the string is replaced preserving any prefix.
+/// - A table with a `version` key (`{ version = "1.0.0", features = [...] }`): the
+///   `version` key is updated. If the table has no `version` key (e.g. a path-only
+///   dependency like `{ path = "../foo" }`), the item is left unchanged.
+///
+/// Returns `true` if the item was modified.
+fn update_dep_item_version(item: &mut toml_edit::Item, new_version: &str) -> bool {
+	if let Some(table) = item.as_table_like_mut() {
+		// Only update if a version key already exists; don't inject one into path-only deps.
+		let Some(old_version) = table.get("version").and_then(|v| v.as_str()) else {
+			return false;
+		};
+		let prefix = super::semver_range_prefix(old_version).to_string();
+		table.insert(
+			"version",
+			toml_edit::value(format!("{prefix}{new_version}")),
+		);
+		true
+	} else if let Some(old_str) = item.as_str() {
+		let prefix = super::semver_range_prefix(old_str).to_string();
+		*item = toml_edit::value(format!("{prefix}{new_version}"));
+		true
+	} else {
+		false
+	}
+}
+
+/// Updates the version of a named dependency in `[workspace.dependencies]`.
+///
+/// Reads the Cargo.toml at `workspace_toml_path`, finds the entry under
+/// `workspace.dependencies`, updates its version, and writes the file back.
+/// Returns `true` if the file was modified.
+fn update_workspace_dep(
+	workspace_toml_path: &Path,
+	dependency_name: &str,
+	new_version: &str,
+) -> anyhow::Result<bool> {
+	if !workspace_toml_path.exists() {
+		return Ok(false);
+	}
+	let contents = std::fs::read_to_string(workspace_toml_path)
+		.with_context(|| format!("Failed to read {}", workspace_toml_path.display()))?;
+	let mut doc = contents
+		.parse::<toml_edit::DocumentMut>()
+		.with_context(|| format!("Failed to parse {}", workspace_toml_path.display()))?;
+
+	let workspace_dep = doc
+		.get_mut("workspace")
+		.and_then(|ws| ws.get_mut("dependencies"))
+		.and_then(|deps| deps.get_mut(dependency_name));
+
+	if let Some(dep_item) = workspace_dep
+		&& update_dep_item_version(dep_item, new_version)
+	{
+		std::fs::write(workspace_toml_path, doc.to_string())
+			.with_context(|| format!("Failed to write {}", workspace_toml_path.display()))?;
+		return Ok(true);
+	}
+	Ok(false)
+}
+
+/// Updates the version of a named dependency in a member Cargo.toml.
+///
+/// Scans `[dependencies]`, `[dev-dependencies]`, and `[build-dependencies]`.
+/// Entries with `workspace = true` are skipped (those are managed via the
+/// workspace root). Writes the file if any entry was modified.
+/// Returns `true` if the file was modified.
+fn update_member_dep(
+	member_toml_path: &Path,
+	dependency_name: &str,
+	new_version: &str,
+) -> anyhow::Result<bool> {
+	if !member_toml_path.exists() {
+		return Ok(false);
+	}
+	let contents = std::fs::read_to_string(member_toml_path)
+		.with_context(|| format!("Failed to read {}", member_toml_path.display()))?;
+	let mut doc = contents
+		.parse::<toml_edit::DocumentMut>()
+		.with_context(|| format!("Failed to parse {}", member_toml_path.display()))?;
+
+	let mut changed = false;
+	for section_name in ["dependencies", "dev-dependencies", "build-dependencies"] {
+		let Some(dep_item) = doc
+			.get_mut(section_name)
+			.and_then(|s| s.get_mut(dependency_name))
+		else {
+			continue;
+		};
+
+		// Skip entries that inherit from the workspace
+		if dep_item.get("workspace").and_then(|v| v.as_bool()) == Some(true) {
+			continue;
+		}
+
+		if update_dep_item_version(dep_item, new_version) {
+			changed = true;
+		}
+	}
+
+	if changed {
+		std::fs::write(member_toml_path, doc.to_string())
+			.with_context(|| format!("Failed to write {}", member_toml_path.display()))?;
+	}
+	Ok(changed)
+}
+
 impl PackageManagerAdapter for CargoAdapter {
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
 		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
@@ -401,6 +511,32 @@ impl PackageManagerAdapter for CargoAdapter {
 
 	fn manifest_filename(&self) -> &str {
 		"Cargo.toml"
+	}
+
+	fn update_dependency_version(
+		&self,
+		project: &ProjectInfo,
+		dependency_name: &str,
+		new_version: &Version,
+	) -> anyhow::Result<Vec<PathBuf>> {
+		let pm_root = self.resolve_root();
+		let version_str = new_version.to_string();
+		let mut modified = Vec::new();
+
+		let workspace_toml_path = pm_root.join("Cargo.toml");
+		if update_workspace_dep(&workspace_toml_path, dependency_name, &version_str)? {
+			modified.push(workspace_toml_path.clone());
+		}
+
+		// Skip member update when the member IS the workspace root (already handled above)
+		let member_toml_path = self.git_workdir.join(&project.path).join("Cargo.toml");
+		if member_toml_path != workspace_toml_path
+			&& update_member_dep(&member_toml_path, dependency_name, &version_str)?
+		{
+			modified.push(member_toml_path);
+		}
+
+		Ok(modified)
 	}
 }
 
@@ -1232,5 +1368,329 @@ tempfile = "3.0"
 		let dir = temp_dir();
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		assert_eq!(adapter.registry_name(), "crates.io");
+	}
+
+	// --- update_dependency_version tests ---
+
+	fn make_member_info(dir: &Path, name: &str, member_path: &str) -> ProjectInfo {
+		let project_dir = dir.join(member_path);
+		std::fs::create_dir_all(&project_dir).unwrap();
+		ProjectInfo {
+			name: name.to_string(),
+			path: std::path::PathBuf::from(member_path),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn update_dep_version_string_format() {
+		let dir = temp_dir();
+		// Create member with a string-format dependency
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = \"0.2.0\"\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1, "Expected one file modified");
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_table_format_with_features() {
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = { version = \"0.2.0\", features = [\"foo\"] }\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "1.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("version = \"1.0.0\""), "got: {content}");
+		assert!(content.contains("features = [\"foo\"]"), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_table_format_preserves_prefix() {
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = { version = \"^0.2.0\", path = \"../pkg-b\" }\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "1.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(
+			content.contains("version = \"^1.0.0\""),
+			"Expected prefix to be preserved, got: {content}"
+		);
+	}
+
+	#[test]
+	fn update_dep_version_in_dev_dependencies() {
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dev-dependencies]\npkg-b = \"0.2.0\"\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_in_build_dependencies() {
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[build-dependencies]\npkg-b = \"0.2.0\"\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_path_only_dep_not_modified() {
+		// A table dep with only `path = "..."` and no `version` key should not be touched.
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = { path = \"../pkg-b\" }\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		// Path-only dependency — no version field to update
+		assert!(modified.is_empty(), "path-only dep should not be modified");
+		let content = std::fs::read_to_string(member_dir.join("Cargo.toml")).unwrap();
+		assert!(
+			content.contains("path = \"../pkg-b\""),
+			"path should be preserved"
+		);
+		// The pkg-b dependency entry should not have a version field injected
+		assert!(
+			!content.contains("pkg-b = { path = \"../pkg-b\", version"),
+			"no version should be injected into path-only dep"
+		);
+	}
+
+	#[test]
+	fn update_dep_version_no_member_toml_returns_empty() {
+		let dir = temp_dir();
+		// Create workspace root but no member directory
+		write_cargo_toml(dir.path(), "[workspace]\nmembers = []\n");
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = ProjectInfo {
+			name: "missing-pkg".to_string(),
+			path: std::path::PathBuf::from("missing-dir"),
+			..Default::default()
+		};
+		let new_version: Version = "1.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert!(modified.is_empty());
+	}
+
+	#[test]
+	fn update_dep_version_preserves_prefix() {
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = \"^0.2.0\"\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "1.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("pkg-b = \"^1.0.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_workspace_dep_in_root() {
+		let dir = temp_dir();
+		// Root Cargo.toml with [workspace.dependencies]
+		write_cargo_toml(
+			dir.path(),
+			"[workspace]\nmembers = [\"pkg-a\"]\n\n[workspace.dependencies]\npkg-b = \"0.2.0\"\n",
+		);
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		assert_eq!(modified[0], dir.path().join("Cargo.toml"));
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_skips_workspace_true_in_member() {
+		let dir = temp_dir();
+		// Root with workspace.dependencies
+		write_cargo_toml(
+			dir.path(),
+			"[workspace]\nmembers = [\"pkg-a\"]\n\n[workspace.dependencies]\npkg-b = \"0.2.0\"\n",
+		);
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = { workspace = true }\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		// Only the root workspace Cargo.toml should be modified, not the member
+		assert_eq!(modified.len(), 1);
+		assert_eq!(modified[0], dir.path().join("Cargo.toml"));
+
+		// Member Cargo.toml should be untouched
+		let member_content = std::fs::read_to_string(member_dir.join("Cargo.toml")).unwrap();
+		assert!(
+			member_content.contains("workspace = true"),
+			"got: {member_content}"
+		);
+	}
+
+	#[test]
+	fn update_dep_version_not_found_returns_empty() {
+		let dir = temp_dir();
+		let member_dir = dir.path().join("pkg-a");
+		std::fs::create_dir_all(&member_dir).unwrap();
+		std::fs::write(
+			member_dir.join("Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+		let new_version: Version = "1.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "nonexistent-dep", &new_version)
+			.unwrap();
+
+		assert!(modified.is_empty());
+	}
+
+	#[test]
+	fn semver_range_prefix_extracts_caret() {
+		assert_eq!(super::super::semver_range_prefix("^1.0.0"), "^");
+	}
+
+	#[test]
+	fn semver_range_prefix_extracts_tilde() {
+		assert_eq!(super::super::semver_range_prefix("~1.0.0"), "~");
+	}
+
+	#[test]
+	fn semver_range_prefix_empty_for_bare_version() {
+		assert_eq!(super::super::semver_range_prefix("1.0.0"), "");
+	}
+
+	#[test]
+	fn semver_range_prefix_extracts_gte() {
+		assert_eq!(super::super::semver_range_prefix(">=1.0.0"), ">=");
 	}
 }

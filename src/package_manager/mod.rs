@@ -155,6 +155,18 @@ impl Project {
 		&self.info.dependency_names
 	}
 
+	/// Updates a dependency version in this project's manifest file.
+	///
+	/// Delegates to the underlying package manager adapter.
+	pub fn update_dependency_version(
+		&self,
+		dependency_name: &str,
+		new_version: &Version,
+	) -> anyhow::Result<Vec<PathBuf>> {
+		self.adapter
+			.update_dependency_version(&self.info, dependency_name, new_version)
+	}
+
 	/// Returns the absolute path to this project's manifest file.
 	///
 	/// Combines the git working directory with the project's relative path and
@@ -277,6 +289,37 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// This is used during dry-run mode so that Chronicle can report which files *would*
 	/// be staged without actually executing the lock file update.
 	fn lock_file_path(&self) -> Option<PathBuf>;
+
+	/// Updates a dependency version in a project's manifest file.
+	///
+	/// `dependency_name` is the name of the dependency to update.
+	/// `new_version` is the version to write.
+	///
+	/// Returns a list of modified file paths (may include the project's own
+	/// manifest and/or a workspace-level manifest).
+	///
+	/// # Errors
+	///
+	/// Returns an error if a manifest file cannot be read or written.
+	fn update_dependency_version(
+		&self,
+		project: &ProjectInfo,
+		dependency_name: &str,
+		new_version: &Version,
+	) -> anyhow::Result<Vec<PathBuf>>;
+}
+
+/// Extracts the non-numeric prefix from a semver range string.
+///
+/// For example, `"^1.0.0"` returns `"^"`, `"~1.0.0"` returns `"~"`, and
+/// `"1.0.0"` returns `""`. Used to preserve operator prefixes when rewriting
+/// version strings in manifest files.
+pub(crate) fn semver_range_prefix(version_range: &str) -> &str {
+	let digit_pos = version_range
+		.char_indices()
+		.find(|(_, c)| c.is_ascii_digit())
+		.map_or(version_range.len(), |(i, _)| i);
+	&version_range[..digit_pos]
 }
 
 /// Mutable state threaded through Tarjan's iterative SCC algorithm.

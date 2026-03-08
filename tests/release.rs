@@ -562,3 +562,165 @@ fn release_updates_cargo_lock_file() {
 		"Cargo.lock should contain the new version, got: {lock_content}"
 	);
 }
+
+#[test]
+fn release_updates_cargo_intra_workspace_dep_version() {
+	// pkg-a depends on pkg-b via a path dep; when pkg-b is bumped, pkg-a's Cargo.toml should be updated
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+
+	// Write pkg-a with a path + version dep on pkg-b (path lets Cargo resolve it locally)
+	std::fs::write(
+		dir.path().join("pkg-a/Cargo.toml"),
+		"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-b = { path = \"../pkg-b\", version = \"0.2.0\" }\n",
+	)
+	.unwrap();
+
+	write_changeset(
+		dir.path(),
+		"bump-b.md",
+		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
+	);
+
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
+
+	// Verify pkg-b version was bumped
+	let pkg_b_toml = std::fs::read_to_string(dir.path().join("pkg-b/Cargo.toml")).unwrap();
+	assert!(
+		pkg_b_toml.contains("version = \"0.3.0\""),
+		"Expected pkg-b version 0.3.0, got: {pkg_b_toml}"
+	);
+
+	// Verify pkg-a's dependency on pkg-b was updated (version field in table entry)
+	let pkg_a_toml = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
+	assert!(
+		pkg_a_toml.contains("version = \"0.3.0\""),
+		"Expected pkg-a to reference pkg-b 0.3.0, got: {pkg_a_toml}"
+	);
+	assert!(
+		pkg_a_toml.contains("path = \"../pkg-b\""),
+		"Expected path dep to be preserved, got: {pkg_a_toml}"
+	);
+}
+
+#[test]
+fn release_updates_cargo_workspace_dep_in_root() {
+	// Root Cargo.toml has [workspace.dependencies]; pkg-a uses it via workspace = true.
+	// When pkg-b is bumped, the root [workspace.dependencies] entry should be updated.
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+
+	// Root Cargo.toml with workspace.dependencies (path dep so Cargo finds it locally)
+	std::fs::write(
+		dir.path().join("Cargo.toml"),
+		"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n\n[workspace.dependencies]\npkg-b = { path = \"pkg-b\", version = \"0.2.0\" }\n",
+	)
+	.unwrap();
+
+	// pkg-a inherits pkg-b from workspace, which puts "pkg-b" in its dependency_names
+	std::fs::write(
+		dir.path().join("pkg-a/Cargo.toml"),
+		"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-b = { workspace = true }\n",
+	)
+	.unwrap();
+
+	write_changeset(
+		dir.path(),
+		"bump-b.md",
+		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature\n",
+	);
+
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
+
+	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+	assert!(
+		root_toml.contains("version = \"0.3.0\""),
+		"Expected root [workspace.dependencies] pkg-b version 0.3.0, got: {root_toml}"
+	);
+	assert!(
+		root_toml.contains("path = \"pkg-b\""),
+		"Expected path to be preserved in workspace.dependencies, got: {root_toml}"
+	);
+}
+
+#[test]
+fn release_dry_run_shows_dep_updates_without_modifying_files() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+
+	std::fs::write(
+		dir.path().join("pkg-a/Cargo.toml"),
+		"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-b = { path = \"../pkg-b\", version = \"0.2.0\" }\n",
+	)
+	.unwrap();
+
+	write_changeset(
+		dir.path(),
+		"bump-b.md",
+		"+++\npkg-b = \"patch\"\n+++\n\nBug fix\n",
+	);
+
+	let original_a = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
+
+	let result = common::run_chronicle(
+		["chronicle", "--no-interactive", "release", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok());
+
+	// pkg-a/Cargo.toml should not be modified in dry-run
+	let after_a = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
+	assert_eq!(original_a, after_a, "dry-run must not modify dep files");
+}
+
+#[test]
+fn release_updates_npm_intra_workspace_dep_version() {
+	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
+	let dir = temp_git_repo();
+	let config = chronicle::model::config::Config::new(dir.path())
+		.with_npm(chronicle::package_manager::NpmConfig::enabled());
+	config.save().unwrap();
+
+	// Root package.json with workspace config
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "0.0.0", "private": true, "workspaces": ["pkg-a", "pkg-b"]}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("pkg-a")).unwrap();
+	std::fs::write(
+		dir.path().join("pkg-a/package.json"),
+		r#"{"name": "pkg-a", "version": "0.1.0", "dependencies": {"pkg-b": "^0.2.0"}}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("pkg-b")).unwrap();
+	std::fs::write(
+		dir.path().join("pkg-b/package.json"),
+		r#"{"name": "pkg-b", "version": "0.2.0"}"#,
+	)
+	.unwrap();
+
+	write_changeset(
+		dir.path(),
+		"bump-b.md",
+		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
+	);
+
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
+
+	// Verify pkg-b version was bumped
+	let pkg_b_json = std::fs::read_to_string(dir.path().join("pkg-b/package.json")).unwrap();
+	assert!(
+		pkg_b_json.contains("\"0.3.0\""),
+		"Expected pkg-b version 0.3.0, got: {pkg_b_json}"
+	);
+
+	// Verify pkg-a's dependency on pkg-b was updated (preserving ^ prefix)
+	let pkg_a_json = std::fs::read_to_string(dir.path().join("pkg-a/package.json")).unwrap();
+	assert!(
+		pkg_a_json.contains("\"pkg-b\": \"^0.3.0\""),
+		"Expected pkg-a to reference pkg-b ^0.3.0, got: {pkg_a_json}"
+	);
+}

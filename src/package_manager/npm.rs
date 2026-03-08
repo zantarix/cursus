@@ -100,6 +100,8 @@ struct PackageJson {
 	dev_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
 	#[serde(rename = "peerDependencies")]
 	peer_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
+	#[serde(rename = "optionalDependencies")]
+	optional_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 /// Workspaces can be either an array of globs or an object with a packages field.
@@ -204,6 +206,7 @@ fn extract_project_metadata(package: &PackageJson) -> anyhow::Result<(Version, b
 		&package.dependencies,
 		&package.dev_dependencies,
 		&package.peer_dependencies,
+		&package.optional_dependencies,
 	]
 	.into_iter()
 	.flatten()
@@ -306,6 +309,35 @@ fn replace_json_version(contents: &str, new_version: &str) -> Option<String> {
 	let mut result = contents.to_string();
 	result.replace_range(value_start..value_end, new_version);
 	Some(result)
+}
+
+/// Replaces a dependency version value in raw JSON content, preserving formatting.
+///
+/// Finds occurrences of `"dep_name": "current_value"` (with or without a space
+/// after the colon) and replaces the value portion with `new_value`.
+///
+/// Returns the modified content, or `None` if the pattern was not found.
+fn replace_json_dep_value(
+	contents: &str,
+	dep_name: &str,
+	current_value: &str,
+	new_value: &str,
+) -> Option<String> {
+	// Try with space after colon (standard npm/prettier formatting)
+	let old_spaced = format!("\"{dep_name}\": \"{current_value}\"");
+	let new_spaced = format!("\"{dep_name}\": \"{new_value}\"");
+	if contents.contains(&old_spaced) {
+		return Some(contents.replace(&old_spaced, &new_spaced));
+	}
+
+	// Try without space after colon (compact formatting)
+	let old_compact = format!("\"{dep_name}\":\"{current_value}\"");
+	let new_compact = format!("\"{dep_name}\":\"{new_value}\"");
+	if contents.contains(&old_compact) {
+		return Some(contents.replace(&old_compact, &new_compact));
+	}
+
+	None
 }
 
 impl PackageManagerAdapter for NpmAdapter {
@@ -567,6 +599,82 @@ impl PackageManagerAdapter for NpmAdapter {
 
 	fn manifest_filename(&self) -> &str {
 		"package.json"
+	}
+
+	fn update_dependency_version(
+		&self,
+		project: &ProjectInfo,
+		dependency_name: &str,
+		new_version: &Version,
+	) -> anyhow::Result<Vec<PathBuf>> {
+		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
+		if !manifest_path.exists() {
+			return Ok(Vec::new());
+		}
+
+		let contents = std::fs::read_to_string(&manifest_path)
+			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+		let json: serde_json::Value = serde_json::from_str(&contents)
+			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+
+		let sections = [
+			"dependencies",
+			"devDependencies",
+			"peerDependencies",
+			"optionalDependencies",
+		];
+		let mut updated_contents = contents;
+		let mut modified = false;
+		// Track old values already replaced to avoid duplicate processing
+		let mut replaced_values: std::collections::HashSet<String> =
+			std::collections::HashSet::new();
+
+		for section in &sections {
+			let Some(current_value) = json
+				.get(*section)
+				.and_then(|s| s.get(dependency_name))
+				.and_then(|v| v.as_str())
+			else {
+				continue;
+			};
+
+			if current_value.starts_with("workspace:") {
+				eprintln!(
+					"Warning: skipping workspace: protocol dependency '{}' in {}",
+					dependency_name,
+					manifest_path.display()
+				);
+				continue;
+			}
+
+			// Skip if already replaced (same value in multiple sections)
+			if replaced_values.contains(current_value) {
+				continue;
+			}
+			replaced_values.insert(current_value.to_string());
+
+			let prefix = super::semver_range_prefix(current_value).to_string();
+			let new_dep_value = format!("{prefix}{new_version}");
+
+			if let Some(updated) = replace_json_dep_value(
+				&updated_contents,
+				dependency_name,
+				current_value,
+				&new_dep_value,
+			) {
+				updated_contents = updated;
+				modified = true;
+			}
+		}
+
+		if modified {
+			let output = format!("{}\n", updated_contents.trim_end_matches('\n'));
+			std::fs::write(&manifest_path, output)
+				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+			return Ok(vec![manifest_path]);
+		}
+
+		Ok(Vec::new())
 	}
 }
 
@@ -1792,5 +1900,214 @@ mod tests {
 		let dir = temp_dir();
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		assert_eq!(adapter.manifest_filename(), "package.json");
+	}
+
+	// --- update_dependency_version tests ---
+
+	fn make_project_with_deps(dir: &Path, deps_json: &str) -> ProjectInfo {
+		let content =
+			format!(r#"{{"name": "pkg-a", "version": "0.1.0", "dependencies": {deps_json}}}"#);
+		write_package_json(dir, &content);
+		project_info("pkg-a", "")
+	}
+
+	#[test]
+	fn update_dep_version_preserves_caret() {
+		let dir = temp_dir();
+		let info = make_project_with_deps(dir.path(), r#"{"pkg-b": "^1.0.0"}"#);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("\"pkg-b\": \"^2.0.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_preserves_tilde() {
+		let dir = temp_dir();
+		let info = make_project_with_deps(dir.path(), r#"{"pkg-b": "~1.2.0"}"#);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "1.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("\"pkg-b\": \"~1.3.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_exact_no_prefix() {
+		let dir = temp_dir();
+		let info = make_project_with_deps(dir.path(), r#"{"pkg-b": "1.0.0"}"#);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let content = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(content.contains("\"pkg-b\": \"2.0.0\""), "got: {content}");
+	}
+
+	#[test]
+	fn update_dep_version_workspace_protocol_prints_warning() {
+		let dir = temp_dir();
+		let info = make_project_with_deps(dir.path(), r#"{"pkg-b": "workspace:*"}"#);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		// Should not error, should return empty (skipped)
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert!(modified.is_empty(), "workspace: deps should be skipped");
+	}
+
+	#[test]
+	fn update_dep_version_not_found_returns_empty() {
+		let dir = temp_dir();
+		let info = make_project_with_deps(dir.path(), r#"{"other-dep": "1.0.0"}"#);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "nonexistent", &new_version)
+			.unwrap();
+
+		assert!(modified.is_empty());
+	}
+
+	#[test]
+	fn update_dep_version_in_dev_dependencies() {
+		let dir = temp_dir();
+		let content =
+			r#"{"name": "pkg-a", "version": "0.1.0", "devDependencies": {"pkg-b": "^1.0.0"}}"#;
+		write_package_json(dir.path(), content);
+		let info = project_info("pkg-a", "");
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let updated = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(updated.contains("\"pkg-b\": \"^2.0.0\""), "got: {updated}");
+	}
+
+	#[test]
+	fn semver_range_prefix_caret() {
+		assert_eq!(super::super::semver_range_prefix("^1.0.0"), "^");
+	}
+
+	#[test]
+	fn semver_range_prefix_tilde() {
+		assert_eq!(super::super::semver_range_prefix("~1.2.0"), "~");
+	}
+
+	#[test]
+	fn semver_range_prefix_empty() {
+		assert_eq!(super::super::semver_range_prefix("1.0.0"), "");
+	}
+
+	#[test]
+	fn replace_json_dep_value_with_space() {
+		let content = r#"{"dependencies": {"foo": "^1.0.0"}}"#;
+		let result = replace_json_dep_value(content, "foo", "^1.0.0", "^2.0.0").unwrap();
+		assert!(result.contains("\"foo\": \"^2.0.0\""), "got: {result}");
+	}
+
+	#[test]
+	fn replace_json_dep_value_not_found_returns_none() {
+		let content = r#"{"dependencies": {"bar": "1.0.0"}}"#;
+		assert!(replace_json_dep_value(content, "foo", "1.0.0", "2.0.0").is_none());
+	}
+
+	#[test]
+	fn replace_json_dep_value_compact_format() {
+		let content = r#"{"dependencies":{"foo":"^1.0.0"}}"#;
+		let result = replace_json_dep_value(content, "foo", "^1.0.0", "^2.0.0").unwrap();
+		assert!(result.contains("\"foo\":\"^2.0.0\""), "got: {result}");
+	}
+
+	#[test]
+	fn update_dep_version_in_peer_dependencies() {
+		let dir = temp_dir();
+		let content =
+			r#"{"name": "pkg-a", "version": "0.1.0", "peerDependencies": {"pkg-b": "^1.0.0"}}"#;
+		write_package_json(dir.path(), content);
+		let info = project_info("pkg-a", "");
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let updated = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(updated.contains("\"pkg-b\": \"^2.0.0\""), "got: {updated}");
+	}
+
+	#[test]
+	fn update_dep_version_in_optional_dependencies() {
+		let dir = temp_dir();
+		let content =
+			r#"{"name": "pkg-a", "version": "0.1.0", "optionalDependencies": {"pkg-b": "~1.0.0"}}"#;
+		write_package_json(dir.path(), content);
+		let info = project_info("pkg-a", "");
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		let updated = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(updated.contains("\"pkg-b\": \"~2.0.0\""), "got: {updated}");
+	}
+
+	#[test]
+	fn update_dep_version_in_root_workspace_project() {
+		// The root package.json in an npm workspace can depend on workspace members.
+		// project.path is "" for the root, so update_dependency_version should write
+		// to git_workdir/package.json.
+		let dir = temp_dir();
+		let content = r#"{
+  "name": "my-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "pkg-b": "^0.2.0"
+  }
+}"#;
+		write_package_json(dir.path(), content);
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		// Root project has path = ""
+		let info = project_info("my-monorepo", "");
+		let new_version: Version = "0.3.0".parse().unwrap();
+
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+
+		assert_eq!(modified.len(), 1);
+		assert_eq!(modified[0], dir.path().join("package.json"));
+		let updated = std::fs::read_to_string(&modified[0]).unwrap();
+		assert!(updated.contains("\"pkg-b\": \"^0.3.0\""), "got: {updated}");
 	}
 }

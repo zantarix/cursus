@@ -151,6 +151,34 @@ pub fn cmd_release(
 		});
 	}
 
+	// Build map of bumped package names → new versions for dependency propagation.
+	let bumped_versions: BTreeMap<String, semver::Version> = release_infos
+		.iter()
+		.map(|info| (info.package_name.clone(), info.new_version.clone()))
+		.collect();
+
+	// Update intra-workspace dependency references for all projects.
+	for project in &projects {
+		for dep_name in project.dependency_names() {
+			if let Some(new_version) = bumped_versions.get(dep_name.as_str()) {
+				if args.dry_run {
+					println!(
+						"  {}: would update dependency {} to {}",
+						project.name(),
+						dep_name,
+						new_version
+					);
+					// Predict the manifest that would be modified so git lifecycle
+					// dry-run can report it as a file that would be staged.
+					modified_files.push(project.manifest_path(git_workdir));
+				} else {
+					let paths = project.update_dependency_version(dep_name, new_version)?;
+					modified_files.extend(paths);
+				}
+			}
+		}
+	}
+
 	// Collect lock file paths. During dry-run, use lock_file_path() to predict which
 	// file would be updated without running the update command.
 	for adapter in &adapters {
@@ -175,6 +203,10 @@ pub fn cmd_release(
 			cs.consume(path, &released)?;
 		}
 	}
+
+	// Deduplicate modified files (e.g. workspace root Cargo.toml updated by multiple projects)
+	modified_files.sort();
+	modified_files.dedup();
 
 	// Run git lifecycle if enabled and not suppressed
 	if config.git.enabled && !args.no_git {
