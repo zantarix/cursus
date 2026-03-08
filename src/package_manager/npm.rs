@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use glob::glob;
+use jsonc_parser::ParseOptions;
+use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -284,74 +286,22 @@ fn expand_workspace_pattern(
 		.collect()
 }
 
-/// Replaces the value of the `"version"` key in a JSON string in-place,
-/// without re-serializing, thereby preserving key order, indentation, and all
-/// other formatting.
-///
-/// Returns `None` if the `"version"` key cannot be found or the surrounding
-/// syntax is not what was expected (e.g. the key is not at the top level).
-fn replace_json_version(contents: &str, new_version: &str) -> Option<String> {
-	let key = "\"version\"";
-	let key_pos = contents.find(key)?;
-	let rest = &contents[key_pos + key.len()..];
-
-	// Between the key and the opening quote of the value there must be only
-	// optional whitespace and exactly one colon.
-	let open_quote = rest.find('"')?;
-	if rest[..open_quote].trim() != ":" {
-		return None;
-	}
-
-	let value_start = key_pos + key.len() + open_quote + 1;
-	let close_quote = contents[value_start..].find('"')?;
-	let value_end = value_start + close_quote;
-
-	let mut result = contents.to_string();
-	result.replace_range(value_start..value_end, new_version);
-	Some(result)
-}
-
-/// Replaces a dependency version value in raw JSON content, preserving formatting.
-///
-/// Finds occurrences of `"dep_name": "current_value"` (with or without a space
-/// after the colon) and replaces the value portion with `new_value`.
-///
-/// Returns the modified content, or `None` if the pattern was not found.
-fn replace_json_dep_value(
-	contents: &str,
-	dep_name: &str,
-	current_value: &str,
-	new_value: &str,
-) -> Option<String> {
-	// Try with space after colon (standard npm/prettier formatting)
-	let old_spaced = format!("\"{dep_name}\": \"{current_value}\"");
-	let new_spaced = format!("\"{dep_name}\": \"{new_value}\"");
-	if contents.contains(&old_spaced) {
-		return Some(contents.replace(&old_spaced, &new_spaced));
-	}
-
-	// Try without space after colon (compact formatting)
-	let old_compact = format!("\"{dep_name}\":\"{current_value}\"");
-	let new_compact = format!("\"{dep_name}\":\"{new_value}\"");
-	if contents.contains(&old_compact) {
-		return Some(contents.replace(&old_compact, &new_compact));
-	}
-
-	None
-}
-
 impl PackageManagerAdapter for NpmAdapter {
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
 		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		// Validate JSON before attempting the replacement.
-		serde_json::from_str::<serde_json::Value>(&contents)
+		let root = CstRootNode::parse(&contents, &ParseOptions::default())
 			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		let output = replace_json_version(&contents, &version.to_string())
+		let obj = root
+			.object_value()
+			.with_context(|| format!("Root is not an object in {}", manifest_path.display()))?;
+		let prop = obj
+			.get("version")
 			.with_context(|| format!("Missing 'version' field in {}", manifest_path.display()))?;
+		prop.set_value(CstInputValue::String(version.to_string()));
 		// Ensure the file always ends with exactly one newline.
-		let output = format!("{}\n", output.trim_end_matches('\n'));
+		let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
 		std::fs::write(&manifest_path, output)
 			.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		Ok(())
@@ -614,8 +564,11 @@ impl PackageManagerAdapter for NpmAdapter {
 
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let json: serde_json::Value = serde_json::from_str(&contents)
+		let root = CstRootNode::parse(&contents, &ParseOptions::default())
 			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+		let obj = root
+			.object_value()
+			.with_context(|| format!("Root is not an object in {}", manifest_path.display()))?;
 
 		let sections = [
 			"dependencies",
@@ -623,18 +576,29 @@ impl PackageManagerAdapter for NpmAdapter {
 			"peerDependencies",
 			"optionalDependencies",
 		];
-		let mut updated_contents = contents;
 		let mut modified = false;
-		// Track old values already replaced to avoid duplicate processing
-		let mut replaced_values: std::collections::HashSet<String> =
-			std::collections::HashSet::new();
 
 		for section in &sections {
-			let Some(current_value) = json
-				.get(*section)
-				.and_then(|s| s.get(dependency_name))
-				.and_then(|v| v.as_str())
+			let Some(section_obj) = obj
+				.get(section)
+				.and_then(|p| p.value())
+				.and_then(|v| v.as_object())
 			else {
+				continue;
+			};
+			let Some(dep_prop) = section_obj.get(dependency_name) else {
+				continue;
+			};
+			let Some(current_value) = dep_prop
+				.value()
+				.and_then(|v| v.as_string_lit())
+				.and_then(|s| s.decoded_value().ok())
+			else {
+				eprintln!(
+					"Warning: non-string value for dependency '{}' in {}, skipping",
+					dependency_name,
+					manifest_path.display()
+				);
 				continue;
 			};
 
@@ -647,28 +611,14 @@ impl PackageManagerAdapter for NpmAdapter {
 				continue;
 			}
 
-			// Skip if already replaced (same value in multiple sections)
-			if replaced_values.contains(current_value) {
-				continue;
-			}
-			replaced_values.insert(current_value.to_string());
-
-			let prefix = super::semver_range_prefix(current_value).to_string();
+			let prefix = super::semver_range_prefix(&current_value).to_string();
 			let new_dep_value = format!("{prefix}{new_version}");
-
-			if let Some(updated) = replace_json_dep_value(
-				&updated_contents,
-				dependency_name,
-				current_value,
-				&new_dep_value,
-			) {
-				updated_contents = updated;
-				modified = true;
-			}
+			dep_prop.set_value(CstInputValue::String(new_dep_value));
+			modified = true;
 		}
 
 		if modified {
-			let output = format!("{}\n", updated_contents.trim_end_matches('\n'));
+			let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
 			std::fs::write(&manifest_path, output)
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 			return Ok(vec![manifest_path]);
@@ -1309,27 +1259,6 @@ mod tests {
 	}
 
 	#[test]
-	fn replace_json_version_basic() {
-		let json = r#"{"name": "my-app", "version": "1.0.0"}"#;
-		assert_eq!(
-			replace_json_version(json, "2.0.0").unwrap(),
-			r#"{"name": "my-app", "version": "2.0.0"}"#
-		);
-	}
-
-	#[test]
-	fn replace_json_version_missing_key_returns_none() {
-		assert!(replace_json_version(r#"{"name": "my-app"}"#, "1.0.0").is_none());
-	}
-
-	#[test]
-	fn replace_json_version_preserves_surrounding_whitespace() {
-		let json = "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\"\n}";
-		let result = replace_json_version(json, "2.0.0").unwrap();
-		assert!(result.contains("  \"version\": \"2.0.0\""));
-	}
-
-	#[test]
 	fn write_version_preserves_key_order() {
 		let dir = temp_dir();
 		// Keys are in non-alphabetical order: name, version, description.
@@ -1912,6 +1841,30 @@ mod tests {
 	}
 
 	#[test]
+	fn update_dep_version_missing_manifest_returns_empty() {
+		let dir = temp_dir();
+		// No package.json written
+		let info = project_info("pkg-a", "");
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+		let modified = adapter
+			.update_dependency_version(&info, "pkg-b", &new_version)
+			.unwrap();
+		assert!(modified.is_empty());
+	}
+
+	#[test]
+	fn update_dep_version_invalid_json_returns_error() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), "not valid json {{{{");
+		let info = project_info("pkg-a", "");
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let new_version: Version = "2.0.0".parse().unwrap();
+		let result = adapter.update_dependency_version(&info, "pkg-b", &new_version);
+		assert!(result.is_err());
+	}
+
+	#[test]
 	fn update_dep_version_preserves_caret() {
 		let dir = temp_dir();
 		let info = make_project_with_deps(dir.path(), r#"{"pkg-b": "^1.0.0"}"#);
@@ -2020,26 +1973,6 @@ mod tests {
 	#[test]
 	fn semver_range_prefix_empty() {
 		assert_eq!(super::super::semver_range_prefix("1.0.0"), "");
-	}
-
-	#[test]
-	fn replace_json_dep_value_with_space() {
-		let content = r#"{"dependencies": {"foo": "^1.0.0"}}"#;
-		let result = replace_json_dep_value(content, "foo", "^1.0.0", "^2.0.0").unwrap();
-		assert!(result.contains("\"foo\": \"^2.0.0\""), "got: {result}");
-	}
-
-	#[test]
-	fn replace_json_dep_value_not_found_returns_none() {
-		let content = r#"{"dependencies": {"bar": "1.0.0"}}"#;
-		assert!(replace_json_dep_value(content, "foo", "1.0.0", "2.0.0").is_none());
-	}
-
-	#[test]
-	fn replace_json_dep_value_compact_format() {
-		let content = r#"{"dependencies":{"foo":"^1.0.0"}}"#;
-		let result = replace_json_dep_value(content, "foo", "^1.0.0", "^2.0.0").unwrap();
-		assert!(result.contains("\"foo\":\"^2.0.0\""), "got: {result}");
 	}
 
 	#[test]
