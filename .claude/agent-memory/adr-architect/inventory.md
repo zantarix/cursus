@@ -11,3 +11,4 @@
 - **ADR-009** (Accepted): JavaScript Package Manager Strategy for Lockfiles and Publishing. Errata: ADR-011 supersedes `lock_command` whitespace-splitting execution; now uses `/bin/sh -c`.
 - **ADR-010** (Accepted): Scoped Release Changeset Consumption — fix silent data loss when using `--package` flag
 - **ADR-011** (Accepted): Command Execution Strategy — standardize shell execution via `/bin/sh -c` for all user-configurable commands, migrating `lock_command` from whitespace splitting. Covers dry-run, error handling, and working directory conventions.
+- **ADR-012** (Proposed): Skip workspace: Protocol Dependencies During Intra-Workspace Version Propagation — skip and warn on `workspace:` protocol entries in npm dependency version propagation during release.
