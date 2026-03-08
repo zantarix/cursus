@@ -94,7 +94,7 @@ pub fn cmd_change(
 
 	let path = changeset.write(config.git_workdir())?;
 
-	if !global.no_interactive && args.message.is_none() {
+	if args.message.is_none() {
 		changeset::open_editor(&path, env)?;
 	}
 

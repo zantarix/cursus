@@ -3,7 +3,9 @@
 mod common;
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
+use chronicle::command::RealCommandRunner;
 use chronicle::model::config::PackageManager;
 use common::{
 	temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project,
@@ -336,4 +338,30 @@ fn change_succeeds_with_cargo_project_in_subfolder() {
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+}
+
+#[test]
+fn change_interactive_with_message_does_not_open_editor() {
+	// When --change-type is supplied, change::run() returns immediately without
+	// entering the TUI. This means we can reach the open-editor guard in
+	// cmd_change while in interactive mode (no --no-interactive) with a message
+	// already provided.
+	//
+	// The condition `if args.message.is_none()` must NOT open the editor when a
+	// message is present. The Env contains a nonexistent VISUAL binary, so any
+	// call to open_editor returns an error — this catches mutations that would
+	// cause the editor to be opened unnecessarily.
+	let dir = temp_git_repo_with_project(PackageManager::Npm);
+	let env = chronicle::Env {
+		visual: Some("__chronicle_test_nonexistent_editor__".to_string()),
+		editor: None,
+	};
+	let runner: Arc<dyn chronicle::command::CommandRunner> = Arc::new(RealCommandRunner);
+	let result = chronicle::run(
+		["chronicle", "change", "-t", "minor", "-m", "bump"],
+		dir.path(),
+		env,
+		runner,
+	);
+	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
 }

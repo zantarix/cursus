@@ -6,6 +6,7 @@ use std::sync::Arc;
 use chronicle::command::RealCommandRunner;
 
 #[coverage(off)]
+#[mutants::skip]
 fn main() -> ExitCode {
 	let cwd = match std::env::current_dir() {
 		Ok(cwd) => cwd,

@@ -418,14 +418,11 @@ impl DependencyGraph {
 								continue;
 							}
 
-							// Get w's lowlink and update v's if needed
+							// Propagate w's lowlink up to v
 							if let Some(&w_lowlink) = state.lowlinks.get(w)
 								&& let Some(v_lowlink) = state.lowlinks.get_mut(&v)
-								&& let Some(&v_index) = state.indices.get(&v)
-								&& w_lowlink < *v_lowlink
-								&& w_lowlink < v_index
 							{
-								*v_lowlink = w_lowlink;
+								*v_lowlink = (*v_lowlink).min(w_lowlink);
 							}
 						}
 					}

@@ -533,8 +533,8 @@ fn publish_dry_run_summary_single_public_package() {
 		"Expected per-package line in stdout, got: {stdout}"
 	);
 	assert!(
-		stdout.contains("1 would be published, 0 would be skipped"),
-		"Expected summary '1 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		stdout.contains("Summary: 1 would be published, 0 would be skipped"),
+		"Expected summary 'Summary: 1 would be published, 0 would be skipped' in stdout, got: {stdout}"
 	);
 }
 
@@ -574,8 +574,8 @@ fn publish_dry_run_summary_multiple_public_packages() {
 
 	assert!(success, "Expected success, stderr: {stderr}");
 	assert!(
-		stdout.contains("2 would be published, 0 would be skipped"),
-		"Expected summary '2 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		stdout.contains("Summary: 2 would be published, 0 would be skipped"),
+		"Expected summary 'Summary: 2 would be published, 0 would be skipped' in stdout, got: {stdout}"
 	);
 }
 
@@ -616,8 +616,8 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	assert!(success, "Expected success, stderr: {stderr}");
 	// Only the public package is counted; private is silently excluded
 	assert!(
-		stdout.contains("1 would be published, 0 would be skipped"),
-		"Expected summary '1 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		stdout.contains("Summary: 1 would be published, 0 would be skipped"),
+		"Expected summary 'Summary: 1 would be published, 0 would be skipped' in stdout, got: {stdout}"
 	);
 }
 
@@ -643,7 +643,7 @@ fn publish_dry_run_summary_all_private_packages() {
 
 	assert!(success, "Expected success, stderr: {stderr}");
 	assert!(
-		stdout.contains("0 would be published, 0 would be skipped"),
-		"Expected summary '0 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		stdout.contains("Summary: 0 would be published, 0 would be skipped"),
+		"Expected summary 'Summary: 0 would be published, 0 would be skipped' in stdout, got: {stdout}"
 	);
 }
