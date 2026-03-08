@@ -1217,4 +1217,20 @@ tempfile = "3.0"
 			invocations[0].args
 		);
 	}
+
+	#[test]
+	fn lock_file_path_returns_cargo_lock_at_root() {
+		let dir = temp_dir();
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		let lock_path = adapter.lock_file_path();
+		assert!(lock_path.is_some(), "expected Some lock path");
+		assert_eq!(lock_path.unwrap(), dir.path().join("Cargo.lock"));
+	}
+
+	#[test]
+	fn registry_name_is_crates_io() {
+		let dir = temp_dir();
+		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+		assert_eq!(adapter.registry_name(), "crates.io");
+	}
 }

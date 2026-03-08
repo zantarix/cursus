@@ -100,38 +100,7 @@ fn publish_projects(
 	projects: &[package_manager::Project],
 	dry_run: bool,
 ) -> anyhow::Result<ExitCode> {
-	let mut published_count = 0;
-	let mut skipped_count = 0;
-	let mut failed = false;
-
-	for project in projects {
-		// Check if the project is publishable (not private)
-		let is_publishable = project.is_publishable()?;
-		if !is_publishable {
-			// Silently skip private packages
-			continue;
-		}
-
-		if dry_run {
-			// Dry run: just print what would be published
-			let version = project.version();
-			let registry = project.registry_name();
-			println!(
-				"Would publish {}@{} to {}",
-				project.name(),
-				version,
-				registry
-			);
-			published_count += 1;
-		} else {
-			// Real publish: delegate to do_publish which handles everything
-			match do_publish(project) {
-				PublishResult::Published => published_count += 1,
-				PublishResult::Skipped => skipped_count += 1,
-				PublishResult::Failed => failed = true,
-			}
-		}
-	}
+	let (published_count, skipped_count, failed) = collect_outcomes(projects, dry_run)?;
 
 	println!();
 	if dry_run {
@@ -151,6 +120,45 @@ fn publish_projects(
 	} else {
 		Ok(ExitCode::SUCCESS)
 	}
+}
+
+/// Counts publish outcomes for each project, printing per-project results.
+///
+/// Returns `(published, skipped, failed)`. In dry-run mode, prints what would be
+/// published without calling the registry. In live mode, delegates to `do_publish`.
+fn collect_outcomes(
+	projects: &[package_manager::Project],
+	dry_run: bool,
+) -> anyhow::Result<(usize, usize, bool)> {
+	let mut published = 0usize;
+	let mut skipped = 0usize;
+	let mut failed = false;
+
+	for project in projects {
+		if !project.is_publishable()? {
+			continue;
+		}
+
+		if dry_run {
+			let version = project.version();
+			let registry = project.registry_name();
+			println!(
+				"Would publish {}@{} to {}",
+				project.name(),
+				version,
+				registry
+			);
+			published += 1;
+		} else {
+			match do_publish(project) {
+				PublishResult::Published => published += 1,
+				PublishResult::Skipped => skipped += 1,
+				PublishResult::Failed => failed = true,
+			}
+		}
+	}
+
+	Ok((published, skipped, failed))
 }
 
 /// Executes the actual publish operation for a project, handling output and errors.
@@ -181,6 +189,11 @@ fn do_publish(project: &package_manager::Project) -> PublishResult {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
+	use crate::command::test_support::RecordingCommandRunner;
+	use crate::package_manager::Project;
+
 	use super::*;
 
 	#[test]
@@ -188,5 +201,55 @@ mod tests {
 		let args = PublishArgs::default();
 		assert!(!args.dry_run);
 		assert!(args.packages.is_empty());
+	}
+
+	#[test]
+	fn collect_outcomes_dry_run_counts_published() {
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let project = Project::new_test_with_runner("pkg-a", "packages/pkg-a", Arc::clone(&runner));
+		let (published, skipped, failed) =
+			collect_outcomes(&[project], true).expect("collect_outcomes failed");
+		assert_eq!(published, 1);
+		assert_eq!(skipped, 0);
+		assert!(!failed);
+	}
+
+	#[test]
+	fn collect_outcomes_non_dry_run_published_increments() {
+		// RecordingCommandRunner exit_code=0 → NpmAdapter::publish returns Published
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let project = Project::new_test_with_runner("pkg-a", "packages/pkg-a", Arc::clone(&runner));
+		let (published, skipped, failed) =
+			collect_outcomes(&[project], false).expect("collect_outcomes failed");
+		assert_eq!(published, 1);
+		assert_eq!(skipped, 0);
+		assert!(!failed);
+	}
+
+	#[test]
+	fn collect_outcomes_non_dry_run_skipped_increments() {
+		// exit_code=1 with "EPUBLISHCONFLICT" → AlreadyPublished → Skipped
+		let runner = Arc::new(
+			RecordingCommandRunner::new(1).with_stderr(b"npm ERR! code EPUBLISHCONFLICT".to_vec()),
+		);
+		let project = Project::new_test_with_runner("pkg-a", "packages/pkg-a", Arc::clone(&runner));
+		let (published, skipped, failed) =
+			collect_outcomes(&[project], false).expect("collect_outcomes failed");
+		assert_eq!(published, 0);
+		assert_eq!(skipped, 1);
+		assert!(!failed);
+	}
+
+	#[test]
+	fn collect_outcomes_non_dry_run_failed_sets_flag() {
+		// exit_code=1 with unrecognised stderr → Failed
+		let runner =
+			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"network error".to_vec()));
+		let project = Project::new_test_with_runner("pkg-a", "packages/pkg-a", Arc::clone(&runner));
+		let (published, skipped, failed) =
+			collect_outcomes(&[project], false).expect("collect_outcomes failed");
+		assert_eq!(published, 0);
+		assert_eq!(skipped, 0);
+		assert!(failed);
 	}
 }

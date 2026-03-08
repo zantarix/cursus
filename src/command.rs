@@ -24,6 +24,17 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	/// Used for user-configurable commands that may use shell features such as
 	/// pipes, redirects, or variable expansion (e.g. custom `lock_command`s).
 	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
+
+	/// Runs a program with inherited stdin/stdout/stderr for interactive use (e.g. editors).
+	///
+	/// Unlike [`run`], this does not capture output — the child process shares the
+	/// terminal directly. Returns the exit status of the child process.
+	fn run_interactive(
+		&self,
+		program: &str,
+		args: &[&str],
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus>;
 }
 
 /// A command runner that executes real system processes.
@@ -49,6 +60,19 @@ impl CommandRunner for RealCommandRunner {
 			.output()
 			.with_context(|| format!("Failed to run shell command: '{command}'"))
 	}
+
+	fn run_interactive(
+		&self,
+		program: &str,
+		args: &[&str],
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		std::process::Command::new(program)
+			.args(args)
+			.current_dir(cwd)
+			.status()
+			.with_context(|| format!("Failed to run '{program}'"))
+	}
 }
 
 /// Test support types for command execution.
@@ -73,6 +97,8 @@ pub mod test_support {
 		pub cwd: PathBuf,
 		/// Whether this was a shell invocation (`run_shell`).
 		pub is_shell: bool,
+		/// Whether this was an interactive invocation (`run_interactive`).
+		pub is_interactive: bool,
 	}
 
 	/// A command runner that records all invocations and returns a configured output.
@@ -127,7 +153,14 @@ pub mod test_support {
 			}
 		}
 
-		fn record(&self, program: &str, args: Vec<String>, cwd: &Path, is_shell: bool) {
+		fn record(
+			&self,
+			program: &str,
+			args: Vec<String>,
+			cwd: &Path,
+			is_shell: bool,
+			is_interactive: bool,
+		) {
 			self.invocations
 				.lock()
 				.expect("mutex poisoned")
@@ -136,6 +169,7 @@ pub mod test_support {
 					args,
 					cwd: cwd.to_path_buf(),
 					is_shell,
+					is_interactive,
 				});
 		}
 	}
@@ -147,6 +181,7 @@ pub mod test_support {
 				args.iter().map(|s| s.to_string()).collect(),
 				cwd,
 				false,
+				false,
 			);
 			Ok(self.make_output())
 		}
@@ -157,8 +192,25 @@ pub mod test_support {
 				vec!["-c".to_string(), command.to_string()],
 				cwd,
 				true,
+				false,
 			);
 			Ok(self.make_output())
+		}
+
+		fn run_interactive(
+			&self,
+			program: &str,
+			args: &[&str],
+			cwd: &Path,
+		) -> anyhow::Result<std::process::ExitStatus> {
+			self.record(
+				program,
+				args.iter().map(|s| s.to_string()).collect(),
+				cwd,
+				false,
+				true,
+			);
+			Ok(self.make_output().status)
 		}
 	}
 }

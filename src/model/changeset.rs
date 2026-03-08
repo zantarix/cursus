@@ -10,6 +10,8 @@ use anyhow::Context;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+use crate::command::CommandRunner;
+
 /// The type of semantic version change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -225,16 +227,13 @@ impl Changeset {
 }
 
 /// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
-fn find_default_editor() -> Option<String> {
+fn find_default_editor(runner: &dyn CommandRunner, cwd: &Path) -> Option<String> {
 	["nano", "vim", "vi"]
 		.into_iter()
 		.find(|cmd| {
-			std::process::Command::new("which")
-				.arg(cmd)
-				.stdout(std::process::Stdio::null())
-				.stderr(std::process::Stdio::null())
-				.status()
-				.is_ok_and(|s| s.success())
+			runner
+				.run("which", &[cmd], cwd)
+				.is_ok_and(|o| o.status.success())
 		})
 		.map(String::from)
 }
@@ -247,18 +246,29 @@ fn find_default_editor() -> Option<String> {
 /// # Errors
 ///
 /// Returns an error if no editor is found or the editor process fails.
-pub fn open_editor(path: &Path, env: &crate::Env) -> anyhow::Result<()> {
+pub fn open_editor(
+	path: &Path,
+	env: &crate::Env,
+	runner: &dyn CommandRunner,
+) -> anyhow::Result<()> {
+	// Changeset files always live under `.chronicle/`, so parent() will always
+	// return a non-empty path. The `.` fallback handles bare filenames (where
+	// parent() returns Some("")) or root paths (where it returns None).
+	let cwd = path
+		.parent()
+		.filter(|p| !p.as_os_str().is_empty())
+		.unwrap_or(Path::new("."));
 	let editor = env
 		.visual
 		.as_deref()
 		.filter(|v| !v.is_empty())
 		.or_else(|| env.editor.as_deref().filter(|v| !v.is_empty()))
 		.map(String::from)
-		.or_else(find_default_editor)
+		.or_else(|| find_default_editor(runner, cwd))
 		.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
-	let status = std::process::Command::new(&editor)
-		.arg(path)
-		.status()
+	let path_str = path.to_string_lossy();
+	let status = runner
+		.run_interactive(&editor, &[path_str.as_ref()], cwd)
 		.with_context(|| format!("Failed to open editor: {editor}"))?;
 	if !status.success() {
 		anyhow::bail!("Editor exited with status: {status}");
@@ -268,6 +278,8 @@ pub fn open_editor(path: &Path, env: &crate::Env) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+	use crate::command::test_support::RecordingCommandRunner;
+
 	use super::*;
 
 	fn single_package_changeset() -> Changeset {
@@ -724,11 +736,18 @@ mod tests {
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		// "true" exits 0; "false" exits 1 — VISUAL must win.
-		let result = open_editor(&path, &make_env(Some("true"), Some("false")));
+		let runner = RecordingCommandRunner::new(0);
+		let result = open_editor(&path, &make_env(Some("vim"), Some("nano")), &runner);
+		assert!(result.is_ok(), "Expected success: {result:?}");
+		let invocations = runner.invocations();
+		assert_eq!(
+			invocations[0].program, "vim",
+			"VISUAL should be used, got: {:?}",
+			invocations[0].program
+		);
 		assert!(
-			result.is_ok(),
-			"Expected success when VISUAL='true', got: {result:?}"
+			invocations[0].is_interactive,
+			"Editor invocation should be interactive"
 		);
 	}
 
@@ -738,11 +757,14 @@ mod tests {
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		// VISUAL is empty string (filtered out), EDITOR = "true"
-		let result = open_editor(&path, &make_env(Some(""), Some("true")));
-		assert!(
-			result.is_ok(),
-			"Expected success when EDITOR='true', got: {result:?}"
+		let runner = RecordingCommandRunner::new(0);
+		let result = open_editor(&path, &make_env(Some(""), Some("nano")), &runner);
+		assert!(result.is_ok(), "Expected success: {result:?}");
+		let invocations = runner.invocations();
+		assert_eq!(
+			invocations[0].program, "nano",
+			"EDITOR should be used when VISUAL is empty, got: {:?}",
+			invocations[0].program
 		);
 	}
 
@@ -752,11 +774,11 @@ mod tests {
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let result = open_editor(&path, &make_env(None, Some("true")));
-		assert!(
-			result.is_ok(),
-			"Expected success when EDITOR='true', got: {result:?}"
-		);
+		let runner = RecordingCommandRunner::new(0);
+		let result = open_editor(&path, &make_env(None, Some("nano")), &runner);
+		assert!(result.is_ok(), "Expected success: {result:?}");
+		let invocations = runner.invocations();
+		assert_eq!(invocations[0].program, "nano");
 	}
 
 	#[test]
@@ -765,8 +787,8 @@ mod tests {
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		// "false" is a standard POSIX command that always exits 1.
-		let result = open_editor(&path, &make_env(Some("false"), None));
+		let runner = RecordingCommandRunner::new(1);
+		let result = open_editor(&path, &make_env(Some("vim"), None), &runner);
 		assert!(result.is_err(), "Expected error when editor exits non-zero");
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -777,16 +799,79 @@ mod tests {
 
 	#[test]
 	fn open_editor_nonexistent_editor_returns_error() {
+		use crate::command::RealCommandRunner;
+
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let result = open_editor(&path, &make_env(Some("__chronicle_no_such_editor__"), None));
+		// Use RealCommandRunner so the spawn actually fails for a non-existent program.
+		let runner = RealCommandRunner;
+		let result = open_editor(
+			&path,
+			&make_env(Some("__chronicle_no_such_editor__"), None),
+			&runner,
+		);
 		assert!(result.is_err(), "Expected error for nonexistent editor");
 		let msg = result.unwrap_err().to_string();
 		assert!(
 			msg.contains("Failed to open editor"),
 			"Error should mention failed to open editor, got: {msg}"
+		);
+	}
+
+	// find_default_editor tests
+
+	#[test]
+	fn find_default_editor_returns_first_available_editor() {
+		// Runner always succeeds → which nano succeeds → returns Some("nano")
+		let dir = tempfile::tempdir().unwrap();
+		let runner = RecordingCommandRunner::new(0);
+		let result = find_default_editor(&runner, dir.path());
+		assert_eq!(result, Some("nano".to_string()));
+	}
+
+	#[test]
+	fn find_default_editor_returns_none_when_no_editor_found() {
+		// Runner always fails → all `which` calls fail → None
+		let dir = tempfile::tempdir().unwrap();
+		let runner = RecordingCommandRunner::new(1);
+		let result = find_default_editor(&runner, dir.path());
+		assert_eq!(result, None);
+	}
+
+	#[test]
+	fn open_editor_falls_back_to_default_when_env_empty() {
+		// When both VISUAL and EDITOR are absent, find_default_editor is called.
+		// Runner exit_code=0 means `which nano` succeeds, so "nano" is the editor,
+		// and run_interactive("nano", ...) also exits 0.
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		let runner = RecordingCommandRunner::new(0);
+		let result = open_editor(&path, &make_env(None, None), &runner);
+		assert!(result.is_ok(), "Expected success: {result:?}");
+		let invocations = runner.invocations();
+		// First call: which nano; last call: run_interactive("nano", ...)
+		let editor_call = invocations.last().unwrap();
+		assert_eq!(editor_call.program, "nano");
+	}
+
+	#[test]
+	fn open_editor_no_editor_found_returns_error() {
+		// Runner exit_code=1 → find_default_editor returns None → error
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		let runner = RecordingCommandRunner::new(1);
+		let result = open_editor(&path, &make_env(None, None), &runner);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("No editor found"),
+			"Error should mention no editor found, got: {msg}"
 		);
 	}
 }

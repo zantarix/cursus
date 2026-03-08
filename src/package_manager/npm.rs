@@ -1724,4 +1724,73 @@ mod tests {
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("Lock command"));
 	}
+
+	// lock_file_path tests
+
+	#[test]
+	fn lock_file_path_returns_none_when_lock_command_set() {
+		let dir = temp_dir();
+		let adapter = recording_adapter_default(
+			NpmConfig {
+				enabled: true,
+				path: None,
+				lock_command: Some("my-lock-cmd".to_string()),
+				access: None,
+			},
+			dir.path(),
+			0,
+		);
+		assert_eq!(adapter.lock_file_path(), None);
+	}
+
+	#[test]
+	fn lock_file_path_returns_none_when_no_lock_file_exists() {
+		let dir = temp_dir();
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(adapter.lock_file_path(), None);
+	}
+
+	#[test]
+	fn lock_file_path_returns_package_lock_json_when_present() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(
+			adapter.lock_file_path(),
+			Some(dir.path().join("package-lock.json"))
+		);
+	}
+
+	#[test]
+	fn lock_file_path_returns_pnpm_lock_yaml_when_present() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(
+			adapter.lock_file_path(),
+			Some(dir.path().join("pnpm-lock.yaml"))
+		);
+	}
+
+	#[test]
+	fn lock_file_path_returns_yarn_lock_when_present() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("yarn.lock"), "").unwrap();
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(adapter.lock_file_path(), Some(dir.path().join("yarn.lock")));
+	}
+
+	#[test]
+	fn registry_name_is_npm() {
+		let dir = temp_dir();
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(adapter.registry_name(), "npm");
+	}
+
+	#[test]
+	fn manifest_filename_is_package_json() {
+		let dir = temp_dir();
+		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		assert_eq!(adapter.manifest_filename(), "package.json");
+	}
 }

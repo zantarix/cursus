@@ -75,10 +75,10 @@ pub fn cmd_release(
 	let mut aggregated: BTreeMap<String, ChangeType> = BTreeMap::new();
 	for (_, cs) in &changesets {
 		for (pkg, ct) in &cs.packages {
-			let entry = aggregated.entry(pkg.clone()).or_insert(*ct);
-			if *ct > *entry {
-				*entry = *ct;
-			}
+			aggregated
+				.entry(pkg.clone())
+				.and_modify(|e| *e = (*e).max(*ct))
+				.or_insert(*ct);
 		}
 	}
 

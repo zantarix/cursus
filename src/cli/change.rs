@@ -40,7 +40,7 @@ pub fn cmd_change(
 	runner: Arc<dyn CommandRunner>,
 ) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
-	let projects = config.load_projects(runner)?;
+	let projects = config.load_projects(Arc::clone(&runner))?;
 
 	let project_indices = if !args.projects.is_empty() {
 		let indices: Vec<usize> = args
@@ -95,7 +95,7 @@ pub fn cmd_change(
 	let path = changeset.write(config.git_workdir())?;
 
 	if args.message.is_none() {
-		changeset::open_editor(&path, env)?;
+		changeset::open_editor(&path, env, runner.as_ref())?;
 	}
 
 	Ok(ExitCode::SUCCESS)

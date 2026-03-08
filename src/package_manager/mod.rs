@@ -169,6 +169,16 @@ impl Project {
 	#[cfg(test)]
 	pub fn new_test(name: &str, path: &str) -> Self {
 		use crate::command::test_support::RecordingCommandRunner;
+		Self::new_test_with_runner(name, path, Arc::new(RecordingCommandRunner::new(0)))
+	}
+
+	/// Creates a `Project` with a custom recording runner for use in unit tests.
+	#[cfg(test)]
+	pub fn new_test_with_runner(
+		name: &str,
+		path: &str,
+		runner: Arc<crate::command::test_support::RecordingCommandRunner>,
+	) -> Self {
 		Self {
 			info: ProjectInfo {
 				name: name.to_string(),
@@ -178,7 +188,7 @@ impl Project {
 			adapter: Arc::new(NpmAdapter::new(
 				NpmConfig::default(),
 				std::path::PathBuf::from("."),
-				Arc::new(RecordingCommandRunner::new(0)),
+				runner,
 			)),
 		}
 	}
@@ -646,6 +656,21 @@ mod tests {
 		let project = Project::new_test("my-pkg", "packages/my-pkg");
 		assert_eq!(project.name(), "my-pkg");
 		assert_eq!(project.path(), Path::new("packages/my-pkg"));
+	}
+
+	#[test]
+	fn project_info_returns_project_metadata() {
+		let project = Project::new_test("my-app", "packages/my-app");
+		let info = project.info();
+		assert_eq!(info.name, "my-app");
+		assert_eq!(info.path, std::path::PathBuf::from("packages/my-app"));
+	}
+
+	#[test]
+	fn project_registry_name_delegates_to_adapter() {
+		// new_test uses NpmAdapter, which returns "npm"
+		let project = Project::new_test("my-app", "");
+		assert_eq!(project.registry_name(), "npm");
 	}
 
 	#[test]
