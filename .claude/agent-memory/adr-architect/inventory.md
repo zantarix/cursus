@@ -12,3 +12,5 @@
 - **ADR-010** (Accepted): Scoped Release Changeset Consumption — fix silent data loss when using `--package` flag
 - **ADR-011** (Accepted): Command Execution Strategy — standardize shell execution via `/bin/sh -c` for all user-configurable commands, migrating `lock_command` from whitespace splitting. Covers dry-run, error handling, and working directory conventions.
 - **ADR-012** (Accepted): Skip workspace: Protocol Dependencies During Intra-Workspace Version Propagation — skip and warn on `workspace:` protocol entries in npm dependency version propagation during release.
+- **ADR-013** (Proposed): Adopt the log Crate with fern for Application Logging — `log` facade + `fern` backend with split-stream routing (Info/Debug/Trace to stdout, Warn/Error to stderr). Migrate all `println!()`/`eprintln!()` to `log` macros. Hardcoded `Info` default; ADR-014 adds dynamic control later.
+- **ADR-014** (Proposed): Add Verbose and Silent Modes via Global CLI Flags — stackable `-v` flag and mutually exclusive `-s` flag on `GlobalArgs` controlling log level filter (`-s` = Error, default = Info, `-v` = Debug, `-vv` = Trace). Depends on ADR-013.
