@@ -48,43 +48,43 @@ jobs:
         run: cargo make release
 
       - name: Upload linux-x86_64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-x86_64
           path: target/x86_64-unknown-linux-musl/release/chronicle
 
       - name: Upload linux-aarch64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-aarch64
           path: target/aarch64-unknown-linux-musl/release/chronicle
 
       - name: Upload linux-riscv64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-riscv64
           path: target/riscv64gc-unknown-linux-musl/release/chronicle
 
       - name: Upload macos-x86_64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-x86_64
           path: target/x86_64-apple-darwin/release/chronicle
 
       - name: Upload macos-aarch64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-aarch64
           path: target/aarch64-apple-darwin/release/chronicle
 
       - name: Upload windows-x86_64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-x86_64
           path: target/x86_64-pc-windows-gnullvm/release/chronicle.exe
 
       - name: Upload windows-aarch64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-aarch64
           path: target/aarch64-pc-windows-gnullvm/release/chronicle.exe
@@ -117,7 +117,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ matrix.artifact }}
           path: ./bin
