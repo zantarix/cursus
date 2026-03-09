@@ -68,3 +68,7 @@ Leave a changeset on disk entirely if it references any package outside the rele
 ### Track consumed entries in a separate manifest
 
 Maintain a `.chronicle/released.toml` recording which package entries have been consumed from which changeset files. This preserves changeset files as immutable records but introduces a new file format, a new consistency concern (manifest and changesets can drift out of sync), and additional cleanup logic. The complexity is disproportionate to the problem, especially given that changesets are transient artifacts designed to be consumed and deleted.
+
+## Errata
+
+**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `release` as a subcommand name in this ADR now refer to `chronicle prepare`. The scoped changeset consumption behavior is unchanged. See ADR-016 for details.

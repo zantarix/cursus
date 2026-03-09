@@ -2,15 +2,17 @@
 
 - **ADR-001** (Accepted): Project Initialisation
 - **ADR-002** (Accepted): Changeset Recording
-- **ADR-003** (Accepted): Release Command. Errata: ADR-006 adds optional git hooks.
-- **ADR-004** (Accepted): Publish Command
-- **ADR-005** (Accepted): GitHub Releases. Errata: ADR-011 is authoritative reference for `build_command` execution semantics.
-- **ADR-006** (Accepted): Git Lifecycle Hooks. `run_until: GitStep` enum, `TagFormat`, `extra_files`, `--no-git` CLI flag. Push is `#[coverage(off)]` / `#[mutants::skip]`.
-- **ADR-007** (Accepted): Honor Private Package Markers During Publish
-- **ADR-008** (Accepted): Dry-Run Must Be Strictly Local-Only. Errata added to ADR-004.
+- **ADR-003** (Accepted): Release Command. Errata: ADR-006 adds optional git hooks; ADR-015 adds branch management; ADR-016 renames subcommand to `prepare`.
+- **ADR-004** (Accepted): Publish Command. Errata: ADR-008 changes dry-run semantics; ADR-015 adds tag creation/pushing to publish and extends `--no-git`; ADR-016 renames `release` to `prepare`.
+- **ADR-005** (Accepted): GitHub Releases. Errata: ADR-011 is authoritative reference for `build_command` execution semantics; ADR-015 moves tag creation from release to publish and replaces `run_until` with `strategy`; ADR-016 renames subcommand.
+- **ADR-006** (Accepted): Git Lifecycle Hooks. Errata: ADR-015 replaces `run_until` with `strategy`, moves tags to publish, extends `--no-git` to publish; ADR-016 renames subcommand.
+- **ADR-007** (Accepted): Honor Private Package Markers During Publish. Errata: ADR-016 renames `release` to `prepare`.
+- **ADR-008** (Accepted): Dry-Run Must Be Strictly Local-Only. Errata: ADR-015 expands dry-run scope to include tag operations; ADR-016 renames subcommand.
 - **ADR-009** (Accepted): JavaScript Package Manager Strategy for Lockfiles and Publishing. Errata: ADR-011 supersedes `lock_command` whitespace-splitting execution; now uses `/bin/sh -c`.
-- **ADR-010** (Accepted): Scoped Release Changeset Consumption — fix silent data loss when using `--package` flag
+- **ADR-010** (Accepted): Scoped Release Changeset Consumption — fix silent data loss when using `--package` flag. Errata: ADR-016 renames subcommand.
 - **ADR-011** (Accepted): Command Execution Strategy — standardize shell execution via `/bin/sh -c` for all user-configurable commands, migrating `lock_command` from whitespace splitting. Covers dry-run, error handling, and working directory conventions.
 - **ADR-012** (Accepted): Skip workspace: Protocol Dependencies During Intra-Workspace Version Propagation — skip and warn on `workspace:` protocol entries in npm dependency version propagation during release.
 - **ADR-013** (Proposed): Adopt the log Crate with fern for Application Logging — `log` facade + `fern` backend with split-stream routing (Info/Debug/Trace to stdout, Warn/Error to stderr). Migrate all `println!()`/`eprintln!()` to `log` macros. Hardcoded `Info` default; ADR-014 adds dynamic control later.
 - **ADR-014** (Proposed): Add Verbose and Silent Modes via Global CLI Flags — stackable `-v` flag and mutually exclusive `-s` flag on `GlobalArgs` controlling log level filter (`-s` = Error, default = Info, `-v` = Debug, `-vv` = Trace). Depends on ADR-013.
+- **ADR-015** (Proposed): CI-Managed Release Workflow — `chronicle ci` smart entrypoint infers prepare vs publish from repo state. Tags always created during `publish` after registry publishing (never during `release`/`prepare`). `strategy` field replaces `run_until`: `push` | `branch` (no `commit` or `tag` variants). Default derived: `branch` when `[github].enabled`, `push` otherwise. `branch` strategy: checkout release branch, commit there, push, optionally create PR, checkout back (no `git reset`). Pre-flight check: refuses to run with uncommitted changes. `release_branch_prefix` config + `--branch` CLI override. Auto-creates PR when `[github].enabled`. `--no-git` extended to `publish`. Errata moved to affected ADRs (003-006, 008).
+- **ADR-016** (Proposed): Rename `release` Subcommand to `prepare` — the `release` subcommand is misleading because it does not release anything; `prepare` accurately describes its function (version bumps, changelogs, commits, branch management). Config fields and commit messages using "release" as a noun are retained. `chronicle ci` dispatches to `prepare`/`publish` internally.

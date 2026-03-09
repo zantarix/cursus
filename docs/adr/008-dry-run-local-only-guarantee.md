@@ -91,3 +91,9 @@ Permit dry-run to make read-only network requests (e.g., checking if a version a
 ### Make the behavior configurable
 
 Add a flag like `--dry-run=local` vs `--dry-run=validate` to let users choose between a strict local-only mode and a mode that delegates to external tools for validation. This was rejected because it adds complexity to the CLI surface, splits the mental model of what `--dry-run` means, and creates a risk that the less-safe mode becomes the default in practice. A single, strict `--dry-run` is easier to document, teach, and trust.
+
+## Errata
+
+**2026-03-09**: ADR-015 adds git tag creation and pushing to the `chronicle publish` workflow when `[git].enabled = true`. The Scope section of this ADR lists `chronicle publish --dry-run` as skipping "No registry uploads, no GitHub Release creation, no subprocess invocations that contact remotes." Tag creation and tag pushing must now also be skipped during dry-run. The invariant itself ("no remote operations during dry-run") is unchanged; the set of operations it covers has expanded. See ADR-015.
+
+**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior and dry-run guarantees are unchanged. See ADR-016 for details.

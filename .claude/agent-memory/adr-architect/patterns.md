@@ -2,11 +2,13 @@
 
 ## Three-Step Release Workflow
 
-1. `chronicle release` — filesystem only (version bumps, changelogs, changeset deletion)
-2. Git operations — manual by default, opt-in automation via ADR-006
-3. `chronicle publish` — registry publishing + optional GitHub Releases
+1. `chronicle prepare` (formerly `release`, renamed ADR-016) — filesystem changes + optional git branch management
+2. Git operations — manual by default, opt-in automation via ADR-006/ADR-015
+3. `chronicle publish` — registry publishing, tag creation/push, GitHub Releases
 
 This separation is a core principle. Chronicle defaults to filesystem-only changes.
+
+ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step to run based on repo state (changesets present = prepare, untagged/unpublished manifest versions = publish). `[git].strategy` field (`push` | `branch`, default derived from `[github].enabled`) controls how release changes are delivered. `branch` strategy: checkout release branch, commit there, push, auto-create PR if GitHub enabled, checkout back. Tags always created during `publish` after registry publishing -- never during prepare. Publish ordering: registry -> tags -> GitHub Releases (prevents state detection inconsistency on retry).
 
 ## Adapter Trait Pattern
 

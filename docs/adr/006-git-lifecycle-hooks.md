@@ -194,3 +194,9 @@ The original design proposed three independent boolean fields: `commit = true`, 
 ### No git integration (status quo)
 
 Continuing to rely on manual git operations, as established by ADR-003. This was rejected because the manual workflow is error-prone and tedious, especially in monorepos. The opt-in nature of `[git].enabled` preserves the status quo as the default for users who prefer manual control.
+
+## Errata
+
+**2026-03-09**: ADR-015 replaces the `run_until` field (with variants `commit | tag | push`) with a `strategy` field (with variants `push | branch`). The `tag` step described in section "2. Tag" is removed from the release workflow entirely -- tags are now created during `chronicle publish`, not during `chronicle release`. The `commit` variant is also removed; both strategies include committing as an inherent step. The `--no-git` flag, originally defined in this ADR only for `chronicle release`, now also applies to `chronicle publish`. See ADR-015 for the revised git integration model.
+
+**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.

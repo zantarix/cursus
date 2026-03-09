@@ -118,3 +118,7 @@ Rather than silently excluding private packages, Chronicle could print a line li
 ### Erroring when `--package` explicitly names a private package
 
 Chronicle could treat an explicit `--package my-private-pkg` as an error, on the theory that the user made a mistake. This was rejected because it makes CI scripts fragile. A common pattern is to pass all package names to `--package` without filtering, and erroring on private packages would force scripts to maintain a separate exclusion list that duplicates information already in the manifest.
+
+## Errata
+
+**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.

@@ -32,6 +32,11 @@ Key differences from old style:
 - Do NOT enumerate all alternatives in the Context section. Context should describe the problem and forces at play.
 - The Decision section details the chosen approach. Other options go in Alternatives Considered.
 
+## ADR Template Compliance
+
+- Errata sections are allowed as an exception to "no new sections" rule -- they record dated corrections to accepted ADRs without modifying the originals.
+- Errata belong on the **affected ADR** as a forward pointer to the ADR that supersedes or amends it. Do NOT put errata on the ADR that introduces the change.
+
 ## Project ADR Rules (from CLAUDE.md)
 
 - ADRs are immutable once accepted — do not edit accepted ADRs
