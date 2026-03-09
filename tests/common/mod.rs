@@ -26,6 +26,19 @@ pub fn run_chronicle(
 	chronicle::run(args, cwd, chronicle::Env::default(), runner)
 }
 
+/// Runs chronicle with a custom environment and real command runner, returning the result.
+///
+/// Like [`run_chronicle`] but accepts a caller-supplied [`chronicle::Env`], allowing
+/// tests that need specific environment variables (e.g. `github_token`) to inject them.
+pub fn run_chronicle_with_env(
+	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+	cwd: &std::path::Path,
+	env: chronicle::Env,
+) -> anyhow::Result<std::process::ExitCode> {
+	let runner: Arc<dyn CommandRunner> = Arc::new(chronicle::command::RealCommandRunner);
+	chronicle::run(args, cwd, env, runner)
+}
+
 /// Runs a git command in the given directory and panics on failure.
 ///
 /// Stdout is suppressed to keep test output clean. Stderr is captured and

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::command::CommandRunner;
 use crate::git::GitConfig;
+use crate::github::GitHubConfig;
 use crate::package_manager::{
 	self, CargoAdapter, CargoConfig, NpmAdapter, NpmConfig, PackageManagerAdapter, Project,
 };
@@ -45,6 +46,9 @@ pub struct Config {
 	/// Git lifecycle automation configuration.
 	#[serde(default)]
 	pub git: GitConfig,
+	/// GitHub Releases configuration.
+	#[serde(default)]
+	pub github: GitHubConfig,
 	/// Git repository root path.
 	#[serde(skip)]
 	git_workdir: PathBuf,
@@ -58,6 +62,7 @@ impl Config {
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
+			github: GitHubConfig::default(),
 			git_workdir: git_workdir.to_path_buf(),
 		}
 	}
@@ -83,6 +88,12 @@ impl Config {
 	/// Sets git lifecycle configuration (builder pattern).
 	pub fn with_git(mut self, config: GitConfig) -> Self {
 		self.git = config;
+		self
+	}
+
+	/// Sets GitHub Releases configuration (builder pattern).
+	pub fn with_github(mut self, config: GitHubConfig) -> Self {
+		self.github = config;
 		self
 	}
 
@@ -218,6 +229,12 @@ pub fn load(git_workdir: &Path) -> anyhow::Result<Config> {
 		bail!("Configuration must have at least one package manager enabled");
 	}
 
+	// Derived default: [github].enabled = true implies [git].enabled = true,
+	// unless [git].enabled was explicitly set in the config file.
+	if config.github.enabled && config.git.enabled.is_none() {
+		config.git.enabled = Some(true);
+	}
+
 	// Set the git root
 	config.git_workdir = git_workdir.to_path_buf();
 
@@ -230,6 +247,7 @@ mod tests {
 
 	use super::*;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::github::GitHubConfig;
 	use tempfile::TempDir;
 
 	fn temp_dir() -> TempDir {
@@ -335,6 +353,7 @@ mod tests {
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
+			github: GitHubConfig::default(),
 			git_workdir: PathBuf::new(),
 		};
 		assert!(!config.npm.enabled);
@@ -380,6 +399,7 @@ mod tests {
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
+			github: GitHubConfig::default(),
 			git_workdir: PathBuf::new(),
 		};
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
@@ -409,6 +429,7 @@ mod tests {
 			npm: NpmConfig::default(),
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
+			github: GitHubConfig::default(),
 			git_workdir: PathBuf::new(),
 		};
 		config.npm.enabled = true;
@@ -642,6 +663,69 @@ enabled = true
 		assert!(
 			chain.contains("unknown field"),
 			"Expected 'unknown field' error, got: {chain}"
+		);
+	}
+
+	#[test]
+	fn config_deserializes_github_section() {
+		let config: Config =
+			toml::from_str("[npm]\nenabled = true\n[github]\nenabled = true").unwrap();
+		assert!(config.github.enabled);
+	}
+
+	#[test]
+	fn config_github_unknown_field_fails() {
+		let result: Result<Config, _> =
+			toml::from_str("[npm]\nenabled = true\n[github]\nunknown = true");
+		assert!(
+			result.is_err(),
+			"Expected error for unknown field in [github]"
+		);
+	}
+
+	#[test]
+	fn config_without_github_section_defaults_disabled() {
+		let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+		assert!(!config.github.enabled);
+	}
+
+	#[test]
+	fn load_github_enabled_derives_git_enabled() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[cargo]\nenabled = true\n[github]\nenabled = true\n",
+		)
+		.unwrap();
+
+		let loaded = load(dir.path()).unwrap();
+		assert!(loaded.github.enabled);
+		assert_eq!(
+			loaded.git.enabled,
+			Some(true),
+			"git.enabled should be derived Some(true) when github.enabled = true"
+		);
+	}
+
+	#[test]
+	fn load_explicit_git_disabled_overrides_derived_default() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[cargo]\nenabled = true\n[github]\nenabled = true\n[git]\nenabled = false\n",
+		)
+		.unwrap();
+
+		let loaded = load(dir.path()).unwrap();
+		assert!(loaded.github.enabled);
+		assert_eq!(
+			loaded.git.enabled,
+			Some(false),
+			"explicit [git].enabled = false must not be overridden"
 		);
 	}
 }

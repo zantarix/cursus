@@ -77,8 +77,11 @@ impl CommandRunner for RealCommandRunner {
 
 /// Test support types for command execution.
 ///
-/// Provides a fake command runner implementation for use in unit tests.
-/// This module is always compiled so that integration test crates can import it.
+/// Provides a fake command runner implementation for use in unit and integration
+/// tests. Available when compiled with `#[cfg(test)]` (unit tests within this
+/// crate) or with the `test-support` feature (external consumers such as
+/// integration test crates).
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support {
 	use std::path::PathBuf;
 	use std::process::Output;

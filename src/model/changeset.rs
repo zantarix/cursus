@@ -727,6 +727,7 @@ mod tests {
 		crate::Env {
 			visual: visual.map(String::from),
 			editor: editor.map(String::from),
+			github_token: None,
 		}
 	}
 

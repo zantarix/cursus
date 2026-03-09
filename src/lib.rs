@@ -5,6 +5,7 @@
 pub mod cli;
 pub mod command;
 pub mod git;
+pub mod github;
 pub mod model;
 pub mod package_manager;
 pub mod tui;
@@ -40,6 +41,8 @@ pub struct Env {
 	pub visual: Option<String>,
 	/// Value of the `EDITOR` environment variable.
 	pub editor: Option<String>,
+	/// GitHub API token, from `GH_TOKEN` or `GITHUB_TOKEN`.
+	pub github_token: Option<String>,
 }
 
 /// Main entry point for the chronicle application.
@@ -79,7 +82,12 @@ where
 			cli::cmd_change(&git_workdir, &args, &cli.global, &env, Arc::clone(&runner))
 		}
 		Some(cli::Command::Publish(args)) => {
-			cli::cmd_publish(&git_workdir, &args, Arc::clone(&runner))
+			let github_client: Option<Arc<dyn github::client::GitHubClient>> =
+				env.github_token.as_ref().map(|token| {
+					Arc::new(github::RestGitHubClient::new(token.clone()))
+						as Arc<dyn github::client::GitHubClient>
+				});
+			cli::cmd_publish(&git_workdir, &args, Arc::clone(&runner), github_client)
 		}
 		Some(cli::Command::Release(args)) => {
 			cli::cmd_release(&git_workdir, &args, Arc::clone(&runner))

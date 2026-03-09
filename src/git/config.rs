@@ -90,8 +90,11 @@ impl GitStep {
 pub struct GitConfig {
 	/// Whether git lifecycle automation is enabled.
 	///
-	/// Defaults to `false`.
-	pub enabled: bool,
+	/// `None` means the key was absent from the config file; callers should
+	/// treat `None` the same as `Some(false)` unless a derived default applies
+	/// (e.g. `[github].enabled = true` implies `Some(true)`).
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub enabled: Option<bool>,
 	/// How far the git lifecycle should proceed.
 	///
 	/// Defaults to [`GitStep::Tag`] (commit + tag locally, no push).
@@ -118,7 +121,7 @@ mod tests {
 	#[test]
 	fn git_config_defaults() {
 		let config = GitConfig::default();
-		assert!(!config.enabled);
+		assert_eq!(config.enabled, None);
 		assert_eq!(config.run_until, GitStep::Tag);
 		assert_eq!(config.tag_format, TagFormat::Auto);
 	}
@@ -147,15 +150,21 @@ mod tests {
 	#[test]
 	fn git_config_deserializes_defaults_when_empty() {
 		let config: GitConfig = toml::from_str("").unwrap();
-		assert!(!config.enabled);
+		assert_eq!(config.enabled, None);
 		assert_eq!(config.run_until, GitStep::Tag);
 		assert_eq!(config.tag_format, TagFormat::Auto);
 	}
 
 	#[test]
-	fn git_config_deserializes_enabled() {
+	fn git_config_deserializes_enabled_true() {
 		let config: GitConfig = toml::from_str("enabled = true").unwrap();
-		assert!(config.enabled);
+		assert_eq!(config.enabled, Some(true));
+	}
+
+	#[test]
+	fn git_config_deserializes_enabled_false() {
+		let config: GitConfig = toml::from_str("enabled = false").unwrap();
+		assert_eq!(config.enabled, Some(false));
 	}
 
 	#[test]
@@ -213,7 +222,7 @@ mod tests {
 	#[test]
 	fn git_config_roundtrip() {
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			run_until: GitStep::Push,
 			tag_format: TagFormat::Prefixed,
 			extra_files: vec!["custom.lock".to_string()],
@@ -226,10 +235,20 @@ mod tests {
 	#[test]
 	fn git_config_serializes_enabled_true() {
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			..Default::default()
 		};
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("enabled = true"));
+	}
+
+	#[test]
+	fn git_config_serializes_omits_enabled_when_none() {
+		let config = GitConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("enabled"),
+			"None enabled should be omitted"
+		);
 	}
 }

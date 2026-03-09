@@ -209,7 +209,7 @@ pub fn cmd_release(
 	modified_files.dedup();
 
 	// Run git lifecycle if enabled and not suppressed
-	if config.git.enabled && !args.no_git {
+	if config.git.enabled.unwrap_or(false) && !args.no_git {
 		git::run_git_lifecycle(
 			git_workdir,
 			&config.git,

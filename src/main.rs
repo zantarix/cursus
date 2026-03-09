@@ -19,6 +19,9 @@ fn main() -> ExitCode {
 	let env = chronicle::Env {
 		visual: std::env::var("VISUAL").ok(),
 		editor: std::env::var("EDITOR").ok(),
+		github_token: std::env::var("GH_TOKEN")
+			.ok()
+			.or_else(|| std::env::var("GITHUB_TOKEN").ok()),
 	};
 	let runner = Arc::new(RealCommandRunner);
 	match chronicle::run(std::env::args_os(), &cwd, env, runner) {

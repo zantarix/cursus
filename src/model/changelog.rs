@@ -91,6 +91,60 @@ impl Changelog {
 	}
 }
 
+/// Extracts the body of a specific version's section from a CHANGELOG.md file.
+///
+/// Finds the `## {version}` heading (with optional ` - date` suffix) and returns
+/// the lines until the next `## ` heading or end of file, with leading and
+/// trailing blank lines trimmed.
+///
+/// Returns an empty string if the version is not found. Does not match version
+/// prefixes — searching for `1.2.0` will not match `## 1.2.0-beta`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read.
+pub fn extract_version_body(
+	changelog_path: &Path,
+	version: &semver::Version,
+) -> anyhow::Result<String> {
+	let content = std::fs::read_to_string(changelog_path)
+		.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
+
+	let version_str = version.to_string();
+	let mut in_section = false;
+	let mut body_lines: Vec<&str> = Vec::new();
+
+	for line in content.lines() {
+		if let Some(rest) = line.strip_prefix("## ") {
+			if in_section {
+				break;
+			}
+			// Match "1.2.0" exactly or "1.2.0 - date" (space after version prevents
+			// matching prefixes like "1.2.0-beta").
+			if rest == version_str || rest.starts_with(&format!("{version_str} ")) {
+				in_section = true;
+			}
+		} else if in_section {
+			body_lines.push(line);
+		}
+	}
+
+	if !in_section {
+		return Ok(String::new());
+	}
+
+	let start = body_lines
+		.iter()
+		.position(|l| !l.is_empty())
+		.unwrap_or(body_lines.len());
+	let end = body_lines
+		.iter()
+		.rposition(|l| !l.is_empty())
+		.map_or(start, |i| i + 1);
+
+	Ok(body_lines[start..end].join("\n"))
+}
+
 /// Indents continuation lines of a multiline string for use in a Markdown list item.
 ///
 /// The first line is returned as-is. Subsequent non-empty lines are prefixed with
@@ -423,5 +477,113 @@ mod tests {
 
 		// Should fail because directory is read-only
 		assert!(result.is_err());
+	}
+
+	// --- extract_version_body ---
+
+	const MULTI_VERSION_CHANGELOG: &str = "\
+# Changelog
+
+## 1.2.0 - 2024-06-01
+
+### Features
+
+- Added widget
+
+## 1.1.0 - 2024-03-01
+
+### Bug Fixes
+
+- Fixed thing
+
+## 1.0.0
+
+Initial release
+";
+
+	#[test]
+	fn extract_version_body_finds_middle_version() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
+
+		let body = extract_version_body(&path, &"1.1.0".parse().unwrap()).unwrap();
+		assert!(body.contains("### Bug Fixes"));
+		assert!(body.contains("- Fixed thing"));
+		assert!(!body.contains("### Features"));
+	}
+
+	#[test]
+	fn extract_version_body_finds_first_version() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
+
+		let body = extract_version_body(&path, &"1.2.0".parse().unwrap()).unwrap();
+		assert!(body.contains("### Features"));
+		assert!(body.contains("- Added widget"));
+	}
+
+	#[test]
+	fn extract_version_body_finds_version_at_eof() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
+
+		let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+		assert_eq!(body.trim(), "Initial release");
+	}
+
+	#[test]
+	fn extract_version_body_returns_empty_for_missing_version() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
+
+		let body = extract_version_body(&path, &"9.9.9".parse().unwrap()).unwrap();
+		assert!(body.is_empty());
+	}
+
+	#[test]
+	fn extract_version_body_returns_error_for_missing_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+
+		let result = extract_version_body(&path, &"1.0.0".parse().unwrap());
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn extract_version_body_does_not_match_version_prefix() {
+		let changelog = "# Changelog\n\n## 1.2.0-beta - 2024-01-01\n\nbeta content\n\n## 1.2.0 - 2024-02-01\n\nstable content\n";
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, changelog).unwrap();
+
+		let body = extract_version_body(&path, &"1.2.0".parse().unwrap()).unwrap();
+		assert!(body.contains("stable content"));
+		assert!(!body.contains("beta content"));
+	}
+
+	#[test]
+	fn extract_version_body_with_date_suffix() {
+		let changelog = "# Changelog\n\n## 2.0.0 - 2025-01-01\n\nMajor release\n";
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, changelog).unwrap();
+
+		let body = extract_version_body(&path, &"2.0.0".parse().unwrap()).unwrap();
+		assert!(body.contains("Major release"));
+	}
+
+	#[test]
+	fn extract_version_body_empty_body() {
+		let changelog = "# Changelog\n\n## 1.0.0\n\n## 0.9.0\n\nPrevious\n";
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, changelog).unwrap();
+
+		let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+		assert!(body.is_empty());
 	}
 }

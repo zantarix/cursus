@@ -260,7 +260,7 @@ mod tests {
 	fn extra_files_outside_repo_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			extra_files: vec!["../../etc/passwd".to_string()],
 			..Default::default()
 		};
@@ -283,7 +283,7 @@ mod tests {
 	fn extra_files_absolute_path_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			extra_files: vec!["/etc/passwd".to_string()],
 			..Default::default()
 		};
@@ -306,7 +306,7 @@ mod tests {
 	fn run_git_lifecycle_empty_releases_is_noop() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			..Default::default()
 		};
 		// Empty releases → returns Ok immediately without touching git
@@ -319,7 +319,7 @@ mod tests {
 	fn run_git_lifecycle_dry_run_prints_summary() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			..Default::default()
 		};
 		let releases = vec![ReleaseInfo {
@@ -336,7 +336,7 @@ mod tests {
 	fn run_git_lifecycle_dry_run_with_push_enabled_prints_summary() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = GitConfig {
-			enabled: true,
+			enabled: Some(true),
 			run_until: GitStep::Push,
 			..Default::default()
 		};

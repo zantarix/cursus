@@ -16,7 +16,7 @@ use common::{
 /// Creates a git-enabled config with default settings (Tag step, Auto format).
 fn git_enabled_config() -> GitConfig {
 	GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		..Default::default()
 	}
 }
@@ -181,7 +181,7 @@ fn release_git_tag_format_auto_multi() {
 #[test]
 fn release_git_tag_format_prefixed() {
 	let config = GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		tag_format: TagFormat::Prefixed,
 		..Default::default()
 	};
@@ -207,7 +207,7 @@ fn release_git_tag_format_prefixed() {
 #[test]
 fn release_git_tag_format_simple() {
 	let config = GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		tag_format: TagFormat::Simple,
 		..Default::default()
 	};
@@ -263,7 +263,7 @@ fn release_no_git_flag_skips_git() {
 #[test]
 fn release_git_run_until_commit() {
 	let config = GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		run_until: GitStep::Commit,
 		..Default::default()
 	};
@@ -347,7 +347,7 @@ fn release_git_filesystem_changes_persist_after_lifecycle() {
 #[test]
 fn release_git_run_until_push() {
 	let config = GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		run_until: GitStep::Push,
 		..Default::default()
 	};
@@ -397,7 +397,7 @@ fn release_git_failure_preserves_filesystem_changes() {
 	// When git push fails (no remote configured), version bumps and
 	// changelogs written before git ran must remain on disk.
 	let config = GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		run_until: GitStep::Push,
 		..Default::default()
 	};
@@ -457,7 +457,7 @@ fn release_git_extra_files_are_staged() {
 	// An extra file listed in [git].extra_files should be included in the release
 	// commit even though Chronicle didn't write it directly.
 	let config = GitConfig {
-		enabled: true,
+		enabled: Some(true),
 		extra_files: vec!["custom.lock".to_string()],
 		..Default::default()
 	};

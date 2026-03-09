@@ -1,0 +1,149 @@
+//! GitHub Releases configuration types.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+/// Configuration for opt-in GitHub Releases creation after publish.
+///
+/// When `enabled` is `true`, Chronicle will create a GitHub Release for each
+/// published package after the publish step completes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitHubConfig {
+	/// Whether GitHub Releases creation is enabled.
+	///
+	/// Defaults to `false`. When set to `true`, also implies `[git].enabled = true`
+	/// unless `[git].enabled` is explicitly set.
+	pub enabled: bool,
+	/// GitHub repository owner (user or organisation name).
+	///
+	/// If not set, Chronicle will attempt to detect it from the git remote URL.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub owner: Option<String>,
+	/// GitHub repository name.
+	///
+	/// If not set, Chronicle will attempt to detect it from the git remote URL.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub repo: Option<String>,
+	/// Optional shell command to build release artifacts before uploading.
+	///
+	/// Run in the git root directory. Defaults to empty (no build step).
+	#[serde(skip_serializing_if = "String::is_empty")]
+	pub build_command: String,
+	/// Map of artifact display names to file paths (relative to git root).
+	///
+	/// Each entry is uploaded as a release asset. Defaults to empty (no assets).
+	#[serde(skip_serializing_if = "BTreeMap::is_empty")]
+	pub artifacts: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn github_config_defaults() {
+		let config = GitHubConfig::default();
+		assert!(!config.enabled);
+		assert_eq!(config.owner, None);
+		assert_eq!(config.repo, None);
+		assert!(config.build_command.is_empty());
+		assert!(config.artifacts.is_empty());
+	}
+
+	#[test]
+	fn github_config_deserializes_empty() {
+		let config: GitHubConfig = toml::from_str("").unwrap();
+		assert!(!config.enabled);
+		assert_eq!(config.owner, None);
+		assert_eq!(config.repo, None);
+	}
+
+	#[test]
+	fn github_config_deserializes_enabled_only() {
+		let config: GitHubConfig = toml::from_str("enabled = true").unwrap();
+		assert!(config.enabled);
+		assert_eq!(config.owner, None);
+		assert_eq!(config.repo, None);
+	}
+
+	#[test]
+	fn github_config_deserializes_all_fields() {
+		let toml_str = r#"
+enabled = true
+owner = "acme"
+repo = "my-app"
+build_command = "cargo build --release"
+[artifacts]
+"linux-amd64" = "target/release/app"
+"#;
+		let config: GitHubConfig = toml::from_str(toml_str).unwrap();
+		assert!(config.enabled);
+		assert_eq!(config.owner.as_deref(), Some("acme"));
+		assert_eq!(config.repo.as_deref(), Some("my-app"));
+		assert_eq!(config.build_command, "cargo build --release");
+		assert_eq!(
+			config.artifacts.get("linux-amd64").map(|s| s.as_str()),
+			Some("target/release/app")
+		);
+	}
+
+	#[test]
+	fn github_config_rejects_unknown_fields() {
+		let result: Result<GitHubConfig, _> = toml::from_str("unknown_field = true");
+		assert!(result.is_err(), "Expected error for unknown field");
+	}
+
+	#[test]
+	fn github_config_roundtrip() {
+		let mut artifacts = BTreeMap::new();
+		artifacts.insert("linux".to_string(), "target/app".to_string());
+		let config = GitHubConfig {
+			enabled: true,
+			owner: Some("owner".to_string()),
+			repo: Some("repo".to_string()),
+			build_command: "make release".to_string(),
+			artifacts,
+		};
+		let toml_str = toml::to_string(&config).unwrap();
+		let deserialized: GitHubConfig = toml::from_str(&toml_str).unwrap();
+		assert_eq!(config, deserialized);
+	}
+
+	#[test]
+	fn github_config_serializes_skips_none_and_empty() {
+		let config = GitHubConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(!toml_str.contains("owner"), "None owner should be omitted");
+		assert!(!toml_str.contains("repo"), "None repo should be omitted");
+		assert!(
+			!toml_str.contains("build_command"),
+			"Empty build_command should be omitted"
+		);
+		assert!(
+			!toml_str.contains("artifacts"),
+			"Empty artifacts should be omitted"
+		);
+	}
+
+	#[test]
+	fn github_config_serializes_some_owner() {
+		let config = GitHubConfig {
+			owner: Some("myorg".to_string()),
+			..Default::default()
+		};
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(toml_str.contains("owner = \"myorg\""));
+	}
+
+	#[test]
+	fn github_config_serializes_build_command() {
+		let config = GitHubConfig {
+			build_command: "make all".to_string(),
+			..Default::default()
+		};
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(toml_str.contains("build_command = \"make all\""));
+	}
+}
