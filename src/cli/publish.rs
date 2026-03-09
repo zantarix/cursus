@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use clap::Args;
+use log::{error, info, warn};
 
 use crate::command::CommandRunner;
 use crate::github::client::GitHubClient;
@@ -68,15 +69,14 @@ pub fn cmd_publish(
 		let cycle_groups = graph.cycle_groups();
 		if !cycle_groups.is_empty() {
 			for group in &cycle_groups {
-				eprintln!(
-					"Warning: circular dependencies detected between: {}",
+				warn!(
+					"circular dependencies detected between: {}",
 					group.join(", ")
 				);
 			}
-			eprintln!(
+			warn!(
 				"To disable this warning, set `disable_dependency_cycle_warnings = true` in the [global] section of .chronicle/config.toml"
 			);
-			eprintln!();
 		}
 	}
 
@@ -121,9 +121,9 @@ pub fn cmd_publish(
 					.git
 					.tag_format
 					.tag(&pkg.name, &pkg.version, is_multi_package);
-				println!("Would create GitHub Release for {tag}");
+				info!("Would create GitHub Release for {tag}");
 				for display_name in config.github.artifacts.keys() {
-					println!("  Would attach: {display_name}");
+					info!("  Would attach: {display_name}");
 				}
 			}
 			(0usize, false)
@@ -148,16 +148,16 @@ pub fn cmd_publish(
 	};
 
 	// Summary
-	println!();
+	info!("");
 	if args.dry_run {
-		println!(
+		info!(
 			"Summary: {} would be published, {} would be skipped",
 			published_packages.len(),
 			skipped_count
 		);
 	} else if config.github.enabled {
 		match (github_created, github_failed) {
-			(created, false) => println!(
+			(created, false) => info!(
 				"Summary: {} published, {} skipped, {} GitHub Releases created",
 				published_packages.len(),
 				skipped_count,
@@ -165,7 +165,7 @@ pub fn cmd_publish(
 			),
 			(created, true) => {
 				let failed_count = published_packages.len().saturating_sub(created);
-				println!(
+				info!(
 					"Summary: {} published, {} skipped, {} GitHub Release{} created, {} GitHub Release{} failed",
 					published_packages.len(),
 					skipped_count,
@@ -177,7 +177,7 @@ pub fn cmd_publish(
 			}
 		}
 	} else {
-		println!(
+		info!(
 			"Summary: {} published, {} skipped",
 			published_packages.len(),
 			skipped_count
@@ -223,7 +223,7 @@ fn publish_projects(
 			// Dry run: just print what would be published
 			let version = project.version();
 			let registry = project.registry_name();
-			println!(
+			info!(
 				"Would publish {}@{} to {}",
 				project.name(),
 				version,
@@ -277,7 +277,7 @@ fn orchestrate_github_releases(
 	// Run build command if configured
 	let mut github_failed = false;
 	if !config.github.build_command.is_empty() {
-		println!("Running build command: {}", config.github.build_command);
+		info!("Running build command: {}", config.github.build_command);
 		let output = runner
 			.run_shell(&config.github.build_command, git_workdir)
 			.with_context(|| {
@@ -287,7 +287,7 @@ fn orchestrate_github_releases(
 				)
 			})?;
 		if !output.status.success() {
-			eprintln!("Build command failed with status {}", output.status);
+			error!("Build command failed with status {}", output.status);
 			return Ok((0, true));
 		}
 	}
@@ -306,7 +306,7 @@ fn orchestrate_github_releases(
 			match extract_version_body(&changelog_path, &pkg.version) {
 				Ok(text) => text,
 				Err(e) => {
-					eprintln!("Warning: could not read changelog for {}: {e:#}", pkg.name);
+					warn!("could not read changelog for {}: {e:#}", pkg.name);
 					String::new()
 				}
 			}
@@ -317,7 +317,7 @@ fn orchestrate_github_releases(
 		// Create the release
 		match github_client.create_release(&owner, &repo, &tag, &tag, &body) {
 			Ok(release_id) => {
-				println!("Created GitHub Release for {tag}");
+				info!("Created GitHub Release for {tag}");
 				created_count += 1;
 
 				// Upload artifacts
@@ -330,16 +330,16 @@ fn orchestrate_github_releases(
 						display_name,
 						&full_path,
 					) {
-						Ok(()) => println!("  Attached: {display_name}"),
+						Ok(()) => info!("  Attached: {display_name}"),
 						Err(e) => {
-							eprintln!("  Failed to attach '{display_name}': {e:#}");
+							warn!("  Failed to attach '{display_name}': {e:#}");
 							github_failed = true;
 						}
 					}
 				}
 			}
 			Err(e) => {
-				eprintln!("Failed to create GitHub Release for {tag}: {e:#}");
+				error!("Failed to create GitHub Release for {tag}: {e:#}");
 				github_failed = true;
 			}
 		}
@@ -383,11 +383,11 @@ fn do_publish(project: &package_manager::Project) -> PublishResult {
 
 	match project.publish() {
 		Ok(PublishOutcome::Published) => {
-			println!("Published {}@{} to {}", project.name(), version, registry);
+			info!("Published {}@{} to {}", project.name(), version, registry);
 			PublishResult::Published
 		}
 		Ok(PublishOutcome::AlreadyPublished) => {
-			println!(
+			info!(
 				"Skipped {}@{} (already published to {})",
 				project.name(),
 				version,
@@ -396,7 +396,7 @@ fn do_publish(project: &package_manager::Project) -> PublishResult {
 			PublishResult::Skipped
 		}
 		Err(e) => {
-			eprintln!("Failed to publish {}@{}: {}", project.name(), version, e);
+			error!("Failed to publish {}@{}: {}", project.name(), version, e);
 			PublishResult::Failed
 		}
 	}

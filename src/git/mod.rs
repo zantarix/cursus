@@ -11,6 +11,7 @@ pub use config::{GitConfig, GitStep, TagFormat};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use log::info;
 use semver::Version;
 
 use crate::command::CommandRunner;
@@ -114,18 +115,18 @@ pub fn run_git_lifecycle(
 	}
 
 	if dry_run {
-		println!("Would create commit: {commit_message}");
-		println!("Would stage files:");
+		info!("Would create commit: {commit_message}");
+		info!("Would stage files:");
 		for file in &all_files {
-			println!("  {}", file.display());
+			info!("  {}", file.display());
 		}
 		if config.run_until.should_tag() {
 			for tag in &tags {
-				println!("Would create tag: {tag}");
+				info!("Would create tag: {tag}");
 			}
 		}
 		if config.run_until.should_push() {
-			println!("Would push: git push origin HEAD --follow-tags");
+			info!("Would push: git push origin HEAD --follow-tags");
 		}
 		return Ok(());
 	}

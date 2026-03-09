@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Args;
+use log::info;
 
 use crate::command::CommandRunner;
 use crate::git::{self, ReleaseInfo};
@@ -67,7 +68,7 @@ pub fn cmd_release(
 	// Read all pending changesets
 	let changesets = Changeset::read_all(config.git_workdir())?;
 	if changesets.is_empty() {
-		println!("No pending changesets found. Nothing to release.");
+		info!("No pending changesets found. Nothing to release.");
 		return Ok(ExitCode::SUCCESS);
 	}
 
@@ -124,7 +125,7 @@ pub fn cmd_release(
 		modified_files.push(git_workdir.join(project.path()).join("CHANGELOG.md"));
 
 		if args.dry_run {
-			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
+			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		} else {
 			project.write_version(&new_version)?;
 
@@ -142,7 +143,7 @@ pub fn cmd_release(
 			)
 			.update(config.git_workdir())?;
 
-			println!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
+			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		}
 
 		release_infos.push(ReleaseInfo {
@@ -162,7 +163,7 @@ pub fn cmd_release(
 		for dep_name in project.dependency_names() {
 			if let Some(new_version) = bumped_versions.get(dep_name.as_str()) {
 				if args.dry_run {
-					println!(
+					info!(
 						"  {}: would update dependency {} to {}",
 						project.name(),
 						dep_name,

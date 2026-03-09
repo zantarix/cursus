@@ -39,7 +39,7 @@ Key differences from old style:
 
 ## Project ADR Rules (from CLAUDE.md)
 
-- ADRs are immutable once accepted — do not edit accepted ADRs
+- ADRs are immutable once accepted -- do not edit accepted ADRs
 - Use Errata sections when new requirements contradict an older ADR
 - Update status to "Superceded by ADR-XXX" if fully replaced
 - Stored in `docs/adr/`

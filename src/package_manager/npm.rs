@@ -7,6 +7,7 @@ use anyhow::Context;
 use glob::glob;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
+use log::warn;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -594,8 +595,8 @@ impl PackageManagerAdapter for NpmAdapter {
 				.and_then(|v| v.as_string_lit())
 				.and_then(|s| s.decoded_value().ok())
 			else {
-				eprintln!(
-					"Warning: non-string value for dependency '{}' in {}, skipping",
+				warn!(
+					"non-string value for dependency '{}' in {}, skipping",
 					dependency_name,
 					manifest_path.display()
 				);
@@ -603,8 +604,8 @@ impl PackageManagerAdapter for NpmAdapter {
 			};
 
 			if current_value.starts_with("workspace:") {
-				eprintln!(
-					"Warning: skipping workspace: protocol dependency '{}' in {}",
+				warn!(
+					"skipping workspace: protocol dependency '{}' in {}",
 					dependency_name,
 					manifest_path.display()
 				);

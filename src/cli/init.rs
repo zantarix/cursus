@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use anyhow::bail;
 use clap::Args;
+use log::info;
 
 use crate::model::config::{self, Config, PackageManager};
 use crate::package_manager::{CargoConfig, NpmConfig};
@@ -51,6 +52,6 @@ pub fn cmd_init(
 	};
 
 	let path = config.save()?;
-	println!("Created {}", path.display());
+	info!("Created {}", path.display());
 	Ok(ExitCode::SUCCESS)
 }
