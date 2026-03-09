@@ -22,6 +22,14 @@ pub struct GlobalArgs {
 	/// Disable interactive prompts
 	#[arg(long, global = true, action = ArgAction::SetTrue, overrides_with = "interactive")]
 	pub no_interactive: bool,
+
+	/// Increase log verbosity; use twice (`-vv`) for trace output
+	#[arg(short = 'v', long, global = true, action = ArgAction::Count, conflicts_with = "silent")]
+	pub verbose: u8,
+
+	/// Suppress all output except errors
+	#[arg(short = 's', long, global = true, action = ArgAction::SetTrue, conflicts_with = "verbose")]
+	pub silent: bool,
 }
 
 impl Default for GlobalArgs {
@@ -29,6 +37,8 @@ impl Default for GlobalArgs {
 		Self {
 			interactive: true,
 			no_interactive: false,
+			verbose: 0,
+			silent: false,
 		}
 	}
 }
@@ -66,5 +76,39 @@ mod tests {
 		let args = GlobalArgs::default();
 		assert!(args.interactive);
 		assert!(!args.no_interactive);
+		assert_eq!(args.verbose, 0);
+		assert!(!args.silent);
+	}
+
+	#[test]
+	fn verbose_flag_sets_count() {
+		let cli = Cli::try_parse_from(["chronicle", "-v"]).unwrap();
+		assert_eq!(cli.global.verbose, 1);
+	}
+
+	#[test]
+	fn verbose_flag_stacks() {
+		let cli = Cli::try_parse_from(["chronicle", "-vv"]).unwrap();
+		assert_eq!(cli.global.verbose, 2);
+	}
+
+	#[test]
+	fn silent_flag_sets_true() {
+		let cli = Cli::try_parse_from(["chronicle", "-s"]).unwrap();
+		assert!(cli.global.silent);
+	}
+
+	#[test]
+	fn verbose_flag_three_sets_count_three() {
+		// Three or more -v flags all map to Trace in determine_log_level; this
+		// test documents that the u8 count saturates safely and keeps counting.
+		let cli = Cli::try_parse_from(["chronicle", "-vvv"]).unwrap();
+		assert_eq!(cli.global.verbose, 3);
+	}
+
+	#[test]
+	fn verbose_and_silent_conflict() {
+		let result = Cli::try_parse_from(["chronicle", "-v", "-s"]);
+		assert!(result.is_err());
 	}
 }

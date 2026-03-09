@@ -37,6 +37,50 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	) -> anyhow::Result<std::process::ExitStatus>;
 }
 
+/// A command runner decorator that logs each invocation at `debug` level.
+///
+/// Wraps any [`CommandRunner`] and emits a `log::debug!` message before
+/// delegating to the inner runner. Fern filters the messages according to the
+/// configured log level, so this wrapper is always active and has no effect
+/// when the log level is above `Debug`.
+#[derive(Debug)]
+pub struct VerboseCommandRunner<R: CommandRunner> {
+	inner: R,
+}
+
+impl<R: CommandRunner> VerboseCommandRunner<R> {
+	/// Creates a new `VerboseCommandRunner` wrapping the given runner.
+	pub fn new(inner: R) -> Self {
+		Self { inner }
+	}
+}
+
+impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
+	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		log::debug!("run: {program} {} (cwd: {})", args.join(" "), cwd.display());
+		self.inner.run(program, args, cwd)
+	}
+
+	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		log::debug!("run_shell: {command:?} (cwd: {})", cwd.display());
+		self.inner.run_shell(command, cwd)
+	}
+
+	fn run_interactive(
+		&self,
+		program: &str,
+		args: &[&str],
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		log::debug!(
+			"run_interactive: {program} {} (cwd: {})",
+			args.join(" "),
+			cwd.display()
+		);
+		self.inner.run_interactive(program, args, cwd)
+	}
+}
+
 /// A command runner that executes real system processes.
 ///
 /// This is the production implementation, used by the binary and by integration
@@ -72,6 +116,109 @@ impl CommandRunner for RealCommandRunner {
 			.current_dir(cwd)
 			.status()
 			.with_context(|| format!("Failed to run '{program}'"))
+	}
+}
+
+#[cfg(test)]
+mod verbose_tests {
+	use std::path::Path;
+
+	use super::*;
+	use crate::command::test_support::RecordingCommandRunner;
+	use crate::test_logging::{init_test_logger, take_logs};
+
+	#[test]
+	fn verbose_runner_delegates_run_to_inner() {
+		init_test_logger();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/tmp");
+		let _ = runner.run("git", &["status"], cwd);
+		let invocations = runner.inner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args, vec!["status"]);
+	}
+
+	#[test]
+	fn verbose_runner_delegates_run_shell_to_inner() {
+		init_test_logger();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/tmp");
+		let _ = runner.run_shell("echo hello", cwd);
+		let invocations = runner.inner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(invocations[0].is_shell);
+	}
+
+	#[test]
+	fn verbose_runner_delegates_run_interactive_to_inner() {
+		init_test_logger();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/tmp");
+		let _ = runner.run_interactive("vim", &["file.txt"], cwd);
+		let invocations = runner.inner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(invocations[0].is_interactive);
+		assert_eq!(invocations[0].program, "vim");
+	}
+
+	#[test]
+	fn verbose_runner_logs_run_with_program_and_args() {
+		init_test_logger();
+		let _ = take_logs(); // clear any accumulated messages
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/some/dir");
+		let _ = runner.run("cargo", &["build", "--release"], cwd);
+		let logs = take_logs();
+		let msg = logs
+			.iter()
+			.find(|(_, m)| m.contains("cargo"))
+			.map(|(_, m)| m.as_str())
+			.expect("expected a log message about cargo");
+		assert!(msg.contains("build"), "log should contain args: {msg}");
+		assert!(msg.contains("/some/dir"), "log should contain cwd: {msg}");
+	}
+
+	#[test]
+	fn verbose_runner_logs_run_shell_with_command_and_cwd() {
+		init_test_logger();
+		let _ = take_logs();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/workspace");
+		let _ = runner.run_shell("npm install", cwd);
+		let logs = take_logs();
+		let msg = logs
+			.iter()
+			.find(|(_, m)| m.contains("npm install"))
+			.map(|(_, m)| m.as_str())
+			.expect("expected a log message about npm install");
+		assert!(msg.contains("/workspace"), "log should contain cwd: {msg}");
+	}
+
+	#[test]
+	fn verbose_runner_logs_run_interactive_with_program_and_cwd() {
+		init_test_logger();
+		let _ = take_logs();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/edit");
+		let _ = runner.run_interactive("nano", &["CHANGELOG.md"], cwd);
+		let logs = take_logs();
+		let msg = logs
+			.iter()
+			.find(|(_, m)| m.contains("nano"))
+			.map(|(_, m)| m.as_str())
+			.expect("expected a log message about nano");
+		assert!(
+			msg.contains("CHANGELOG.md"),
+			"log should contain args: {msg}"
+		);
+		assert!(msg.contains("/edit"), "log should contain cwd: {msg}");
 	}
 }
 

@@ -44,11 +44,16 @@ struct UploadAssetResponse {
 ///
 /// Authentication is via a personal access token or GitHub App token,
 /// passed as a `Bearer` token in the `Authorization` header.
+///
+/// The underlying [`ureq::Agent`] is configured with `http_status_as_error(false)`
+/// so that non-2xx responses are returned normally and their bodies can be
+/// logged at trace level before the error is propagated.
 #[derive(Debug)]
 pub struct RestGitHubClient {
 	token: String,
 	api_base_url: String,
 	upload_base_url: String,
+	agent: ureq::Agent,
 }
 
 impl RestGitHubClient {
@@ -56,10 +61,15 @@ impl RestGitHubClient {
 	///
 	/// Uses the production GitHub API and uploads base URLs by default.
 	pub fn new(token: String) -> Self {
+		let config = ureq::Agent::config_builder()
+			.http_status_as_error(false)
+			.build();
+		let agent = ureq::Agent::new_with_config(config);
 		Self {
 			token,
 			api_base_url: "https://api.github.com".to_string(),
 			upload_base_url: "https://uploads.github.com".to_string(),
+			agent,
 		}
 	}
 
@@ -73,9 +83,51 @@ impl RestGitHubClient {
 		self
 	}
 
-	/// Returns the standard headers used for all GitHub API requests.
+	/// Returns the `Authorization` header value for the current token.
 	fn auth_header(&self) -> String {
 		format!("Bearer {}", self.token)
+	}
+
+	/// Returns a POST request builder for `url` with all standard GitHub API
+	/// headers pre-applied (Authorization, Accept, API version, User-Agent).
+	fn post_request(&self, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
+		self.agent
+			.post(url)
+			.header("Authorization", &self.auth_header())
+			.header("Accept", "application/vnd.github+json")
+			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+			.header(
+				"User-Agent",
+				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
+			)
+	}
+
+	/// Checks that `response` has a 2xx status. On failure, logs the status
+	/// and response body then returns `Err` wrapped with `context`.
+	fn require_success(
+		method: &str,
+		url: &str,
+		response: &mut ureq::http::Response<ureq::Body>,
+		context: impl Fn() -> String,
+	) -> anyhow::Result<()> {
+		if response.status().is_success() {
+			return Ok(());
+		}
+		let code = response.status().as_u16();
+		let reason = response
+			.status()
+			.canonical_reason()
+			.unwrap_or("Unknown")
+			.to_string();
+		let resp_body = response.body_mut().read_to_string().unwrap_or_default();
+		Self::log_http_failure(method, url, code, &reason, &resp_body);
+		Err(anyhow::anyhow!("HTTP {code} {reason}")).with_context(context)
+	}
+
+	/// Logs an HTTP failure at debug level and, when trace is enabled, also logs the response body.
+	fn log_http_failure(method: &str, url: &str, code: u16, reason: &str, resp_body: &str) {
+		log::debug!("{method} {url} -> {code} {reason}");
+		log::trace!("  response body: {resp_body}");
 	}
 }
 
@@ -131,20 +183,22 @@ impl GitHubClient for RestGitHubClient {
 			draft: false,
 			prerelease: false,
 		};
-		let response: CreateReleaseResponse = ureq::post(&url)
-			.header("Authorization", &self.auth_header())
-			.header("Accept", "application/vnd.github+json")
-			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-			.header(
-				"User-Agent",
-				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
-			)
+		log::trace!(
+			"  request body: {}",
+			serde_json::to_string(&request_body).unwrap_or_default()
+		);
+		let mut response = self
+			.post_request(&url)
 			.send_json(&request_body)
-			.with_context(|| format!("Failed to create GitHub Release for tag '{tag_name}'"))?
+			.with_context(|| format!("Failed to create GitHub Release for tag '{tag_name}'"))?;
+		Self::require_success("POST", &url, &mut response, || {
+			format!("Failed to create GitHub Release for tag '{tag_name}'")
+		})?;
+		let release: CreateReleaseResponse = response
 			.body_mut()
 			.read_json()
 			.context("Failed to parse GitHub Release creation response")?;
-		Ok(response.id.to_string())
+		Ok(release.id.to_string())
 	}
 
 	fn upload_asset(
@@ -168,17 +222,15 @@ impl GitHubClient for RestGitHubClient {
 			"{}/repos/{owner}/{repo}/releases/{release_id}/assets?name={encoded_name}",
 			self.upload_base_url
 		);
-		let _response: UploadAssetResponse = ureq::post(&url)
-			.header("Authorization", &self.auth_header())
-			.header("Accept", "application/vnd.github+json")
-			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-			.header(
-				"User-Agent",
-				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
-			)
+		let mut response = self
+			.post_request(&url)
 			.header("Content-Type", "application/octet-stream")
 			.send(file)
-			.with_context(|| format!("Failed to upload asset '{file_name}'"))?
+			.with_context(|| format!("Failed to upload asset '{file_name}'"))?;
+		Self::require_success("POST", &url, &mut response, || {
+			format!("Failed to upload asset '{file_name}'")
+		})?;
+		let _: UploadAssetResponse = response
 			.body_mut()
 			.read_json()
 			.context("Failed to parse GitHub asset upload response")?;
@@ -188,7 +240,13 @@ impl GitHubClient for RestGitHubClient {
 
 #[cfg(test)]
 mod tests {
+	use std::io::Write as _;
+
+	use httpmock::prelude::*;
+	use tempfile::NamedTempFile;
+
 	use super::*;
+	use crate::test_logging::{init_test_logger, take_logs};
 
 	#[test]
 	fn create_release_request_serializes_correctly() {
@@ -314,5 +372,141 @@ mod tests {
 		assert!(validate_github_identifier("a/b", "owner").is_err());
 		assert!(validate_github_identifier("../evil", "repo").is_err());
 		assert!(validate_github_identifier("a b", "owner").is_err());
+	}
+
+	#[test]
+	fn create_release_error_logs_debug_message_on_422() {
+		init_test_logger();
+		let _ = take_logs();
+
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST).path("/repos/owner/repo/releases");
+			then.status(422)
+				.header("Content-Type", "application/json")
+				.body(r#"{"message": "Validation Failed", "errors": []}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let result = client.create_release("owner", "repo", "v1.0.0", "Release", "Body");
+		assert!(result.is_err());
+
+		let logs = take_logs();
+		// Our log format is: "POST {url} -> 422 {reason}"
+		let debug_msg = logs
+			.iter()
+			.find(|(level, msg)| {
+				*level == log::Level::Debug && msg.contains("POST") && msg.contains("422")
+			})
+			.map(|(_, msg)| msg.as_str())
+			.expect("expected a debug log message containing POST and 422");
+		assert!(
+			debug_msg.contains("/repos/owner/repo/releases"),
+			"debug log should contain URL path: {debug_msg}"
+		);
+	}
+
+	#[test]
+	fn create_release_error_logs_trace_with_request_and_response_body() {
+		init_test_logger();
+		let _ = take_logs();
+
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST).path("/repos/owner/repo/releases");
+			then.status(422)
+				.header("Content-Type", "application/json")
+				.body(r#"{"message": "already exists"}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let _ = client.create_release("owner", "repo", "v1.0.0", "Release", "Body");
+
+		let logs = take_logs();
+		let trace_msgs: Vec<&str> = logs
+			.iter()
+			.filter(|(level, _)| *level == log::Level::Trace)
+			.map(|(_, msg)| msg.as_str())
+			.collect();
+
+		let has_resp_body = trace_msgs.iter().any(|m| m.contains("already exists"));
+		assert!(
+			has_resp_body,
+			"trace log should include response body content, got: {trace_msgs:?}"
+		);
+
+		let has_req_body = trace_msgs.iter().any(|m| m.contains("tag_name"));
+		assert!(
+			has_req_body,
+			"trace log should include request body content, got: {trace_msgs:?}"
+		);
+	}
+
+	#[test]
+	fn upload_asset_error_logs_debug_message_on_500() {
+		init_test_logger();
+		let _ = take_logs();
+
+		let mut file = NamedTempFile::new().unwrap();
+		file.write_all(b"data").unwrap();
+
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST)
+				.path("/repos/owner/repo/releases/12345/assets");
+			then.status(500).body("Internal Server Error");
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let result = client.upload_asset("owner", "repo", "12345", "file.tar.gz", file.path());
+		assert!(result.is_err());
+
+		let logs = take_logs();
+		// Our log format is: "POST {url} -> 500 {reason}"
+		let debug_msg = logs
+			.iter()
+			.find(|(level, msg)| {
+				*level == log::Level::Debug && msg.contains("POST") && msg.contains("500")
+			})
+			.map(|(_, msg)| msg.as_str())
+			.expect("expected a debug log message containing POST and 500");
+		assert!(
+			debug_msg.contains("/repos/owner/repo/releases"),
+			"debug log should contain URL path: {debug_msg}"
+		);
+	}
+
+	#[test]
+	fn log_http_failure_helper_formats_correctly() {
+		init_test_logger();
+		let _ = take_logs();
+		RestGitHubClient::log_http_failure(
+			"POST",
+			"https://api.example.com/releases",
+			422,
+			"Unprocessable Entity",
+			"error body",
+		);
+		let logs = take_logs();
+		let debug = logs
+			.iter()
+			.find(|(l, _)| *l == log::Level::Debug)
+			.map(|(_, m)| m.as_str())
+			.expect("expected debug log");
+		assert!(debug.contains("POST"));
+		assert!(debug.contains("422"));
+		assert!(debug.contains("Unprocessable Entity"));
+		let trace = logs
+			.iter()
+			.find(|(l, _)| *l == log::Level::Trace)
+			.map(|(_, m)| m.as_str())
+			.expect("expected trace log");
+		assert!(trace.contains("error body"));
 	}
 }

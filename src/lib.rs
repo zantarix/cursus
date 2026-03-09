@@ -11,6 +11,9 @@ pub mod package_manager;
 pub mod tui;
 pub mod utils;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_logging;
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -47,8 +50,9 @@ pub struct Env {
 
 /// Main entry point for the chronicle application.
 ///
-/// Parses CLI arguments from the provided iterator, finds the git root
-/// starting from the given working directory, and dispatches to the appropriate command.
+/// Parses CLI arguments from the provided iterator, then delegates to
+/// [`run_with`]. Use [`run_with`] directly when the arguments have already
+/// been parsed (e.g., to initialise logging from the flags before running).
 pub fn run<I, T>(
 	args: I,
 	cwd: &Path,
@@ -73,7 +77,20 @@ where
 			return Ok(exit_code);
 		}
 	};
+	run_with(cli, cwd, env, runner)
+}
 
+/// Dispatches a pre-parsed CLI to the appropriate subcommand.
+///
+/// Prefer this over [`run`] when the caller has already parsed the arguments
+/// (for example, to read the verbose/silent flags and initialise logging before
+/// any library code runs).
+pub fn run_with(
+	cli: cli::Cli,
+	cwd: &Path,
+	env: Env,
+	runner: Arc<dyn CommandRunner>,
+) -> anyhow::Result<ExitCode> {
 	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
 
 	match cli.command {
