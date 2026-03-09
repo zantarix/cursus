@@ -13,18 +13,22 @@ cargo make coverage            # Check test coverage (90% for lines/regions/func
 cargo clippy                   # Lint the code
 cargo fmt                      # Format the code
 
-# Generate static binaries
-cargo make release             # Build all release targets
-cargo make release-x86_64      # x86_64 Linux (musl static)
-cargo make release-aarch64     # ARM64 Linux (musl static)
-cargo make release-macos       # ARM64 macOS (via cargo-zigbuild)
+# Generate static binaries (all via cargo-zigbuild)
+cargo make release                  # Build all release targets
+cargo make release-linux-x86_64    # x86_64 Linux (musl static)
+cargo make release-linux-aarch64   # ARM64 Linux (musl static)
+cargo make release-linux-riscv64   # RISC-V Linux (musl static)
+cargo make release-macos-x86_64    # x86_64 macOS
+cargo make release-macos-aarch64   # ARM64 macOS
+cargo make release-windows-x86_64  # x86_64 Windows (GNULLVM)
+cargo make release-windows-aarch64 # ARM64 Windows (GNULLVM)
 ```
 
 ## Development Environment
 
 This project uses Nix flakes and direnv for development. The flake only supports three systems: x86_64-linux, aarch64-linux, and aarch64-darwin. You should be running inside a dev shell already. If something appears missing then prompt the user to restart you.
 
-The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, and musl cross-compilation toolchain for static binaries (Linux only).
+The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, zig, and cargo-zigbuild for cross-compilation to all targets.
 
 ## Code Style
 

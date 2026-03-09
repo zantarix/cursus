@@ -142,10 +142,17 @@ pub mod test_support {
 		}
 
 		fn make_output(&self) -> Output {
-			use std::os::unix::process::ExitStatusExt;
-			// On Unix, raw waitpid status N<<8 means "exited normally with code N".
-			let raw = self.exit_code << 8;
-			let status = std::process::ExitStatus::from_raw(raw);
+			#[cfg(unix)]
+			let status = {
+				use std::os::unix::process::ExitStatusExt;
+				// On Unix, raw waitpid status N<<8 means "exited normally with code N".
+				std::process::ExitStatus::from_raw(self.exit_code << 8)
+			};
+			#[cfg(windows)]
+			let status = {
+				use std::os::windows::process::ExitStatusExt;
+				std::process::ExitStatus::from_raw(self.exit_code as u32)
+			};
 			Output {
 				status,
 				stdout: self.stdout.clone(),

@@ -13,17 +13,33 @@ clear = true
 command = "cargo"
 args = ["llvm-cov", "--html", "--open", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 
-[tasks.release-x86_64]
+[tasks.release-linux-x86_64]
 command = "cargo"
-args = ["build", "--release", "--target", "x86_64-unknown-linux-musl"]
+args = ["zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"]
 
-[tasks.release-aarch64]
+[tasks.release-linux-aarch64]
 command = "cargo"
-args = ["build", "--release", "--target", "aarch64-unknown-linux-musl"]
+args = ["zigbuild", "--release", "--target", "aarch64-unknown-linux-musl"]
 
-[tasks.release-macos]
+[tasks.release-linux-riscv64]
+command = "cargo"
+args = ["zigbuild", "--release", "--target", "riscv64gc-unknown-linux-musl"]
+
+[tasks.release-macos-x86_64]
+command = "cargo"
+args = ["zigbuild", "--release", "--target", "x86_64-apple-darwin"]
+
+[tasks.release-macos-aarch64]
 command = "cargo"
 args = ["zigbuild", "--release", "--target", "aarch64-apple-darwin"]
 
+[tasks.release-windows-x86_64]
+command = "cargo"
+args = ["zigbuild", "--release", "--target", "x86_64-pc-windows-gnullvm"]
+
+[tasks.release-windows-aarch64]
+command = "cargo"
+args = ["zigbuild", "--release", "--target", "aarch64-pc-windows-gnullvm"]
+
 [tasks.release]
-dependencies = ["release-x86_64", "release-aarch64", "release-macos"]
+dependencies = ["release-linux-x86_64", "release-linux-aarch64", "release-linux-riscv64", "release-macos-x86_64", "release-macos-aarch64", "release-windows-x86_64", "release-windows-aarch64"]

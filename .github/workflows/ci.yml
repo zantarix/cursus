@@ -46,3 +46,85 @@ jobs:
       - name: Check cross-compilation
         shell: nix develop -c bash -e {0}
         run: cargo make release
+
+      - name: Upload linux-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: target/x86_64-unknown-linux-musl/release/chronicle
+
+      - name: Upload linux-aarch64
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: target/aarch64-unknown-linux-musl/release/chronicle
+
+      - name: Upload linux-riscv64
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-riscv64
+          path: target/riscv64gc-unknown-linux-musl/release/chronicle
+
+      - name: Upload macos-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: target/x86_64-apple-darwin/release/chronicle
+
+      - name: Upload macos-aarch64
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64
+          path: target/aarch64-apple-darwin/release/chronicle
+
+      - name: Upload windows-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: target/x86_64-pc-windows-gnullvm/release/chronicle.exe
+
+      - name: Upload windows-aarch64
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-aarch64
+          path: target/aarch64-pc-windows-gnullvm/release/chronicle.exe
+
+  smoke-test:
+    name: Smoke test (${{ matrix.artifact }})
+    needs: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            artifact: linux-x86_64
+            binary: chronicle
+          - runner: ubuntu-24.04-arm
+            artifact: linux-aarch64
+            binary: chronicle
+          - runner: macos-26-intel
+            artifact: macos-x86_64
+            binary: chronicle
+          - runner: macos-latest
+            artifact: macos-aarch64
+            binary: chronicle
+          - runner: windows-latest
+            artifact: windows-x86_64
+            binary: chronicle.exe
+          - runner: windows-11-arm
+            artifact: windows-aarch64
+            binary: chronicle.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./bin
+
+      - name: Make executable
+        if: runner.os != 'Windows'
+        run: chmod +x ./bin/${{ matrix.binary }}
+
+      - name: Run smoke test
+        run: ./bin/${{ matrix.binary }} --version
