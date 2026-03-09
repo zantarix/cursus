@@ -47,12 +47,30 @@ struct UploadAssetResponse {
 #[derive(Debug)]
 pub struct RestGitHubClient {
 	token: String,
+	api_base_url: String,
+	upload_base_url: String,
 }
 
 impl RestGitHubClient {
 	/// Creates a new REST client authenticated with the given token.
+	///
+	/// Uses the production GitHub API and uploads base URLs by default.
 	pub fn new(token: String) -> Self {
-		Self { token }
+		Self {
+			token,
+			api_base_url: "https://api.github.com".to_string(),
+			upload_base_url: "https://uploads.github.com".to_string(),
+		}
+	}
+
+	/// Overrides the base URLs used for API and upload requests.
+	///
+	/// Used in tests to point the client at a mock HTTP server.
+	#[cfg(any(test, feature = "test-support"))]
+	pub fn with_base_urls(mut self, api: impl Into<String>, upload: impl Into<String>) -> Self {
+		self.api_base_url = api.into();
+		self.upload_base_url = upload.into();
+		self
 	}
 
 	/// Returns the standard headers used for all GitHub API requests.
@@ -105,7 +123,7 @@ impl GitHubClient for RestGitHubClient {
 	) -> anyhow::Result<String> {
 		validate_github_identifier(owner, "owner")?;
 		validate_github_identifier(repo, "repo")?;
-		let url = format!("https://api.github.com/repos/{owner}/{repo}/releases");
+		let url = format!("{}/repos/{owner}/{repo}/releases", self.api_base_url);
 		let request_body = CreateReleaseRequest {
 			tag_name,
 			name,
@@ -139,12 +157,16 @@ impl GitHubClient for RestGitHubClient {
 	) -> anyhow::Result<()> {
 		validate_github_identifier(owner, "owner")?;
 		validate_github_identifier(repo, "repo")?;
+		if release_id.is_empty() || !release_id.chars().all(|c| c.is_ascii_digit()) {
+			anyhow::bail!("Invalid GitHub release_id: {release_id:?}");
+		}
 		let file = std::fs::File::open(file_path)
 			.with_context(|| format!("Failed to read asset file '{}'", file_path.display()))?;
 
 		let encoded_name = percent_encode(file_name);
 		let url = format!(
-			"https://uploads.github.com/repos/{owner}/{repo}/releases/{release_id}/assets?name={encoded_name}"
+			"{}/repos/{owner}/{repo}/releases/{release_id}/assets?name={encoded_name}",
+			self.upload_base_url
 		);
 		let _response: UploadAssetResponse = ureq::post(&url)
 			.header("Authorization", &self.auth_header())
@@ -208,7 +230,7 @@ mod tests {
 		let result = client.upload_asset(
 			"owner",
 			"repo",
-			"release-1",
+			"12345678",
 			"missing.tar.gz",
 			Path::new("/nonexistent/path/to/missing.tar.gz"),
 		);
@@ -217,6 +239,44 @@ mod tests {
 		assert!(
 			msg.contains("missing.tar.gz"),
 			"Error should mention file path, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn upload_asset_rejects_invalid_release_id() {
+		let client = RestGitHubClient::new("token".to_string());
+		for bad_id in &["", "abc", "12-34", "../evil", "12 34"] {
+			let result = client.upload_asset(
+				"owner",
+				"repo",
+				bad_id,
+				"file.tar.gz",
+				Path::new("/tmp/file.tar.gz"),
+			);
+			assert!(
+				result.is_err(),
+				"Expected error for release_id={bad_id:?}, but got Ok"
+			);
+		}
+	}
+
+	#[test]
+	fn upload_asset_accepts_numeric_release_id() {
+		// Validation should pass for a numeric release ID; the error is the missing file.
+		let client = RestGitHubClient::new("token".to_string());
+		let result = client.upload_asset(
+			"owner",
+			"repo",
+			"987654321",
+			"file.tar.gz",
+			Path::new("/nonexistent/file.tar.gz"),
+		);
+		assert!(result.is_err());
+		// Error should be about the file, not the release_id.
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("file.tar.gz"),
+			"Error should be about the missing file, got: {msg}"
 		);
 	}
 

@@ -8,3 +8,6 @@
 /mutants.out/
 /mutants.out.old/
 /target/
+
+# Cached files from build scripts
+/.cache/
