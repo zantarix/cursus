@@ -10,12 +10,16 @@ use clap::Args;
 use log::info;
 
 use crate::command::CommandRunner;
-use crate::git::{self, ReleaseInfo};
+use crate::git::{self, ReleaseInfo, Strategy};
+use crate::github::client::GitHubClient;
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config;
 use crate::package_manager::filter_projects_by_name;
 use crate::utils::today_iso_date;
+
+/// Default prefix for release branches in the `branch` strategy.
+const DEFAULT_RELEASE_BRANCH_PREFIX: &str = "chronicle-release/";
 
 /// Arguments for the `release` subcommand.
 #[derive(Args, Default)]
@@ -31,6 +35,13 @@ pub struct ReleaseArgs {
 	/// Skip git lifecycle automation even if enabled in config
 	#[arg(long)]
 	pub no_git: bool,
+
+	/// Override the release branch name (branch strategy only).
+	///
+	/// If not provided, the branch name is derived from `release_branch_prefix`
+	/// in the config plus the current branch name.
+	#[arg(long)]
+	pub branch: Option<String>,
 }
 
 /// Bumps a semver version according to the given change type.
@@ -55,11 +66,47 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 	v
 }
 
+/// Checks that the working tree is clean before making changes.
+///
+/// # Errors
+///
+/// Returns an error if the working tree has uncommitted changes.
+fn check_dirty_tree(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
+	let status = git::git_status_porcelain(runner, git_workdir)?;
+	if !status.trim().is_empty() {
+		anyhow::bail!(
+			"Working tree is dirty. Commit or stash changes before releasing.\n\
+			 Run `git status` to see pending changes."
+		);
+	}
+	Ok(())
+}
+
+/// Computes the release branch name from CLI flags, config, and current branch.
+///
+/// Priority order:
+/// 1. `args_branch` — explicit `--branch` flag
+/// 2. `{config_prefix}{current_branch}` — derived from config prefix and current branch
+/// 3. `chronicle-release/detached` — fallback when HEAD is detached
+fn compute_release_branch(
+	args_branch: Option<&str>,
+	config_prefix: Option<&str>,
+	current_branch: Option<&str>,
+) -> String {
+	if let Some(branch) = args_branch {
+		return branch.to_string();
+	}
+	let prefix = config_prefix.unwrap_or(DEFAULT_RELEASE_BRANCH_PREFIX);
+	let base = current_branch.unwrap_or("detached");
+	format!("{prefix}{base}")
+}
+
 /// Runs the `release` subcommand.
 pub fn cmd_release(
 	git_workdir: &Path,
 	args: &ReleaseArgs,
 	runner: Arc<dyn CommandRunner>,
+	_github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
 	let adapters = config.create_adapters(Arc::clone(&runner));
@@ -104,6 +151,44 @@ pub fn cmd_release(
 		aggregated.retain(|name, _| args.packages.contains(name));
 		changes_per_package.retain(|name, _| args.packages.contains(name));
 	}
+
+	let git_enabled = config.git.enabled.unwrap_or(false) && !args.no_git;
+	// strategy is always Some after config::load(); unwrap_or is a defensive fallback.
+	let strategy = config.git.strategy.unwrap_or(Strategy::Push);
+
+	if args.branch.is_some() && strategy == Strategy::Push {
+		log::warn!("--branch has no effect with the push strategy; ignoring");
+	}
+
+	// Pre-flight dirty-tree check and branch strategy setup (before filesystem changes).
+	let (original_branch, release_branch) = if git_enabled && !args.dry_run {
+		check_dirty_tree(runner.as_ref(), git_workdir)?;
+		if strategy == Strategy::Branch {
+			let current = git::git_current_branch(runner.as_ref(), git_workdir)?;
+			let branch = compute_release_branch(
+				args.branch.as_deref(),
+				config.git.release_branch_prefix.as_deref(),
+				current.as_deref(),
+			);
+			git::git_checkout_new_branch(runner.as_ref(), git_workdir, &branch)?;
+			(current, Some(branch))
+		} else {
+			(None, None)
+		}
+	} else if git_enabled && args.dry_run && strategy == Strategy::Branch {
+		// Compute branch name for dry-run reporting; no actual git operations.
+		let current = git::git_current_branch(runner.as_ref(), git_workdir)
+			.ok()
+			.flatten();
+		let branch = compute_release_branch(
+			args.branch.as_deref(),
+			config.git.release_branch_prefix.as_deref(),
+			current.as_deref(),
+		);
+		(current, Some(branch))
+	} else {
+		(None, None)
+	};
 
 	let mut release_infos: Vec<ReleaseInfo> = Vec::new();
 	let mut modified_files: Vec<PathBuf> = Vec::new();
@@ -209,8 +294,8 @@ pub fn cmd_release(
 	modified_files.sort();
 	modified_files.dedup();
 
-	// Run git lifecycle if enabled and not suppressed
-	if config.git.enabled.unwrap_or(false) && !args.no_git {
+	// Git lifecycle: commit + strategy push
+	if git_enabled {
 		git::run_git_lifecycle(
 			git_workdir,
 			&config.git,
@@ -219,6 +304,46 @@ pub fn cmd_release(
 			args.dry_run,
 			runner.as_ref(),
 		)?;
+
+		// Strategy push dispatch
+		if args.dry_run {
+			match strategy {
+				Strategy::Push => info!("Would push to origin"),
+				Strategy::Branch => {
+					if let Some(ref branch) = release_branch {
+						info!("Would push branch '{branch}' to origin");
+					}
+					match &original_branch {
+						Some(orig) => info!("Would return to branch '{orig}'"),
+						None => {
+							info!("HEAD is detached; would remain on release branch after push")
+						}
+					}
+				}
+			}
+		} else {
+			match strategy {
+				Strategy::Push => {
+					git::git_push(runner.as_ref(), git_workdir)?;
+				}
+				Strategy::Branch => {
+					if let Some(ref branch) = release_branch {
+						git::git_push_branch(runner.as_ref(), git_workdir, branch).with_context(
+							|| {
+								format!(
+									"Failed to push release branch '{branch}'. \
+								 You are still on the release branch; run \
+								 `git checkout <your-branch>` to return."
+								)
+							},
+						)?;
+					}
+					if let Some(ref orig) = original_branch {
+						git::git_checkout(runner.as_ref(), git_workdir, orig)?;
+					}
+				}
+			}
+		}
 	}
 
 	Ok(ExitCode::SUCCESS)
@@ -234,6 +359,10 @@ mod tests {
 
 	fn make_runner() -> Arc<dyn CommandRunner> {
 		Arc::new(RecordingCommandRunner::new(0))
+	}
+
+	fn no_github() -> Option<Arc<dyn GitHubClient>> {
+		None
 	}
 
 	#[test]
@@ -275,11 +404,63 @@ mod tests {
 	}
 
 	#[test]
+	fn compute_release_branch_uses_flag_over_all() {
+		assert_eq!(
+			compute_release_branch(Some("my-branch"), Some("release/"), Some("main")),
+			"my-branch"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_uses_config_prefix() {
+		assert_eq!(
+			compute_release_branch(None, Some("release/"), Some("main")),
+			"release/main"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_uses_default_prefix() {
+		assert_eq!(
+			compute_release_branch(None, None, Some("main")),
+			"chronicle-release/main"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_detached_fallback() {
+		assert_eq!(
+			compute_release_branch(None, None, None),
+			"chronicle-release/detached"
+		);
+	}
+
+	#[test]
+	fn check_dirty_tree_succeeds_when_clean() {
+		let dir = tempfile::tempdir().unwrap();
+		let runner = RecordingCommandRunner::new(0); // empty stdout → clean
+		let result = check_dirty_tree(&runner, dir.path());
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn check_dirty_tree_fails_when_dirty() {
+		let dir = tempfile::tempdir().unwrap();
+		let runner = RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec());
+		let result = check_dirty_tree(&runner, dir.path());
+		assert!(result.is_err());
+		assert!(
+			result.unwrap_err().to_string().contains("dirty"),
+			"Expected 'dirty' in error message"
+		);
+	}
+
+	#[test]
 	fn cmd_release_no_config_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, make_runner());
+		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -303,7 +484,7 @@ mod tests {
 		.unwrap();
 
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, make_runner()).unwrap();
+		let result = cmd_release(dir.path(), &args, make_runner(), no_github()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -328,7 +509,7 @@ mod tests {
 		.unwrap();
 
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, make_runner());
+		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -381,11 +562,11 @@ mod tests {
 		.unwrap();
 
 		let args = ReleaseArgs {
-			dry_run: false,
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
+			..ReleaseArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, make_runner());
+		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -418,8 +599,9 @@ mod tests {
 			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
+			..ReleaseArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, make_runner());
+		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -451,11 +633,11 @@ mod tests {
 		.unwrap();
 
 		let args = ReleaseArgs {
-			dry_run: false,
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
+			..ReleaseArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, make_runner());
+		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result

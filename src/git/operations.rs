@@ -95,8 +95,6 @@ pub(crate) fn git_tag(
 /// # Errors
 ///
 /// Returns an error if `git push` exits with a non-zero status.
-// Used in cmd_release push strategy (Commit 3).
-#[allow(dead_code)]
 pub(crate) fn git_push(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
 	let output = runner
 		.run(
@@ -122,8 +120,6 @@ pub(crate) fn git_push(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow
 /// # Errors
 ///
 /// Returns an error if `git status` exits with a non-zero status.
-// Used in cmd_release pre-flight dirty-tree check (Commit 3).
-#[allow(dead_code)]
 pub(crate) fn git_status_porcelain(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -148,8 +144,6 @@ pub(crate) fn git_status_porcelain(
 /// # Errors
 ///
 /// Returns an error if `git rev-parse` exits with a non-zero status.
-// Used in cmd_release branch strategy (Commit 3).
-#[allow(dead_code)]
 pub(crate) fn git_current_branch(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -178,8 +172,6 @@ pub(crate) fn git_current_branch(
 /// # Errors
 ///
 /// Returns an error if `git checkout` exits with a non-zero status.
-// Used in cmd_release branch strategy (Commit 3).
-#[allow(dead_code)]
 pub(crate) fn git_checkout_new_branch(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -204,8 +196,6 @@ pub(crate) fn git_checkout_new_branch(
 /// # Errors
 ///
 /// Returns an error if `git checkout` exits with a non-zero status.
-// Used in cmd_release branch strategy (Commit 3).
-#[allow(dead_code)]
 pub(crate) fn git_checkout(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -230,8 +220,6 @@ pub(crate) fn git_checkout(
 /// # Errors
 ///
 /// Returns an error if `git push` exits with a non-zero status.
-// Used in cmd_release branch strategy (Commit 3).
-#[allow(dead_code)]
 pub(crate) fn git_push_branch(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,

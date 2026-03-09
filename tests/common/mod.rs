@@ -190,6 +190,37 @@ pub fn git_tag_exists(dir: &std::path::Path, tag: &str) -> bool {
 	git_tags(dir).contains(&tag.to_string())
 }
 
+/// Returns `true` if the given local branch exists.
+pub fn git_local_branch_exists(dir: &std::path::Path, branch: &str) -> bool {
+	let output = Command::new("git")
+		.args(["branch", "--list", branch])
+		.current_dir(dir)
+		.output()
+		.expect("Failed to run git branch");
+	!String::from_utf8(output.stdout)
+		.expect("git branch output is not UTF-8")
+		.trim()
+		.is_empty()
+}
+
+/// Pushes the current branch to origin.
+///
+/// Panics if the push fails.
+pub fn git_push_to_remote(working_repo: &std::path::Path) {
+	let branch = git_current_branch(working_repo);
+	let output = Command::new("git")
+		.args(["push", "origin", &branch])
+		.current_dir(working_repo)
+		.stderr(std::process::Stdio::piped())
+		.output()
+		.expect("Failed to run git push");
+	assert!(
+		output.status.success(),
+		"git push to origin failed:\n{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+}
+
 /// Returns the name of the current git branch.
 ///
 /// Panics if the command fails or the HEAD is detached.
