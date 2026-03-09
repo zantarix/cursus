@@ -190,6 +190,26 @@ pub fn git_tag_exists(dir: &std::path::Path, tag: &str) -> bool {
 	git_tags(dir).contains(&tag.to_string())
 }
 
+/// Returns the name of the current git branch.
+///
+/// Panics if the command fails or the HEAD is detached.
+pub fn git_current_branch(dir: &std::path::Path) -> String {
+	let output = Command::new("git")
+		.args(["rev-parse", "--abbrev-ref", "HEAD"])
+		.current_dir(dir)
+		.output()
+		.expect("Failed to run git rev-parse");
+	let branch = String::from_utf8(output.stdout)
+		.expect("git rev-parse output is not UTF-8")
+		.trim()
+		.to_string();
+	assert!(
+		branch != "HEAD",
+		"git_current_branch called in detached HEAD state"
+	);
+	branch
+}
+
 /// Runs chronicle as a real subprocess, capturing stdout and stderr.
 ///
 /// Returns `(success, stdout, stderr)`. Use this instead of [`run_chronicle`] when

@@ -235,6 +235,16 @@ pub fn load(git_workdir: &Path) -> anyhow::Result<Config> {
 		config.git.enabled = Some(true);
 	}
 
+	// Derived default: strategy is Branch when github.enabled, else Push.
+	// Only set when not explicitly configured.
+	if config.git.strategy.is_none() {
+		config.git.strategy = Some(if config.github.enabled {
+			crate::git::Strategy::Branch
+		} else {
+			crate::git::Strategy::Push
+		});
+	}
+
 	// Set the git root
 	config.git_workdir = git_workdir.to_path_buf();
 
@@ -292,7 +302,10 @@ mod tests {
 		config.save().unwrap();
 
 		let loaded = load(dir.path()).unwrap();
-		assert_eq!(loaded, config);
+		// After load, strategy is derived: Push (no github)
+		assert!(loaded.npm.enabled);
+		assert!(!loaded.cargo.enabled);
+		assert_eq!(loaded.git.strategy, Some(crate::git::Strategy::Push));
 	}
 
 	#[test]
@@ -343,7 +356,9 @@ mod tests {
 		config.save().unwrap();
 
 		let loaded = load(dir.path()).unwrap();
-		assert_eq!(loaded, config);
+		// After load, strategy is derived: Push (no github)
+		assert!(loaded.cargo.enabled);
+		assert_eq!(loaded.git.strategy, Some(crate::git::Strategy::Push));
 	}
 
 	#[test]
@@ -726,6 +741,82 @@ enabled = true
 			loaded.git.enabled,
 			Some(false),
 			"explicit [git].enabled = false must not be overridden"
+		);
+	}
+
+	#[test]
+	fn load_derives_branch_strategy_when_github_enabled() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[cargo]\nenabled = true\n[github]\nenabled = true\n",
+		)
+		.unwrap();
+
+		let loaded = load(dir.path()).unwrap();
+		assert_eq!(
+			loaded.git.strategy,
+			Some(crate::git::Strategy::Branch),
+			"strategy should be derived as Branch when github.enabled = true"
+		);
+	}
+
+	#[test]
+	fn load_derives_push_strategy_when_github_disabled() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[cargo]\nenabled = true\n[git]\nenabled = true\n",
+		)
+		.unwrap();
+
+		let loaded = load(dir.path()).unwrap();
+		assert_eq!(
+			loaded.git.strategy,
+			Some(crate::git::Strategy::Push),
+			"strategy should be derived as Push when github is not enabled"
+		);
+	}
+
+	#[test]
+	fn load_explicit_strategy_overrides_derived_default() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[cargo]\nenabled = true\n[github]\nenabled = true\n[git]\nstrategy = \"push\"\n",
+		)
+		.unwrap();
+
+		let loaded = load(dir.path()).unwrap();
+		assert_eq!(
+			loaded.git.strategy,
+			Some(crate::git::Strategy::Push),
+			"explicit strategy must not be overridden by derivation"
+		);
+	}
+
+	#[test]
+	fn load_fails_on_old_run_until_field() {
+		let dir = temp_dir();
+		let config_dir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(
+			config_dir.join("config.toml"),
+			"[cargo]\nenabled = true\n[git]\nrun_until = \"push\"\n",
+		)
+		.unwrap();
+
+		let err = load(dir.path()).unwrap_err();
+		let chain = format!("{err:#}");
+		assert!(
+			chain.contains("unknown field"),
+			"Expected 'unknown field' error for run_until, got: {chain}"
 		);
 	}
 }

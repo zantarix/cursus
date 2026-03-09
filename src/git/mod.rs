@@ -1,12 +1,12 @@
 //! Git lifecycle automation for Chronicle releases.
 //!
-//! This module provides optional post-release git automation: creating a commit,
-//! tagging each released package, and optionally pushing to origin.
+//! This module provides optional post-release git automation: creating a commit
+//! and optionally pushing. Tags are created during `publish`, not `release`.
 
 mod config;
 mod operations;
 
-pub use config::{GitConfig, GitStep, TagFormat};
+pub use config::{GitConfig, Strategy, TagFormat};
 
 use std::path::{Path, PathBuf};
 
@@ -59,7 +59,11 @@ pub(crate) fn format_commit_message(releases: &[ReleaseInfo]) -> String {
 	format!("chore(release): {}", parts.join(", "))
 }
 
-/// Runs the git lifecycle after a release: commit, optionally tag, optionally push.
+/// Stages files and creates a commit after a release.
+///
+/// This is the core git operation for the release step — it only commits.
+/// Tagging happens in `publish`, and branch pushing is handled separately by
+/// the strategy dispatch in `cmd_release`.
 ///
 /// If `dry_run` is `true`, prints what would be done without executing any git commands.
 ///
@@ -69,7 +73,6 @@ pub(crate) fn format_commit_message(releases: &[ReleaseInfo]) -> String {
 /// * `config` - Git lifecycle configuration.
 /// * `releases` - The packages that were released.
 /// * `modified_files` - Files to stage before committing.
-/// * `total_project_count` - Total number of projects in the workspace (used for auto tag format).
 /// * `dry_run` - If `true`, only print a summary; do not modify git state.
 /// * `runner` - Command runner for executing git commands.
 ///
@@ -81,7 +84,6 @@ pub fn run_git_lifecycle(
 	config: &GitConfig,
 	releases: &[ReleaseInfo],
 	modified_files: &[PathBuf],
-	total_project_count: usize,
 	dry_run: bool,
 	runner: &dyn CommandRunner,
 ) -> anyhow::Result<()> {
@@ -90,16 +92,6 @@ pub fn run_git_lifecycle(
 	}
 
 	let commit_message = format_commit_message(releases);
-	let is_multi_package = total_project_count > 1;
-
-	let tags: Vec<String> = releases
-		.iter()
-		.map(|r| {
-			config
-				.tag_format
-				.tag(&r.package_name, &r.new_version, is_multi_package)
-		})
-		.collect();
 
 	// Build the full staging list, validating that extra_files resolve inside the repo root.
 	let mut all_files = modified_files.to_vec();
@@ -120,41 +112,14 @@ pub fn run_git_lifecycle(
 		for file in &all_files {
 			info!("  {}", file.display());
 		}
-		if config.run_until.should_tag() {
-			for tag in &tags {
-				info!("Would create tag: {tag}");
-			}
-		}
-		if config.run_until.should_push() {
-			info!("Would push: git push origin HEAD --follow-tags");
-		}
 		return Ok(());
 	}
 
 	// Stage and commit
-	if config.run_until.should_commit() {
-		operations::git_add(runner, git_workdir, &all_files)
-			.context("Failed to stage files for git commit")?;
-		operations::git_commit(runner, git_workdir, &commit_message)
-			.context("Failed to create git commit")?;
-	}
-
-	// Tag each release
-	if config.run_until.should_tag() {
-		for (release, tag) in releases.iter().zip(tags.iter()) {
-			let tag_message = format!(
-				"Release {} version {}",
-				release.package_name, release.new_version
-			);
-			operations::git_tag(runner, git_workdir, tag, &tag_message)
-				.with_context(|| format!("Failed to create git tag: {tag}"))?;
-		}
-	}
-
-	// Push
-	if config.run_until.should_push() {
-		operations::git_push(runner, git_workdir).context("Failed to push to remote")?;
-	}
+	operations::git_add(runner, git_workdir, &all_files)
+		.context("Failed to stage files for git commit")?;
+	operations::git_commit(runner, git_workdir, &commit_message)
+		.context("Failed to create git commit")?;
 
 	Ok(())
 }
@@ -270,7 +235,7 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], true, &runner);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -293,7 +258,7 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], true, &runner);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -312,7 +277,7 @@ mod tests {
 		};
 		// Empty releases → returns Ok immediately without touching git
 		let runner = RecordingCommandRunner::new(0);
-		let result = run_git_lifecycle(dir.path(), &config, &[], &[], 1, false, &runner);
+		let result = run_git_lifecycle(dir.path(), &config, &[], &[], false, &runner);
 		assert!(result.is_ok());
 	}
 
@@ -329,25 +294,7 @@ mod tests {
 		}];
 		// Dry run should not execute any git commands
 		let runner = RecordingCommandRunner::new(0);
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
-		assert!(result.is_ok());
-	}
-
-	#[test]
-	fn run_git_lifecycle_dry_run_with_push_enabled_prints_summary() {
-		let dir = tempfile::tempdir().unwrap();
-		let config = GitConfig {
-			enabled: Some(true),
-			run_until: GitStep::Push,
-			..Default::default()
-		};
-		let releases = vec![ReleaseInfo {
-			package_name: "my-pkg".to_string(),
-			new_version: "1.0.0".parse().unwrap(),
-		}];
-		// Dry run with push enabled should print "Would push" without running git
-		let runner = RecordingCommandRunner::new(0);
-		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], 1, true, &runner);
+		let result = run_git_lifecycle(dir.path(), &config, &releases, &[], true, &runner);
 		assert!(result.is_ok());
 	}
 }

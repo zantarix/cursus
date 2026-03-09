@@ -4,16 +4,16 @@ mod common;
 
 use std::process::{Command, Stdio};
 
-use chronicle::git::{GitConfig, GitStep, TagFormat};
+use chronicle::git::{GitConfig, TagFormat};
 use chronicle::model::config::PackageManager;
 use common::{
-	add_local_remote, git_log, git_tag_exists, git_tags, temp_git_repo_with_project,
-	temp_real_git_repo_with_cargo_workspace, temp_real_git_repo_with_config,
+	git_log, git_tags, temp_git_repo_with_project, temp_real_git_repo_with_cargo_workspace,
+	temp_real_git_repo_with_config,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Creates a git-enabled config with default settings (Tag step, Auto format).
+/// Creates a git-enabled config with default settings (commit-only, Auto format).
 fn git_enabled_config() -> GitConfig {
 	GitConfig {
 		enabled: Some(true),
@@ -112,7 +112,8 @@ fn release_git_creates_commit() {
 }
 
 #[test]
-fn release_git_creates_tags() {
+fn release_git_does_not_create_tags() {
+	// Tags are now created during publish, not release.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
@@ -125,61 +126,17 @@ fn release_git_creates_tags() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
-	// Single package with Auto format → v{version}
+	// Release no longer creates tags — publish does.
 	assert!(
-		git_tag_exists(dir.path(), "v1.0.1"),
-		"Expected tag v1.0.1, got tags: {:?}",
+		git_tags(dir.path()).is_empty(),
+		"Release should not create tags (tags are created on publish), got: {:?}",
 		git_tags(dir.path())
 	);
 }
 
 #[test]
-fn release_git_tag_format_auto_single() {
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
-	setup_single_cargo_package(dir.path(), "solo", "2.0.0");
-	write_changeset(
-		dir.path(),
-		"change.md",
-		"+++\nsolo = \"minor\"\n+++\n\nFeature\n",
-	);
-	git_commit_all(dir.path(), "chore: add changeset");
-
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	assert!(result.is_ok());
-
-	assert!(
-		git_tag_exists(dir.path(), "v2.1.0"),
-		"Single-package auto format should use v{{version}}, tags: {:?}",
-		git_tags(dir.path())
-	);
-}
-
-#[test]
-fn release_git_tag_format_auto_multi() {
-	let dir = temp_real_git_repo_with_cargo_workspace(
-		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
-		git_enabled_config(),
-	);
-	write_changeset(
-		dir.path(),
-		"change.md",
-		"+++\npkg-a = \"patch\"\n+++\n\nFix\n",
-	);
-	git_commit_all(dir.path(), "chore: add changeset");
-
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	assert!(result.is_ok());
-
-	// Multi-package workspace with Auto → prefixed
-	assert!(
-		git_tag_exists(dir.path(), "pkg-a@1.0.1"),
-		"Multi-package auto format should use pkg@version, tags: {:?}",
-		git_tags(dir.path())
-	);
-}
-
-#[test]
-fn release_git_tag_format_prefixed() {
+fn release_git_tag_format_config_no_tags_at_release() {
+	// Tag format only affects publish step now; release just commits.
 	let config = GitConfig {
 		enabled: Some(true),
 		tag_format: TagFormat::Prefixed,
@@ -198,35 +155,39 @@ fn release_git_tag_format_prefixed() {
 	assert!(result.is_ok());
 
 	assert!(
-		git_tag_exists(dir.path(), "solo@1.0.1"),
-		"Prefixed format should use pkg@version even for single package, tags: {:?}",
+		git_tags(dir.path()).is_empty(),
+		"Release should not create tags regardless of tag_format, got: {:?}",
 		git_tags(dir.path())
 	);
 }
 
 #[test]
-fn release_git_tag_format_simple() {
-	let config = GitConfig {
-		enabled: Some(true),
-		tag_format: TagFormat::Simple,
-		..Default::default()
-	};
-	let dir =
-		temp_real_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")], config);
+fn release_git_multi_package_creates_single_commit() {
+	// When multiple packages are released simultaneously, a single commit is created.
+	let dir = temp_real_git_repo_with_cargo_workspace(
+		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
+		git_enabled_config(),
+	);
 	write_changeset(
 		dir.path(),
 		"change.md",
-		"+++\npkg-a = \"patch\"\n+++\n\nFix\n",
+		"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nFix and feature\n",
 	);
 	git_commit_all(dir.path(), "chore: add changeset");
 
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	assert!(result.is_ok());
+	assert!(result.is_ok(), "release failed: {result:?}");
 
-	// Simple format: always v{version} even in a monorepo
+	let log = git_log(dir.path());
 	assert!(
-		git_tag_exists(dir.path(), "v1.0.1"),
-		"Simple format should use v{{version}} even in multi-package, tags: {:?}",
+		log[0].contains("pkg-a") && log[0].contains("pkg-b"),
+		"Release commit should mention both packages, got: {}",
+		log[0]
+	);
+	// No tags at release time
+	assert!(
+		git_tags(dir.path()).is_empty(),
+		"Release should not create tags, got: {:?}",
 		git_tags(dir.path())
 	);
 }
@@ -256,37 +217,6 @@ fn release_no_git_flag_skips_git() {
 	assert!(
 		git_tags(dir.path()).is_empty(),
 		"--no-git should not create tags, got: {:?}",
-		git_tags(dir.path())
-	);
-}
-
-#[test]
-fn release_git_run_until_commit() {
-	let config = GitConfig {
-		enabled: Some(true),
-		run_until: GitStep::Commit,
-		..Default::default()
-	};
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
-	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
-	write_changeset(
-		dir.path(),
-		"change.md",
-		"+++\nmy-pkg = \"patch\"\n+++\n\nFix\n",
-	);
-	git_commit_all(dir.path(), "chore: add changeset");
-
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	assert!(result.is_ok());
-
-	let log = git_log(dir.path());
-	assert!(
-		log.iter().any(|msg| msg.contains("chore(release):")),
-		"Commit should be created, got log: {log:?}"
-	);
-	assert!(
-		git_tags(dir.path()).is_empty(),
-		"run_until=commit should not create tags, got: {:?}",
 		git_tags(dir.path())
 	);
 }
@@ -341,85 +271,6 @@ fn release_git_filesystem_changes_persist_after_lifecycle() {
 	assert!(
 		cargo_toml.contains("1.0.1"),
 		"Version should be bumped to 1.0.1, got: {cargo_toml}"
-	);
-}
-
-#[test]
-fn release_git_run_until_push() {
-	let config = GitConfig {
-		enabled: Some(true),
-		run_until: GitStep::Push,
-		..Default::default()
-	};
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
-	// Wire up a local bare repo as "origin" so push has a real remote to push to
-	let _remote = add_local_remote(dir.path());
-
-	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
-	write_changeset(
-		dir.path(),
-		"change.md",
-		"+++\nmy-pkg = \"patch\"\n+++\n\nFix\n",
-	);
-	git_commit_all(dir.path(), "chore: add changeset");
-	// Push initial state to remote so follow-tags push has a tracking branch
-	let output = Command::new("git")
-		.args(["push", "-u", "origin", "HEAD"])
-		.current_dir(dir.path())
-		.stdout(Stdio::null())
-		.stderr(Stdio::piped())
-		.output()
-		.unwrap();
-	assert!(
-		output.status.success(),
-		"initial push failed:\n{}",
-		String::from_utf8_lossy(&output.stderr)
-	);
-
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	assert!(result.is_ok(), "release failed: {result:?}");
-
-	// Commit and tags should exist locally
-	let log = git_log(dir.path());
-	assert!(
-		log.iter().any(|msg| msg.contains("chore(release):")),
-		"Expected release commit, got: {log:?}"
-	);
-	assert!(
-		git_tag_exists(dir.path(), "v1.0.1"),
-		"Expected tag v1.0.1, got tags: {:?}",
-		git_tags(dir.path())
-	);
-}
-
-#[test]
-fn release_git_failure_preserves_filesystem_changes() {
-	// When git push fails (no remote configured), version bumps and
-	// changelogs written before git ran must remain on disk.
-	let config = GitConfig {
-		enabled: Some(true),
-		run_until: GitStep::Push,
-		..Default::default()
-	};
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
-	// No remote added → git push will fail
-	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
-	write_changeset(
-		dir.path(),
-		"change.md",
-		"+++\nmy-pkg = \"patch\"\n+++\n\nFix\n",
-	);
-	git_commit_all(dir.path(), "chore: add changeset");
-
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	// Push fails because there is no remote — the overall release should error
-	assert!(result.is_err(), "Expected error due to missing remote");
-
-	// Despite the git failure, the version bump must still be on disk
-	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
-	assert!(
-		cargo_toml.contains("1.0.1"),
-		"Version should be bumped to 1.0.1 even after git failure, got: {cargo_toml}"
 	);
 }
 
@@ -496,31 +347,23 @@ fn release_git_extra_files_are_staged() {
 }
 
 #[test]
-fn release_git_multi_package_creates_all_tags() {
-	// When multiple packages are released simultaneously, a tag must be created
-	// for each one — not just the first.
-	let dir = temp_real_git_repo_with_cargo_workspace(
-		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
-		git_enabled_config(),
-	);
-	write_changeset(
-		dir.path(),
-		"change.md",
-		"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nFix and feature\n",
-	);
-	git_commit_all(dir.path(), "chore: add changeset");
+fn release_git_config_old_run_until_field_fails_to_load() {
+	// Old configs with run_until must produce a clear parse error.
+	let dir = tempfile::tempdir().unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let config_dir = dir.path().join(".chronicle");
+	std::fs::create_dir_all(&config_dir).unwrap();
+	std::fs::write(
+		config_dir.join("config.toml"),
+		"[cargo]\nenabled = true\n[git]\nenabled = true\nrun_until = \"push\"\n",
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("Cargo.toml"),
+		"[package]\nname = \"my-pkg\"\nversion = \"0.1.0\"\n",
+	)
+	.unwrap();
 
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
-	assert!(result.is_ok(), "release failed: {result:?}");
-
-	let tags = git_tags(dir.path());
-	// Multi-package workspace with Auto format → pkg@version
-	assert!(
-		tags.contains(&"pkg-a@1.0.1".to_string()),
-		"Expected tag pkg-a@1.0.1, got: {tags:?}"
-	);
-	assert!(
-		tags.contains(&"pkg-b@2.1.0".to_string()),
-		"Expected tag pkg-b@2.1.0, got: {tags:?}"
-	);
+	assert!(result.is_err(), "Expected error for old run_until field");
 }

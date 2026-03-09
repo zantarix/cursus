@@ -216,7 +216,6 @@ pub fn cmd_release(
 			&config.git,
 			&release_infos,
 			&modified_files,
-			projects.len(),
 			args.dry_run,
 			runner.as_ref(),
 		)?;

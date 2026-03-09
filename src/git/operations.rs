@@ -68,6 +68,8 @@ pub(crate) fn git_commit(
 /// # Errors
 ///
 /// Returns an error if `git tag` exits with a non-zero status.
+// Used in cmd_publish (Commit 4 — tags moved from release to publish step).
+#[allow(dead_code)]
 pub(crate) fn git_tag(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -93,6 +95,8 @@ pub(crate) fn git_tag(
 /// # Errors
 ///
 /// Returns an error if `git push` exits with a non-zero status.
+// Used in cmd_release push strategy (Commit 3).
+#[allow(dead_code)]
 pub(crate) fn git_push(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
 	let output = runner
 		.run(

@@ -36,6 +36,11 @@ pub struct GitHubConfig {
 	/// Each entry is uploaded as a release asset. Defaults to empty (no assets).
 	#[serde(skip_serializing_if = "BTreeMap::is_empty")]
 	pub artifacts: BTreeMap<String, String>,
+	/// Title to use for automatically created pull requests in the `branch` git strategy.
+	///
+	/// Defaults to `"Release updates"` when not set.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub pull_request_title: Option<String>,
 }
 
 #[cfg(test)]
@@ -105,6 +110,7 @@ build_command = "cargo build --release"
 			repo: Some("repo".to_string()),
 			build_command: "make release".to_string(),
 			artifacts,
+			pull_request_title: None,
 		};
 		let toml_str = toml::to_string(&config).unwrap();
 		let deserialized: GitHubConfig = toml::from_str(&toml_str).unwrap();
@@ -145,5 +151,37 @@ build_command = "cargo build --release"
 		};
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("build_command = \"make all\""));
+	}
+
+	#[test]
+	fn github_config_pull_request_title_defaults_to_none() {
+		let config = GitHubConfig::default();
+		assert_eq!(config.pull_request_title, None);
+	}
+
+	#[test]
+	fn github_config_deserializes_pull_request_title() {
+		let config: GitHubConfig = toml::from_str("pull_request_title = \"Release PR\"").unwrap();
+		assert_eq!(config.pull_request_title.as_deref(), Some("Release PR"));
+	}
+
+	#[test]
+	fn github_config_serializes_omits_pull_request_title_when_none() {
+		let config = GitHubConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("pull_request_title"),
+			"None pull_request_title should be omitted, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn github_config_serializes_pull_request_title_when_set() {
+		let config = GitHubConfig {
+			pull_request_title: Some("My Release".to_string()),
+			..Default::default()
+		};
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(toml_str.contains("pull_request_title = \"My Release\""));
 	}
 }

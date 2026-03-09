@@ -424,6 +424,7 @@ mod tests {
 			repo: Some("app".to_string()),
 			build_command: build_command.to_string(),
 			artifacts,
+			pull_request_title: None,
 		}
 	}
 
@@ -581,6 +582,7 @@ mod tests {
 			repo: Some("app".to_string()),
 			build_command: String::new(),
 			artifacts: artifacts_with_paths,
+			pull_request_title: None,
 		};
 
 		let config = Config::new(dir.path()).with_github(github_cfg);
@@ -628,6 +630,7 @@ mod tests {
 			repo: Some("app".to_string()),
 			build_command: String::new(),
 			artifacts,
+			pull_request_title: None,
 		};
 		let config = Config::new(dir.path()).with_github(github_cfg);
 		let client = RecordingGitHubClient::new();
@@ -685,6 +688,7 @@ mod tests {
 			repo: None,
 			build_command: String::new(),
 			artifacts: BTreeMap::new(),
+			pull_request_title: None,
 		};
 		let config = Config::new(&workdir()).with_github(github_cfg);
 		// Runner returns a GitHub HTTPS remote URL
@@ -705,6 +709,7 @@ mod tests {
 			repo: None,
 			build_command: String::new(),
 			artifacts: BTreeMap::new(),
+			pull_request_title: None,
 		};
 		let config = Config::new(&workdir()).with_github(github_cfg);
 		// Runner returns failure (no origin remote)
@@ -727,6 +732,7 @@ mod tests {
 			repo: None,
 			build_command: String::new(),
 			artifacts: BTreeMap::new(),
+			pull_request_title: None,
 		};
 		let config = Config::new(&workdir()).with_github(github_cfg);
 		let runner = RecordingCommandRunner::new(0);

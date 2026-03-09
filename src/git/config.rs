@@ -44,47 +44,23 @@ impl TagFormat {
 	}
 }
 
-/// Controls how far the git lifecycle proceeds after a release.
+/// Controls which git strategy is used for release automation.
 ///
-/// Each step implies all previous steps. For example, `Push` implies `Commit` + `Tag` + `Push`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// `Push` commits and pushes directly to the current branch.
+/// `Branch` creates a new release branch, commits, and pushes it (suitable for PR workflows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum GitStep {
-	/// Only create a commit — do not create any tags or push.
-	Commit,
-	/// Create a commit and tags — do not push. This is the default.
-	#[default]
-	Tag,
-	/// Create a commit, tags, and push to origin.
+pub enum Strategy {
+	/// Commit and push directly to the current branch.
 	Push,
-}
-
-impl GitStep {
-	/// Returns `true` if the lifecycle should create a commit.
-	///
-	/// Always returns `true` since every step includes committing. This method
-	/// exists for symmetry with [`should_tag`] and [`should_push`], and to make
-	/// the orchestrator's intent explicit at the call site if a no-commit step
-	/// is ever added in the future.
-	pub fn should_commit(self) -> bool {
-		true
-	}
-
-	/// Returns `true` if the lifecycle should create git tags.
-	pub fn should_tag(self) -> bool {
-		matches!(self, GitStep::Tag | GitStep::Push)
-	}
-
-	/// Returns `true` if the lifecycle should push to origin.
-	pub fn should_push(self) -> bool {
-		matches!(self, GitStep::Push)
-	}
+	/// Create a release branch, commit, push it, then return to the original branch.
+	Branch,
 }
 
 /// Configuration for the optional git lifecycle automation.
 ///
-/// When `enabled` is `true`, Chronicle will automatically create a commit,
-/// optionally tag, and optionally push after a successful `release`.
+/// When `enabled` is `true`, Chronicle will automatically create a commit
+/// and optionally push after a successful `release`, and create tags after `publish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct GitConfig {
@@ -95,10 +71,19 @@ pub struct GitConfig {
 	/// (e.g. `[github].enabled = true` implies `Some(true)`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub enabled: Option<bool>,
-	/// How far the git lifecycle should proceed.
+	/// Git automation strategy.
 	///
-	/// Defaults to [`GitStep::Tag`] (commit + tag locally, no push).
-	pub run_until: GitStep,
+	/// `None` means the key was absent from the config file; the runtime default
+	/// is derived: `Branch` when `[github].enabled = true`, otherwise `Push`.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub strategy: Option<Strategy>,
+	/// Prefix used to name release branches in the `branch` strategy.
+	///
+	/// The release branch name is `{prefix}{current_branch}`, defaulting to `chronicle-release/`
+	/// (e.g., if on `main`, the release branch is `chronicle-release/main`).
+	/// When the current branch cannot be determined (detached HEAD), `detached` is used.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub release_branch_prefix: Option<String>,
 	/// Tag name format to use when creating git tags.
 	///
 	/// Defaults to [`TagFormat::Auto`].
@@ -122,36 +107,15 @@ mod tests {
 	fn git_config_defaults() {
 		let config = GitConfig::default();
 		assert_eq!(config.enabled, None);
-		assert_eq!(config.run_until, GitStep::Tag);
+		assert_eq!(config.strategy, None);
 		assert_eq!(config.tag_format, TagFormat::Auto);
-	}
-
-	#[test]
-	fn git_step_commit_only_should_commit() {
-		assert!(GitStep::Commit.should_commit());
-		assert!(!GitStep::Commit.should_tag());
-		assert!(!GitStep::Commit.should_push());
-	}
-
-	#[test]
-	fn git_step_tag_includes_commit_and_tag() {
-		assert!(GitStep::Tag.should_commit());
-		assert!(GitStep::Tag.should_tag());
-		assert!(!GitStep::Tag.should_push());
-	}
-
-	#[test]
-	fn git_step_push_includes_all() {
-		assert!(GitStep::Push.should_commit());
-		assert!(GitStep::Push.should_tag());
-		assert!(GitStep::Push.should_push());
 	}
 
 	#[test]
 	fn git_config_deserializes_defaults_when_empty() {
 		let config: GitConfig = toml::from_str("").unwrap();
 		assert_eq!(config.enabled, None);
-		assert_eq!(config.run_until, GitStep::Tag);
+		assert_eq!(config.strategy, None);
 		assert_eq!(config.tag_format, TagFormat::Auto);
 	}
 
@@ -168,15 +132,21 @@ mod tests {
 	}
 
 	#[test]
-	fn git_config_deserializes_run_until_commit() {
-		let config: GitConfig = toml::from_str("run_until = \"commit\"").unwrap();
-		assert_eq!(config.run_until, GitStep::Commit);
+	fn git_config_deserializes_strategy_push() {
+		let config: GitConfig = toml::from_str("strategy = \"push\"").unwrap();
+		assert_eq!(config.strategy, Some(Strategy::Push));
 	}
 
 	#[test]
-	fn git_config_deserializes_run_until_push() {
-		let config: GitConfig = toml::from_str("run_until = \"push\"").unwrap();
-		assert_eq!(config.run_until, GitStep::Push);
+	fn git_config_deserializes_strategy_branch() {
+		let config: GitConfig = toml::from_str("strategy = \"branch\"").unwrap();
+		assert_eq!(config.strategy, Some(Strategy::Branch));
+	}
+
+	#[test]
+	fn git_config_deserializes_release_branch_prefix() {
+		let config: GitConfig = toml::from_str("release_branch_prefix = \"releases/\"").unwrap();
+		assert_eq!(config.release_branch_prefix.as_deref(), Some("releases/"));
 	}
 
 	#[test]
@@ -220,10 +190,21 @@ mod tests {
 	}
 
 	#[test]
+	fn git_config_rejects_old_run_until_field() {
+		// run_until was removed; configs with this field must fail to parse.
+		let result: Result<GitConfig, _> = toml::from_str("run_until = \"push\"");
+		assert!(
+			result.is_err(),
+			"Expected error for removed run_until field"
+		);
+	}
+
+	#[test]
 	fn git_config_roundtrip() {
 		let config = GitConfig {
 			enabled: Some(true),
-			run_until: GitStep::Push,
+			strategy: Some(Strategy::Branch),
+			release_branch_prefix: Some("release/".to_string()),
 			tag_format: TagFormat::Prefixed,
 			extra_files: vec!["custom.lock".to_string()],
 		};
@@ -249,6 +230,26 @@ mod tests {
 		assert!(
 			!toml_str.contains("enabled"),
 			"None enabled should be omitted"
+		);
+	}
+
+	#[test]
+	fn git_config_serializes_omits_strategy_when_none() {
+		let config = GitConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("strategy"),
+			"None strategy should be omitted"
+		);
+	}
+
+	#[test]
+	fn git_config_serializes_omits_release_branch_prefix_when_none() {
+		let config = GitConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("release_branch_prefix"),
+			"None release_branch_prefix should be omitted"
 		);
 	}
 }
