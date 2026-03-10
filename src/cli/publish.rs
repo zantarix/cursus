@@ -11,7 +11,7 @@ use log::{error, info, warn};
 use crate::command::CommandRunner;
 use crate::git;
 use crate::github::client::GitHubClient;
-use crate::github::remote::detect_github_repo;
+use crate::github::remote::resolve_github_repo;
 use crate::model::changelog::extract_version_body;
 use crate::model::config;
 use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
@@ -363,7 +363,7 @@ fn orchestrate_github_releases(
 	}
 
 	// Resolve owner/repo from config or git remote
-	let (owner, repo) = resolve_github_repo(config, runner, git_workdir)?;
+	let (owner, repo) = resolve_github_repo(&config.github, runner, git_workdir)?;
 
 	// Run build command if configured
 	let mut github_failed = false;
@@ -437,32 +437,6 @@ fn orchestrate_github_releases(
 	}
 
 	Ok((created_count, github_failed))
-}
-
-/// Resolves the GitHub owner and repo name.
-///
-/// Checks config fields first, then falls back to detecting from the git remote URL.
-fn resolve_github_repo(
-	config: &config::Config,
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-) -> anyhow::Result<(String, String)> {
-	match (&config.github.owner, &config.github.repo) {
-		(Some(owner), Some(repo)) => return Ok((owner.clone(), repo.clone())),
-		(Some(_), None) | (None, Some(_)) => bail!(
-			"[github].owner and [github].repo must be set together; \
-			 set both or omit both for auto-detection."
-		),
-		(None, None) => {}
-	}
-
-	match detect_github_repo(runner, git_workdir)? {
-		Some(gh_repo) => Ok((gh_repo.owner, gh_repo.repo)),
-		None => bail!(
-			"Could not determine GitHub repository. Set [github] owner and repo in config, \
-			 or ensure the git remote 'origin' points to a GitHub repository."
-		),
-	}
 }
 
 /// Counts publish outcomes for each project, printing per-project results.
@@ -754,87 +728,6 @@ mod tests {
 			.count();
 		// Each of 2 packages should have 1 artifact each
 		assert_eq!(upload_count, 2);
-	}
-
-	// --- Tests for resolve_github_repo ---
-
-	#[test]
-	fn resolve_github_repo_uses_config_when_set() {
-		let config = Config::new(&workdir()).with_github(make_github_config("", BTreeMap::new()));
-		let runner = RecordingCommandRunner::new(0);
-
-		let (owner, repo) = resolve_github_repo(&config, &runner, &workdir()).unwrap();
-		assert_eq!(owner, "acme");
-		assert_eq!(repo, "app");
-		// Config values take priority — no git command should run
-		assert!(runner.invocations().is_empty());
-	}
-
-	#[test]
-	fn resolve_github_repo_falls_back_to_git_remote() {
-		// Config with no owner/repo
-		let github_cfg = GitHubConfig {
-			enabled: true,
-			owner: None,
-			repo: None,
-			build_command: String::new(),
-			artifacts: BTreeMap::new(),
-			pull_request_title: None,
-		};
-		let config = Config::new(&workdir()).with_github(github_cfg);
-		// Runner returns a GitHub HTTPS remote URL
-		let runner = RecordingCommandRunner::new(0)
-			.with_stdout(b"https://github.com/myorg/myapp.git\n".to_vec());
-
-		let (owner, repo) = resolve_github_repo(&config, &runner, &workdir()).unwrap();
-		assert_eq!(owner, "myorg");
-		assert_eq!(repo, "myapp");
-	}
-
-	#[test]
-	fn resolve_github_repo_errors_when_neither_config_nor_remote() {
-		// Config with no owner/repo
-		let github_cfg = GitHubConfig {
-			enabled: true,
-			owner: None,
-			repo: None,
-			build_command: String::new(),
-			artifacts: BTreeMap::new(),
-			pull_request_title: None,
-		};
-		let config = Config::new(&workdir()).with_github(github_cfg);
-		// Runner returns failure (no origin remote)
-		let runner = RecordingCommandRunner::new(1);
-
-		let result = resolve_github_repo(&config, &runner, &workdir());
-		assert!(result.is_err());
-		let msg = format!("{:#}", result.unwrap_err());
-		assert!(
-			msg.contains("Could not determine GitHub repository"),
-			"Expected repo detection error, got: {msg}"
-		);
-	}
-
-	#[test]
-	fn resolve_github_repo_errors_when_only_owner_set() {
-		let github_cfg = GitHubConfig {
-			enabled: true,
-			owner: Some("acme".to_string()),
-			repo: None,
-			build_command: String::new(),
-			artifacts: BTreeMap::new(),
-			pull_request_title: None,
-		};
-		let config = Config::new(&workdir()).with_github(github_cfg);
-		let runner = RecordingCommandRunner::new(0);
-
-		let result = resolve_github_repo(&config, &runner, &workdir());
-		assert!(result.is_err());
-		let msg = format!("{:#}", result.unwrap_err());
-		assert!(
-			msg.contains("must be set together"),
-			"Expected partial config error, got: {msg}"
-		);
 	}
 
 	#[test]

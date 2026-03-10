@@ -35,6 +35,30 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 		file_name: &str,
 		file_path: &Path,
 	) -> anyhow::Result<()>;
+
+	/// Creates a pull request and returns the PR URL.
+	///
+	/// # Arguments
+	///
+	/// * `owner` - Repository owner.
+	/// * `repo` - Repository name.
+	/// * `title` - Pull request title.
+	/// * `body` - Pull request description (markdown).
+	/// * `head` - Source branch (the branch to merge from).
+	/// * `base` - Target branch (the branch to merge into).
+	///
+	/// # Errors
+	///
+	/// Returns an error if the API call fails.
+	fn create_pull_request(
+		&self,
+		owner: &str,
+		repo: &str,
+		title: &str,
+		body: &str,
+		head: &str,
+		base: &str,
+	) -> anyhow::Result<String>;
 }
 
 /// Test support types for GitHub client operations.
@@ -81,6 +105,21 @@ pub mod test_support {
 			/// Local path of the file to upload.
 			file_path: std::path::PathBuf,
 		},
+		/// A `create_pull_request` call.
+		CreatePullRequest {
+			/// Repository owner.
+			owner: String,
+			/// Repository name.
+			repo: String,
+			/// Pull request title.
+			title: String,
+			/// Pull request body (markdown).
+			body: String,
+			/// Source branch (head).
+			head: String,
+			/// Target branch (base).
+			base: String,
+		},
 	}
 
 	/// A [`GitHubClient`] that records all invocations and returns configured responses.
@@ -90,6 +129,7 @@ pub mod test_support {
 		release_id: String,
 		fail_create: bool,
 		fail_upload: bool,
+		fail_create_pr: bool,
 	}
 
 	impl RecordingGitHubClient {
@@ -100,6 +140,7 @@ pub mod test_support {
 				release_id: "release-1".to_string(),
 				fail_create: false,
 				fail_upload: false,
+				fail_create_pr: false,
 			}
 		}
 
@@ -118,6 +159,12 @@ pub mod test_support {
 		/// Causes [`upload_asset`](GitHubClient::upload_asset) to return an error.
 		pub fn with_upload_failure(mut self) -> Self {
 			self.fail_upload = true;
+			self
+		}
+
+		/// Causes [`create_pull_request`](GitHubClient::create_pull_request) to return an error.
+		pub fn with_create_pr_failure(mut self) -> Self {
+			self.fail_create_pr = true;
 			self
 		}
 
@@ -180,6 +227,31 @@ pub mod test_support {
 			}
 			Ok(())
 		}
+
+		fn create_pull_request(
+			&self,
+			owner: &str,
+			repo: &str,
+			title: &str,
+			body: &str,
+			head: &str,
+			base: &str,
+		) -> anyhow::Result<String> {
+			self.invocations.lock().expect("mutex poisoned").push(
+				GitHubInvocation::CreatePullRequest {
+					owner: owner.to_string(),
+					repo: repo.to_string(),
+					title: title.to_string(),
+					body: body.to_string(),
+					head: head.to_string(),
+					base: base.to_string(),
+				},
+			);
+			if self.fail_create_pr {
+				bail!("simulated create_pull_request failure");
+			}
+			Ok(format!("https://github.com/{owner}/{repo}/pull/1"))
+		}
 	}
 
 	#[cfg(test)]
@@ -238,6 +310,48 @@ pub mod test_support {
 				Path::new("/tmp/file.tar.gz"),
 			);
 			assert!(result.is_err());
+			assert_eq!(client.invocations().len(), 1);
+		}
+
+		#[test]
+		fn recording_client_records_create_pull_request() {
+			let client = RecordingGitHubClient::new();
+			let url = client
+				.create_pull_request(
+					"acme",
+					"app",
+					"Release updates",
+					"Release:\n\n- my-pkg@1.0.0",
+					"chronicle-release/main",
+					"main",
+				)
+				.unwrap();
+			assert!(
+				url.contains("acme/app"),
+				"URL should contain owner/repo: {url}"
+			);
+			let invocations = client.invocations();
+			assert_eq!(invocations.len(), 1);
+			assert!(matches!(
+				&invocations[0],
+				GitHubInvocation::CreatePullRequest { title, head, base, .. }
+					if title == "Release updates" && head == "chronicle-release/main" && base == "main"
+			));
+		}
+
+		#[test]
+		fn recording_client_create_pr_failure_returns_error() {
+			let client = RecordingGitHubClient::new().with_create_pr_failure();
+			let result = client.create_pull_request(
+				"acme",
+				"app",
+				"Release",
+				"body",
+				"release-branch",
+				"main",
+			);
+			assert!(result.is_err());
+			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);
 		}
 	}

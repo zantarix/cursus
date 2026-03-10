@@ -28,6 +28,21 @@ struct CreateReleaseResponse {
 	id: u64,
 }
 
+/// Request body for creating a GitHub pull request.
+#[derive(Debug, Serialize)]
+struct CreatePullRequestRequest<'a> {
+	title: &'a str,
+	body: &'a str,
+	head: &'a str,
+	base: &'a str,
+}
+
+/// Response body from a GitHub pull request creation.
+#[derive(Debug, Deserialize)]
+struct CreatePullRequestResponse {
+	html_url: String,
+}
+
 /// Response body from a GitHub Release asset upload.
 ///
 /// Fields are read by serde during JSON deserialization; the struct exists to
@@ -235,6 +250,42 @@ impl GitHubClient for RestGitHubClient {
 			.read_json()
 			.context("Failed to parse GitHub asset upload response")?;
 		Ok(())
+	}
+
+	fn create_pull_request(
+		&self,
+		owner: &str,
+		repo: &str,
+		title: &str,
+		body: &str,
+		head: &str,
+		base: &str,
+	) -> anyhow::Result<String> {
+		validate_github_identifier(owner, "owner")?;
+		validate_github_identifier(repo, "repo")?;
+		let url = format!("{}/repos/{owner}/{repo}/pulls", self.api_base_url);
+		let request_body = CreatePullRequestRequest {
+			title,
+			body,
+			head,
+			base,
+		};
+		log::trace!(
+			"  request body: {}",
+			serde_json::to_string(&request_body).unwrap_or_default()
+		);
+		let mut response = self
+			.post_request(&url)
+			.send_json(&request_body)
+			.with_context(|| format!("Failed to create pull request '{title}'"))?;
+		Self::require_success("POST", &url, &mut response, || {
+			format!("Failed to create pull request '{title}'")
+		})?;
+		let pr: CreatePullRequestResponse = response
+			.body_mut()
+			.read_json()
+			.context("Failed to parse pull request creation response")?;
+		Ok(pr.html_url)
 	}
 }
 
@@ -508,5 +559,83 @@ mod tests {
 			.map(|(_, m)| m.as_str())
 			.expect("expected trace log");
 		assert!(trace.contains("error body"));
+	}
+
+	#[test]
+	fn create_pull_request_request_serializes_correctly() {
+		let req = CreatePullRequestRequest {
+			title: "Release updates",
+			body: "Release:\n\n- my-pkg@1.0.0",
+			head: "chronicle-release/main",
+			base: "main",
+		};
+		let json = serde_json::to_value(&req).unwrap();
+		assert_eq!(json["title"], "Release updates");
+		assert_eq!(json["head"], "chronicle-release/main");
+		assert_eq!(json["base"], "main");
+	}
+
+	#[test]
+	fn create_pull_request_response_deserializes_correctly() {
+		let json = r#"{"id": 42, "html_url": "https://github.com/acme/app/pull/1", "number": 1}"#;
+		let response: CreatePullRequestResponse = serde_json::from_str(json).unwrap();
+		assert_eq!(response.html_url, "https://github.com/acme/app/pull/1");
+	}
+
+	#[test]
+	fn create_pull_request_sends_correct_request() {
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST).path("/repos/acme/app/pulls");
+			then.status(201)
+				.header("Content-Type", "application/json")
+				.body(
+					r#"{"id": 1, "number": 1, "html_url": "https://github.com/acme/app/pull/1"}"#,
+				);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let url = client
+			.create_pull_request(
+				"acme",
+				"app",
+				"Release updates",
+				"body",
+				"release-branch",
+				"main",
+			)
+			.unwrap();
+		assert_eq!(url, "https://github.com/acme/app/pull/1");
+	}
+
+	#[test]
+	fn create_pull_request_returns_error_on_failure() {
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST).path("/repos/acme/app/pulls");
+			then.status(422)
+				.header("Content-Type", "application/json")
+				.body(r#"{"message": "Validation Failed"}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let result = client.create_pull_request(
+			"acme",
+			"app",
+			"Release updates",
+			"body",
+			"release-branch",
+			"main",
+		);
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("422"),
+			"Error should contain status code: {msg}"
+		);
 	}
 }

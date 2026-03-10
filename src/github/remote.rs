@@ -2,9 +2,10 @@
 
 use std::path::Path;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 use crate::command::CommandRunner;
+use crate::github::GitHubConfig;
 
 /// A parsed GitHub repository owner and name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +71,38 @@ pub fn parse_github_remote(url: &str) -> Option<GitHubRepo> {
 		owner: owner.to_string(),
 		repo: repo.to_string(),
 	})
+}
+
+/// Resolves the GitHub owner and repository name.
+///
+/// Checks `owner` and `repo` config fields first, then falls back to
+/// detecting from the git remote URL. Returns `(owner, repo)`.
+///
+/// # Errors
+///
+/// Returns an error if both config fields are partially set (one set, one not),
+/// or if neither config nor remote detection can determine the repository.
+pub fn resolve_github_repo(
+	github_config: &GitHubConfig,
+	runner: &dyn CommandRunner,
+	git_workdir: &Path,
+) -> anyhow::Result<(String, String)> {
+	match (&github_config.owner, &github_config.repo) {
+		(Some(owner), Some(repo)) => return Ok((owner.clone(), repo.clone())),
+		(Some(_), None) | (None, Some(_)) => bail!(
+			"[github].owner and [github].repo must be set together; \
+			 set both or omit both for auto-detection."
+		),
+		(None, None) => {}
+	}
+
+	match detect_github_repo(runner, git_workdir)? {
+		Some(gh_repo) => Ok((gh_repo.owner, gh_repo.repo)),
+		None => bail!(
+			"Could not determine GitHub repository. Set [github] owner and repo in config, \
+			 or ensure the git remote 'origin' points to a GitHub repository."
+		),
+	}
 }
 
 /// Detects the GitHub repository for a git working directory.
@@ -334,5 +367,81 @@ mod tests {
 			.with_stdout(b"https://gitlab.com/owner/repo.git\n".to_vec());
 		let result = detect_github_repo(&runner, &workdir()).unwrap();
 		assert_eq!(result, None);
+	}
+
+	// --- resolve_github_repo ---
+
+	fn make_github_config(owner: Option<&str>, repo: Option<&str>) -> GitHubConfig {
+		GitHubConfig {
+			enabled: true,
+			owner: owner.map(str::to_string),
+			repo: repo.map(str::to_string),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn resolve_github_repo_uses_config_when_set() {
+		let config = make_github_config(Some("acme"), Some("app"));
+		let runner = RecordingCommandRunner::new(0);
+
+		let (owner, repo) = resolve_github_repo(&config, &runner, &workdir()).unwrap();
+		assert_eq!(owner, "acme");
+		assert_eq!(repo, "app");
+		// Config values take priority — no git command should run
+		assert!(runner.invocations().is_empty());
+	}
+
+	#[test]
+	fn resolve_github_repo_falls_back_to_git_remote() {
+		let config = make_github_config(None, None);
+		let runner = RecordingCommandRunner::new(0)
+			.with_stdout(b"https://github.com/myorg/myapp.git\n".to_vec());
+
+		let (owner, repo) = resolve_github_repo(&config, &runner, &workdir()).unwrap();
+		assert_eq!(owner, "myorg");
+		assert_eq!(repo, "myapp");
+	}
+
+	#[test]
+	fn resolve_github_repo_errors_when_neither_config_nor_remote() {
+		let config = make_github_config(None, None);
+		let runner = RecordingCommandRunner::new(1); // no origin remote
+
+		let result = resolve_github_repo(&config, &runner, &workdir());
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("Could not determine GitHub repository"),
+			"Expected repo detection error, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn resolve_github_repo_errors_when_only_owner_set() {
+		let config = make_github_config(Some("acme"), None);
+		let runner = RecordingCommandRunner::new(0);
+
+		let result = resolve_github_repo(&config, &runner, &workdir());
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("must be set together"),
+			"Expected partial config error, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn resolve_github_repo_errors_when_only_repo_set() {
+		let config = make_github_config(None, Some("app"));
+		let runner = RecordingCommandRunner::new(0);
+
+		let result = resolve_github_repo(&config, &runner, &workdir());
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("must be set together"),
+			"Expected partial config error, got: {msg}"
+		);
 	}
 }

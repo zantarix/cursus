@@ -21,6 +21,9 @@ use crate::utils::today_iso_date;
 /// Default prefix for release branches in the `branch` strategy.
 const DEFAULT_RELEASE_BRANCH_PREFIX: &str = "chronicle-release/";
 
+/// Default pull request title when none is set in config.
+const DEFAULT_PR_TITLE: &str = "Release updates";
+
 /// Arguments for the `release` subcommand.
 #[derive(Args, Default)]
 pub struct ReleaseArgs {
@@ -101,12 +104,21 @@ fn compute_release_branch(
 	format!("{prefix}{base}")
 }
 
+/// Builds the pull request body listing each released package and its new version.
+fn build_pr_body(releases: &[ReleaseInfo]) -> String {
+	let items: Vec<String> = releases
+		.iter()
+		.map(|r| format!("- {}@{}", r.package_name, r.new_version))
+		.collect();
+	format!("Release:\n\n{}", items.join("\n"))
+}
+
 /// Runs the `release` subcommand.
 pub fn cmd_release(
 	git_workdir: &Path,
 	args: &ReleaseArgs,
 	runner: Arc<dyn CommandRunner>,
-	_github_client: Option<Arc<dyn GitHubClient>>,
+	github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
 	let config = config::load(git_workdir)?;
 	let adapters = config.create_adapters(Arc::clone(&runner));
@@ -312,6 +324,14 @@ pub fn cmd_release(
 				Strategy::Branch => {
 					if let Some(ref branch) = release_branch {
 						info!("Would push branch '{branch}' to origin");
+						if config.github.enabled && github_client.is_some() {
+							let title = config
+								.github
+								.pull_request_title
+								.as_deref()
+								.unwrap_or(DEFAULT_PR_TITLE);
+							info!("Would create pull request: '{title}'");
+						}
 					}
 					match &original_branch {
 						Some(orig) => info!("Would return to branch '{orig}'"),
@@ -337,6 +357,38 @@ pub fn cmd_release(
 								)
 							},
 						)?;
+
+						// PR creation is non-fatal; warn on failure.
+						if config.github.enabled
+							&& let Some(ref client) = github_client
+						{
+							let base = original_branch.as_deref().unwrap_or("main");
+							match crate::github::remote::resolve_github_repo(
+								&config.github,
+								runner.as_ref(),
+								git_workdir,
+							) {
+								Ok((owner, repo)) => {
+									let title = config
+										.github
+										.pull_request_title
+										.as_deref()
+										.unwrap_or(DEFAULT_PR_TITLE);
+									let pr_body = build_pr_body(&release_infos);
+									match client.create_pull_request(
+										&owner, &repo, title, &pr_body, branch, base,
+									) {
+										Ok(url) => info!("Created pull request: {url}"),
+										Err(e) => {
+											log::warn!("Failed to create pull request: {e:#}")
+										}
+									}
+								}
+								Err(e) => log::warn!(
+									"Could not resolve GitHub repository for PR creation: {e:#}"
+								),
+							}
+						}
 					}
 					if let Some(ref orig) = original_branch {
 						git::git_checkout(runner.as_ref(), git_workdir, orig)?;
@@ -644,6 +696,144 @@ mod tests {
 				.unwrap_err()
 				.to_string()
 				.contains("Unknown package: nonexistent")
+		);
+	}
+
+	#[test]
+	fn build_pr_body_empty_releases() {
+		assert_eq!(build_pr_body(&[]), "Release:\n\n");
+	}
+
+	#[test]
+	fn build_pr_body_formats_single_release() {
+		let releases = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.2.0".parse().unwrap(),
+		}];
+		assert_eq!(build_pr_body(&releases), "Release:\n\n- my-pkg@1.2.0");
+	}
+
+	#[test]
+	fn build_pr_body_formats_multiple_releases() {
+		let releases = vec![
+			ReleaseInfo {
+				package_name: "pkg-a".to_string(),
+				new_version: "1.0.0".parse().unwrap(),
+			},
+			ReleaseInfo {
+				package_name: "pkg-b".to_string(),
+				new_version: "2.1.0".parse().unwrap(),
+			},
+		];
+		assert_eq!(
+			build_pr_body(&releases),
+			"Release:\n\n- pkg-a@1.0.0\n- pkg-b@2.1.0"
+		);
+	}
+
+	/// Sets up a temp dir with a Cargo project, branch strategy git config, and GitHub config.
+	fn setup_branch_strategy_with_github() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let config = crate::model::config::Config::new(dir.path())
+			.with_cargo(crate::package_manager::CargoConfig::enabled())
+			.with_git(crate::git::GitConfig {
+				enabled: Some(true),
+				strategy: Some(crate::git::Strategy::Branch),
+				..Default::default()
+			})
+			.with_github(crate::github::GitHubConfig {
+				enabled: true,
+				owner: Some("acme".to_string()),
+				repo: Some("app".to_string()),
+				pull_request_title: Some("My Release PR".to_string()),
+				..Default::default()
+			});
+		config.save().unwrap();
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"test-pkg\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
+		)
+		.unwrap();
+		std::fs::create_dir_all(dir.path().join("src")).unwrap();
+		std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+		let chronicle_dir = dir.path().join(".chronicle");
+		std::fs::write(
+			chronicle_dir.join("change.md"),
+			"+++\ntest-pkg = \"patch\"\n+++\n\nFix\n",
+		)
+		.unwrap();
+		dir
+	}
+
+	#[test]
+	fn cmd_release_branch_strategy_with_github_creates_pr() {
+		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+		let dir = setup_branch_strategy_with_github();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let client = Arc::new(RecordingGitHubClient::new());
+		let args = ReleaseArgs::default();
+
+		let result = cmd_release(
+			dir.path(),
+			&args,
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Some(Arc::clone(&client) as Arc<dyn GitHubClient>),
+		);
+		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+		let invocations = client.invocations();
+		let pr = invocations
+			.iter()
+			.find(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. }));
+		assert!(pr.is_some(), "Expected PR creation, got: {invocations:?}");
+		if let Some(GitHubInvocation::CreatePullRequest {
+			title, owner, repo, ..
+		}) = pr
+		{
+			assert_eq!(title, "My Release PR");
+			assert_eq!(owner, "acme");
+			assert_eq!(repo, "app");
+		}
+	}
+
+	#[test]
+	fn cmd_release_branch_strategy_pr_failure_is_nonfatal() {
+		use crate::github::client::test_support::RecordingGitHubClient;
+		let dir = setup_branch_strategy_with_github();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
+		let args = ReleaseArgs::default();
+
+		let result = cmd_release(
+			dir.path(),
+			&args,
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Some(Arc::clone(&client) as Arc<dyn GitHubClient>),
+		);
+		// PR failure is non-fatal — command should still succeed
+		assert!(
+			result.is_ok(),
+			"PR failure should be non-fatal, got: {result:?}"
+		);
+	}
+
+	#[test]
+	fn cmd_release_no_github_client_no_pr() {
+		let dir = setup_branch_strategy_with_github();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		// No github client — PR creation should be skipped entirely
+		let args = ReleaseArgs::default();
+
+		let result = cmd_release(
+			dir.path(),
+			&args,
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			no_github(),
+		);
+		assert!(
+			result.is_ok(),
+			"Expected Ok without github client, got: {result:?}"
 		);
 	}
 }
