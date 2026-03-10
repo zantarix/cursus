@@ -7,21 +7,14 @@ on:
     branches: [main]
 
 jobs:
-  ci:
-    name: Rust tests
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@19effe9fe722874e6d46dd7182e4b8b7a43c4a99 # v31.10.0
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-      - name: Pre-build devShell
-        run: nix build --no-link .#devShells.$(nix eval --impure --raw --expr 'builtins.currentSystem').default
-
-      - name: Build Nix package
-        run: nix build --no-link
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
 
       - name: Check formatting
         shell: nix develop -c bash -e {0}
@@ -35,63 +28,79 @@ jobs:
         shell: nix develop -c bash -e {0}
         run: cargo deny check
 
-      - name: Run tests
-        shell: nix develop -c bash -e {0}
-        run: cargo test
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
 
       - name: Check code coverage
         shell: nix develop -c bash -e {0}
         run: cargo make coverage
 
-      - name: Check cross-compilation
+  nix-build:
+    name: Nix build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+
+      - name: Build Nix package
+        run: nix build --no-link
+
+  release:
+    name: Release (${{ matrix.artifact }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            artifact: linux-x86_64
+            binary: chronicle
+          - target: aarch64-unknown-linux-musl
+            artifact: linux-aarch64
+            binary: chronicle
+          - target: riscv64gc-unknown-linux-musl
+            artifact: linux-riscv64
+            binary: chronicle
+            # No GitHub-hosted RISC-V runner exists; artifact is built but not smoke-tested
+          - target: x86_64-apple-darwin
+            artifact: macos-x86_64
+            binary: chronicle
+          - target: aarch64-apple-darwin
+            artifact: macos-aarch64
+            binary: chronicle
+          - target: x86_64-pc-windows-gnullvm
+            artifact: windows-x86_64
+            binary: chronicle.exe
+          - target: aarch64-pc-windows-gnullvm
+            artifact: windows-aarch64
+            binary: chronicle.exe
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+
+      - name: Build ${{ matrix.artifact }}
         shell: nix develop -c bash -e {0}
-        run: cargo make release
+        run: cargo zigbuild --release --target ${{ matrix.target }}
 
-      - name: Upload linux-x86_64
+      - name: Upload ${{ matrix.artifact }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: linux-x86_64
-          path: target/x86_64-unknown-linux-musl/release/chronicle
-
-      - name: Upload linux-aarch64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: linux-aarch64
-          path: target/aarch64-unknown-linux-musl/release/chronicle
-
-      - name: Upload linux-riscv64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: linux-riscv64
-          path: target/riscv64gc-unknown-linux-musl/release/chronicle
-
-      - name: Upload macos-x86_64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: macos-x86_64
-          path: target/x86_64-apple-darwin/release/chronicle
-
-      - name: Upload macos-aarch64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: macos-aarch64
-          path: target/aarch64-apple-darwin/release/chronicle
-
-      - name: Upload windows-x86_64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: windows-x86_64
-          path: target/x86_64-pc-windows-gnullvm/release/chronicle.exe
-
-      - name: Upload windows-aarch64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: windows-aarch64
-          path: target/aarch64-pc-windows-gnullvm/release/chronicle.exe
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
 
   smoke-test:
     name: Smoke test (${{ matrix.artifact }})
-    needs: ci
+    needs: [lint, test, nix-build, release]
     strategy:
       fail-fast: false
       matrix:
