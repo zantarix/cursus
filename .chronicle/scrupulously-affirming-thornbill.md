@@ -1,6 +1,6 @@
 +++
-"@mscharley/chronicle" = "patch"
-chronicle = "patch"
+"@mscharley/chronicle" = "minor"
+chronicle = "minor"
 +++
 
 Initial release

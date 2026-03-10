@@ -1,6 +1,7 @@
 {
-	"name": "@mscharley/chronicle",
-	"version": "0.1.0",
+	"name": "@zantarix/chronicle",
+	"version": "0.0.1",
+	"private": true,
 	"description": "Release management with style",
 	"homepage": "https://github.com/mscharley/chronicle#readme",
 	"bugs": {
