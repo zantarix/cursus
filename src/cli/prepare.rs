@@ -1,6 +1,7 @@
 //! The `prepare` subcommand.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -103,6 +104,8 @@ fn compute_release_branch(
 struct ReleaseInfo {
 	package_name: String,
 	new_version: Version,
+	/// Formatted changelog sections (### headings + bullets) without the version heading.
+	changelog_entry: String,
 }
 
 /// Normalises a path by resolving `.` and `..` components without requiring
@@ -204,13 +207,23 @@ fn stage_and_commit(
 	Ok(())
 }
 
-/// Builds the pull request body listing each released package and its new version.
-fn build_pr_body(releases: &[ReleaseInfo]) -> String {
-	let items: Vec<String> = releases
-		.iter()
-		.map(|r| format!("- {}@{}", r.package_name, r.new_version))
-		.collect();
-	format!("Release:\n\n{}", items.join("\n"))
+/// Builds the pull request body with an introduction and per-package changelog sections.
+fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
+	let mut body = format!(
+		"This PR was opened by Chronicle. When ready to release, you should merge this PR \
+		 which will trigger a release. If you're not ready to do a release then simply leave \
+		 this PR and it will be updated as you merge more changesets into `{base_branch}`.\n\
+		 \n\
+		 # Releases\n"
+	);
+	for r in releases {
+		let _ = write!(
+			body,
+			"\n## {}@{}\n\n{}",
+			r.package_name, r.new_version, r.changelog_entry
+		);
+	}
+	body
 }
 
 /// Runs the `prepare` subcommand.
@@ -330,31 +343,31 @@ pub(crate) fn cmd_prepare(
 		modified_files.push(project.manifest_path());
 		modified_files.push(project.path().join("CHANGELOG.md"));
 
+		// Build Changelog now (shared between dry-run and real paths for changelog_entry)
+		let changes = changes_per_package
+			.get(pkg_name)
+			.cloned()
+			.unwrap_or_default();
+		let changelog = Changelog::new(
+			new_version.clone(),
+			today_iso_date(),
+			changes,
+			project.path().clone(),
+		);
+		let changelog_entry = changelog.format_sections();
+
 		if args.dry_run {
 			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		} else {
 			project.write_version(&new_version)?;
-
-			// Generate changelog
-			let changes = changes_per_package
-				.get(pkg_name)
-				.map(|v| v.as_slice())
-				.unwrap_or_default()
-				.to_vec();
-			Changelog::new(
-				new_version.clone(),
-				today_iso_date(),
-				changes,
-				project.path().clone(),
-			)
-			.update()?;
-
+			changelog.update()?;
 			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		}
 
 		release_infos.push(ReleaseInfo {
 			package_name: pkg_name.clone(),
 			new_version,
+			changelog_entry,
 		});
 	}
 
@@ -473,7 +486,7 @@ pub(crate) fn cmd_prepare(
 										.pull_request_title
 										.as_deref()
 										.unwrap_or(DEFAULT_PR_TITLE);
-									let pr_body = build_pr_body(&release_infos);
+									let pr_body = build_pr_body(&release_infos, base);
 									match client.create_pull_request(
 										&gh_repo, title, &pr_body, branch, base,
 									) {
@@ -542,6 +555,7 @@ mod tests {
 		let infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
 		}];
 		assert_eq!(
 			format_commit_message(&infos),
@@ -555,10 +569,12 @@ mod tests {
 			ReleaseInfo {
 				package_name: "pkg-a".to_string(),
 				new_version: "1.0.0".parse().unwrap(),
+				changelog_entry: String::new(),
 			},
 			ReleaseInfo {
 				package_name: "pkg-b".to_string(),
 				new_version: "2.1.0".parse().unwrap(),
+				changelog_entry: String::new(),
 			},
 		];
 		assert_eq!(
@@ -593,6 +609,7 @@ mod tests {
 		let release_infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
 		}];
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -611,6 +628,7 @@ mod tests {
 		let release_infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
 		}];
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -635,6 +653,7 @@ mod tests {
 		let release_infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
 		}];
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -981,7 +1000,10 @@ mod tests {
 
 	#[test]
 	fn build_pr_body_empty_releases() {
-		assert_eq!(build_pr_body(&[]), "Release:\n\n");
+		let body = build_pr_body(&[], "main");
+		assert!(body.contains("# Releases"));
+		assert!(body.contains("`main`"));
+		assert!(body.contains("Chronicle"));
 	}
 
 	#[test]
@@ -989,8 +1011,13 @@ mod tests {
 		let releases = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.2.0".parse().unwrap(),
+			changelog_entry: "### Features\n\n- Added something\n".to_string(),
 		}];
-		assert_eq!(build_pr_body(&releases), "Release:\n\n- my-pkg@1.2.0");
+		let body = build_pr_body(&releases, "main");
+		assert!(body.contains("## my-pkg@1.2.0"));
+		assert!(body.contains("### Features"));
+		assert!(body.contains("- Added something"));
+		assert!(body.contains("`main`"));
 	}
 
 	#[test]
@@ -999,16 +1026,53 @@ mod tests {
 			ReleaseInfo {
 				package_name: "pkg-a".to_string(),
 				new_version: "1.0.0".parse().unwrap(),
+				changelog_entry: "### Bug Fixes\n\n- Fixed a bug\n".to_string(),
 			},
 			ReleaseInfo {
 				package_name: "pkg-b".to_string(),
 				new_version: "2.1.0".parse().unwrap(),
+				changelog_entry: String::new(),
 			},
 		];
-		assert_eq!(
-			build_pr_body(&releases),
-			"Release:\n\n- pkg-a@1.0.0\n- pkg-b@2.1.0"
-		);
+		let body = build_pr_body(&releases, "develop");
+		assert!(body.contains("## pkg-a@1.0.0"));
+		assert!(body.contains("### Bug Fixes"));
+		assert!(body.contains("- Fixed a bug"));
+		assert!(body.contains("## pkg-b@2.1.0"));
+		assert!(body.contains("`develop`"));
+		// pkg-a section must appear before pkg-b
+		let pos_a = body.find("## pkg-a").unwrap();
+		let pos_b = body.find("## pkg-b").unwrap();
+		assert!(pos_a < pos_b);
+	}
+
+	#[test]
+	fn build_pr_body_includes_base_branch_in_intro() {
+		let body = build_pr_body(&[], "my-feature-branch");
+		assert!(body.contains("`my-feature-branch`"));
+	}
+
+	#[test]
+	fn build_pr_body_snapshot() {
+		let releases = vec![
+			ReleaseInfo {
+				package_name: "pkg-a".to_string(),
+				new_version: "2.0.0".parse().unwrap(),
+				changelog_entry: "### Breaking Changes\n\n- Removed old API\n".to_string(),
+			},
+			ReleaseInfo {
+				package_name: "pkg-b".to_string(),
+				new_version: "1.3.0".parse().unwrap(),
+				changelog_entry:
+					"### Features\n\n- Added widget\n\n### Bug Fixes\n\n- Fixed crash\n".to_string(),
+			},
+			ReleaseInfo {
+				package_name: "pkg-c".to_string(),
+				new_version: "0.9.1".parse().unwrap(),
+				changelog_entry: String::new(),
+			},
+		];
+		insta::assert_snapshot!(build_pr_body(&releases, "main"));
 	}
 
 	/// Sets up a temp dir with a Cargo project, branch strategy git config, and GitHub config.
