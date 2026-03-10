@@ -1,11 +1,13 @@
 //! Command-line interface for chronicle.
 
 mod change;
+mod ci;
 mod init;
 mod publish;
 mod release;
 
 pub use change::{ChangeArgs, cmd_change};
+pub use ci::{CiArgs, cmd_ci};
 pub use init::{InitArgs, cmd_init};
 pub use publish::{PublishArgs, cmd_publish};
 pub use release::{ReleaseArgs, cmd_release};
@@ -59,6 +61,8 @@ pub struct Cli {
 pub enum Command {
 	/// Record a change to the project
 	Change(ChangeArgs),
+	/// Auto-detect repo state and run release or publish as needed (for CI use)
+	Ci(CiArgs),
 	/// Initialize a new chronicle configuration using the setup wizard
 	Init(InitArgs),
 	/// Publish packages to their registries
