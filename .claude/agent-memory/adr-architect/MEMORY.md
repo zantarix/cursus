@@ -37,6 +37,11 @@ Key differences from old style:
 - Errata sections are allowed as an exception to "no new sections" rule -- they record dated corrections to accepted ADRs without modifying the originals.
 - Errata belong on the **affected ADR** as a forward pointer to the ADR that supersedes or amends it. Do NOT put errata on the ADR that introduces the change.
 
+## ADR Status Quick Reference
+
+- ADR-001 to ADR-016: Accepted
+- Next ADR number: 017
+
 ## Project ADR Rules (from CLAUDE.md)
 
 - ADRs are immutable once accepted -- do not edit accepted ADRs

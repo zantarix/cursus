@@ -101,7 +101,7 @@ pub fn run_with(
 				Some(cli::Command::Change(args)) => {
 					cli::cmd_change(&args, &cli.global, &env, config, Arc::clone(&runner))
 				}
-				Some(cli::Command::Release(args)) => cli::cmd_release(
+				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(
 					&git_workdir,
 					&args,
 					config,

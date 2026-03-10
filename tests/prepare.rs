@@ -1,4 +1,4 @@
-//! Integration tests for the `release` command.
+//! Integration tests for the `prepare` command.
 
 mod common;
 
@@ -15,9 +15,9 @@ fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 }
 
 #[test]
-fn release_fails_when_no_config() {
+fn prepare_fails_when_no_config() {
 	let dir = temp_git_repo();
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -28,16 +28,16 @@ fn release_fails_when_no_config() {
 }
 
 #[test]
-fn release_with_no_changesets_is_noop() {
+fn prepare_with_no_changesets_is_noop() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
 #[test]
-fn release_with_single_changeset_cargo() {
+fn prepare_with_single_changeset_cargo() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -45,7 +45,7 @@ fn release_with_single_changeset_cargo() {
 		"+++\ntest-project = \"minor\"\n+++\n\nAdded a feature\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -76,7 +76,7 @@ fn release_with_single_changeset_cargo() {
 }
 
 #[test]
-fn release_with_single_changeset_npm() {
+fn prepare_with_single_changeset_npm() {
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
 	write_changeset(
 		dir.path(),
@@ -84,7 +84,7 @@ fn release_with_single_changeset_npm() {
 		"+++\ntest-project = \"patch\"\n+++\n\nFixed a bug\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -100,7 +100,7 @@ fn release_with_single_changeset_npm() {
 }
 
 #[test]
-fn release_aggregates_to_highest_change_type() {
+fn prepare_aggregates_to_highest_change_type() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -113,7 +113,7 @@ fn release_aggregates_to_highest_change_type() {
 		"+++\ntest-project = \"minor\"\n+++\n\nNew feature\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -130,7 +130,7 @@ fn release_aggregates_to_highest_change_type() {
 }
 
 #[test]
-fn release_dry_run_does_not_modify_files() {
+fn prepare_dry_run_does_not_modify_files() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -141,7 +141,7 @@ fn release_dry_run_does_not_modify_files() {
 	let original_cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--dry-run"],
+		["chronicle", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -168,7 +168,7 @@ fn release_dry_run_does_not_modify_files() {
 }
 
 #[test]
-fn release_major_bump_resets_minor_and_patch() {
+fn prepare_major_bump_resets_minor_and_patch() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	// First set the version to something non-trivial
 	std::fs::write(
@@ -182,7 +182,7 @@ fn release_major_bump_resets_minor_and_patch() {
 		"+++\ntest-project = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -193,7 +193,7 @@ fn release_major_bump_resets_minor_and_patch() {
 }
 
 #[test]
-fn release_idempotent_no_changesets_after_release() {
+fn prepare_idempotent_no_changesets_after_release() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -202,17 +202,17 @@ fn release_idempotent_no_changesets_after_release() {
 	);
 
 	// First release
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	// Second release (no changesets)
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
 #[test]
-fn release_changelog_has_proper_sections() {
+fn prepare_changelog_has_proper_sections() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -230,7 +230,7 @@ fn release_changelog_has_proper_sections() {
 		"+++\ntest-project = \"patch\"\n+++\n\nBug fix\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	let today = chronicle::utils::today_iso_date();
@@ -256,7 +256,7 @@ fn release_changelog_has_proper_sections() {
 }
 
 #[test]
-fn release_successive_releases_prepend_to_changelog() {
+fn prepare_successive_releases_prepend_to_changelog() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 
 	// First release: minor bump 0.1.0 -> 0.2.0
@@ -265,7 +265,7 @@ fn release_successive_releases_prepend_to_changelog() {
 		"change-1.md",
 		"+++\ntest-project = \"minor\"\n+++\n\nFirst feature\n",
 	);
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	// Second release: patch bump 0.2.0 -> 0.2.1
@@ -274,7 +274,7 @@ fn release_successive_releases_prepend_to_changelog() {
 		"change-2.md",
 		"+++\ntest-project = \"patch\"\n+++\n\nA bug fix\n",
 	);
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	let today = chronicle::utils::today_iso_date();
@@ -300,7 +300,7 @@ fn release_successive_releases_prepend_to_changelog() {
 }
 
 #[test]
-fn release_unknown_package_in_changeset_fails() {
+fn prepare_unknown_package_in_changeset_fails() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -308,7 +308,7 @@ fn release_unknown_package_in_changeset_fails() {
 		"+++\nnonexistent-package = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err());
 	let err = result.unwrap_err();
 	assert!(
@@ -318,7 +318,7 @@ fn release_unknown_package_in_changeset_fails() {
 }
 
 #[test]
-fn release_package_flag_filters_packages() {
+fn prepare_package_flag_filters_packages() {
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
 
 	write_changeset(
@@ -331,7 +331,7 @@ fn release_package_flag_filters_packages() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--package",
 			"pkg-a",
 		],
@@ -364,7 +364,7 @@ fn release_package_flag_filters_packages() {
 }
 
 #[test]
-fn release_scoped_fully_consumed_changeset_is_deleted() {
+fn prepare_scoped_fully_consumed_changeset_is_deleted() {
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0")]);
 
 	// Changeset only references pkg-a
@@ -378,7 +378,7 @@ fn release_scoped_fully_consumed_changeset_is_deleted() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--package",
 			"pkg-a",
 		],
@@ -394,7 +394,7 @@ fn release_scoped_fully_consumed_changeset_is_deleted() {
 }
 
 #[test]
-fn release_scoped_sequential_releases() {
+fn prepare_scoped_sequential_releases() {
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
 
 	// Single changeset covering both packages
@@ -409,7 +409,7 @@ fn release_scoped_sequential_releases() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--package",
 			"pkg-a",
 		],
@@ -436,7 +436,7 @@ fn release_scoped_sequential_releases() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--package",
 			"pkg-b",
 		],
@@ -457,7 +457,7 @@ fn release_scoped_sequential_releases() {
 }
 
 #[test]
-fn release_scoped_unrelated_changeset_untouched() {
+fn prepare_scoped_unrelated_changeset_untouched() {
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
 
 	// One changeset for pkg-a, one for pkg-b
@@ -474,7 +474,7 @@ fn release_scoped_unrelated_changeset_untouched() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--package",
 			"pkg-a",
 		],
@@ -501,7 +501,7 @@ fn release_scoped_unrelated_changeset_untouched() {
 }
 
 #[test]
-fn release_unknown_package_flag_fails() {
+fn prepare_unknown_package_flag_fails() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -513,7 +513,7 @@ fn release_unknown_package_flag_fails() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--package",
 			"nonexistent",
 		],
@@ -528,7 +528,7 @@ fn release_unknown_package_flag_fails() {
 }
 
 #[test]
-fn release_updates_cargo_lock_file() {
+fn prepare_updates_cargo_lock_file() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -542,7 +542,7 @@ fn release_updates_cargo_lock_file() {
 		std::fs::remove_file(&lock_file).unwrap();
 	}
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	if let Err(ref err) = result {
 		eprintln!("Release failed: {:#}", err);
 	}
@@ -564,7 +564,7 @@ fn release_updates_cargo_lock_file() {
 }
 
 #[test]
-fn release_updates_cargo_intra_workspace_dep_version() {
+fn prepare_updates_cargo_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b via a path dep; when pkg-b is bumped, pkg-a's Cargo.toml should be updated
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
 
@@ -581,7 +581,7 @@ fn release_updates_cargo_intra_workspace_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	// Verify pkg-b version was bumped
@@ -604,7 +604,7 @@ fn release_updates_cargo_intra_workspace_dep_version() {
 }
 
 #[test]
-fn release_updates_cargo_workspace_dep_in_root() {
+fn prepare_updates_cargo_workspace_dep_in_root() {
 	// Root Cargo.toml has [workspace.dependencies]; pkg-a uses it via workspace = true.
 	// When pkg-b is bumped, the root [workspace.dependencies] entry should be updated.
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
@@ -629,7 +629,7 @@ fn release_updates_cargo_workspace_dep_in_root() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -644,7 +644,7 @@ fn release_updates_cargo_workspace_dep_in_root() {
 }
 
 #[test]
-fn release_dry_run_shows_dep_updates_without_modifying_files() {
+fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
 	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
 
 	std::fs::write(
@@ -662,7 +662,7 @@ fn release_dry_run_shows_dep_updates_without_modifying_files() {
 	let original_a = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--dry-run"],
+		["chronicle", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -673,7 +673,7 @@ fn release_dry_run_shows_dep_updates_without_modifying_files() {
 }
 
 #[test]
-fn release_updates_npm_intra_workspace_dep_version() {
+fn prepare_updates_npm_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
 	let dir = temp_git_repo();
 	let config = chronicle::model::config::Config::new(dir.path())
@@ -707,7 +707,7 @@ fn release_updates_npm_intra_workspace_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	// Verify pkg-b version was bumped

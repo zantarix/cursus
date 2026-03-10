@@ -3,14 +3,14 @@
 mod change;
 mod ci;
 mod init;
+mod prepare;
 mod publish;
-mod release;
 
 pub use change::{ChangeArgs, cmd_change};
 pub use ci::{CiArgs, cmd_ci};
 pub use init::{InitArgs, cmd_init};
+pub use prepare::{PrepareArgs, cmd_prepare};
 pub use publish::{PublishArgs, cmd_publish};
-pub use release::{ReleaseArgs, cmd_release};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
@@ -61,14 +61,14 @@ pub struct Cli {
 pub enum Command {
 	/// Record a change to the project
 	Change(ChangeArgs),
-	/// Auto-detect repo state and run release or publish as needed (for CI use)
+	/// Auto-detect repo state and run prepare or publish as needed (for CI use)
 	Ci(CiArgs),
 	/// Initialize a new chronicle configuration using the setup wizard
 	Init(InitArgs),
+	/// Prepare a release: bump versions, generate changelogs, manage branches
+	Prepare(PrepareArgs),
 	/// Publish packages to their registries
 	Publish(PublishArgs),
-	/// Consume pending changesets and release new versions
-	Release(ReleaseArgs),
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 ---
-source: tests/release.rs
+source: tests/prepare.rs
 expression: rewritten
 ---
 +++

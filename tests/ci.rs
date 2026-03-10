@@ -29,7 +29,7 @@ fn git_tag(dir: &std::path::Path, tag: &str) {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// When pending changesets exist, `ci` should delegate to `release`.
+/// When pending changesets exist, `ci` should delegate to `prepare`.
 #[test]
 fn ci_with_changesets_runs_release() {
 	// Use a simple fake-git repo with git disabled to avoid real git ops.
@@ -265,7 +265,7 @@ fn ci_package_filter_only_checks_selected_packages() {
 	assert_eq!(tags, vec!["pkg-a@1.0.0"], "Only pkg-a@1.0.0 should exist");
 }
 
-/// `ci --no-git` with changesets delegates to `release --no-git`.
+/// `ci --no-git` with changesets delegates to `prepare --no-git`.
 #[test]
 fn ci_no_git_with_changesets_runs_release_no_git() {
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
@@ -343,7 +343,7 @@ fn ci_changesets_present_but_package_filter_matches_no_changeset() {
 		"+++\npkg-a = \"patch\"\n+++\n\nFix\n",
 	);
 
-	// ci detects changesets and dispatches to release with -p pkg-b.
+	// ci detects changesets and dispatches to prepare with -p pkg-b.
 	// Release finds nothing to do for pkg-b → succeeds with no changes.
 	let result = run_chronicle(
 		[

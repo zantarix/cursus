@@ -1,4 +1,4 @@
-//! Integration tests for git lifecycle automation in the `release` command.
+//! Integration tests for git lifecycle automation in the `prepare` command.
 
 mod common;
 
@@ -55,7 +55,7 @@ fn setup_single_cargo_package(dir: &std::path::Path, name: &str, version: &str) 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[test]
-fn release_git_disabled_by_default() {
+fn prepare_git_disabled_by_default() {
 	// Without [git] enabled, a release should succeed without touching git state.
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
@@ -65,12 +65,12 @@ fn release_git_disabled_by_default() {
 	);
 
 	// Uses a fake .git dir, not a real repo — verifies nothing panics when enabled=false.
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 }
 
 #[test]
-fn release_git_creates_commit() {
+fn prepare_git_creates_commit() {
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
@@ -82,7 +82,7 @@ fn release_git_creates_commit() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -98,7 +98,7 @@ fn release_git_creates_commit() {
 }
 
 #[test]
-fn release_git_does_not_create_tags() {
+fn prepare_git_does_not_create_tags() {
 	// Tags are now created during publish, not release.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
@@ -111,7 +111,7 @@ fn release_git_does_not_create_tags() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Release no longer creates tags — publish does.
@@ -123,7 +123,7 @@ fn release_git_does_not_create_tags() {
 }
 
 #[test]
-fn release_git_tag_format_config_no_tags_at_release() {
+fn prepare_git_tag_format_config_no_tags_at_release() {
 	// Tag format only affects publish step now; release just commits.
 	let config = GitConfig {
 		enabled: Some(true),
@@ -141,7 +141,7 @@ fn release_git_tag_format_config_no_tags_at_release() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	assert!(
@@ -152,7 +152,7 @@ fn release_git_tag_format_config_no_tags_at_release() {
 }
 
 #[test]
-fn release_git_multi_package_creates_single_commit() {
+fn prepare_git_multi_package_creates_single_commit() {
 	// When multiple packages are released simultaneously, a single commit is created.
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
@@ -167,7 +167,7 @@ fn release_git_multi_package_creates_single_commit() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -185,7 +185,7 @@ fn release_git_multi_package_creates_single_commit() {
 }
 
 #[test]
-fn release_no_git_flag_skips_git() {
+fn prepare_no_git_flag_skips_git() {
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
@@ -196,7 +196,7 @@ fn release_no_git_flag_skips_git() {
 	git_commit_all(dir.path(), "chore: add changeset");
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--no-git"],
+		["chronicle", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -214,7 +214,7 @@ fn release_no_git_flag_skips_git() {
 }
 
 #[test]
-fn release_git_stages_only_chronicle_files() {
+fn prepare_git_stages_only_chronicle_files() {
 	// Chronicle uses `git add -- <files>` for selective staging, so tracked
 	// but unmodified files are never included in the release commit.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
@@ -233,7 +233,7 @@ fn release_git_stages_only_chronicle_files() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	// The release commit should not contain the unrelated file (it was not modified)
@@ -250,7 +250,7 @@ fn release_git_stages_only_chronicle_files() {
 }
 
 #[test]
-fn release_git_filesystem_changes_persist_after_lifecycle() {
+fn prepare_git_filesystem_changes_persist_after_lifecycle() {
 	// Version bumps (filesystem) happen before git ops; a successful git lifecycle
 	// should leave the bumped version in place.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
@@ -264,7 +264,7 @@ fn release_git_filesystem_changes_persist_after_lifecycle() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -275,7 +275,7 @@ fn release_git_filesystem_changes_persist_after_lifecycle() {
 }
 
 #[test]
-fn release_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
+fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
@@ -286,7 +286,7 @@ fn release_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 	git_commit_all(dir.path(), "chore: add changeset");
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--dry-run"],
+		["chronicle", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -304,7 +304,7 @@ fn release_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 }
 
 #[test]
-fn release_git_extra_files_are_staged() {
+fn prepare_git_extra_files_are_staged() {
 	// An extra file produced by a custom lock_command should be staged in the release
 	// commit. We use an npm project with a lock_command that writes custom.lock so the
 	// file is created WITHIN chronicle's execution (after the dirty-tree check).
@@ -342,7 +342,7 @@ fn release_git_extra_files_are_staged() {
 	git_push_to_remote(dir.path());
 
 	// Tree is clean; lock_command will write custom.lock during chronicle's execution.
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Verify custom.lock was included in the release commit
@@ -370,7 +370,7 @@ fn branch_strategy_config() -> GitConfig {
 }
 
 #[test]
-fn release_dirty_tree_fails_when_git_enabled() {
+fn prepare_dirty_tree_fails_when_git_enabled() {
 	// A dirty working tree should abort the release before making any changes.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
@@ -384,7 +384,7 @@ fn release_dirty_tree_fails_when_git_enabled() {
 	// Make the tree dirty with an untracked file
 	std::fs::write(dir.path().join("dirty.txt"), "untracked change").unwrap();
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err());
 	assert!(
 		result.unwrap_err().to_string().contains("dirty"),
@@ -393,7 +393,7 @@ fn release_dirty_tree_fails_when_git_enabled() {
 }
 
 #[test]
-fn release_dirty_tree_ignored_when_no_git() {
+fn prepare_dirty_tree_ignored_when_no_git() {
 	// --no-git bypasses the dirty tree check.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
@@ -408,7 +408,7 @@ fn release_dirty_tree_ignored_when_no_git() {
 	std::fs::write(dir.path().join("dirty.txt"), "untracked change").unwrap();
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--no-git"],
+		["chronicle", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
 	);
 	assert!(
@@ -418,7 +418,7 @@ fn release_dirty_tree_ignored_when_no_git() {
 }
 
 #[test]
-fn release_push_strategy_commits_and_pushes() {
+fn prepare_push_strategy_commits_and_pushes() {
 	// Push strategy: commit is pushed directly to origin.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
@@ -435,7 +435,7 @@ fn release_push_strategy_commits_and_pushes() {
 
 	let initial_branch = git_current_branch(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Verify the release commit was pushed to origin
@@ -452,7 +452,7 @@ fn release_push_strategy_commits_and_pushes() {
 }
 
 #[test]
-fn release_push_strategy_dry_run_does_not_push() {
+fn prepare_push_strategy_dry_run_does_not_push() {
 	// Dry-run must not push (no remote → would fail if push were attempted).
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
@@ -465,7 +465,7 @@ fn release_push_strategy_dry_run_does_not_push() {
 	// No remote — push would fail; this verifies dry-run doesn't push.
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--dry-run"],
+		["chronicle", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "dry-run should succeed: {result:?}");
@@ -479,7 +479,7 @@ fn release_push_strategy_dry_run_does_not_push() {
 }
 
 #[test]
-fn release_branch_strategy_creates_branch_and_returns() {
+fn prepare_branch_strategy_creates_branch_and_returns() {
 	// Branch strategy: release commit lands on a new branch; current branch is restored.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
@@ -496,7 +496,7 @@ fn release_branch_strategy_creates_branch_and_returns() {
 	let initial_branch = git_current_branch(dir.path());
 	let expected_release_branch = format!("chronicle-release/{initial_branch}");
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Current branch is back to original
@@ -526,7 +526,7 @@ fn release_branch_strategy_creates_branch_and_returns() {
 }
 
 #[test]
-fn release_branch_strategy_dry_run_does_not_checkout() {
+fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	// Dry-run branch strategy must not switch branches.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
@@ -540,7 +540,7 @@ fn release_branch_strategy_dry_run_does_not_checkout() {
 	let initial_branch = git_current_branch(dir.path());
 
 	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "release", "--dry-run"],
+		["chronicle", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "dry-run should succeed: {result:?}");
@@ -561,7 +561,7 @@ fn release_branch_strategy_dry_run_does_not_checkout() {
 }
 
 #[test]
-fn release_branch_flag_overrides_prefix() {
+fn prepare_branch_flag_overrides_prefix() {
 	// --branch overrides the computed release branch name.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
@@ -581,7 +581,7 @@ fn release_branch_flag_overrides_prefix() {
 		[
 			"chronicle",
 			"--no-interactive",
-			"release",
+			"prepare",
 			"--branch",
 			"custom-release-branch",
 		],
@@ -604,7 +604,7 @@ fn release_branch_flag_overrides_prefix() {
 }
 
 #[test]
-fn release_git_config_old_run_until_field_fails_to_load() {
+fn prepare_git_config_old_run_until_field_fails_to_load() {
 	// Old configs with run_until must produce a clear parse error.
 	let dir = tempfile::tempdir().unwrap();
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
@@ -621,6 +621,6 @@ fn release_git_config_old_run_until_field_fails_to_load() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "release"], dir.path());
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err(), "Expected error for old run_until field");
 }

@@ -1,4 +1,4 @@
-//! The `release` subcommand.
+//! The `prepare` subcommand.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -19,14 +19,14 @@ use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
 use crate::utils::today_iso_date;
 
-/// Arguments for the `release` subcommand.
+/// Arguments for the `prepare` subcommand.
 #[derive(Args, Default)]
-pub struct ReleaseArgs {
+pub struct PrepareArgs {
 	/// Preview changes without modifying any files
 	#[arg(long)]
 	pub dry_run: bool,
 
-	/// Only release specific packages (repeatable)
+	/// Only prepare specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
 
@@ -108,10 +108,10 @@ fn build_pr_body(releases: &[ReleaseInfo]) -> String {
 	format!("Release:\n\n{}", items.join("\n"))
 }
 
-/// Runs the `release` subcommand.
-pub fn cmd_release(
+/// Runs the `prepare` subcommand.
+pub fn cmd_prepare(
 	git_workdir: &Path,
-	args: &ReleaseArgs,
+	args: &PrepareArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,
 	github_client: Option<Arc<dyn GitHubClient>>,
@@ -122,7 +122,7 @@ pub fn cmd_release(
 	// Read all pending changesets
 	let changesets = Changeset::read_all(config.git_workdir())?;
 	if changesets.is_empty() {
-		info!("No pending changesets found. Nothing to release.");
+		info!("No pending changesets found. Nothing to prepare.");
 		return Ok(ExitCode::SUCCESS);
 	}
 
@@ -517,7 +517,7 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_no_changesets_succeeds() {
+	fn cmd_prepare_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg = crate::model::config::Config::new(dir.path())
@@ -530,13 +530,13 @@ mod tests {
 		.unwrap();
 
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github()).unwrap();
+		let args = PrepareArgs::default();
+		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
 	#[test]
-	fn cmd_release_unknown_package_in_changeset_fails() {
+	fn cmd_prepare_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg = crate::model::config::Config::new(dir.path())
@@ -556,8 +556,8 @@ mod tests {
 		.unwrap();
 
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
+		let args = PrepareArgs::default();
+		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -597,7 +597,7 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_package_flag_filters_packages() {
+	fn cmd_prepare_package_flag_filters_packages() {
 		let dir = setup_two_package_workspace();
 
 		let chronicle_dir = dir.path().join(".chronicle");
@@ -610,12 +610,12 @@ mod tests {
 		.unwrap();
 
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs {
+		let args = PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
-			..ReleaseArgs::default()
+			..PrepareArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
+		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -635,7 +635,7 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_package_flag_with_dry_run_leaves_changeset_untouched() {
+	fn cmd_prepare_package_flag_with_dry_run_leaves_changeset_untouched() {
 		let dir = setup_two_package_workspace();
 
 		let chronicle_dir = dir.path().join(".chronicle");
@@ -645,13 +645,13 @@ mod tests {
 		std::fs::write(&changeset_path, original).unwrap();
 
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs {
+		let args = PrepareArgs {
 			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
-			..ReleaseArgs::default()
+			..PrepareArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
+		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -663,7 +663,7 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_unknown_package_flag_fails() {
+	fn cmd_prepare_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg = crate::model::config::Config::new(dir.path())
@@ -683,12 +683,12 @@ mod tests {
 		.unwrap();
 
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs {
+		let args = PrepareArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
-			..ReleaseArgs::default()
+			..PrepareArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
+		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -766,15 +766,15 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_branch_strategy_with_github_creates_pr() {
+	fn cmd_prepare_branch_strategy_with_github_creates_pr() {
 		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let client = Arc::new(RecordingGitHubClient::new());
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs::default();
+		let args = PrepareArgs::default();
 
-		let result = cmd_release(
+		let result = cmd_prepare(
 			dir.path(),
 			&args,
 			config,
@@ -796,15 +796,15 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_branch_strategy_pr_failure_is_nonfatal() {
+	fn cmd_prepare_branch_strategy_pr_failure_is_nonfatal() {
 		use crate::github::client::test_support::RecordingGitHubClient;
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs::default();
+		let args = PrepareArgs::default();
 
-		let result = cmd_release(
+		let result = cmd_prepare(
 			dir.path(),
 			&args,
 			config,
@@ -819,14 +819,14 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_no_github_client_errors() {
+	fn cmd_prepare_no_github_client_errors() {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		// No github client — pre-flight check should error
 		let config = config::load(dir.path()).unwrap();
-		let args = ReleaseArgs::default();
+		let args = PrepareArgs::default();
 
-		let result = cmd_release(
+		let result = cmd_prepare(
 			dir.path(),
 			&args,
 			config,

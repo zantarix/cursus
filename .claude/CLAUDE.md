@@ -51,7 +51,7 @@ Integration tests live in `tests/` and should always use the `--no-interactive` 
 **Non-interactive CLI flags for tests:**
 
 - `change`: `--change-type/-t` (major/minor/patch), `--message/-m`, `--project/-p` (repeatable, defaults to all)
-- `release`: `--dry-run`, `--package/-p` (repeatable, filters which packages to release)
+- `prepare`: `--dry-run`, `--package/-p` (repeatable, filters which packages to prepare)
 
 **Git root discovery:** `run()` walks up the directory tree to find the `.git` directory. Integration tests must set up a git repo in their temp directory.
 
@@ -61,7 +61,7 @@ Chronicle is a Rust CLI tool for release management. It uses an interactive TUI 
 
 **Key modules:**
 
-- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`) and subcommands (`init`, `change`, `release`). `change` is the default when no subcommand is given.
+- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`) and subcommands (`init`, `change`, `prepare`). `change` is the default when no subcommand is given.
 - `src/tui/` - ratatui/crossterm terminal UI wizards
 - `src/model/` - Core domain types:
   - `config.rs` - `Config` and `PackageManager` types, TOML persistence in `.chronicle/config.toml`

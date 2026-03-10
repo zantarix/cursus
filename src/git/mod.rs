@@ -67,7 +67,7 @@ pub(crate) fn format_commit_message(releases: &[ReleaseInfo]) -> String {
 /// Stages files and creates a commit after a release.
 ///
 /// This is the core git operation for the release step — it only commits.
-/// Pushing is handled by the strategy dispatch in `cmd_release`, and tagging
+/// Pushing is handled by the strategy dispatch in `cmd_prepare`, and tagging
 /// happens in `publish`.
 ///
 /// If `dry_run` is `true`, prints what would be done without executing any git commands.

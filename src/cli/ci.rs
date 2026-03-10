@@ -1,4 +1,4 @@
-//! The `ci` subcommand — auto-detects repo state and dispatches to `release` or `publish`.
+//! The `ci` subcommand — auto-detects repo state and dispatches to `prepare` or `publish`.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -14,7 +14,7 @@ use crate::model::changeset::Changeset;
 use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
 
-use super::{PublishArgs, ReleaseArgs, cmd_publish, cmd_release};
+use super::{PrepareArgs, PublishArgs, cmd_prepare, cmd_publish};
 
 /// Arguments for the `ci` subcommand.
 #[derive(Args, Default)]
@@ -29,7 +29,7 @@ pub struct CiArgs {
 
 	/// Override the release branch name (branch strategy only).
 	///
-	/// Passed through to `release` when pending changesets are found.
+	/// Passed through to `prepare` when pending changesets are found.
 	#[arg(long)]
 	pub branch: Option<String>,
 
@@ -44,7 +44,7 @@ pub struct CiArgs {
 ///
 /// Auto-detects the current repository state and dispatches accordingly:
 ///
-/// 1. Pending changesets found → run `release`
+/// 1. Pending changesets found → run `prepare`
 /// 2. No changesets, git enabled, and at least one expected tag is absent → run `publish`
 /// 3. Otherwise → log "Nothing to do" and return success
 ///
@@ -67,16 +67,16 @@ pub fn cmd_ci(
 	// Step 1: check for pending changesets.
 	let changesets = Changeset::read_all(config.git_workdir())?;
 	if !changesets.is_empty() {
-		info!("ci: pending changesets found, running release");
-		let release_args = ReleaseArgs {
+		info!("ci: pending changesets found, running prepare");
+		let prepare_args = PrepareArgs {
 			dry_run: args.dry_run,
 			packages: args.packages.clone(),
 			no_git: args.no_git,
 			branch: args.branch.clone(),
 		};
-		return cmd_release(
+		return cmd_prepare(
 			git_workdir,
-			&release_args,
+			&prepare_args,
 			config,
 			Arc::clone(&runner),
 			github_client,
