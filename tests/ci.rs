@@ -4,21 +4,14 @@ mod common;
 
 use std::process::Command;
 
-use chronicle::git::GitConfig;
 use chronicle::model::config::PackageManager;
 use common::{
-	git_tag_exists, git_tags, run_chronicle, temp_git_repo, temp_git_repo_with_project,
-	temp_real_git_repo_with_cargo_workspace, temp_real_git_repo_with_config,
+	git_enabled_config, git_tag_exists, git_tags, run_chronicle, temp_git_repo,
+	temp_git_repo_with_project, temp_real_git_repo_with_cargo_workspace,
+	temp_real_git_repo_with_config, write_changeset,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Creates a changeset file in the `.chronicle` directory.
-fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
-	let chronicle_dir = dir.join(".chronicle");
-	std::fs::create_dir_all(&chronicle_dir).unwrap();
-	std::fs::write(chronicle_dir.join(filename), content).unwrap();
-}
 
 /// Creates a lightweight git tag in the given directory.
 fn git_tag(dir: &std::path::Path, tag: &str) {
@@ -32,13 +25,6 @@ fn git_tag(dir: &std::path::Path, tag: &str) {
 		"git tag failed: {}",
 		String::from_utf8_lossy(&out.stderr)
 	);
-}
-
-fn git_enabled_config() -> GitConfig {
-	GitConfig {
-		enabled: Some(true),
-		..Default::default()
-	}
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -338,5 +324,45 @@ fn ci_fails_when_package_filter_names_unknown_package() {
 	assert!(
 		result.is_err(),
 		"Expected Err for unknown package filter, got: {result:?}"
+	);
+}
+
+/// `ci` finds changesets but the `--package` filter doesn't match any changeset package.
+/// Release should succeed with "nothing to release" for the filtered package.
+#[test]
+fn ci_changesets_present_but_package_filter_matches_no_changeset() {
+	let dir = temp_real_git_repo_with_cargo_workspace(
+		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
+		git_enabled_config(),
+	);
+
+	// Changeset only mentions pkg-a, but we filter for pkg-b.
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\npkg-a = \"patch\"\n+++\n\nFix\n",
+	);
+
+	// ci detects changesets and dispatches to release with -p pkg-b.
+	// Release finds nothing to do for pkg-b → succeeds with no changes.
+	let result = run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"ci",
+			"--dry-run",
+			"--no-git",
+			"-p",
+			"pkg-b",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	// No version should have changed.
+	let toml = std::fs::read_to_string(dir.path().join("pkg-b/Cargo.toml")).unwrap();
+	assert!(
+		toml.contains("version = \"2.0.0\""),
+		"pkg-b version should not change when it has no changeset"
 	);
 }

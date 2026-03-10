@@ -362,7 +362,13 @@ pub fn cmd_release(
 						if config.github.enabled
 							&& let Some(ref client) = github_client
 						{
-							let base = original_branch.as_deref().unwrap_or("main");
+							let base = original_branch.as_deref().unwrap_or_else(|| {
+								log::warn!(
+									"HEAD is detached; using \"main\" as the PR base branch. \
+								 Configure [github].default_branch if your repo uses a different name."
+								);
+								"main"
+							});
 							match crate::github::remote::resolve_github_repo(
 								&config.github,
 								runner.as_ref(),

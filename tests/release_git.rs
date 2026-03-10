@@ -7,27 +7,10 @@ use std::process::{Command, Stdio};
 use chronicle::git::{GitConfig, Strategy, TagFormat};
 use chronicle::model::config::PackageManager;
 use common::{
-	add_local_remote, git_current_branch, git_local_branch_exists, git_log, git_push_to_remote,
-	git_tags, temp_git_repo_with_project, temp_real_git_repo_with_cargo_workspace,
-	temp_real_git_repo_with_config,
+	add_local_remote, git_current_branch, git_enabled_config, git_local_branch_exists, git_log,
+	git_push_to_remote, git_tags, temp_git_repo_with_project,
+	temp_real_git_repo_with_cargo_workspace, temp_real_git_repo_with_config, write_changeset,
 };
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Creates a git-enabled config with default settings (commit-only, Auto format).
-fn git_enabled_config() -> GitConfig {
-	GitConfig {
-		enabled: Some(true),
-		..Default::default()
-	}
-}
-
-/// Creates a changeset file in the `.chronicle` directory.
-fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
-	let chronicle_dir = dir.join(".chronicle");
-	std::fs::create_dir_all(&chronicle_dir).unwrap();
-	std::fs::write(chronicle_dir.join(filename), content).unwrap();
-}
 
 /// Stages all files and creates a commit with the given message.
 fn git_commit_all(dir: &std::path::Path, message: &str) {

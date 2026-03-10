@@ -374,3 +374,21 @@ pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &s
 	}
 	dir
 }
+
+/// Creates a changeset file in the `.chronicle` directory.
+///
+/// The `content` should be a valid changeset with TOML frontmatter, e.g.:
+/// `"+++\npkg-name = \"minor\"\n+++\n\nDescription\n"`.
+pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
+	let chronicle_dir = dir.join(".chronicle");
+	std::fs::create_dir_all(&chronicle_dir).unwrap();
+	std::fs::write(chronicle_dir.join(filename), content).unwrap();
+}
+
+/// Returns a [`GitConfig`] with git lifecycle enabled and all other fields at their defaults.
+pub fn git_enabled_config() -> GitConfig {
+	GitConfig {
+		enabled: Some(true),
+		..Default::default()
+	}
+}

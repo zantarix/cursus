@@ -86,20 +86,19 @@ pub(crate) fn git_tag(
 	Ok(())
 }
 
-/// Pushes to origin, following tags.
+/// Pushes HEAD to origin.
 ///
-/// Runs `git push origin HEAD --follow-tags`.
+/// Runs `git push origin HEAD`.
+///
+/// Tags are never pushed here — tag pushing is the responsibility of the
+/// `publish` command, which pushes each tag individually via [`git_push_tag`].
 ///
 /// # Errors
 ///
 /// Returns an error if `git push` exits with a non-zero status.
 pub(crate) fn git_push(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
 	let output = runner
-		.run(
-			"git",
-			&["push", "origin", "HEAD", "--follow-tags"],
-			git_workdir,
-		)
+		.run("git", &["push", "origin", "HEAD"], git_workdir)
 		.context("Failed to run git push")?;
 
 	if !output.status.success() {
@@ -283,27 +282,6 @@ pub(crate) fn git_push_tag(
 	Ok(())
 }
 
-/// Pushes all local tags to origin.
-///
-/// Runs `git push origin --tags`.
-///
-/// # Errors
-///
-/// Returns an error if `git push` exits with a non-zero status.
-#[allow(dead_code)]
-pub(crate) fn git_push_tags(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["push", "origin", "--tags"], git_workdir)
-		.context("Failed to run git push --tags")?;
-
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git push --tags failed: {stderr}");
-	}
-
-	Ok(())
-}
-
 #[cfg(test)]
 mod tests {
 	use std::sync::Arc;
@@ -430,10 +408,7 @@ mod tests {
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
-		assert_eq!(
-			invocations[0].args,
-			["push", "origin", "HEAD", "--follow-tags"]
-		);
+		assert_eq!(invocations[0].args, ["push", "origin", "HEAD"]);
 		assert_eq!(invocations[0].cwd, dir.path());
 	}
 
@@ -666,31 +641,6 @@ mod tests {
 		assert!(
 			msg.contains("git tag -l failed"),
 			"Expected 'git tag -l failed', got: {msg}"
-		);
-	}
-
-	#[test]
-	fn git_push_tags_passes_correct_args() {
-		let dir = temp_dir();
-		let runner = recording(0);
-		git_push_tags(runner.as_ref(), dir.path()).unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations.len(), 1);
-		assert_eq!(invocations[0].program, "git");
-		assert_eq!(invocations[0].args, ["push", "origin", "--tags"]);
-		assert_eq!(invocations[0].cwd, dir.path());
-	}
-
-	#[test]
-	fn git_push_tags_failure_propagates() {
-		let dir = temp_dir();
-		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_push_tags(runner.as_ref(), dir.path());
-		assert!(result.is_err());
-		let msg = result.unwrap_err().to_string();
-		assert!(
-			msg.contains("git push --tags failed"),
-			"Expected 'git push --tags failed', got: {msg}"
 		);
 	}
 }

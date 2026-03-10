@@ -3,11 +3,10 @@
 mod common;
 
 use common::{
-	git_tags, run_chronicle, temp_real_git_repo_with_cargo_workspace,
+	git_enabled_config, git_tags, run_chronicle, temp_real_git_repo_with_cargo_workspace,
 	temp_real_git_repo_with_config,
 };
 
-use chronicle::git::GitConfig;
 use chronicle::model::config::PackageManager;
 
 /// Helper: write a config TOML directly to `.chronicle/config.toml`.
@@ -15,14 +14,6 @@ fn write_config(dir: &std::path::Path, toml: &str) {
 	let config_dir = dir.join(".chronicle");
 	std::fs::create_dir_all(&config_dir).unwrap();
 	std::fs::write(config_dir.join("config.toml"), toml).unwrap();
-}
-
-/// A `GitConfig` with git lifecycle enabled.
-fn git_enabled_config() -> GitConfig {
-	GitConfig {
-		enabled: Some(true),
-		..Default::default()
-	}
 }
 
 // --- Flag parsing ---
