@@ -9,8 +9,10 @@ use anyhow::Context;
 use clap::Args;
 use log::info;
 
+use semver::Version;
+
 use crate::command::CommandRunner;
-use crate::git::{self, DEFAULT_RELEASE_BRANCH_PREFIX, ReleaseInfo, Strategy};
+use crate::git::{self, DEFAULT_RELEASE_BRANCH_PREFIX, Strategy};
 use crate::github::client::GitHubClient;
 use crate::github::{DEFAULT_PR_TITLE, GitHubRepo};
 use crate::model::changelog::Changelog;
@@ -97,6 +99,112 @@ fn compute_release_branch(
 	let prefix = config_prefix.unwrap_or(DEFAULT_RELEASE_BRANCH_PREFIX);
 	let base = current_branch.unwrap_or("detached");
 	format!("{prefix}{base}")
+}
+
+/// Information about a single package prepared for release.
+#[derive(Debug)]
+struct ReleaseInfo {
+	package_name: String,
+	new_version: Version,
+}
+
+/// Normalises a path by resolving `.` and `..` components without requiring
+/// the path to exist on disk.
+fn normalize_path(path: &Path) -> PathBuf {
+	use std::path::Component;
+	let mut result = PathBuf::new();
+	for component in path.components() {
+		match component {
+			Component::ParentDir => {
+				result.pop();
+			}
+			Component::CurDir => {}
+			c => result.push(c),
+		}
+	}
+	result
+}
+
+/// Formats the git commit message for a prepare run.
+///
+/// Produces `chore(release): pkg1@1.0.0, pkg2@2.0.0` for the given releases.
+///
+/// # Note
+///
+/// `release_infos` must be non-empty; passing an empty slice produces the
+/// malformed string `"chore(release): "`. This is guaranteed by the early
+/// return in [`stage_and_commit`] which skips all git operations when there
+/// are no releases.
+fn format_commit_message(release_infos: &[ReleaseInfo]) -> String {
+	let parts: Vec<String> = release_infos
+		.iter()
+		.map(|r| format!("{}@{}", r.package_name, r.new_version))
+		.collect();
+	format!("chore(release): {}", parts.join(", "))
+}
+
+/// Stages files and creates a commit for the prepare step.
+///
+/// This is the core git operation for `prepare` — it only commits.
+/// Pushing is handled by the strategy dispatch in `cmd_prepare`, and tagging
+/// happens in `publish`.
+///
+/// If `dry_run` is `true`, prints what would be done without executing any git commands.
+///
+/// # Arguments
+///
+/// * `git_workdir` - Root of the git repository.
+/// * `extra_files` - Additional files to unconditionally stage, relative to the git root.
+/// * `release_infos` - The packages that were prepared for release.
+/// * `modified_files` - Files to stage before committing.
+/// * `dry_run` - If `true`, only print a summary; do not modify git state.
+/// * `runner` - Command runner for executing git commands.
+///
+/// # Errors
+///
+/// Returns an error if any git command fails.
+fn stage_and_commit(
+	git_workdir: &Path,
+	extra_files: &[String],
+	release_infos: &[ReleaseInfo],
+	modified_files: &[PathBuf],
+	dry_run: bool,
+	runner: &dyn CommandRunner,
+) -> anyhow::Result<()> {
+	if release_infos.is_empty() {
+		return Ok(());
+	}
+
+	let commit_message = format_commit_message(release_infos);
+
+	// Build the full staging list, validating that extra_files resolve inside the repo root.
+	let mut all_files = modified_files.to_vec();
+	for f in extra_files {
+		let resolved = normalize_path(&git_workdir.join(f));
+		if !resolved.starts_with(git_workdir) {
+			anyhow::bail!(
+				"extra_files entry {:?} resolves outside the repository root",
+				f
+			);
+		}
+		all_files.push(resolved);
+	}
+
+	if dry_run {
+		info!("Would create commit: {commit_message}");
+		info!("Would stage files:");
+		for file in &all_files {
+			info!("  {}", file.display());
+		}
+		return Ok(());
+	}
+
+	// Stage and commit
+	git::git_add(runner, git_workdir, &all_files)
+		.context("Failed to stage files for git commit")?;
+	git::git_commit(runner, git_workdir, &commit_message).context("Failed to create git commit")?;
+
+	Ok(())
 }
 
 /// Builds the pull request body listing each released package and its new version.
@@ -313,11 +421,11 @@ pub fn cmd_prepare(
 	modified_files.sort();
 	modified_files.dedup();
 
-	// Git lifecycle: commit + strategy push
+	// Stage and commit
 	if git_enabled {
-		git::run_git_lifecycle(
+		stage_and_commit(
 			git_workdir,
-			&config.git,
+			&config.git.extra_files,
 			&release_infos,
 			&modified_files,
 			args.dry_run,
@@ -424,6 +532,117 @@ mod tests {
 
 	fn no_github() -> Option<Arc<dyn GitHubClient>> {
 		None
+	}
+
+	// ── normalize_path ────────────────────────────────────────────────────────
+
+	#[test]
+	fn normalize_path_collapses_parent_dir() {
+		let p = std::path::Path::new("/repo/foo/../bar");
+		assert_eq!(normalize_path(p), std::path::Path::new("/repo/bar"));
+	}
+
+	#[test]
+	fn normalize_path_collapses_current_dir() {
+		let p = std::path::Path::new("/repo/./foo");
+		assert_eq!(normalize_path(p), std::path::Path::new("/repo/foo"));
+	}
+
+	// ── format_commit_message ─────────────────────────────────────────────────
+
+	#[test]
+	fn format_commit_message_single_package() {
+		let infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+		}];
+		assert_eq!(
+			format_commit_message(&infos),
+			"chore(release): my-pkg@1.0.0"
+		);
+	}
+
+	#[test]
+	fn format_commit_message_multiple_packages() {
+		let infos = vec![
+			ReleaseInfo {
+				package_name: "pkg-a".to_string(),
+				new_version: "1.0.0".parse().unwrap(),
+			},
+			ReleaseInfo {
+				package_name: "pkg-b".to_string(),
+				new_version: "2.1.0".parse().unwrap(),
+			},
+		];
+		assert_eq!(
+			format_commit_message(&infos),
+			"chore(release): pkg-a@1.0.0, pkg-b@2.1.0"
+		);
+	}
+
+	#[test]
+	fn format_commit_message_empty() {
+		assert_eq!(format_commit_message(&[]), "chore(release): ");
+	}
+
+	// ── stage_and_commit ──────────────────────────────────────────────────────
+
+	#[test]
+	fn stage_and_commit_empty_releases_is_noop() {
+		let dir = tempfile::tempdir().unwrap();
+		let runner = RecordingCommandRunner::new(0);
+		let result = stage_and_commit(dir.path(), &[], &[], &[], false, &runner);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn stage_and_commit_dry_run_prints_summary() {
+		let dir = tempfile::tempdir().unwrap();
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+		}];
+		let runner = RecordingCommandRunner::new(0);
+		let result = stage_and_commit(dir.path(), &[], &release_infos, &[], true, &runner);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn extra_files_outside_repo_is_rejected() {
+		let dir = tempfile::tempdir().unwrap();
+		let extra_files = vec!["../../etc/passwd".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+		}];
+		let runner = RecordingCommandRunner::new(0);
+		let result = stage_and_commit(dir.path(), &extra_files, &release_infos, &[], true, &runner);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("resolves outside the repository root")
+		);
+	}
+
+	#[test]
+	fn extra_files_absolute_path_is_rejected() {
+		let dir = tempfile::tempdir().unwrap();
+		let extra_files = vec!["/etc/passwd".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+		}];
+		let runner = RecordingCommandRunner::new(0);
+		let result = stage_and_commit(dir.path(), &extra_files, &release_infos, &[], true, &runner);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("resolves outside the repository root")
+		);
 	}
 
 	#[test]
