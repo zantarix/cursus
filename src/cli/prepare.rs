@@ -12,6 +12,7 @@ use log::info;
 use semver::Version;
 
 use crate::git::{self, DEFAULT_RELEASE_BRANCH_PREFIX, Strategy};
+use crate::github::client::GitHubClient;
 use crate::github::{DEFAULT_PR_TITLE, GitHubRepo};
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
@@ -207,6 +208,37 @@ fn stage_and_commit(
 	Ok(())
 }
 
+/// Creates or updates a pull request for the given head branch.
+///
+/// If an open pull request already exists for `head`, it is updated with the
+/// new `title` and `body`. Otherwise a new pull request is created from `head`
+/// into `base`. Returns the URL of the created or updated pull request.
+///
+/// # Errors
+///
+/// Returns an error if the find, create, or update API call fails.
+fn upsert_pull_request(
+	client: &dyn GitHubClient,
+	gh_repo: &GitHubRepo,
+	title: &str,
+	body: &str,
+	head: &str,
+	base: &str,
+) -> anyhow::Result<String> {
+	match client.find_open_pull_request(gh_repo, head)? {
+		Some(pr) => {
+			let url = client.update_pull_request(gh_repo, pr.number, title, body)?;
+			info!("Updated pull request: {url}");
+			Ok(url)
+		}
+		None => {
+			let url = client.create_pull_request(gh_repo, title, body, head, base)?;
+			info!("Created pull request: {url}");
+			Ok(url)
+		}
+	}
+}
+
 /// Builds the pull request body with an introduction and per-package changelog sections.
 fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
 	let mut body = format!(
@@ -314,7 +346,7 @@ pub(crate) fn cmd_prepare(
 				current.as_deref(),
 			);
 			if !args.dry_run {
-				git.checkout_new_branch(&branch)?;
+				git.checkout_or_reset_branch(&branch)?;
 			}
 			(current, Some(branch))
 		} else {
@@ -457,10 +489,10 @@ pub(crate) fn cmd_prepare(
 								.pull_request_title
 								.as_deref()
 								.unwrap_or(DEFAULT_PR_TITLE);
-							info!("Would create pull request: '{title}'");
+							info!("Would create or update pull request: '{title}'");
 						}
 					} else {
-						git.push_branch(branch).with_context(|| {
+						git.force_push_branch(branch).with_context(|| {
 							format!(
 								"Failed to push release branch '{branch}'. \
 									 You are still on the release branch; run \
@@ -468,7 +500,7 @@ pub(crate) fn cmd_prepare(
 							)
 						})?;
 
-						// PR creation is non-fatal; warn on failure.
+						// PR upsert is non-fatal; warn on failure.
 						// github_client is guaranteed Some by the pre-flight check above.
 						if config.github.enabled
 							&& let Some(client) = env.github_client()
@@ -487,13 +519,12 @@ pub(crate) fn cmd_prepare(
 										.as_deref()
 										.unwrap_or(DEFAULT_PR_TITLE);
 									let pr_body = build_pr_body(&release_infos, base);
-									match client.create_pull_request(
-										&gh_repo, title, &pr_body, branch, base,
+									if let Err(e) = upsert_pull_request(
+										client, &gh_repo, title, &pr_body, branch, base,
 									) {
-										Ok(url) => info!("Created pull request: {url}"),
-										Err(e) => {
-											log::warn!("Failed to create pull request: {e:#}")
-										}
+										log::warn!(
+											"Failed to create or update pull request: {e:#}"
+										);
 									}
 								}
 								Err(e) => log::warn!(
@@ -1161,6 +1192,149 @@ mod tests {
 		assert!(
 			result.is_ok(),
 			"PR failure should be non-fatal, got: {result:?}"
+		);
+	}
+
+	// ── upsert_pull_request ───────────────────────────────────────────────────
+
+	#[test]
+	fn upsert_pull_request_creates_when_no_existing() {
+		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+		let client = RecordingGitHubClient::new(); // no existing PR
+		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
+		let result = upsert_pull_request(
+			&client,
+			&gh_repo,
+			"Release PR",
+			"body",
+			"chronicle-release/main",
+			"main",
+		);
+		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+		let invocations = client.invocations();
+		// Should have called find then create
+		assert!(
+			invocations
+				.iter()
+				.any(|i| matches!(i, GitHubInvocation::FindOpenPullRequest { .. })),
+			"Expected FindOpenPullRequest invocation"
+		);
+		assert!(
+			invocations
+				.iter()
+				.any(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. })),
+			"Expected CreatePullRequest invocation"
+		);
+	}
+
+	#[test]
+	fn upsert_pull_request_updates_when_existing() {
+		use crate::github::client::PullRequest;
+		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+		let existing_pr = PullRequest {
+			number: 7,
+			html_url: "https://github.com/acme/app/pull/7".to_string(),
+		};
+		let client = RecordingGitHubClient::new().with_existing_pr(existing_pr);
+		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
+		let result = upsert_pull_request(
+			&client,
+			&gh_repo,
+			"Release PR",
+			"updated body",
+			"chronicle-release/main",
+			"main",
+		);
+		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+		let invocations = client.invocations();
+		assert!(
+			invocations
+				.iter()
+				.any(|i| matches!(i, GitHubInvocation::FindOpenPullRequest { .. })),
+			"Expected FindOpenPullRequest invocation"
+		);
+		assert!(
+			invocations.iter().any(|i| matches!(
+				i,
+				GitHubInvocation::UpdatePullRequest { pull_number, .. } if *pull_number == 7
+			)),
+			"Expected UpdatePullRequest invocation for PR #7"
+		);
+		assert!(
+			!invocations
+				.iter()
+				.any(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. })),
+			"Should NOT call CreatePullRequest when existing PR found"
+		);
+	}
+
+	#[test]
+	fn upsert_pull_request_propagates_find_error() {
+		use crate::github::client::test_support::RecordingGitHubClient;
+		let client = RecordingGitHubClient::new().with_find_pr_failure();
+		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
+		let result = upsert_pull_request(
+			&client,
+			&gh_repo,
+			"Release PR",
+			"body",
+			"release-branch",
+			"main",
+		);
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("simulated find_open_pull_request failure"),
+			"Expected find failure error, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn upsert_pull_request_propagates_update_error() {
+		use crate::github::client::PullRequest;
+		use crate::github::client::test_support::RecordingGitHubClient;
+		let existing_pr = PullRequest {
+			number: 1,
+			html_url: "https://github.com/acme/app/pull/1".to_string(),
+		};
+		let client = RecordingGitHubClient::new()
+			.with_existing_pr(existing_pr)
+			.with_update_pr_failure();
+		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
+		let result = upsert_pull_request(
+			&client,
+			&gh_repo,
+			"Release PR",
+			"body",
+			"release-branch",
+			"main",
+		);
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("simulated update_pull_request failure"),
+			"Expected update failure error, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn upsert_pull_request_propagates_create_error() {
+		use crate::github::client::test_support::RecordingGitHubClient;
+		let client = RecordingGitHubClient::new().with_create_pr_failure();
+		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
+		let result = upsert_pull_request(
+			&client,
+			&gh_repo,
+			"Release PR",
+			"body",
+			"release-branch",
+			"main",
+		);
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("simulated create_pull_request failure"),
+			"Expected create failure error, got: {msg}"
 		);
 	}
 

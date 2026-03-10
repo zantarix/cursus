@@ -4,6 +4,15 @@ use std::path::Path;
 
 use super::remote::GitHubRepo;
 
+/// A resolved GitHub pull request.
+#[derive(Debug, Clone)]
+pub struct PullRequest {
+	/// Pull request number.
+	pub number: u64,
+	/// Full URL of the pull request on GitHub.
+	pub html_url: String,
+}
+
 /// Abstract interface for GitHub API operations.
 ///
 /// All methods are synchronous. The production implementation uses
@@ -57,6 +66,32 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 		head: &str,
 		base: &str,
 	) -> anyhow::Result<String>;
+
+	/// Finds an open pull request whose head branch matches `head`.
+	///
+	/// Returns `None` if no open PR exists for that branch.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the API call fails.
+	fn find_open_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		head: &str,
+	) -> anyhow::Result<Option<PullRequest>>;
+
+	/// Updates the title and body of an existing pull request, returning the PR URL.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the API call fails.
+	fn update_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		pull_number: u64,
+		title: &str,
+		body: &str,
+	) -> anyhow::Result<String>;
 }
 
 /// Test support types for GitHub client operations.
@@ -72,7 +107,7 @@ pub mod test_support {
 
 	use anyhow::bail;
 
-	use super::GitHubClient;
+	use super::{GitHubClient, PullRequest};
 	use crate::github::remote::GitHubRepo;
 
 	/// A recorded GitHub API invocation.
@@ -113,6 +148,24 @@ pub mod test_support {
 			/// Target branch (base).
 			base: String,
 		},
+		/// A `find_open_pull_request` call.
+		FindOpenPullRequest {
+			/// GitHub repository (owner and name).
+			gh_repo: GitHubRepo,
+			/// Head branch to search for.
+			head: String,
+		},
+		/// An `update_pull_request` call.
+		UpdatePullRequest {
+			/// GitHub repository (owner and name).
+			gh_repo: GitHubRepo,
+			/// Pull request number.
+			pull_number: u64,
+			/// New pull request title.
+			title: String,
+			/// New pull request body (markdown).
+			body: String,
+		},
 	}
 
 	/// A [`GitHubClient`] that records all invocations and returns configured responses.
@@ -123,6 +176,9 @@ pub mod test_support {
 		fail_create: bool,
 		fail_upload: bool,
 		fail_create_pr: bool,
+		existing_pr: Option<PullRequest>,
+		fail_find_pr: bool,
+		fail_update_pr: bool,
 	}
 
 	impl RecordingGitHubClient {
@@ -134,6 +190,9 @@ pub mod test_support {
 				fail_create: false,
 				fail_upload: false,
 				fail_create_pr: false,
+				existing_pr: None,
+				fail_find_pr: false,
+				fail_update_pr: false,
 			}
 		}
 
@@ -158,6 +217,26 @@ pub mod test_support {
 		/// Causes [`create_pull_request`](GitHubClient::create_pull_request) to return an error.
 		pub fn with_create_pr_failure(mut self) -> Self {
 			self.fail_create_pr = true;
+			self
+		}
+
+		/// Configures an existing PR to be returned by
+		/// [`find_open_pull_request`](GitHubClient::find_open_pull_request).
+		pub fn with_existing_pr(mut self, pr: PullRequest) -> Self {
+			self.existing_pr = Some(pr);
+			self
+		}
+
+		/// Causes [`find_open_pull_request`](GitHubClient::find_open_pull_request) to return an
+		/// error.
+		pub fn with_find_pr_failure(mut self) -> Self {
+			self.fail_find_pr = true;
+			self
+		}
+
+		/// Causes [`update_pull_request`](GitHubClient::update_pull_request) to return an error.
+		pub fn with_update_pr_failure(mut self) -> Self {
+			self.fail_update_pr = true;
 			self
 		}
 
@@ -240,6 +319,48 @@ pub mod test_support {
 			let owner = &gh_repo.owner;
 			let repo = &gh_repo.repo;
 			Ok(format!("https://github.com/{owner}/{repo}/pull/1"))
+		}
+
+		fn find_open_pull_request(
+			&self,
+			gh_repo: &GitHubRepo,
+			head: &str,
+		) -> anyhow::Result<Option<PullRequest>> {
+			self.invocations.lock().expect("mutex poisoned").push(
+				GitHubInvocation::FindOpenPullRequest {
+					gh_repo: gh_repo.clone(),
+					head: head.to_string(),
+				},
+			);
+			if self.fail_find_pr {
+				bail!("simulated find_open_pull_request failure");
+			}
+			Ok(self.existing_pr.clone())
+		}
+
+		fn update_pull_request(
+			&self,
+			gh_repo: &GitHubRepo,
+			pull_number: u64,
+			title: &str,
+			body: &str,
+		) -> anyhow::Result<String> {
+			self.invocations.lock().expect("mutex poisoned").push(
+				GitHubInvocation::UpdatePullRequest {
+					gh_repo: gh_repo.clone(),
+					pull_number,
+					title: title.to_string(),
+					body: body.to_string(),
+				},
+			);
+			if self.fail_update_pr {
+				bail!("simulated update_pull_request failure");
+			}
+			let owner = &gh_repo.owner;
+			let repo = &gh_repo.repo;
+			Ok(format!(
+				"https://github.com/{owner}/{repo}/pull/{pull_number}"
+			))
 		}
 	}
 
@@ -353,6 +474,87 @@ pub mod test_support {
 			);
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
+			assert_eq!(client.invocations().len(), 1);
+		}
+
+		#[test]
+		fn recording_client_find_open_pr_returns_none_when_not_configured() {
+			let client = RecordingGitHubClient::new();
+			let result = client
+				.find_open_pull_request(
+					&GitHubRepo::new("acme", "app").unwrap(),
+					"chronicle-release/main",
+				)
+				.unwrap();
+			assert!(result.is_none());
+			let invocations = client.invocations();
+			assert_eq!(invocations.len(), 1);
+			assert!(matches!(
+				&invocations[0],
+				GitHubInvocation::FindOpenPullRequest { head, .. }
+					if head == "chronicle-release/main"
+			));
+		}
+
+		#[test]
+		fn recording_client_find_open_pr_returns_configured_pr() {
+			let pr = PullRequest {
+				number: 42,
+				html_url: "https://github.com/acme/app/pull/42".to_string(),
+			};
+			let client = RecordingGitHubClient::new().with_existing_pr(pr);
+			let result = client
+				.find_open_pull_request(
+					&GitHubRepo::new("acme", "app").unwrap(),
+					"chronicle-release/main",
+				)
+				.unwrap();
+			assert!(result.is_some());
+			let found = result.unwrap();
+			assert_eq!(found.number, 42);
+			assert!(found.html_url.contains("pull/42"));
+		}
+
+		#[test]
+		fn recording_client_find_pr_failure_returns_error() {
+			let client = RecordingGitHubClient::new().with_find_pr_failure();
+			let result = client
+				.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch");
+			assert!(result.is_err());
+			assert_eq!(client.invocations().len(), 1);
+		}
+
+		#[test]
+		fn recording_client_update_pull_request_records_invocation() {
+			let client = RecordingGitHubClient::new();
+			let url = client
+				.update_pull_request(
+					&GitHubRepo::new("acme", "app").unwrap(),
+					42,
+					"Updated Title",
+					"Updated body",
+				)
+				.unwrap();
+			assert!(url.contains("pull/42"), "URL should contain pull/42: {url}");
+			let invocations = client.invocations();
+			assert_eq!(invocations.len(), 1);
+			assert!(matches!(
+				&invocations[0],
+				GitHubInvocation::UpdatePullRequest { pull_number, title, .. }
+					if *pull_number == 42 && title == "Updated Title"
+			));
+		}
+
+		#[test]
+		fn recording_client_update_pr_failure_returns_error() {
+			let client = RecordingGitHubClient::new().with_update_pr_failure();
+			let result = client.update_pull_request(
+				&GitHubRepo::new("acme", "app").unwrap(),
+				1,
+				"Title",
+				"body",
+			);
+			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
 	}

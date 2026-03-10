@@ -174,27 +174,6 @@ impl GitWorkdir {
 		}
 	}
 
-	/// Creates and checks out a new branch.
-	///
-	/// Runs `git checkout -b <branch>`.
-	///
-	/// # Errors
-	///
-	/// Returns an error if `git checkout` exits with a non-zero status.
-	pub(crate) fn checkout_new_branch(&self, branch: &str) -> anyhow::Result<()> {
-		let output = self
-			.env
-			.run("git", &["checkout", "-b", branch], &self.path)
-			.context("Failed to run git checkout")?;
-
-		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
-			bail!("git checkout -b failed: {stderr}");
-		}
-
-		Ok(())
-	}
-
 	/// Checks out an existing branch.
 	///
 	/// Runs `git checkout <branch>`.
@@ -211,27 +190,6 @@ impl GitWorkdir {
 		if !output.status.success() {
 			let stderr = String::from_utf8_lossy(&output.stderr);
 			bail!("git checkout failed: {stderr}");
-		}
-
-		Ok(())
-	}
-
-	/// Pushes a named branch to origin.
-	///
-	/// Runs `git push origin <branch>`.
-	///
-	/// # Errors
-	///
-	/// Returns an error if `git push` exits with a non-zero status.
-	pub(crate) fn push_branch(&self, branch: &str) -> anyhow::Result<()> {
-		let output = self
-			.env
-			.run("git", &["push", "origin", branch], &self.path)
-			.context("Failed to run git push branch")?;
-
-		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
-			bail!("git push branch failed: {stderr}");
 		}
 
 		Ok(())
@@ -279,6 +237,55 @@ impl GitWorkdir {
 		Ok(Some(
 			String::from_utf8_lossy(&output.stdout).trim().to_string(),
 		))
+	}
+
+	/// Creates or resets a branch at the current HEAD.
+	///
+	/// Runs `git checkout -B <branch>`. If the branch already exists, it is reset
+	/// to the current HEAD, making this operation idempotent.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git checkout` exits with a non-zero status.
+	pub(crate) fn checkout_or_reset_branch(&self, branch: &str) -> anyhow::Result<()> {
+		let output = self
+			.env
+			.run("git", &["checkout", "-B", branch], &self.path)
+			.context("Failed to run git checkout")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git checkout -B failed: {stderr}");
+		}
+
+		Ok(())
+	}
+
+	/// Force-pushes a named branch to origin using `--force-with-lease`.
+	///
+	/// Runs `git push --force-with-lease origin <branch>`. The `--force-with-lease`
+	/// flag ensures the push is rejected if the remote branch has been updated by
+	/// someone else since the last fetch, preventing accidental overwrites.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git push` exits with a non-zero status.
+	pub(crate) fn force_push_branch(&self, branch: &str) -> anyhow::Result<()> {
+		let output = self
+			.env
+			.run(
+				"git",
+				&["push", "--force-with-lease", "origin", branch],
+				&self.path,
+			)
+			.context("Failed to run git force push branch")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git force push branch failed: {stderr}");
+		}
+
+		Ok(())
 	}
 
 	/// Pushes a specific tag to origin.
@@ -567,36 +574,6 @@ mod tests {
 			"Expected 'git rev-parse failed', got: {msg}"
 		);
 	}
-
-	#[test]
-	fn git_checkout_new_branch_passes_correct_args() {
-		let dir = temp_dir();
-		let runner = recording(0);
-		let dir_abs = abs(&dir);
-		let (git, runner) = make_git(runner, dir_abs);
-		git.checkout_new_branch("feature/my-branch").unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations.len(), 1);
-		assert_eq!(invocations[0].program, "git");
-		assert_eq!(invocations[0].args, ["checkout", "-b", "feature/my-branch"]);
-		assert_eq!(invocations[0].cwd, dir.path());
-	}
-
-	#[test]
-	fn git_checkout_new_branch_failure_propagates() {
-		let dir = temp_dir();
-		let runner = recording_with_stderr(1, b"fatal: branch already exists");
-		let dir_abs = abs(&dir);
-		let (git, _) = make_git(runner, dir_abs);
-		let result = git.checkout_new_branch("main");
-		assert!(result.is_err());
-		let msg = result.unwrap_err().to_string();
-		assert!(
-			msg.contains("git checkout -b failed"),
-			"Expected 'git checkout -b failed', got: {msg}"
-		);
-	}
-
 	#[test]
 	fn git_checkout_passes_correct_args() {
 		let dir = temp_dir();
@@ -656,34 +633,72 @@ mod tests {
 	}
 
 	#[test]
-	fn git_push_branch_passes_correct_args() {
+	fn git_checkout_or_reset_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
 		let (git, runner) = make_git(runner, dir_abs);
-		git.push_branch("chronicle-release/main").unwrap();
+		git.checkout_or_reset_branch("chronicle-release/main")
+			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
 		assert_eq!(
 			invocations[0].args,
-			["push", "origin", "chronicle-release/main"]
+			["checkout", "-B", "chronicle-release/main"]
 		);
 		assert_eq!(invocations[0].cwd, dir.path());
 	}
 
 	#[test]
-	fn git_push_branch_failure_propagates() {
+	fn git_checkout_or_reset_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
 		let (git, _) = make_git(runner, dir_abs);
-		let result = git.push_branch("release/main");
+		let result = git.checkout_or_reset_branch("release/main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
-			msg.contains("git push branch failed"),
-			"Expected 'git push branch failed', got: {msg}"
+			msg.contains("git checkout -B failed"),
+			"Expected 'git checkout -B failed', got: {msg}"
+		);
+	}
+
+	#[test]
+	fn git_force_push_branch_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.force_push_branch("chronicle-release/main").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			[
+				"push",
+				"--force-with-lease",
+				"origin",
+				"chronicle-release/main"
+			]
+		);
+		assert_eq!(invocations[0].cwd, dir.path());
+	}
+
+	#[test]
+	fn git_force_push_branch_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repo");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.force_push_branch("release/main");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git force push branch failed"),
+			"Expected 'git force push branch failed', got: {msg}"
 		);
 	}
 

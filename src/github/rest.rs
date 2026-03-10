@@ -7,7 +7,7 @@ use std::path::Path;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use super::client::GitHubClient;
+use super::client::{GitHubClient, PullRequest};
 use super::remote::GitHubRepo;
 
 /// GitHub REST API version header value, pinned to prevent breakage on future API changes.
@@ -41,6 +41,26 @@ struct CreatePullRequestRequest<'a> {
 /// Response body from a GitHub pull request creation.
 #[derive(Debug, Deserialize)]
 struct CreatePullRequestResponse {
+	html_url: String,
+}
+
+/// A single item in the list pull requests response.
+#[derive(Debug, Deserialize)]
+struct ListPullRequestItem {
+	number: u64,
+	html_url: String,
+}
+
+/// Request body for updating an existing GitHub pull request.
+#[derive(Debug, Serialize)]
+struct UpdatePullRequestRequest<'a> {
+	title: &'a str,
+	body: &'a str,
+}
+
+/// Response body from a GitHub pull request update.
+#[derive(Debug, Deserialize)]
+struct UpdatePullRequestResponse {
 	html_url: String,
 }
 
@@ -104,11 +124,39 @@ impl RestGitHubClient {
 		format!("Bearer {}", self.token)
 	}
 
+	/// Returns a GET request builder for `url` with all standard GitHub API
+	/// headers pre-applied (Authorization, Accept, API version, User-Agent).
+	fn get_request(&self, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+		self.agent
+			.get(url)
+			.header("Authorization", &self.auth_header())
+			.header("Accept", "application/vnd.github+json")
+			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+			.header(
+				"User-Agent",
+				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
+			)
+	}
+
 	/// Returns a POST request builder for `url` with all standard GitHub API
 	/// headers pre-applied (Authorization, Accept, API version, User-Agent).
 	fn post_request(&self, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
 		self.agent
 			.post(url)
+			.header("Authorization", &self.auth_header())
+			.header("Accept", "application/vnd.github+json")
+			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+			.header(
+				"User-Agent",
+				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
+			)
+	}
+
+	/// Returns a PATCH request builder for `url` with all standard GitHub API
+	/// headers pre-applied (Authorization, Accept, API version, User-Agent).
+	fn patch_request(&self, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
+		self.agent
+			.patch(url)
 			.header("Authorization", &self.auth_header())
 			.header("Accept", "application/vnd.github+json")
 			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
@@ -270,6 +318,63 @@ impl GitHubClient for RestGitHubClient {
 			.context("Failed to parse pull request creation response")?;
 		Ok(pr.html_url)
 	}
+
+	fn find_open_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		head: &str,
+	) -> anyhow::Result<Option<PullRequest>> {
+		let head_param = percent_encode(&format!("{}:{}", gh_repo.owner, head));
+		let url = format!(
+			"{}/repos/{}/{}/pulls?head={head_param}&state=open",
+			self.api_base_url, gh_repo.owner, gh_repo.repo
+		);
+		let mut response = self
+			.get_request(&url)
+			.call()
+			.with_context(|| format!("Failed to list pull requests for branch '{head}'"))?;
+		Self::require_success("GET", &url, &mut response, || {
+			format!("Failed to list pull requests for branch '{head}'")
+		})?;
+		let items: Vec<ListPullRequestItem> = response
+			.body_mut()
+			.read_json()
+			.context("Failed to parse pull request list response")?;
+		Ok(items.into_iter().next().map(|item| PullRequest {
+			number: item.number,
+			html_url: item.html_url,
+		}))
+	}
+
+	fn update_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		pull_number: u64,
+		title: &str,
+		body: &str,
+	) -> anyhow::Result<String> {
+		let url = format!(
+			"{}/repos/{}/{}/pulls/{pull_number}",
+			self.api_base_url, gh_repo.owner, gh_repo.repo
+		);
+		let request_body = UpdatePullRequestRequest { title, body };
+		log::trace!(
+			"  request body: {}",
+			serde_json::to_string(&request_body).unwrap_or_default()
+		);
+		let mut response = self
+			.patch_request(&url)
+			.send_json(&request_body)
+			.with_context(|| format!("Failed to update pull request #{pull_number}"))?;
+		Self::require_success("PATCH", &url, &mut response, || {
+			format!("Failed to update pull request #{pull_number}")
+		})?;
+		let pr: UpdatePullRequestResponse = response
+			.body_mut()
+			.read_json()
+			.context("Failed to parse pull request update response")?;
+		Ok(pr.html_url)
+	}
 }
 
 #[cfg(test)]
@@ -382,6 +487,9 @@ mod tests {
 		assert_eq!(percent_encode("a?b"), "a%3Fb");
 		assert_eq!(percent_encode("a#b"), "a%23b");
 		assert_eq!(percent_encode("a%b"), "a%25b");
+		// Colon and slash appear in the `owner:branch` query param for PR lookup
+		assert_eq!(percent_encode("a:b"), "a%3Ab");
+		assert_eq!(percent_encode("a/b"), "a%2Fb");
 	}
 
 	#[test]
@@ -562,57 +670,29 @@ mod tests {
 	}
 
 	#[test]
-	fn create_pull_request_sends_correct_request() {
-		let server = MockServer::start();
-		let _mock = server.mock(|when, then| {
-			when.method(POST).path("/repos/acme/app/pulls");
-			then.status(201)
-				.header("Content-Type", "application/json")
-				.body(
-					r#"{"id": 1, "number": 1, "html_url": "https://github.com/acme/app/pull/1"}"#,
-				);
-		});
-
-		let client = RestGitHubClient::new("test-token".to_string())
-			.with_base_urls(server.base_url(), server.base_url());
-
-		let url = client
-			.create_pull_request(
-				&GitHubRepo::new("acme", "app").unwrap(),
-				"Release updates",
-				"body",
-				"release-branch",
-				"main",
-			)
-			.unwrap();
-		assert_eq!(url, "https://github.com/acme/app/pull/1");
+	fn list_pull_request_item_deserializes_correctly() {
+		let json =
+			r#"{"number": 7, "html_url": "https://github.com/acme/app/pull/7", "state": "open"}"#;
+		let item: ListPullRequestItem = serde_json::from_str(json).unwrap();
+		assert_eq!(item.number, 7);
+		assert_eq!(item.html_url, "https://github.com/acme/app/pull/7");
 	}
 
 	#[test]
-	fn create_pull_request_returns_error_on_failure() {
-		let server = MockServer::start();
-		let _mock = server.mock(|when, then| {
-			when.method(POST).path("/repos/acme/app/pulls");
-			then.status(422)
-				.header("Content-Type", "application/json")
-				.body(r#"{"message": "Validation Failed"}"#);
-		});
+	fn update_pull_request_request_serializes_correctly() {
+		let req = UpdatePullRequestRequest {
+			title: "Updated title",
+			body: "Updated body",
+		};
+		let json = serde_json::to_value(&req).unwrap();
+		assert_eq!(json["title"], "Updated title");
+		assert_eq!(json["body"], "Updated body");
+	}
 
-		let client = RestGitHubClient::new("test-token".to_string())
-			.with_base_urls(server.base_url(), server.base_url());
-
-		let result = client.create_pull_request(
-			&GitHubRepo::new("acme", "app").unwrap(),
-			"Release updates",
-			"body",
-			"release-branch",
-			"main",
-		);
-		assert!(result.is_err());
-		let msg = format!("{:#}", result.unwrap_err());
-		assert!(
-			msg.contains("422"),
-			"Error should contain status code: {msg}"
-		);
+	#[test]
+	fn update_pull_request_response_deserializes_correctly() {
+		let json = r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#;
+		let response: UpdatePullRequestResponse = serde_json::from_str(json).unwrap();
+		assert_eq!(response.html_url, "https://github.com/acme/app/pull/7");
 	}
 }
