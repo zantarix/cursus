@@ -624,3 +624,192 @@ fn prepare_git_config_old_run_until_field_fails_to_load() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err(), "Expected error for old run_until field");
 }
+
+#[test]
+fn prepare_branch_strategy_rerun_is_idempotent() {
+	// Running prepare twice with branch strategy should succeed both times.
+	// The second run resets the existing release branch and force-pushes it.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let initial_branch = git_current_branch(dir.path());
+	let expected_release_branch = format!("chronicle-release/{initial_branch}");
+
+	// First run
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "first prepare failed: {result:?}");
+
+	// Back on original branch after first run
+	assert_eq!(
+		git_current_branch(dir.path()),
+		initial_branch,
+		"Should have returned to original branch after first run"
+	);
+
+	// Second run — should succeed even though the release branch already exists
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "second prepare failed: {result:?}");
+
+	// Still on original branch after second run
+	assert_eq!(
+		git_current_branch(dir.path()),
+		initial_branch,
+		"Should be on original branch after second run"
+	);
+
+	// Release branch still exists with the release commit
+	assert!(
+		git_local_branch_exists(dir.path(), &expected_release_branch),
+		"Release branch '{expected_release_branch}' should still exist after second run"
+	);
+
+	let output = Command::new("git")
+		.args(["log", &expected_release_branch, "--format=%s"])
+		.current_dir(dir.path())
+		.output()
+		.expect("Failed to run git log");
+	let log = String::from_utf8(output.stdout).expect("log not UTF-8");
+	assert!(
+		log.lines().any(|l| l.contains("chore(release):")),
+		"Release branch should contain the release commit after second run, got: {log}"
+	);
+
+	// Verify the version was correctly bumped to 0.2.0 on the release branch
+	let cargo_toml = Command::new("git")
+		.args(["show", &format!("{expected_release_branch}:Cargo.toml")])
+		.current_dir(dir.path())
+		.output()
+		.expect("Failed to read Cargo.toml from release branch");
+	let cargo_toml_content = String::from_utf8(cargo_toml.stdout).expect("Not UTF-8");
+	assert!(
+		cargo_toml_content.contains("version = \"0.2.0\""),
+		"Release branch Cargo.toml should have bumped version to 0.2.0, got: {cargo_toml_content}"
+	);
+}
+
+#[test]
+fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
+	// Full end-to-end test: prepare with branch strategy + GitHub enabled.
+	// First run creates a PR; second run finds the existing PR and updates it.
+	// Uses httpmock to intercept the GitHub REST API calls made by RestGitHubClient.
+	use std::sync::Arc;
+
+	use chronicle::command::RealCommandRunner;
+	use chronicle::github::client::GitHubClient;
+	use chronicle::github::{GitHubConfig, RestGitHubClient};
+	use chronicle::model::config::Config;
+	use chronicle::package_manager::CargoConfig;
+	use chronicle::path::AbsolutePath;
+	use httpmock::prelude::*;
+
+	let server = MockServer::start();
+	let api_url = server.base_url();
+
+	// Create a repo with branch strategy + GitHub config (owner = "acme", repo = "app")
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let abs = AbsolutePath::new(dir.path()).unwrap();
+	Config::new(&abs)
+		.with_cargo(CargoConfig::enabled())
+		.with_git(branch_strategy_config())
+		.with_github(GitHubConfig {
+			enabled: true,
+			owner: Some("acme".into()),
+			repo: Some("app".into()),
+			..Default::default()
+		})
+		.save()
+		.unwrap();
+
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let initial_branch = git_current_branch(dir.path());
+	let release_branch = format!("chronicle-release/{initial_branch}");
+	let head_param = format!("acme:{release_branch}");
+
+	// Build a fresh Env with a RestGitHubClient pointing at the mock server.
+	// A new client is created for each run because Env is consumed by chronicle::run.
+	let make_env = || {
+		let client = Arc::new(
+			RestGitHubClient::new("test-token".to_string())
+				.with_base_urls(api_url.clone(), api_url.clone()),
+		) as Arc<dyn GitHubClient>;
+		chronicle::Env::new(
+			Arc::new(RealCommandRunner) as Arc<dyn chronicle::command::CommandRunner>
+		)
+		.with_github_client(client)
+	};
+
+	// ── First run: no existing PR → find returns empty → create PR ───────────
+	let mut mock_find_empty = server.mock(|when, then| {
+		when.method(GET)
+			.path("/repos/acme/app/pulls")
+			.query_param("head", &head_param)
+			.query_param("state", "open");
+		then.status(200)
+			.header("Content-Type", "application/json")
+			.body("[]");
+	});
+	let mut mock_create = server.mock(|when, then| {
+		when.method(POST).path("/repos/acme/app/pulls");
+		then.status(201)
+			.header("Content-Type", "application/json")
+			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
+	});
+
+	let result = chronicle::run(
+		["chronicle", "--no-interactive", "prepare"],
+		dir.path(),
+		make_env(),
+	);
+	assert!(result.is_ok(), "first prepare failed: {result:?}");
+	mock_find_empty.assert_calls(1);
+	mock_create.assert_calls(1);
+
+	// Remove first-run mocks before registering second-run mocks so they don't overlap.
+	mock_find_empty.delete();
+	mock_create.delete();
+
+	// ── Second run: existing PR found → find returns PR #7 → update PR ───────
+	let mock_find_existing = server.mock(|when, then| {
+		when.method(GET)
+			.path("/repos/acme/app/pulls")
+			.query_param("head", &head_param)
+			.query_param("state", "open");
+		then.status(200)
+			.header("Content-Type", "application/json")
+			.body(r#"[{"number": 7, "html_url": "https://github.com/acme/app/pull/7"}]"#);
+	});
+	let mock_update = server.mock(|when, then| {
+		when.method(PATCH).path("/repos/acme/app/pulls/7");
+		then.status(200)
+			.header("Content-Type", "application/json")
+			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
+	});
+
+	let result = chronicle::run(
+		["chronicle", "--no-interactive", "prepare"],
+		dir.path(),
+		make_env(),
+	);
+	assert!(result.is_ok(), "second prepare (update) failed: {result:?}");
+	mock_find_existing.assert_calls(1);
+	mock_update.assert_calls(1);
+}
