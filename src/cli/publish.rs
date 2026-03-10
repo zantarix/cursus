@@ -1,6 +1,6 @@
 //! Publish command implementation.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -51,8 +51,8 @@ pub struct PublishArgs {
 }
 
 /// Execute the publish command.
-pub fn cmd_publish(
-	git_workdir: &Path,
+pub(crate) fn cmd_publish(
+	git: &git::GitWorkdir<'_>,
 	args: &PublishArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,
@@ -129,13 +129,7 @@ pub fn cmd_publish(
 			}
 			(0usize, 0usize)
 		} else {
-			create_and_push_tags(
-				&published_packages,
-				&config,
-				runner.as_ref(),
-				git_workdir,
-				is_multi_package,
-			)?
+			create_and_push_tags(&published_packages, &config, git, is_multi_package)?
 		}
 	} else {
 		(0, 0)
@@ -164,7 +158,7 @@ pub fn cmd_publish(
 				None => bail!("GitHub client not available despite token being set"),
 			};
 			orchestrate_github_releases(
-				git_workdir,
+				git,
 				&config,
 				runner.as_ref(),
 				client,
@@ -240,8 +234,7 @@ pub fn cmd_publish(
 fn create_and_push_tags(
 	published: &[PublishedPackage],
 	config: &Config,
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
+	git: &git::GitWorkdir<'_>,
 	is_multi_package: bool,
 ) -> anyhow::Result<(usize, usize)> {
 	let mut created_tags: Vec<String> = Vec::new();
@@ -253,21 +246,21 @@ fn create_and_push_tags(
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 
-		if git::git_tag_exists(runner, git_workdir, &tag)? {
+		if git.tag_exists(&tag)? {
 			info!("Tag {tag} already exists, skipping");
 			skipped += 1;
 			continue;
 		}
 
 		let message = format!("Release {} version {}", pkg.name, pkg.version);
-		git::git_tag(runner, git_workdir, &tag, &message)?;
+		git.tag(&tag, &message)?;
 		info!("Created tag {tag}");
 		created_tags.push(tag);
 	}
 
 	// Push only the tags created in this invocation (not all local tags).
 	for tag_name in &created_tags {
-		git::git_push_tag(runner, git_workdir, tag_name)?;
+		git.push_tag(tag_name)?;
 	}
 
 	let created = created_tags.len();
@@ -351,7 +344,7 @@ fn publish_projects(
 ///
 /// Returns `(releases_created, any_failed)`.
 fn orchestrate_github_releases(
-	git_workdir: &Path,
+	git: &git::GitWorkdir<'_>,
 	config: &Config,
 	runner: &dyn CommandRunner,
 	github_client: &dyn GitHubClient,
@@ -363,14 +356,14 @@ fn orchestrate_github_releases(
 	}
 
 	// Resolve owner/repo from config or git remote
-	let gh_repo = GitHubRepo::resolve(&config.github, git_workdir, runner)?;
+	let gh_repo = GitHubRepo::resolve(&config.github, git)?;
 
 	// Run build command if configured
 	let mut github_failed = false;
 	if !config.github.build_command.is_empty() {
 		info!("Running build command: {}", config.github.build_command);
 		let output = runner
-			.run_shell(&config.github.build_command, git_workdir)
+			.run_shell(&config.github.build_command, git.path())
 			.with_context(|| {
 				format!(
 					"Failed to execute build command: {}",
@@ -392,7 +385,7 @@ fn orchestrate_github_releases(
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 
 		// Read changelog body for the release
-		let changelog_path = git_workdir.join(&pkg.project_path).join("CHANGELOG.md");
+		let changelog_path = git.path().join(&pkg.project_path).join("CHANGELOG.md");
 		let body = if changelog_path.exists() {
 			match extract_version_body(&changelog_path, &pkg.version) {
 				Ok(text) => text,
@@ -413,7 +406,7 @@ fn orchestrate_github_releases(
 
 				// Upload artifacts
 				for (display_name, artifact_path) in &config.github.artifacts {
-					let full_path = git_workdir.join(artifact_path);
+					let full_path = git.path().join(artifact_path);
 					match github_client.upload_asset(
 						&gh_repo,
 						&release_id,
@@ -503,9 +496,11 @@ mod tests {
 		let config = Config::new(&workdir()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
 		let runner = RecordingCommandRunner::new(0);
+		let wd = workdir();
+		let git = git::GitWorkdir::new(&runner, &wd);
 
 		let (created, failed) =
-			orchestrate_github_releases(&workdir(), &config, &runner, &client, &[], false).unwrap();
+			orchestrate_github_releases(&git, &config, &runner, &client, &[], false).unwrap();
 
 		assert_eq!(created, 0);
 		assert!(!failed);
@@ -524,9 +519,10 @@ mod tests {
 			project_path: PathBuf::new(),
 		}];
 
+		let wd = workdir();
+		let git = git::GitWorkdir::new(&runner, &wd);
 		let (created, failed) =
-			orchestrate_github_releases(&workdir(), &config, &runner, &client, &packages, false)
-				.unwrap();
+			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
 
 		assert_eq!(created, 1);
 		assert!(!failed);
@@ -551,13 +547,10 @@ mod tests {
 			project_path: PathBuf::new(),
 		}];
 
+		let wd = workdir();
+		let git = git::GitWorkdir::new(&runner, &wd);
 		let (created, failed) = orchestrate_github_releases(
-			&workdir(),
-			&config,
-			&runner,
-			&client,
-			&packages,
-			true, // is_multi_package
+			&git, &config, &runner, &client, &packages, true, // is_multi_package
 		)
 		.unwrap();
 
@@ -583,9 +576,10 @@ mod tests {
 			project_path: PathBuf::new(),
 		}];
 
+		let wd = workdir();
+		let git = git::GitWorkdir::new(&runner, &wd);
 		let (created, failed) =
-			orchestrate_github_releases(&workdir(), &config, &runner, &client, &packages, false)
-				.unwrap();
+			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -611,9 +605,10 @@ mod tests {
 			},
 		];
 
+		let wd = workdir();
+		let git = git::GitWorkdir::new(&runner, &wd);
 		let (created, failed) =
-			orchestrate_github_releases(&workdir(), &config, &runner, &client, &packages, true)
-				.unwrap();
+			orchestrate_github_releases(&git, &config, &runner, &client, &packages, true).unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -658,10 +653,10 @@ mod tests {
 			version: "1.0.0".parse().unwrap(),
 			project_path: PathBuf::new(),
 		}];
+		let git = git::GitWorkdir::new(&runner, dir.path());
 
 		let (created, failed) =
-			orchestrate_github_releases(dir.path(), &config, &runner, &client, &packages, false)
-				.unwrap();
+			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
 
 		// Release was created even though uploads failed
 		assert_eq!(created, 1);
@@ -712,10 +707,10 @@ mod tests {
 				project_path: PathBuf::new(),
 			},
 		];
+		let git = git::GitWorkdir::new(&runner, dir.path());
 
 		let (created, failed) =
-			orchestrate_github_releases(dir.path(), &config, &runner, &client, &packages, true)
-				.unwrap();
+			orchestrate_github_releases(&git, &config, &runner, &client, &packages, true).unwrap();
 
 		assert_eq!(created, 2);
 		assert!(!failed);
@@ -745,14 +740,14 @@ mod tests {
 		let config = Config::new(dir.path());
 		// empty stdout → git_tag_exists returns false (no existing tag)
 		let runner = RecordingCommandRunner::new(0);
+		let git = git::GitWorkdir::new(&runner, dir.path());
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.2.0".parse().unwrap(),
 			project_path: PathBuf::new(),
 		}];
 
-		let (created, skipped) =
-			create_and_push_tags(&published, &config, &runner, dir.path(), false).unwrap();
+		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
 
 		assert_eq!(created, 1);
 		assert_eq!(skipped, 0);
@@ -779,14 +774,14 @@ mod tests {
 		let config = Config::new(dir.path());
 		// non-empty stdout → git_tag_exists returns true (tag already exists)
 		let runner = RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec());
+		let git = git::GitWorkdir::new(&runner, dir.path());
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
 			project_path: PathBuf::new(),
 		}];
 
-		let (created, skipped) =
-			create_and_push_tags(&published, &config, &runner, dir.path(), false).unwrap();
+		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 1);
@@ -801,9 +796,9 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(dir.path());
 		let runner = RecordingCommandRunner::new(0);
+		let git = git::GitWorkdir::new(&runner, dir.path());
 
-		let (created, skipped) =
-			create_and_push_tags(&[], &config, &runner, dir.path(), false).unwrap();
+		let (created, skipped) = create_and_push_tags(&[], &config, &git, false).unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
@@ -815,13 +810,14 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(dir.path());
 		let runner = RecordingCommandRunner::new(0);
+		let git = git::GitWorkdir::new(&runner, dir.path());
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "2.0.0".parse().unwrap(),
 			project_path: PathBuf::new(),
 		}];
 
-		create_and_push_tags(&published, &config, &runner, dir.path(), true).unwrap();
+		create_and_push_tags(&published, &config, &git, true).unwrap();
 
 		let invocations = runner.invocations();
 		// The tag -l check should use the prefixed tag name

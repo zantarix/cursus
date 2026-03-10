@@ -4,10 +4,7 @@ mod config;
 mod operations;
 
 pub use config::{DEFAULT_RELEASE_BRANCH_PREFIX, GitConfig, Strategy, TagFormat};
-pub(crate) use operations::{
-	git_add, git_checkout, git_checkout_new_branch, git_commit, git_current_branch, git_push,
-	git_push_branch, git_push_tag, git_status_porcelain, git_tag, git_tag_exists,
-};
+pub(crate) use operations::GitWorkdir;
 
 #[cfg(test)]
 mod tests {

@@ -1,10 +1,8 @@
 //! GitHub remote URL detection and parsing.
 
-use std::path::Path;
+use anyhow::bail;
 
-use anyhow::{Context, bail};
-
-use crate::command::CommandRunner;
+use crate::git::GitWorkdir;
 use crate::github::GitHubConfig;
 
 /// A parsed GitHub repository owner and name.
@@ -79,41 +77,32 @@ impl GitHubRepo {
 
 	/// Detects the GitHub repository for a git working directory.
 	///
-	/// Runs `git remote get-url origin` and parses the output. Returns `Ok(None)`
-	/// if there is no `origin` remote or the URL does not point to GitHub.
+	/// Queries the `origin` remote URL via [`GitWorkdir::remote_origin_url`] and
+	/// parses the output. Returns `Ok(None)` if there is no `origin` remote or
+	/// the URL does not point to GitHub.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the git command cannot be executed.
-	pub fn detect_in(
-		git_workdir: &Path,
-		runner: &dyn CommandRunner,
-	) -> anyhow::Result<Option<Self>> {
-		let output = runner
-			.run("git", &["remote", "get-url", "origin"], git_workdir)
-			.context("Failed to query git remote URL")?;
-
-		if !output.status.success() {
-			return Ok(None);
+	pub(crate) fn detect_in(git: &GitWorkdir<'_>) -> anyhow::Result<Option<Self>> {
+		match git.remote_origin_url()? {
+			Some(url) => Ok(Self::parse_url(&url)),
+			None => Ok(None),
 		}
-
-		let url = String::from_utf8_lossy(&output.stdout);
-		Ok(Self::parse_url(url.trim()))
 	}
 
 	/// Resolves the GitHub repository from config or by detecting from the git remote.
 	///
 	/// Checks `owner` and `repo` config fields first, then falls back to
-	/// detecting from the git remote URL.
+	/// detecting from the git remote URL via [`GitWorkdir::remote_origin_url`].
 	///
 	/// # Errors
 	///
 	/// Returns an error if both config fields are partially set (one set, one not),
 	/// or if neither config nor remote detection can determine the repository.
-	pub fn resolve(
+	pub(crate) fn resolve(
 		github_config: &GitHubConfig,
-		git_workdir: &Path,
-		runner: &dyn CommandRunner,
+		git: &GitWorkdir<'_>,
 	) -> anyhow::Result<Self> {
 		match (&github_config.owner, &github_config.repo) {
 			(Some(owner), Some(repo)) => {
@@ -126,7 +115,7 @@ impl GitHubRepo {
 			(None, None) => {}
 		}
 
-		match Self::detect_in(git_workdir, runner)? {
+		match Self::detect_in(git)? {
 			Some(gh_repo) => Ok(gh_repo),
 			None => bail!(
 				"Could not determine GitHub repository. Set [github] owner and repo in config, \
@@ -161,6 +150,7 @@ mod tests {
 
 	use super::*;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::git::GitWorkdir;
 
 	fn workdir() -> PathBuf {
 		PathBuf::from("/tmp")
@@ -286,7 +276,9 @@ mod tests {
 	fn detect_returns_repo_for_https_remote() {
 		let runner = RecordingCommandRunner::new(0)
 			.with_stdout(b"https://github.com/acme/app.git\n".to_vec());
-		let result = GitHubRepo::detect_in(&workdir(), &runner).unwrap();
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
+		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -298,14 +290,18 @@ mod tests {
 	fn detect_returns_repo_for_ssh_remote() {
 		let runner =
 			RecordingCommandRunner::new(0).with_stdout(b"git@github.com:acme/app.git\n".to_vec());
-		let result = GitHubRepo::detect_in(&workdir(), &runner).unwrap();
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
+		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 	}
 
 	#[test]
 	fn detect_returns_none_when_git_fails() {
 		let runner = RecordingCommandRunner::new(1);
-		let result = GitHubRepo::detect_in(&workdir(), &runner).unwrap();
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
+		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, None);
 	}
 
@@ -313,7 +309,9 @@ mod tests {
 	fn detect_returns_none_for_non_github_url() {
 		let runner = RecordingCommandRunner::new(0)
 			.with_stdout(b"https://gitlab.com/owner/repo.git\n".to_vec());
-		let result = GitHubRepo::detect_in(&workdir(), &runner).unwrap();
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
+		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, None);
 	}
 
@@ -332,8 +330,10 @@ mod tests {
 	fn resolve_github_repo_uses_config_when_set() {
 		let config = make_github_config(Some("acme"), Some("app"));
 		let runner = RecordingCommandRunner::new(0);
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
 
-		let gh_repo = GitHubRepo::resolve(&config, &workdir(), &runner).unwrap();
+		let gh_repo = GitHubRepo::resolve(&config, &git).unwrap();
 		assert_eq!(gh_repo.owner, "acme");
 		assert_eq!(gh_repo.repo, "app");
 		// Config values take priority — no git command should run
@@ -345,8 +345,10 @@ mod tests {
 		let config = make_github_config(None, None);
 		let runner = RecordingCommandRunner::new(0)
 			.with_stdout(b"https://github.com/myorg/myapp.git\n".to_vec());
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
 
-		let gh_repo = GitHubRepo::resolve(&config, &workdir(), &runner).unwrap();
+		let gh_repo = GitHubRepo::resolve(&config, &git).unwrap();
 		assert_eq!(gh_repo.owner, "myorg");
 		assert_eq!(gh_repo.repo, "myapp");
 	}
@@ -355,8 +357,10 @@ mod tests {
 	fn resolve_github_repo_errors_when_neither_config_nor_remote() {
 		let config = make_github_config(None, None);
 		let runner = RecordingCommandRunner::new(1); // no origin remote
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
 
-		let result = GitHubRepo::resolve(&config, &workdir(), &runner);
+		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -369,8 +373,10 @@ mod tests {
 	fn resolve_github_repo_errors_when_only_owner_set() {
 		let config = make_github_config(Some("acme"), None);
 		let runner = RecordingCommandRunner::new(0);
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
 
-		let result = GitHubRepo::resolve(&config, &workdir(), &runner);
+		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -383,8 +389,10 @@ mod tests {
 	fn resolve_github_repo_errors_when_only_repo_set() {
 		let config = make_github_config(None, Some("app"));
 		let runner = RecordingCommandRunner::new(0);
+		let wd = workdir();
+		let git = GitWorkdir::new(&runner, &wd);
 
-		let result = GitHubRepo::resolve(&config, &workdir(), &runner);
+		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

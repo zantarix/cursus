@@ -7,10 +7,13 @@ mod prepare;
 mod publish;
 
 pub use change::{ChangeArgs, cmd_change};
-pub use ci::{CiArgs, cmd_ci};
+pub use ci::CiArgs;
+pub(crate) use ci::cmd_ci;
 pub use init::{InitArgs, cmd_init};
-pub use prepare::{PrepareArgs, cmd_prepare};
-pub use publish::{PublishArgs, cmd_publish};
+pub use prepare::PrepareArgs;
+pub(crate) use prepare::cmd_prepare;
+pub use publish::PublishArgs;
+pub(crate) use publish::cmd_publish;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 

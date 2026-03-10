@@ -92,6 +92,7 @@ pub fn run_with(
 	github_client: Option<Arc<dyn github::client::GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
 	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
+	let git = git::GitWorkdir::new(runner.as_ref(), &git_workdir);
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
@@ -101,27 +102,15 @@ pub fn run_with(
 				Some(cli::Command::Change(args)) => {
 					cli::cmd_change(&args, &cli.global, &env, config, Arc::clone(&runner))
 				}
-				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(
-					&git_workdir,
-					&args,
-					config,
-					Arc::clone(&runner),
-					github_client,
-				),
-				Some(cli::Command::Publish(args)) => cli::cmd_publish(
-					&git_workdir,
-					&args,
-					config,
-					Arc::clone(&runner),
-					github_client,
-				),
-				Some(cli::Command::Ci(args)) => cli::cmd_ci(
-					&git_workdir,
-					&args,
-					config,
-					Arc::clone(&runner),
-					github_client,
-				),
+				Some(cli::Command::Prepare(args)) => {
+					cli::cmd_prepare(&git, &args, config, Arc::clone(&runner), github_client)
+				}
+				Some(cli::Command::Publish(args)) => {
+					cli::cmd_publish(&git, &args, config, Arc::clone(&runner), github_client)
+				}
+				Some(cli::Command::Ci(args)) => {
+					cli::cmd_ci(&git, &args, config, Arc::clone(&runner), github_client)
+				}
 				None => cli::cmd_change(
 					&cli::ChangeArgs::default(),
 					&cli.global,

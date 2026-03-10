@@ -6,280 +6,298 @@ use anyhow::{Context, bail};
 
 use crate::command::CommandRunner;
 
-/// Stages the given files for the next git commit.
+/// A git working directory paired with a command runner.
 ///
-/// # Errors
-///
-/// Returns an error if `git add` exits with a non-zero status.
-pub(crate) fn git_add(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	files: &[PathBuf],
-) -> anyhow::Result<()> {
-	if files.is_empty() {
-		return Ok(());
-	}
-
-	// Convert PathBuf slice to &str slice for the runner.
-	let file_str_storage: Vec<String> = files
-		.iter()
-		.map(|f| f.to_string_lossy().into_owned())
-		.collect();
-	let mut args = vec!["add", "--"];
-	let file_str_refs: Vec<&str> = file_str_storage.iter().map(|s| s.as_str()).collect();
-	args.extend_from_slice(&file_str_refs);
-
-	let output = runner
-		.run("git", &args, git_workdir)
-		.context("Failed to run git add")?;
-
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git add failed: {stderr}");
-	}
-
-	Ok(())
+/// Bundles the repository root path and a command runner so that
+/// every git operation can be called as a method without repeating
+/// both parameters.
+#[derive(Debug)]
+pub(crate) struct GitWorkdir<'a> {
+	path: &'a Path,
+	runner: &'a dyn CommandRunner,
 }
 
-/// Creates a git commit with the given message.
-///
-/// # Errors
-///
-/// Returns an error if `git commit` exits with a non-zero status.
-pub(crate) fn git_commit(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	message: &str,
-) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["commit", "-m", message], git_workdir)
-		.context("Failed to run git commit")?;
-
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git commit failed: {stderr}");
+impl<'a> GitWorkdir<'a> {
+	/// Creates a new `GitWorkdir` from a command runner and repository root path.
+	pub(crate) fn new(runner: &'a dyn CommandRunner, path: &'a Path) -> Self {
+		Self { path, runner }
 	}
 
-	Ok(())
-}
-
-/// Creates an annotated git tag with the given name and message.
-///
-/// # Errors
-///
-/// Returns an error if `git tag` exits with a non-zero status.
-pub(crate) fn git_tag(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	tag_name: &str,
-	message: &str,
-) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["tag", "-a", tag_name, "-m", message], git_workdir)
-		.context("Failed to run git tag")?;
-
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git tag failed: {stderr}");
+	/// Returns the repository root path.
+	pub(crate) fn path(&self) -> &Path {
+		self.path
 	}
 
-	Ok(())
-}
+	/// Stages the given files for the next git commit.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git add` exits with a non-zero status.
+	pub(crate) fn add(&self, files: &[PathBuf]) -> anyhow::Result<()> {
+		if files.is_empty() {
+			return Ok(());
+		}
 
-/// Pushes HEAD to origin.
-///
-/// Runs `git push origin HEAD`.
-///
-/// Tags are never pushed here — tag pushing is the responsibility of the
-/// `publish` command, which pushes each tag individually via [`git_push_tag`].
-///
-/// # Errors
-///
-/// Returns an error if `git push` exits with a non-zero status.
-pub(crate) fn git_push(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["push", "origin", "HEAD"], git_workdir)
-		.context("Failed to run git push")?;
+		// Convert PathBuf slice to &str slice for the runner.
+		let file_str_storage: Vec<String> = files
+			.iter()
+			.map(|f| f.to_string_lossy().into_owned())
+			.collect();
+		let mut args = vec!["add", "--"];
+		let file_str_refs: Vec<&str> = file_str_storage.iter().map(|s| s.as_str()).collect();
+		args.extend_from_slice(&file_str_refs);
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git push failed: {stderr}");
+		let output = self
+			.runner
+			.run("git", &args, self.path)
+			.context("Failed to run git add")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git add failed: {stderr}");
+		}
+
+		Ok(())
 	}
 
-	Ok(())
-}
+	/// Creates a git commit with the given message.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git commit` exits with a non-zero status.
+	pub(crate) fn commit(&self, message: &str) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["commit", "-m", message], self.path)
+			.context("Failed to run git commit")?;
 
-/// Returns the porcelain status of the working tree.
-///
-/// Runs `git status --porcelain` and returns the raw output as a string.
-/// An empty string means the working tree is clean.
-///
-/// # Errors
-///
-/// Returns an error if `git status` exits with a non-zero status.
-pub(crate) fn git_status_porcelain(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-) -> anyhow::Result<String> {
-	let output = runner
-		.run("git", &["status", "--porcelain"], git_workdir)
-		.context("Failed to run git status")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git commit failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git status failed: {stderr}");
+		Ok(())
 	}
 
-	Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
+	/// Creates an annotated git tag with the given name and message.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git tag` exits with a non-zero status.
+	pub(crate) fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["tag", "-a", tag_name, "-m", message], self.path)
+			.context("Failed to run git tag")?;
 
-/// Returns the name of the current branch, or `None` when HEAD is detached.
-///
-/// Runs `git rev-parse --abbrev-ref HEAD`. Returns `None` if the output is `"HEAD"`
-/// (detached HEAD state).
-///
-/// # Errors
-///
-/// Returns an error if `git rev-parse` exits with a non-zero status.
-pub(crate) fn git_current_branch(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-) -> anyhow::Result<Option<String>> {
-	let output = runner
-		.run("git", &["rev-parse", "--abbrev-ref", "HEAD"], git_workdir)
-		.context("Failed to run git rev-parse")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git tag failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git rev-parse failed: {stderr}");
+		Ok(())
 	}
 
-	let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-	if branch.is_empty() || branch == "HEAD" {
-		Ok(None)
-	} else {
-		Ok(Some(branch))
-	}
-}
+	/// Pushes HEAD to origin.
+	///
+	/// Runs `git push origin HEAD`.
+	///
+	/// Tags are never pushed here — tag pushing is the responsibility of the
+	/// `publish` command, which pushes each tag individually via [`GitWorkdir::push_tag`].
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git push` exits with a non-zero status.
+	pub(crate) fn push(&self) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["push", "origin", "HEAD"], self.path)
+			.context("Failed to run git push")?;
 
-/// Creates and checks out a new branch.
-///
-/// Runs `git checkout -b <branch>`.
-///
-/// # Errors
-///
-/// Returns an error if `git checkout` exits with a non-zero status.
-pub(crate) fn git_checkout_new_branch(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	branch: &str,
-) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["checkout", "-b", branch], git_workdir)
-		.context("Failed to run git checkout")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git push failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git checkout -b failed: {stderr}");
+		Ok(())
 	}
 
-	Ok(())
-}
+	/// Returns the porcelain status of the working tree.
+	///
+	/// Runs `git status --porcelain` and returns the raw output as a string.
+	/// An empty string means the working tree is clean.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git status` exits with a non-zero status.
+	pub(crate) fn status_porcelain(&self) -> anyhow::Result<String> {
+		let output = self
+			.runner
+			.run("git", &["status", "--porcelain"], self.path)
+			.context("Failed to run git status")?;
 
-/// Checks out an existing branch.
-///
-/// Runs `git checkout <branch>`.
-///
-/// # Errors
-///
-/// Returns an error if `git checkout` exits with a non-zero status.
-pub(crate) fn git_checkout(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	branch: &str,
-) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["checkout", branch], git_workdir)
-		.context("Failed to run git checkout")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git status failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git checkout failed: {stderr}");
+		Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 	}
 
-	Ok(())
-}
+	/// Returns the name of the current branch, or `None` when HEAD is detached.
+	///
+	/// Runs `git rev-parse --abbrev-ref HEAD`. Returns `None` if the output is `"HEAD"`
+	/// (detached HEAD state).
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git rev-parse` exits with a non-zero status.
+	pub(crate) fn current_branch(&self) -> anyhow::Result<Option<String>> {
+		let output = self
+			.runner
+			.run("git", &["rev-parse", "--abbrev-ref", "HEAD"], self.path)
+			.context("Failed to run git rev-parse")?;
 
-/// Pushes a named branch to origin.
-///
-/// Runs `git push origin <branch>`.
-///
-/// # Errors
-///
-/// Returns an error if `git push` exits with a non-zero status.
-pub(crate) fn git_push_branch(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	branch: &str,
-) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["push", "origin", branch], git_workdir)
-		.context("Failed to run git push branch")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git rev-parse failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git push branch failed: {stderr}");
+		let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+		if branch.is_empty() || branch == "HEAD" {
+			Ok(None)
+		} else {
+			Ok(Some(branch))
+		}
 	}
 
-	Ok(())
-}
+	/// Creates and checks out a new branch.
+	///
+	/// Runs `git checkout -b <branch>`.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git checkout` exits with a non-zero status.
+	pub(crate) fn checkout_new_branch(&self, branch: &str) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["checkout", "-b", branch], self.path)
+			.context("Failed to run git checkout")?;
 
-/// Returns `true` if the given tag exists in the repository.
-///
-/// Runs `git tag -l <tag>` and checks whether the output is non-empty.
-///
-/// # Errors
-///
-/// Returns an error if `git tag` exits with a non-zero status.
-pub(crate) fn git_tag_exists(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	tag: &str,
-) -> anyhow::Result<bool> {
-	let output = runner
-		.run("git", &["tag", "-l", tag], git_workdir)
-		.context("Failed to run git tag -l")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git checkout -b failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git tag -l failed: {stderr}");
+		Ok(())
 	}
 
-	Ok(!output.stdout.is_empty())
-}
+	/// Checks out an existing branch.
+	///
+	/// Runs `git checkout <branch>`.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git checkout` exits with a non-zero status.
+	pub(crate) fn checkout(&self, branch: &str) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["checkout", branch], self.path)
+			.context("Failed to run git checkout")?;
 
-/// Pushes a specific tag to origin.
-///
-/// Runs `git push origin <tag>`, pushing only that tag rather than all local tags.
-///
-/// # Errors
-///
-/// Returns an error if `git push` exits with a non-zero status.
-pub(crate) fn git_push_tag(
-	runner: &dyn CommandRunner,
-	git_workdir: &Path,
-	tag: &str,
-) -> anyhow::Result<()> {
-	let output = runner
-		.run("git", &["push", "origin", tag], git_workdir)
-		.context("Failed to run git push tag")?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git checkout failed: {stderr}");
+		}
 
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
-		bail!("git push tag failed: {stderr}");
+		Ok(())
 	}
 
-	Ok(())
+	/// Pushes a named branch to origin.
+	///
+	/// Runs `git push origin <branch>`.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git push` exits with a non-zero status.
+	pub(crate) fn push_branch(&self, branch: &str) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["push", "origin", branch], self.path)
+			.context("Failed to run git push branch")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git push branch failed: {stderr}");
+		}
+
+		Ok(())
+	}
+
+	/// Returns `true` if the given tag exists in the repository.
+	///
+	/// Runs `git tag -l <tag>` and checks whether the output is non-empty.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git tag` exits with a non-zero status.
+	pub(crate) fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
+		let output = self
+			.runner
+			.run("git", &["tag", "-l", tag], self.path)
+			.context("Failed to run git tag -l")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git tag -l failed: {stderr}");
+		}
+
+		Ok(!output.stdout.is_empty())
+	}
+
+	/// Returns the URL of the `origin` remote, or `None` if there is no origin.
+	///
+	/// Runs `git remote get-url origin`. A non-zero exit status is treated as
+	/// "no origin" and returns `None` rather than an error.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the git command cannot be executed at all.
+	pub(crate) fn remote_origin_url(&self) -> anyhow::Result<Option<String>> {
+		let output = self
+			.runner
+			.run("git", &["remote", "get-url", "origin"], self.path)
+			.context("Failed to query git remote URL")?;
+
+		if !output.status.success() {
+			return Ok(None);
+		}
+
+		Ok(Some(
+			String::from_utf8_lossy(&output.stdout).trim().to_string(),
+		))
+	}
+
+	/// Pushes a specific tag to origin.
+	///
+	/// Runs `git push origin <tag>`, pushing only that tag rather than all local tags.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git push` exits with a non-zero status.
+	pub(crate) fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
+		let output = self
+			.runner
+			.run("git", &["push", "origin", tag], self.path)
+			.context("Failed to run git push tag")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git push tag failed: {stderr}");
+		}
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -307,7 +325,8 @@ mod tests {
 	fn git_add_empty_files_is_noop() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let result = git_add(runner.as_ref(), dir.path(), &[]);
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.add(&[]);
 		assert!(result.is_ok());
 		assert!(
 			runner.invocations().is_empty(),
@@ -319,7 +338,8 @@ mod tests {
 	fn git_add_failure_propagates_error() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
-		let result = git_add(runner.as_ref(), dir.path(), &[dir.path().join("file.txt")]);
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.add(&[dir.path().join("file.txt")]);
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -332,8 +352,9 @@ mod tests {
 	fn git_add_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
 		let file = dir.path().join("file.txt");
-		git_add(runner.as_ref(), dir.path(), &[file.clone()]).unwrap();
+		git.add(&[file.clone()]).unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -347,7 +368,8 @@ mod tests {
 	fn git_commit_failure_propagates_error() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
-		let result = git_commit(runner.as_ref(), dir.path(), "test commit");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.commit("test commit");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -360,7 +382,8 @@ mod tests {
 	fn git_commit_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_commit(runner.as_ref(), dir.path(), "chore(release): my-pkg@1.0.0").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.commit("chore(release): my-pkg@1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -375,7 +398,8 @@ mod tests {
 	fn git_tag_failure_propagates_error() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
-		let result = git_tag(runner.as_ref(), dir.path(), "v1.0.0", "Release 1.0.0");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.tag("v1.0.0", "Release 1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -388,7 +412,8 @@ mod tests {
 	fn git_tag_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_tag(runner.as_ref(), dir.path(), "v1.0.0", "Release 1.0.0").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.tag("v1.0.0", "Release 1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -403,7 +428,8 @@ mod tests {
 	fn git_push_invokes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let result = git_push(runner.as_ref(), dir.path());
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.push();
 		assert!(result.is_ok());
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -416,7 +442,8 @@ mod tests {
 	fn git_push_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_push(runner.as_ref(), dir.path());
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.push();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -429,7 +456,8 @@ mod tests {
 	fn git_status_porcelain_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_status_porcelain(runner.as_ref(), dir.path()).unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.status_porcelain().unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -441,7 +469,8 @@ mod tests {
 	fn git_status_porcelain_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_status_porcelain(runner.as_ref(), dir.path());
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.status_porcelain();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -455,7 +484,8 @@ mod tests {
 		let dir = temp_dir();
 		let runner =
 			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
-		let result = git_status_porcelain(runner.as_ref(), dir.path()).unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.status_porcelain().unwrap();
 		assert_eq!(result, " M src/main.rs\n");
 	}
 
@@ -463,7 +493,8 @@ mod tests {
 	fn git_current_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"main\n".to_vec()));
-		git_current_branch(runner.as_ref(), dir.path()).unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.current_branch().unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -475,7 +506,8 @@ mod tests {
 	fn git_current_branch_returns_branch_name() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"main\n".to_vec()));
-		let result = git_current_branch(runner.as_ref(), dir.path()).unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.current_branch().unwrap();
 		assert_eq!(result, Some("main".to_string()));
 	}
 
@@ -483,7 +515,8 @@ mod tests {
 	fn git_current_branch_returns_none_when_detached() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"HEAD\n".to_vec()));
-		let result = git_current_branch(runner.as_ref(), dir.path()).unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.current_branch().unwrap();
 		assert_eq!(result, None);
 	}
 
@@ -491,7 +524,8 @@ mod tests {
 	fn git_current_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_current_branch(runner.as_ref(), dir.path());
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.current_branch();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -504,7 +538,8 @@ mod tests {
 	fn git_checkout_new_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_checkout_new_branch(runner.as_ref(), dir.path(), "feature/my-branch").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.checkout_new_branch("feature/my-branch").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -516,7 +551,8 @@ mod tests {
 	fn git_checkout_new_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: branch already exists");
-		let result = git_checkout_new_branch(runner.as_ref(), dir.path(), "main");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.checkout_new_branch("main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -529,7 +565,8 @@ mod tests {
 	fn git_checkout_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_checkout(runner.as_ref(), dir.path(), "main").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.checkout("main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -541,7 +578,8 @@ mod tests {
 	fn git_checkout_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"error: pathspec 'main' did not match");
-		let result = git_checkout(runner.as_ref(), dir.path(), "main");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.checkout("main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -554,7 +592,8 @@ mod tests {
 	fn git_push_tag_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_push_tag(runner.as_ref(), dir.path(), "v1.2.0").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.push_tag("v1.2.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -566,7 +605,8 @@ mod tests {
 	fn git_push_tag_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_push_tag(runner.as_ref(), dir.path(), "v1.0.0");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.push_tag("v1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -579,7 +619,8 @@ mod tests {
 	fn git_push_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		git_push_branch(runner.as_ref(), dir.path(), "chronicle-release/main").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.push_branch("chronicle-release/main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -594,7 +635,8 @@ mod tests {
 	fn git_push_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_push_branch(runner.as_ref(), dir.path(), "release/main");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.push_branch("release/main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -607,7 +649,8 @@ mod tests {
 	fn git_tag_exists_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
-		git_tag_exists(runner.as_ref(), dir.path(), "v1.0.0").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		git.tag_exists("v1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -619,7 +662,8 @@ mod tests {
 	fn git_tag_exists_returns_true_when_output_nonempty() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
-		let result = git_tag_exists(runner.as_ref(), dir.path(), "v1.0.0").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.tag_exists("v1.0.0").unwrap();
 		assert!(result);
 	}
 
@@ -627,7 +671,8 @@ mod tests {
 	fn git_tag_exists_returns_false_when_output_empty() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let result = git_tag_exists(runner.as_ref(), dir.path(), "v1.0.0").unwrap();
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.tag_exists("v1.0.0").unwrap();
 		assert!(!result);
 	}
 
@@ -635,12 +680,54 @@ mod tests {
 	fn git_tag_exists_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let result = git_tag_exists(runner.as_ref(), dir.path(), "v1.0.0");
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.tag_exists("v1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(
 			msg.contains("git tag -l failed"),
 			"Expected 'git tag -l failed', got: {msg}"
 		);
+	}
+
+	// --- remote_origin_url ---
+
+	#[test]
+	fn remote_origin_url_returns_url_on_success() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"https://github.com/owner/repo.git\n".to_vec()),
+		);
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.remote_origin_url().unwrap();
+		assert_eq!(
+			result,
+			Some("https://github.com/owner/repo.git".to_string())
+		);
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].args, ["remote", "get-url", "origin"]);
+	}
+
+	#[test]
+	fn remote_origin_url_returns_none_when_git_fails() {
+		let dir = temp_dir();
+		let runner = recording(1); // non-zero exit → no origin remote
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.remote_origin_url().unwrap();
+		assert_eq!(result, None);
+	}
+
+	#[test]
+	fn remote_origin_url_trims_whitespace() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"  git@github.com:owner/repo.git  \n".to_vec()),
+		);
+		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = git.remote_origin_url().unwrap();
+		assert_eq!(result, Some("git@github.com:owner/repo.git".to_string()));
 	}
 }

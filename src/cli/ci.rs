@@ -1,6 +1,5 @@
 //! The `ci` subcommand — auto-detects repo state and dispatches to `prepare` or `publish`.
 
-use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -57,8 +56,8 @@ pub struct CiArgs {
 /// already published to a registry but the tag push failed, re-running `publish` will skip the
 /// already-published registry step and only retry the tag. Checking registry state directly
 /// would add network dependencies and is not necessary for correctness.
-pub fn cmd_ci(
-	git_workdir: &Path,
+pub(crate) fn cmd_ci(
+	git: &git::GitWorkdir<'_>,
 	args: &CiArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,
@@ -75,7 +74,7 @@ pub fn cmd_ci(
 			branch: args.branch.clone(),
 		};
 		return cmd_prepare(
-			git_workdir,
+			git,
 			&prepare_args,
 			config,
 			Arc::clone(&runner),
@@ -94,7 +93,7 @@ pub fn cmd_ci(
 			let version = project.version();
 			let tag = config.git.tag_format.tag(project.name(), version, is_multi);
 			// Treat git errors as "tag not found" — conservative, triggers publish.
-			!git::git_tag_exists(runner.as_ref(), git_workdir, &tag).unwrap_or(false)
+			!git.tag_exists(&tag).unwrap_or(false)
 		});
 
 		if any_tag_missing {
@@ -105,7 +104,7 @@ pub fn cmd_ci(
 				no_git: args.no_git,
 			};
 			return cmd_publish(
-				git_workdir,
+				git,
 				&publish_args,
 				config,
 				Arc::clone(&runner),

@@ -71,8 +71,8 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 /// # Errors
 ///
 /// Returns an error if the working tree has uncommitted changes.
-fn check_dirty_tree(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
-	let status = git::git_status_porcelain(runner, git_workdir)?;
+fn check_dirty_tree(git: &git::GitWorkdir<'_>) -> anyhow::Result<()> {
+	let status = git.status_porcelain()?;
 	if !status.trim().is_empty() {
 		anyhow::bail!(
 			"Working tree is dirty. Commit or stash changes before releasing.\n\
@@ -153,23 +153,21 @@ fn format_commit_message(release_infos: &[ReleaseInfo]) -> String {
 ///
 /// # Arguments
 ///
-/// * `git_workdir` - Root of the git repository.
+/// * `git` - Git working directory with command runner.
 /// * `extra_files` - Additional files to unconditionally stage, relative to the git root.
 /// * `release_infos` - The packages that were prepared for release.
 /// * `modified_files` - Files to stage before committing.
 /// * `dry_run` - If `true`, only print a summary; do not modify git state.
-/// * `runner` - Command runner for executing git commands.
 ///
 /// # Errors
 ///
 /// Returns an error if any git command fails.
 fn stage_and_commit(
-	git_workdir: &Path,
+	git: &git::GitWorkdir<'_>,
 	extra_files: &[String],
 	release_infos: &[ReleaseInfo],
 	modified_files: &[PathBuf],
 	dry_run: bool,
-	runner: &dyn CommandRunner,
 ) -> anyhow::Result<()> {
 	if release_infos.is_empty() {
 		return Ok(());
@@ -178,6 +176,7 @@ fn stage_and_commit(
 	let commit_message = format_commit_message(release_infos);
 
 	// Build the full staging list, validating that extra_files resolve inside the repo root.
+	let git_workdir = git.path();
 	let mut all_files = modified_files.to_vec();
 	for f in extra_files {
 		let resolved = normalize_path(&git_workdir.join(f));
@@ -200,9 +199,10 @@ fn stage_and_commit(
 	}
 
 	// Stage and commit
-	git::git_add(runner, git_workdir, &all_files)
+	git.add(&all_files)
 		.context("Failed to stage files for git commit")?;
-	git::git_commit(runner, git_workdir, &commit_message).context("Failed to create git commit")?;
+	git.commit(&commit_message)
+		.context("Failed to create git commit")?;
 
 	Ok(())
 }
@@ -217,8 +217,8 @@ fn build_pr_body(releases: &[ReleaseInfo]) -> String {
 }
 
 /// Runs the `prepare` subcommand.
-pub fn cmd_prepare(
-	git_workdir: &Path,
+pub(crate) fn cmd_prepare(
+	git: &git::GitWorkdir<'_>,
 	args: &PrepareArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,
@@ -291,15 +291,13 @@ pub fn cmd_prepare(
 	// Pre-flight dirty-tree check and branch strategy setup (before filesystem changes).
 	let (original_branch, release_branch) = if git_enabled {
 		if !args.dry_run {
-			check_dirty_tree(runner.as_ref(), git_workdir)?;
+			check_dirty_tree(git)?;
 		}
 		if strategy == Strategy::Branch {
 			let current = if args.dry_run {
-				git::git_current_branch(runner.as_ref(), git_workdir)
-					.ok()
-					.flatten()
+				git.current_branch().ok().flatten()
 			} else {
-				git::git_current_branch(runner.as_ref(), git_workdir)?
+				git.current_branch()?
 			};
 			let branch = compute_release_branch(
 				args.branch.as_deref(),
@@ -307,7 +305,7 @@ pub fn cmd_prepare(
 				current.as_deref(),
 			);
 			if !args.dry_run {
-				git::git_checkout_new_branch(runner.as_ref(), git_workdir, &branch)?;
+				git.checkout_new_branch(&branch)?;
 			}
 			(current, Some(branch))
 		} else {
@@ -333,8 +331,8 @@ pub fn cmd_prepare(
 		let new_version = bump_version(current_version, *change_type);
 
 		// Always track which files would be staged (used for git lifecycle and dry-run display).
-		modified_files.push(project.manifest_path(git_workdir));
-		modified_files.push(git_workdir.join(project.path()).join("CHANGELOG.md"));
+		modified_files.push(project.manifest_path(git.path()));
+		modified_files.push(git.path().join(project.path()).join("CHANGELOG.md"));
 
 		if args.dry_run {
 			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
@@ -383,7 +381,7 @@ pub fn cmd_prepare(
 					);
 					// Predict the manifest that would be modified so git lifecycle
 					// dry-run can report it as a file that would be staged.
-					modified_files.push(project.manifest_path(git_workdir));
+					modified_files.push(project.manifest_path(git.path()));
 				} else {
 					let paths = project.update_dependency_version(dep_name, new_version)?;
 					modified_files.extend(paths);
@@ -424,12 +422,11 @@ pub fn cmd_prepare(
 	// Stage and commit
 	if git_enabled {
 		stage_and_commit(
-			git_workdir,
+			git,
 			&config.git.extra_files,
 			&release_infos,
 			&modified_files,
 			args.dry_run,
-			runner.as_ref(),
 		)?;
 
 		// Strategy push dispatch
@@ -438,7 +435,7 @@ pub fn cmd_prepare(
 				if args.dry_run {
 					info!("Would push to origin");
 				} else {
-					git::git_push(runner.as_ref(), git_workdir)?;
+					git.push()?;
 				}
 			}
 			Strategy::Branch => {
@@ -454,15 +451,13 @@ pub fn cmd_prepare(
 							info!("Would create pull request: '{title}'");
 						}
 					} else {
-						git::git_push_branch(runner.as_ref(), git_workdir, branch).with_context(
-							|| {
-								format!(
-									"Failed to push release branch '{branch}'. \
+						git.push_branch(branch).with_context(|| {
+							format!(
+								"Failed to push release branch '{branch}'. \
 									 You are still on the release branch; run \
 									 `git checkout <your-branch>` to return."
-								)
-							},
-						)?;
+							)
+						})?;
 
 						// PR creation is non-fatal; warn on failure.
 						// github_client is guaranteed Some by the pre-flight check above.
@@ -475,8 +470,7 @@ pub fn cmd_prepare(
 								);
 								"main"
 							});
-							match GitHubRepo::resolve(&config.github, git_workdir, runner.as_ref())
-							{
+							match GitHubRepo::resolve(&config.github, git) {
 								Ok(gh_repo) => {
 									let title = config
 										.github
@@ -508,7 +502,7 @@ pub fn cmd_prepare(
 						}
 					}
 				} else if let Some(ref orig) = original_branch {
-					git::git_checkout(runner.as_ref(), git_workdir, orig)?;
+					git.checkout(orig)?;
 				}
 			}
 		}
@@ -591,7 +585,8 @@ mod tests {
 	fn stage_and_commit_empty_releases_is_noop() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = RecordingCommandRunner::new(0);
-		let result = stage_and_commit(dir.path(), &[], &[], &[], false, &runner);
+		let git = git::GitWorkdir::new(&runner, dir.path());
+		let result = stage_and_commit(&git, &[], &[], &[], false);
 		assert!(result.is_ok());
 	}
 
@@ -603,7 +598,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let result = stage_and_commit(dir.path(), &[], &release_infos, &[], true, &runner);
+		let git = git::GitWorkdir::new(&runner, dir.path());
+		let result = stage_and_commit(&git, &[], &release_infos, &[], true);
 		assert!(result.is_ok());
 	}
 
@@ -616,7 +612,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let result = stage_and_commit(dir.path(), &extra_files, &release_infos, &[], true, &runner);
+		let git = git::GitWorkdir::new(&runner, dir.path());
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -635,7 +632,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let result = stage_and_commit(dir.path(), &extra_files, &release_infos, &[], true, &runner);
+		let git = git::GitWorkdir::new(&runner, dir.path());
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -719,7 +717,8 @@ mod tests {
 	fn check_dirty_tree_succeeds_when_clean() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = RecordingCommandRunner::new(0); // empty stdout → clean
-		let result = check_dirty_tree(&runner, dir.path());
+		let git = git::GitWorkdir::new(&runner, dir.path());
+		let result = check_dirty_tree(&git);
 		assert!(result.is_ok());
 	}
 
@@ -727,7 +726,8 @@ mod tests {
 	fn check_dirty_tree_fails_when_dirty() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec());
-		let result = check_dirty_tree(&runner, dir.path());
+		let git = git::GitWorkdir::new(&runner, dir.path());
+		let result = check_dirty_tree(&git);
 		assert!(result.is_err());
 		assert!(
 			result.unwrap_err().to_string().contains("dirty"),
@@ -750,7 +750,9 @@ mod tests {
 
 		let config = config::load(dir.path()).unwrap();
 		let args = PrepareArgs::default();
-		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github()).unwrap();
+		let runner = make_runner();
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -776,7 +778,9 @@ mod tests {
 
 		let config = config::load(dir.path()).unwrap();
 		let args = PrepareArgs::default();
-		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
+		let runner = make_runner();
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -834,7 +838,9 @@ mod tests {
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
+		let runner = make_runner();
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -870,7 +876,9 @@ mod tests {
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
+		let runner = make_runner();
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -907,7 +915,9 @@ mod tests {
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let result = cmd_prepare(dir.path(), &args, config, make_runner(), no_github());
+		let runner = make_runner();
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -993,8 +1003,9 @@ mod tests {
 		let config = config::load(dir.path()).unwrap();
 		let args = PrepareArgs::default();
 
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
 		let result = cmd_prepare(
-			dir.path(),
+			&git,
 			&args,
 			config,
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
@@ -1023,8 +1034,9 @@ mod tests {
 		let config = config::load(dir.path()).unwrap();
 		let args = PrepareArgs::default();
 
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
 		let result = cmd_prepare(
-			dir.path(),
+			&git,
 			&args,
 			config,
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
@@ -1045,8 +1057,9 @@ mod tests {
 		let config = config::load(dir.path()).unwrap();
 		let args = PrepareArgs::default();
 
+		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
 		let result = cmd_prepare(
-			dir.path(),
+			&git,
 			&args,
 			config,
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
