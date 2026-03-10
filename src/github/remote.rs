@@ -17,6 +17,34 @@ pub struct GitHubRepo {
 }
 
 impl GitHubRepo {
+	/// Creates a new [`GitHubRepo`], validating that `owner` and `repo` contain only
+	/// safe characters for URL interpolation.
+	///
+	/// GitHub allows alphanumeric characters, hyphens, underscores, and dots. Rejecting
+	/// anything else prevents path-traversal attacks when values are interpolated into URLs.
+	///
+	/// # Errors
+	///
+	/// Returns an error if either `owner` or `repo` is empty or contains invalid characters.
+	pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> anyhow::Result<Self> {
+		let owner = owner.into();
+		let repo = repo.into();
+		Self::validate_identifier(&owner, "owner")?;
+		Self::validate_identifier(&repo, "repo")?;
+		Ok(Self { owner, repo })
+	}
+
+	fn validate_identifier(value: &str, field: &str) -> anyhow::Result<()> {
+		if value.is_empty()
+			|| !value
+				.chars()
+				.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+		{
+			anyhow::bail!("Invalid GitHub {field}: {value:?}");
+		}
+		Ok(())
+	}
+
 	/// Parses a git remote URL into a [`GitHubRepo`] if it points to GitHub.
 	///
 	/// Supported formats:
@@ -46,13 +74,7 @@ impl GitHubRepo {
 
 		let path = path.strip_suffix(".git").unwrap_or(path);
 		let (owner, repo) = path.split_once('/')?;
-		if repo.contains('/') || owner.is_empty() || repo.is_empty() {
-			return None;
-		}
-		Some(GitHubRepo {
-			owner: owner.to_string(),
-			repo: repo.to_string(),
-		})
+		GitHubRepo::new(owner, repo).ok()
 	}
 
 	/// Detects the GitHub repository for a git working directory.
@@ -95,10 +117,7 @@ impl GitHubRepo {
 	) -> anyhow::Result<Self> {
 		match (&github_config.owner, &github_config.repo) {
 			(Some(owner), Some(repo)) => {
-				return Ok(GitHubRepo {
-					owner: owner.clone(),
-					repo: repo.clone(),
-				});
+				return GitHubRepo::new(owner, repo);
 			}
 			(Some(_), None) | (None, Some(_)) => bail!(
 				"[github].owner and [github].repo must be set together; \
@@ -152,49 +171,25 @@ mod tests {
 	#[test]
 	fn parse_https_with_git_suffix() {
 		let result = GitHubRepo::parse_url("https://github.com/owner/repo.git");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_https_without_git_suffix() {
 		let result = GitHubRepo::parse_url("https://github.com/owner/repo");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_ssh_with_git_suffix() {
 		let result = GitHubRepo::parse_url("git@github.com:owner/repo.git");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_ssh_without_git_suffix() {
 		let result = GitHubRepo::parse_url("git@github.com:owner/repo");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
@@ -236,73 +231,37 @@ mod tests {
 	#[test]
 	fn parse_ssh_url_with_git_suffix() {
 		let result = GitHubRepo::parse_url("ssh://git@github.com/owner/repo.git");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_ssh_url_without_git_suffix() {
 		let result = GitHubRepo::parse_url("ssh://git@github.com/owner/repo");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_ssh_url_without_user() {
 		let result = GitHubRepo::parse_url("ssh://github.com/owner/repo.git");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_ssh_url_with_port() {
 		let result = GitHubRepo::parse_url("ssh://git@github.com:22/owner/repo.git");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_https_with_port() {
 		let result = GitHubRepo::parse_url("https://github.com:443/owner/repo.git");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
 	fn parse_https_with_port_no_git_suffix() {
 		let result = GitHubRepo::parse_url("https://github.com:8080/owner/repo");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	#[test]
@@ -318,13 +277,7 @@ mod tests {
 	#[test]
 	fn parse_trims_whitespace() {
 		let result = GitHubRepo::parse_url("  https://github.com/owner/repo.git\n");
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "owner".to_string(),
-				repo: "repo".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("owner", "repo").unwrap()));
 	}
 
 	// --- GitHubRepo::detect_in ---
@@ -334,13 +287,7 @@ mod tests {
 		let runner = RecordingCommandRunner::new(0)
 			.with_stdout(b"https://github.com/acme/app.git\n".to_vec());
 		let result = GitHubRepo::detect_in(&workdir(), &runner).unwrap();
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "acme".to_string(),
-				repo: "app".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -352,13 +299,7 @@ mod tests {
 		let runner =
 			RecordingCommandRunner::new(0).with_stdout(b"git@github.com:acme/app.git\n".to_vec());
 		let result = GitHubRepo::detect_in(&workdir(), &runner).unwrap();
-		assert_eq!(
-			result,
-			Some(GitHubRepo {
-				owner: "acme".to_string(),
-				repo: "app".to_string(),
-			})
-		);
+		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 	}
 
 	#[test]
@@ -450,5 +391,29 @@ mod tests {
 			msg.contains("must be set together"),
 			"Expected partial config error, got: {msg}"
 		);
+	}
+
+	// --- GitHubRepo::new validation ---
+
+	#[test]
+	fn new_accepts_valid_names() {
+		assert!(GitHubRepo::new("acme", "my-repo").is_ok());
+		assert!(GitHubRepo::new("my-org", "my_repo.js").is_ok());
+		assert!(GitHubRepo::new("Org123", "repo").is_ok());
+	}
+
+	#[test]
+	fn new_rejects_invalid_owner() {
+		assert!(GitHubRepo::new("", "repo").is_err());
+		assert!(GitHubRepo::new("a/b", "repo").is_err());
+		assert!(GitHubRepo::new("../evil", "repo").is_err());
+		assert!(GitHubRepo::new("a b", "repo").is_err());
+	}
+
+	#[test]
+	fn new_rejects_invalid_repo() {
+		assert!(GitHubRepo::new("owner", "").is_err());
+		assert!(GitHubRepo::new("owner", "a/b").is_err());
+		assert!(GitHubRepo::new("owner", "../evil").is_err());
 	}
 }

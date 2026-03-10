@@ -406,7 +406,7 @@ fn orchestrate_github_releases(
 		};
 
 		// Create the release
-		match github_client.create_release(&gh_repo.owner, &gh_repo.repo, &tag, &tag, &body) {
+		match github_client.create_release(&gh_repo, &tag, &tag, &body) {
 			Ok(release_id) => {
 				info!("Created GitHub Release for {tag}");
 				created_count += 1;
@@ -415,8 +415,7 @@ fn orchestrate_github_releases(
 				for (display_name, artifact_path) in &config.github.artifacts {
 					let full_path = git_workdir.join(artifact_path);
 					match github_client.upload_asset(
-						&gh_repo.owner,
-						&gh_repo.repo,
+						&gh_repo,
 						&release_id,
 						display_name,
 						&full_path,
@@ -535,8 +534,8 @@ mod tests {
 		assert_eq!(invocations.len(), 1);
 		assert!(matches!(
 			&invocations[0],
-			GitHubInvocation::CreateRelease { tag_name, owner, repo, .. }
-				if tag_name == "v1.2.0" && owner == "acme" && repo == "app"
+			GitHubInvocation::CreateRelease { tag_name, gh_repo, .. }
+				if tag_name == "v1.2.0" && gh_repo.owner == "acme" && gh_repo.repo == "app"
 		));
 	}
 

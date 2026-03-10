@@ -377,12 +377,7 @@ pub fn cmd_release(
 										.unwrap_or(DEFAULT_PR_TITLE);
 									let pr_body = build_pr_body(&release_infos);
 									match client.create_pull_request(
-										&gh_repo.owner,
-										&gh_repo.repo,
-										title,
-										&pr_body,
-										branch,
-										base,
+										&gh_repo, title, &pr_body, branch, base,
 									) {
 										Ok(url) => info!("Created pull request: {url}"),
 										Err(e) => {
@@ -793,13 +788,10 @@ mod tests {
 			.iter()
 			.find(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. }));
 		assert!(pr.is_some(), "Expected PR creation, got: {invocations:?}");
-		if let Some(GitHubInvocation::CreatePullRequest {
-			title, owner, repo, ..
-		}) = pr
-		{
+		if let Some(GitHubInvocation::CreatePullRequest { title, gh_repo, .. }) = pr {
 			assert_eq!(title, "My Release PR");
-			assert_eq!(owner, "acme");
-			assert_eq!(repo, "app");
+			assert_eq!(gh_repo.owner, "acme");
+			assert_eq!(gh_repo.repo, "app");
 		}
 	}
 

@@ -12,6 +12,7 @@
 use std::io::Write as _;
 use std::sync::{Arc, Mutex};
 
+use chronicle::github::GitHubRepo;
 use chronicle::github::RestGitHubClient;
 use chronicle::github::client::GitHubClient as _;
 use httpmock::prelude::*;
@@ -89,8 +90,7 @@ fn create_release_sends_correct_request() {
 		.with_base_urls(server.base_url(), server.base_url());
 
 	let result = client.create_release(
-		"owner",
-		"repo",
+		&GitHubRepo::new("owner", "repo").unwrap(),
 		"v1.0.0",
 		"Release v1.0.0",
 		"Changelog body",
@@ -134,7 +134,12 @@ fn create_release_sends_spec_compliant_request() {
 		.with_base_urls(server.base_url(), server.base_url());
 
 	client
-		.create_release("owner", "repo", "v1.0.0", "Release v1.0.0", "Changelog")
+		.create_release(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"v1.0.0",
+			"Release v1.0.0",
+			"Changelog",
+		)
 		.expect("create_release should succeed against mock server");
 
 	let body_str = captured_body.lock().unwrap().clone();
@@ -164,7 +169,12 @@ fn create_release_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.create_release("owner", "repo", "v1.0.0", "Release", "Body");
+	let result = client.create_release(
+		&GitHubRepo::new("owner", "repo").unwrap(),
+		"v1.0.0",
+		"Release",
+		"Body",
+	);
 	assert!(result.is_err(), "Expected error on 422 response");
 	let err = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -207,8 +217,7 @@ fn response_with_extra_fields_still_deserializes() {
 		.with_base_urls(server.base_url(), server.base_url());
 
 	let result = client.create_release(
-		"owner",
-		"repo",
+		&GitHubRepo::new("owner", "repo").unwrap(),
 		"v1.0.0",
 		"Release v1.0.0",
 		"Changelog body",
@@ -248,7 +257,12 @@ fn upload_asset_percent_encodes_filename_in_url() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.upload_asset("owner", "repo", "12345", "my app (1).tar.gz", &file_path);
+	let result = client.upload_asset(
+		&GitHubRepo::new("owner", "repo").unwrap(),
+		"12345",
+		"my app (1).tar.gz",
+		&file_path,
+	);
 	assert!(result.is_ok(), "upload_asset failed: {:?}", result.err());
 	mock.assert();
 
@@ -288,7 +302,12 @@ fn upload_asset_sends_correct_request() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.upload_asset("owner", "repo", "12345", "app.tar.gz", &file_path);
+	let result = client.upload_asset(
+		&GitHubRepo::new("owner", "repo").unwrap(),
+		"12345",
+		"app.tar.gz",
+		&file_path,
+	);
 	assert!(result.is_ok(), "upload_asset failed: {:?}", result.err());
 	mock.assert();
 
@@ -315,7 +334,12 @@ fn upload_asset_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.upload_asset("owner", "repo", "12345", "file.tar.gz", &file_path);
+	let result = client.upload_asset(
+		&GitHubRepo::new("owner", "repo").unwrap(),
+		"12345",
+		"file.tar.gz",
+		&file_path,
+	);
 	assert!(result.is_err(), "Expected error on 500 response");
 	let err = format!("{:#}", result.unwrap_err());
 	assert!(

@@ -8,6 +8,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use super::client::GitHubClient;
+use super::remote::GitHubRepo;
 
 /// GitHub REST API version header value, pinned to prevent breakage on future API changes.
 const GITHUB_API_VERSION: &str = "2022-11-28";
@@ -146,21 +147,6 @@ impl RestGitHubClient {
 	}
 }
 
-/// Validates that a GitHub owner or repository name contains only safe characters.
-///
-/// GitHub allows alphanumeric characters, hyphens, underscores, and dots. Rejecting
-/// anything else prevents path-traversal attacks when values are interpolated into URLs.
-fn validate_github_identifier(value: &str, field: &str) -> anyhow::Result<()> {
-	if value.is_empty()
-		|| !value
-			.chars()
-			.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-	{
-		anyhow::bail!("Invalid GitHub {field}: {value:?}");
-	}
-	Ok(())
-}
-
 /// Percent-encodes a string for use in a URL query parameter value.
 ///
 /// Encodes all bytes that are not in the unreserved character set (A-Z, a-z, 0-9, `-`, `_`, `.`, `~`).
@@ -182,15 +168,15 @@ fn percent_encode(s: &str) -> String {
 impl GitHubClient for RestGitHubClient {
 	fn create_release(
 		&self,
-		owner: &str,
-		repo: &str,
+		gh_repo: &GitHubRepo,
 		tag_name: &str,
 		name: &str,
 		body: &str,
 	) -> anyhow::Result<String> {
-		validate_github_identifier(owner, "owner")?;
-		validate_github_identifier(repo, "repo")?;
-		let url = format!("{}/repos/{owner}/{repo}/releases", self.api_base_url);
+		let url = format!(
+			"{}/repos/{}/{}/releases",
+			self.api_base_url, gh_repo.owner, gh_repo.repo
+		);
 		let request_body = CreateReleaseRequest {
 			tag_name,
 			name,
@@ -218,14 +204,11 @@ impl GitHubClient for RestGitHubClient {
 
 	fn upload_asset(
 		&self,
-		owner: &str,
-		repo: &str,
+		gh_repo: &GitHubRepo,
 		release_id: &str,
 		file_name: &str,
 		file_path: &Path,
 	) -> anyhow::Result<()> {
-		validate_github_identifier(owner, "owner")?;
-		validate_github_identifier(repo, "repo")?;
 		if release_id.is_empty() || !release_id.chars().all(|c| c.is_ascii_digit()) {
 			anyhow::bail!("Invalid GitHub release_id: {release_id:?}");
 		}
@@ -234,8 +217,8 @@ impl GitHubClient for RestGitHubClient {
 
 		let encoded_name = percent_encode(file_name);
 		let url = format!(
-			"{}/repos/{owner}/{repo}/releases/{release_id}/assets?name={encoded_name}",
-			self.upload_base_url
+			"{}/repos/{}/{}/releases/{release_id}/assets?name={encoded_name}",
+			self.upload_base_url, gh_repo.owner, gh_repo.repo
 		);
 		let mut response = self
 			.post_request(&url)
@@ -254,16 +237,16 @@ impl GitHubClient for RestGitHubClient {
 
 	fn create_pull_request(
 		&self,
-		owner: &str,
-		repo: &str,
+		gh_repo: &GitHubRepo,
 		title: &str,
 		body: &str,
 		head: &str,
 		base: &str,
 	) -> anyhow::Result<String> {
-		validate_github_identifier(owner, "owner")?;
-		validate_github_identifier(repo, "repo")?;
-		let url = format!("{}/repos/{owner}/{repo}/pulls", self.api_base_url);
+		let url = format!(
+			"{}/repos/{}/{}/pulls",
+			self.api_base_url, gh_repo.owner, gh_repo.repo
+		);
 		let request_body = CreatePullRequestRequest {
 			title,
 			body,
@@ -337,8 +320,7 @@ mod tests {
 	fn upload_asset_returns_error_when_file_does_not_exist() {
 		let client = RestGitHubClient::new("token".to_string());
 		let result = client.upload_asset(
-			"owner",
-			"repo",
+			&GitHubRepo::new("owner", "repo").unwrap(),
 			"12345678",
 			"missing.tar.gz",
 			Path::new("/nonexistent/path/to/missing.tar.gz"),
@@ -356,8 +338,7 @@ mod tests {
 		let client = RestGitHubClient::new("token".to_string());
 		for bad_id in &["", "abc", "12-34", "../evil", "12 34"] {
 			let result = client.upload_asset(
-				"owner",
-				"repo",
+				&GitHubRepo::new("owner", "repo").unwrap(),
 				bad_id,
 				"file.tar.gz",
 				Path::new("/tmp/file.tar.gz"),
@@ -374,8 +355,7 @@ mod tests {
 		// Validation should pass for a numeric release ID; the error is the missing file.
 		let client = RestGitHubClient::new("token".to_string());
 		let result = client.upload_asset(
-			"owner",
-			"repo",
+			&GitHubRepo::new("owner", "repo").unwrap(),
 			"987654321",
 			"file.tar.gz",
 			Path::new("/nonexistent/file.tar.gz"),
@@ -410,22 +390,6 @@ mod tests {
 	}
 
 	#[test]
-	fn validate_github_identifier_accepts_valid_names() {
-		assert!(validate_github_identifier("acme", "owner").is_ok());
-		assert!(validate_github_identifier("my-org", "owner").is_ok());
-		assert!(validate_github_identifier("my_repo.js", "repo").is_ok());
-		assert!(validate_github_identifier("Org123", "owner").is_ok());
-	}
-
-	#[test]
-	fn validate_github_identifier_rejects_invalid_names() {
-		assert!(validate_github_identifier("", "owner").is_err());
-		assert!(validate_github_identifier("a/b", "owner").is_err());
-		assert!(validate_github_identifier("../evil", "repo").is_err());
-		assert!(validate_github_identifier("a b", "owner").is_err());
-	}
-
-	#[test]
 	fn create_release_error_logs_debug_message_on_422() {
 		init_test_logger();
 		let _ = take_logs();
@@ -441,7 +405,12 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let result = client.create_release("owner", "repo", "v1.0.0", "Release", "Body");
+		let result = client.create_release(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"v1.0.0",
+			"Release",
+			"Body",
+		);
 		assert!(result.is_err());
 
 		let logs = take_logs();
@@ -475,7 +444,12 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let _ = client.create_release("owner", "repo", "v1.0.0", "Release", "Body");
+		let _ = client.create_release(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"v1.0.0",
+			"Release",
+			"Body",
+		);
 
 		let logs = take_logs();
 		let trace_msgs: Vec<&str> = logs
@@ -515,7 +489,12 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let result = client.upload_asset("owner", "repo", "12345", "file.tar.gz", file.path());
+		let result = client.upload_asset(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"12345",
+			"file.tar.gz",
+			file.path(),
+		);
 		assert!(result.is_err());
 
 		let logs = take_logs();
@@ -599,8 +578,7 @@ mod tests {
 
 		let url = client
 			.create_pull_request(
-				"acme",
-				"app",
+				&GitHubRepo::new("acme", "app").unwrap(),
 				"Release updates",
 				"body",
 				"release-branch",
@@ -624,8 +602,7 @@ mod tests {
 			.with_base_urls(server.base_url(), server.base_url());
 
 		let result = client.create_pull_request(
-			"acme",
-			"app",
+			&GitHubRepo::new("acme", "app").unwrap(),
 			"Release updates",
 			"body",
 			"release-branch",

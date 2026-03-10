@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use super::remote::GitHubRepo;
+
 /// Abstract interface for GitHub API operations.
 ///
 /// All methods are synchronous. The production implementation uses
@@ -15,8 +17,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the API call fails or authentication is missing.
 	fn create_release(
 		&self,
-		owner: &str,
-		repo: &str,
+		gh_repo: &GitHubRepo,
 		tag_name: &str,
 		name: &str,
 		body: &str,
@@ -29,8 +30,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the upload fails.
 	fn upload_asset(
 		&self,
-		owner: &str,
-		repo: &str,
+		gh_repo: &GitHubRepo,
 		release_id: &str,
 		file_name: &str,
 		file_path: &Path,
@@ -40,8 +40,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	///
 	/// # Arguments
 	///
-	/// * `owner` - Repository owner.
-	/// * `repo` - Repository name.
+	/// * `gh_repo` - GitHub repository (owner and name).
 	/// * `title` - Pull request title.
 	/// * `body` - Pull request description (markdown).
 	/// * `head` - Source branch (the branch to merge from).
@@ -52,8 +51,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the API call fails.
 	fn create_pull_request(
 		&self,
-		owner: &str,
-		repo: &str,
+		gh_repo: &GitHubRepo,
 		title: &str,
 		body: &str,
 		head: &str,
@@ -75,16 +73,15 @@ pub mod test_support {
 	use anyhow::bail;
 
 	use super::GitHubClient;
+	use crate::github::remote::GitHubRepo;
 
 	/// A recorded GitHub API invocation.
 	#[derive(Debug, Clone)]
 	pub enum GitHubInvocation {
 		/// A `create_release` call.
 		CreateRelease {
-			/// Repository owner.
-			owner: String,
-			/// Repository name.
-			repo: String,
+			/// GitHub repository (owner and name).
+			gh_repo: GitHubRepo,
 			/// Git tag name for the release.
 			tag_name: String,
 			/// Release title.
@@ -94,10 +91,8 @@ pub mod test_support {
 		},
 		/// An `upload_asset` call.
 		UploadAsset {
-			/// Repository owner.
-			owner: String,
-			/// Repository name.
-			repo: String,
+			/// GitHub repository (owner and name).
+			gh_repo: GitHubRepo,
 			/// ID of the release to attach the asset to.
 			release_id: String,
 			/// Asset file name as it will appear in the release.
@@ -107,10 +102,8 @@ pub mod test_support {
 		},
 		/// A `create_pull_request` call.
 		CreatePullRequest {
-			/// Repository owner.
-			owner: String,
-			/// Repository name.
-			repo: String,
+			/// GitHub repository (owner and name).
+			gh_repo: GitHubRepo,
 			/// Pull request title.
 			title: String,
 			/// Pull request body (markdown).
@@ -183,16 +176,14 @@ pub mod test_support {
 	impl GitHubClient for RecordingGitHubClient {
 		fn create_release(
 			&self,
-			owner: &str,
-			repo: &str,
+			gh_repo: &GitHubRepo,
 			tag_name: &str,
 			name: &str,
 			body: &str,
 		) -> anyhow::Result<String> {
 			self.invocations.lock().expect("mutex poisoned").push(
 				GitHubInvocation::CreateRelease {
-					owner: owner.to_string(),
-					repo: repo.to_string(),
+					gh_repo: gh_repo.clone(),
 					tag_name: tag_name.to_string(),
 					name: name.to_string(),
 					body: body.to_string(),
@@ -206,8 +197,7 @@ pub mod test_support {
 
 		fn upload_asset(
 			&self,
-			owner: &str,
-			repo: &str,
+			gh_repo: &GitHubRepo,
 			release_id: &str,
 			file_name: &str,
 			file_path: &Path,
@@ -216,8 +206,7 @@ pub mod test_support {
 				.lock()
 				.expect("mutex poisoned")
 				.push(GitHubInvocation::UploadAsset {
-					owner: owner.to_string(),
-					repo: repo.to_string(),
+					gh_repo: gh_repo.clone(),
 					release_id: release_id.to_string(),
 					file_name: file_name.to_string(),
 					file_path: file_path.to_path_buf(),
@@ -230,8 +219,7 @@ pub mod test_support {
 
 		fn create_pull_request(
 			&self,
-			owner: &str,
-			repo: &str,
+			gh_repo: &GitHubRepo,
 			title: &str,
 			body: &str,
 			head: &str,
@@ -239,8 +227,7 @@ pub mod test_support {
 		) -> anyhow::Result<String> {
 			self.invocations.lock().expect("mutex poisoned").push(
 				GitHubInvocation::CreatePullRequest {
-					owner: owner.to_string(),
-					repo: repo.to_string(),
+					gh_repo: gh_repo.clone(),
 					title: title.to_string(),
 					body: body.to_string(),
 					head: head.to_string(),
@@ -250,6 +237,8 @@ pub mod test_support {
 			if self.fail_create_pr {
 				bail!("simulated create_pull_request failure");
 			}
+			let owner = &gh_repo.owner;
+			let repo = &gh_repo.repo;
 			Ok(format!("https://github.com/{owner}/{repo}/pull/1"))
 		}
 	}
@@ -264,7 +253,12 @@ pub mod test_support {
 		fn recording_client_records_create_release() {
 			let client = RecordingGitHubClient::new().with_release_id("r-42");
 			let id = client
-				.create_release("owner", "repo", "v1.0.0", "Release 1.0.0", "body text")
+				.create_release(
+					&GitHubRepo::new("owner", "repo").unwrap(),
+					"v1.0.0",
+					"Release 1.0.0",
+					"body text",
+				)
 				.unwrap();
 			assert_eq!(id, "r-42");
 			let invocations = client.invocations();
@@ -280,7 +274,12 @@ pub mod test_support {
 			let client = RecordingGitHubClient::new();
 			let path = PathBuf::from("/tmp/app.tar.gz");
 			client
-				.upload_asset("owner", "repo", "r-1", "app.tar.gz", &path)
+				.upload_asset(
+					&GitHubRepo::new("owner", "repo").unwrap(),
+					"r-1",
+					"app.tar.gz",
+					&path,
+				)
 				.unwrap();
 			let invocations = client.invocations();
 			assert_eq!(invocations.len(), 1);
@@ -293,7 +292,12 @@ pub mod test_support {
 		#[test]
 		fn recording_client_create_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_create_failure();
-			let result = client.create_release("owner", "repo", "v1.0.0", "Release", "body");
+			let result = client.create_release(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				"v1.0.0",
+				"Release",
+				"body",
+			);
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);
@@ -303,8 +307,7 @@ pub mod test_support {
 		fn recording_client_upload_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_upload_failure();
 			let result = client.upload_asset(
-				"owner",
-				"repo",
+				&GitHubRepo::new("owner", "repo").unwrap(),
 				"r-1",
 				"file.tar.gz",
 				Path::new("/tmp/file.tar.gz"),
@@ -318,8 +321,7 @@ pub mod test_support {
 			let client = RecordingGitHubClient::new();
 			let url = client
 				.create_pull_request(
-					"acme",
-					"app",
+					&GitHubRepo::new("acme", "app").unwrap(),
 					"Release updates",
 					"Release:\n\n- my-pkg@1.0.0",
 					"chronicle-release/main",
@@ -343,8 +345,7 @@ pub mod test_support {
 		fn recording_client_create_pr_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_create_pr_failure();
 			let result = client.create_pull_request(
-				"acme",
-				"app",
+				&GitHubRepo::new("acme", "app").unwrap(),
 				"Release",
 				"body",
 				"release-branch",
