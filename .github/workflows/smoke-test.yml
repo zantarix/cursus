@@ -1,0 +1,93 @@
+name: Smoke Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  release:
+    name: Release (${{ matrix.artifact }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            artifact: linux-x86_64
+            binary: chronicle
+          - target: aarch64-unknown-linux-musl
+            artifact: linux-aarch64
+            binary: chronicle
+          - target: riscv64gc-unknown-linux-musl
+            artifact: linux-riscv64
+            binary: chronicle
+            # No GitHub-hosted RISC-V runner exists; artifact is built but not smoke-tested
+          - target: x86_64-apple-darwin
+            artifact: macos-x86_64
+            binary: chronicle
+          - target: aarch64-apple-darwin
+            artifact: macos-aarch64
+            binary: chronicle
+          - target: x86_64-pc-windows-gnullvm
+            artifact: windows-x86_64
+            binary: chronicle.exe
+          - target: aarch64-pc-windows-gnullvm
+            artifact: windows-aarch64
+            binary: chronicle.exe
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+
+      - name: Build ${{ matrix.artifact }}
+        shell: nix develop -c bash -e {0}
+        run: cargo zigbuild --release --target ${{ matrix.target }}
+
+      - name: Upload ${{ matrix.artifact }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+  smoke-test:
+    name: Smoke test (${{ matrix.artifact }})
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            artifact: linux-x86_64
+            binary: chronicle
+          - runner: ubuntu-24.04-arm
+            artifact: linux-aarch64
+            binary: chronicle
+          - runner: macos-26-intel
+            artifact: macos-x86_64
+            binary: chronicle
+          - runner: macos-latest
+            artifact: macos-aarch64
+            binary: chronicle
+          - runner: windows-latest
+            artifact: windows-x86_64
+            binary: chronicle.exe
+          - runner: windows-11-arm
+            artifact: windows-aarch64
+            binary: chronicle.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./bin
+
+      - name: Make executable
+        if: runner.os != 'Windows'
+        run: chmod +x ./bin/${{ matrix.binary }}
+
+      - name: Run smoke test
+        run: ./bin/${{ matrix.binary }} --version
