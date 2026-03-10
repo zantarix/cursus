@@ -1,11 +1,11 @@
-use std::path::Path;
-
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 
 use super::widgets::{self, ButtonDef, KeyResult};
 use crate::model::config::{Config, PackageManager};
 use crate::package_manager::{CargoConfig, NpmConfig};
+use crate::path::AbsolutePath;
+use std::path::Path;
 
 /// Options that can be pre-filled to skip interactive steps.
 #[derive(Debug, Clone, Default)]
@@ -94,7 +94,7 @@ fn handle_key(
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
-pub fn run(git_workdir: &Path, options: &InitOptions) -> anyhow::Result<Option<Config>> {
+pub fn run(git_workdir: &AbsolutePath, options: &InitOptions) -> anyhow::Result<Option<Config>> {
 	let detected = detect_package_manager(git_workdir);
 	let pm_opt = widgets::run_tui(Screen::Confirm(true), ui, |screen, key| {
 		Ok(handle_key(screen, key, detected, options))

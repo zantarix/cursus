@@ -1,10 +1,11 @@
 //! Low-level git command wrappers.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, bail};
 
 use crate::command::CommandRunner;
+use crate::path::AbsolutePath;
 
 /// A git working directory paired with a command runner.
 ///
@@ -13,18 +14,18 @@ use crate::command::CommandRunner;
 /// both parameters.
 #[derive(Debug)]
 pub(crate) struct GitWorkdir<'a> {
-	path: &'a Path,
+	path: &'a AbsolutePath,
 	runner: &'a dyn CommandRunner,
 }
 
 impl<'a> GitWorkdir<'a> {
 	/// Creates a new `GitWorkdir` from a command runner and repository root path.
-	pub(crate) fn new(runner: &'a dyn CommandRunner, path: &'a Path) -> Self {
+	pub(crate) fn new(runner: &'a dyn CommandRunner, path: &'a AbsolutePath) -> Self {
 		Self { path, runner }
 	}
 
 	/// Returns the repository root path.
-	pub(crate) fn path(&self) -> &Path {
+	pub(crate) fn path(&self) -> &AbsolutePath {
 		self.path
 	}
 
@@ -308,9 +309,14 @@ mod tests {
 
 	use super::*;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::path::AbsolutePath;
 
 	fn temp_dir() -> TempDir {
 		tempfile::tempdir().expect("Failed to create temp dir")
+	}
+
+	fn abs(dir: &TempDir) -> AbsolutePath {
+		AbsolutePath::new(dir.path()).unwrap()
 	}
 
 	fn recording(exit_code: i32) -> Arc<RecordingCommandRunner> {
@@ -325,7 +331,8 @@ mod tests {
 	fn git_add_empty_files_is_noop() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.add(&[]);
 		assert!(result.is_ok());
 		assert!(
@@ -338,7 +345,8 @@ mod tests {
 	fn git_add_failure_propagates_error() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.add(&[dir.path().join("file.txt")]);
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -352,7 +360,8 @@ mod tests {
 	fn git_add_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let file = dir.path().join("file.txt");
 		git.add(&[file.clone()]).unwrap();
 		let invocations = runner.invocations();
@@ -368,7 +377,8 @@ mod tests {
 	fn git_commit_failure_propagates_error() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.commit("test commit");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -382,7 +392,8 @@ mod tests {
 	fn git_commit_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.commit("chore(release): my-pkg@1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -398,7 +409,8 @@ mod tests {
 	fn git_tag_failure_propagates_error() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.tag("v1.0.0", "Release 1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -412,7 +424,8 @@ mod tests {
 	fn git_tag_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.tag("v1.0.0", "Release 1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -428,7 +441,8 @@ mod tests {
 	fn git_push_invokes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.push();
 		assert!(result.is_ok());
 		let invocations = runner.invocations();
@@ -442,7 +456,8 @@ mod tests {
 	fn git_push_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.push();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -456,7 +471,8 @@ mod tests {
 	fn git_status_porcelain_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.status_porcelain().unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -469,7 +485,8 @@ mod tests {
 	fn git_status_porcelain_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.status_porcelain();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -484,7 +501,8 @@ mod tests {
 		let dir = temp_dir();
 		let runner =
 			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.status_porcelain().unwrap();
 		assert_eq!(result, " M src/main.rs\n");
 	}
@@ -493,7 +511,8 @@ mod tests {
 	fn git_current_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"main\n".to_vec()));
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.current_branch().unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -506,7 +525,8 @@ mod tests {
 	fn git_current_branch_returns_branch_name() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"main\n".to_vec()));
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.current_branch().unwrap();
 		assert_eq!(result, Some("main".to_string()));
 	}
@@ -515,7 +535,8 @@ mod tests {
 	fn git_current_branch_returns_none_when_detached() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"HEAD\n".to_vec()));
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.current_branch().unwrap();
 		assert_eq!(result, None);
 	}
@@ -524,7 +545,8 @@ mod tests {
 	fn git_current_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.current_branch();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -538,7 +560,8 @@ mod tests {
 	fn git_checkout_new_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.checkout_new_branch("feature/my-branch").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -551,7 +574,8 @@ mod tests {
 	fn git_checkout_new_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: branch already exists");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.checkout_new_branch("main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -565,7 +589,8 @@ mod tests {
 	fn git_checkout_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.checkout("main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -578,7 +603,8 @@ mod tests {
 	fn git_checkout_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"error: pathspec 'main' did not match");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.checkout("main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -592,7 +618,8 @@ mod tests {
 	fn git_push_tag_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.push_tag("v1.2.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -605,7 +632,8 @@ mod tests {
 	fn git_push_tag_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.push_tag("v1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -619,7 +647,8 @@ mod tests {
 	fn git_push_branch_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.push_branch("chronicle-release/main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -635,7 +664,8 @@ mod tests {
 	fn git_push_branch_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.push_branch("release/main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -649,7 +679,8 @@ mod tests {
 	fn git_tag_exists_passes_correct_args() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		git.tag_exists("v1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -662,7 +693,8 @@ mod tests {
 	fn git_tag_exists_returns_true_when_output_nonempty() {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.tag_exists("v1.0.0").unwrap();
 		assert!(result);
 	}
@@ -671,7 +703,8 @@ mod tests {
 	fn git_tag_exists_returns_false_when_output_empty() {
 		let dir = temp_dir();
 		let runner = recording(0);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.tag_exists("v1.0.0").unwrap();
 		assert!(!result);
 	}
@@ -680,7 +713,8 @@ mod tests {
 	fn git_tag_exists_failure_propagates() {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.tag_exists("v1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -699,7 +733,8 @@ mod tests {
 			RecordingCommandRunner::new(0)
 				.with_stdout(b"https://github.com/owner/repo.git\n".to_vec()),
 		);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(
 			result,
@@ -714,7 +749,8 @@ mod tests {
 	fn remote_origin_url_returns_none_when_git_fails() {
 		let dir = temp_dir();
 		let runner = recording(1); // non-zero exit → no origin remote
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(result, None);
 	}
@@ -726,7 +762,8 @@ mod tests {
 			RecordingCommandRunner::new(0)
 				.with_stdout(b"  git@github.com:owner/repo.git  \n".to_vec()),
 		);
-		let git = GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = abs(&dir);
+		let git = GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(result, Some("git@github.com:owner/repo.git".to_string()));
 	}

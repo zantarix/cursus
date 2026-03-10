@@ -64,7 +64,7 @@ pub(crate) fn cmd_ci(
 	github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
 	// Step 1: check for pending changesets.
-	let changesets = Changeset::read_all(config.git_workdir())?;
+	let changesets = Changeset::read_all(git)?;
 	if !changesets.is_empty() {
 		info!("ci: pending changesets found, running prepare");
 		let prepare_args = PrepareArgs {

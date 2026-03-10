@@ -1,6 +1,5 @@
 //! The `init` subcommand.
 
-use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::bail;
@@ -9,6 +8,7 @@ use log::info;
 
 use crate::model::config::{self, Config, PackageManager};
 use crate::package_manager::{CargoConfig, NpmConfig};
+use crate::path::AbsolutePath;
 use crate::tui::init;
 
 use super::GlobalArgs;
@@ -22,8 +22,8 @@ pub struct InitArgs {
 }
 
 /// Runs the `init` subcommand.
-pub fn cmd_init(
-	git_workdir: &Path,
+pub(crate) fn cmd_init(
+	git_workdir: &AbsolutePath,
 	args: &InitArgs,
 	global: &GlobalArgs,
 ) -> anyhow::Result<ExitCode> {

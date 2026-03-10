@@ -386,7 +386,12 @@ mod tests {
 
 	fn dummy_projects(n: usize) -> Vec<Project> {
 		(0..n)
-			.map(|i| Project::new_test(&format!("project-{i}"), &format!("projects/project-{i}")))
+			.map(|i| {
+				Project::new_test(
+					&format!("project-{i}"),
+					&format!("/nonexistent/projects/project-{i}"),
+				)
+			})
 			.collect()
 	}
 

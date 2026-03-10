@@ -676,8 +676,10 @@ fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
 fn prepare_updates_npm_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
 	let dir = temp_git_repo();
-	let config = chronicle::model::config::Config::new(dir.path())
-		.with_npm(chronicle::package_manager::NpmConfig::enabled());
+	let config = chronicle::model::config::Config::new(
+		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
+	)
+	.with_npm(chronicle::package_manager::NpmConfig::enabled());
 	config.save().unwrap();
 
 	// Root package.json with workspace config

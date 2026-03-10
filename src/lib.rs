@@ -8,6 +8,10 @@ pub mod git;
 pub mod github;
 pub mod model;
 pub mod package_manager;
+#[cfg(feature = "test-support")]
+pub mod path;
+#[cfg(not(feature = "test-support"))]
+pub(crate) mod path;
 pub mod tui;
 pub mod utils;
 
@@ -15,7 +19,7 @@ pub mod utils;
 pub mod test_logging;
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -23,15 +27,17 @@ use anyhow::Context;
 use clap::Parser;
 
 use crate::command::CommandRunner;
+use crate::path::AbsolutePath;
 
 /// Finds the git working directory by walking up from the given path.
 ///
 /// Returns `Some(path)` if a `.git` directory is found, `None` otherwise.
-fn find_git_workdir(start: &Path) -> Option<PathBuf> {
+fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
 	std::iter::successors(Some(start.to_path_buf()), |dir| {
 		dir.parent().map(Path::to_path_buf)
 	})
 	.find(|dir| dir.join(".git").exists())
+	.and_then(|p| AbsolutePath::new(p).ok())
 }
 
 /// Environment variables used by Chronicle.
@@ -91,7 +97,8 @@ pub fn run_with(
 	runner: Arc<dyn CommandRunner>,
 	github_client: Option<Arc<dyn github::client::GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
-	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
+	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
+	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
 	let git = git::GitWorkdir::new(runner.as_ref(), &git_workdir);
 
 	match cli.command {
@@ -100,7 +107,7 @@ pub fn run_with(
 			let config = model::config::load(&git_workdir)?;
 			match command {
 				Some(cli::Command::Change(args)) => {
-					cli::cmd_change(&args, &cli.global, &env, config, Arc::clone(&runner))
+					cli::cmd_change(&git, &args, &cli.global, &env, config, Arc::clone(&runner))
 				}
 				Some(cli::Command::Prepare(args)) => {
 					cli::cmd_prepare(&git, &args, config, Arc::clone(&runner), github_client)
@@ -112,6 +119,7 @@ pub fn run_with(
 					cli::cmd_ci(&git, &args, config, Arc::clone(&runner), github_client)
 				}
 				None => cli::cmd_change(
+					&git,
 					&cli::ChangeArgs::default(),
 					&cli.global,
 					&env,
@@ -141,15 +149,15 @@ mod tests {
 	#[test]
 	fn find_git_workdir_returns_none_when_no_git() {
 		let dir = temp_dir();
-		assert!(find_git_workdir(dir.path()).is_none());
+		assert!(find_git_workdir(&AbsolutePath::new(dir.path()).unwrap()).is_none());
 	}
 
 	#[test]
 	fn find_git_workdir_finds_git_in_current_dir() {
 		let dir = temp_dir();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let result = find_git_workdir(dir.path());
-		assert_eq!(result, Some(dir.path().to_path_buf()));
+		let result = find_git_workdir(&AbsolutePath::new(dir.path()).unwrap());
+		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
 	}
 
 	#[test]
@@ -159,8 +167,8 @@ mod tests {
 		let subdir = dir.path().join("subdir");
 		std::fs::create_dir(&subdir).unwrap();
 
-		let result = find_git_workdir(&subdir);
-		assert_eq!(result, Some(dir.path().to_path_buf()));
+		let result = find_git_workdir(&AbsolutePath::new(&subdir).unwrap());
+		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
 	}
 
 	#[test]
@@ -170,8 +178,8 @@ mod tests {
 		let nested = dir.path().join("a/b/c");
 		std::fs::create_dir_all(&nested).unwrap();
 
-		let result = find_git_workdir(&nested);
-		assert_eq!(result, Some(dir.path().to_path_buf()));
+		let result = find_git_workdir(&AbsolutePath::new(&nested).unwrap());
+		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
 	}
 
 	#[test]
@@ -183,7 +191,7 @@ mod tests {
 		std::fs::create_dir_all(inner.join(".git")).unwrap();
 
 		// From inner, should find inner's .git
-		let result = find_git_workdir(&inner);
-		assert_eq!(result, Some(inner));
+		let result = find_git_workdir(&AbsolutePath::new(&inner).unwrap());
+		assert_eq!(result, Some(AbsolutePath::new(inner).unwrap()));
 	}
 }

@@ -11,6 +11,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 use crate::command::CommandRunner;
+use crate::git::GitWorkdir;
 
 /// The type of semantic version change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
@@ -133,7 +134,7 @@ impl Changeset {
 		Ok(Self { packages, message })
 	}
 
-	/// Writes this changeset to `{git_workdir}/.chronicle/{name}.md`.
+	/// Writes this changeset to `.chronicle/{name}.md` in the git working directory.
 	///
 	/// Creates the `.chronicle` directory if it doesn't exist. Returns the
 	/// path to the written file.
@@ -141,8 +142,8 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub fn write(&self, git_workdir: &Path) -> anyhow::Result<PathBuf> {
-		let chronicle_dir = git_workdir.join(".chronicle");
+	pub(crate) fn write(&self, git: &GitWorkdir<'_>) -> anyhow::Result<PathBuf> {
+		let chronicle_dir = git.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir)
 			.with_context(|| format!("Failed to create directory: {}", chronicle_dir.display()))?;
 
@@ -162,8 +163,8 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub fn read_all(git_workdir: &Path) -> anyhow::Result<Vec<(PathBuf, Self)>> {
-		let chronicle_dir = git_workdir.join(".chronicle");
+	pub(crate) fn read_all(git: &GitWorkdir<'_>) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+		let chronicle_dir = git.path().join(".chronicle");
 		if !chronicle_dir.is_dir() {
 			return Ok(Vec::new());
 		}
@@ -279,8 +280,16 @@ pub fn open_editor(
 #[cfg(test)]
 mod tests {
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::git::GitWorkdir;
+	use crate::path::AbsolutePath;
 
 	use super::*;
+
+	fn make_git(dir: &tempfile::TempDir) -> (AbsolutePath, RecordingCommandRunner) {
+		let abs = AbsolutePath::new(dir.path()).unwrap();
+		let runner = RecordingCommandRunner::new(0);
+		(abs, runner)
+	}
 
 	fn single_package_changeset() -> Changeset {
 		let mut packages = BTreeMap::new();
@@ -380,8 +389,10 @@ mod tests {
 	#[test]
 	fn write_changeset_creates_file() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let changeset = single_package_changeset();
-		let path = changeset.write(dir.path()).unwrap();
+		let path = changeset.write(&git).unwrap();
 		assert!(path.exists(), "Changeset file should exist");
 		assert!(path.starts_with(dir.path().join(".chronicle")));
 		assert!(path.extension().is_some_and(|ext| ext == "md"));
@@ -390,8 +401,10 @@ mod tests {
 	#[test]
 	fn write_changeset_creates_directory() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let changeset = single_package_changeset();
-		changeset.write(dir.path()).unwrap();
+		changeset.write(&git).unwrap();
 		assert!(
 			dir.path().join(".chronicle").is_dir(),
 			".chronicle directory should exist"
@@ -401,9 +414,11 @@ mod tests {
 	#[test]
 	fn write_changeset_file_has_correct_content() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
-		let path = changeset.write(dir.path()).unwrap();
+		let path = changeset.write(&git).unwrap();
 		let content = std::fs::read_to_string(path).unwrap();
 		assert!(content.starts_with("+++\n"));
 		assert!(
@@ -501,23 +516,29 @@ mod tests {
 	#[test]
 	fn read_all_changesets_empty_when_no_directory() {
 		let dir = tempfile::tempdir().unwrap();
-		let result = Changeset::read_all(dir.path()).unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
+		let result = Changeset::read_all(&git).unwrap();
 		assert!(result.is_empty());
 	}
 
 	#[test]
 	fn read_all_changesets_empty_when_no_md_files() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("config.toml"), "").unwrap();
-		let result = Changeset::read_all(dir.path()).unwrap();
+		let result = Changeset::read_all(&git).unwrap();
 		assert!(result.is_empty());
 	}
 
 	#[test]
 	fn read_all_changesets_single_file() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(
@@ -526,7 +547,7 @@ mod tests {
 		)
 		.unwrap();
 
-		let result = Changeset::read_all(dir.path()).unwrap();
+		let result = Changeset::read_all(&git).unwrap();
 		assert_eq!(result.len(), 1);
 		assert_eq!(result[0].1.packages["my-app"], ChangeType::Minor);
 		assert_eq!(result[0].1.message, Some("A change".to_string()));
@@ -535,23 +556,27 @@ mod tests {
 	#[test]
 	fn read_all_changesets_multiple_files() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 		std::fs::write(chronicle_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(dir.path()).unwrap();
+		let result = Changeset::read_all(&git).unwrap();
 		assert_eq!(result.len(), 2);
 	}
 
 	#[test]
 	fn read_all_changesets_invalid_file_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let git = GitWorkdir::new(&runner, &abs);
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("bad.md"), "not a valid changeset").unwrap();
 
-		let result = Changeset::read_all(dir.path());
+		let result = Changeset::read_all(&git);
 		assert!(result.is_err());
 	}
 

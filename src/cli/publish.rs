@@ -1,6 +1,5 @@
 //! Publish command implementation.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -15,6 +14,7 @@ use crate::github::client::GitHubClient;
 use crate::model::changelog::extract_version_body;
 use crate::model::config::Config;
 use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
+use crate::path::AbsolutePath;
 
 /// Result of attempting to publish a package.
 enum PublishResult {
@@ -33,7 +33,7 @@ struct PublishedPackage {
 	/// Published version.
 	version: semver::Version,
 	/// Absolute path to the project root.
-	project_path: PathBuf,
+	project_path: AbsolutePath,
 }
 
 /// Arguments for the publish subcommand.
@@ -316,7 +316,7 @@ fn publish_projects(
 			published.push(PublishedPackage {
 				name: project.name().to_string(),
 				version: version.clone(),
-				project_path: project.path().to_path_buf(),
+				project_path: project.path().clone(),
 			});
 		} else {
 			// Real publish: delegate to do_publish which handles everything
@@ -325,7 +325,7 @@ fn publish_projects(
 					published.push(PublishedPackage {
 						name: project.name().to_string(),
 						version: project.version().clone(),
-						project_path: project.path().to_path_buf(),
+						project_path: project.path().clone(),
 					});
 				}
 				PublishResult::Skipped => skipped_count += 1,
@@ -462,7 +462,6 @@ fn do_publish(project: &package_manager::Project) -> PublishResult {
 #[cfg(test)]
 mod tests {
 	use std::collections::BTreeMap;
-	use std::path::PathBuf;
 
 	use super::*;
 	use crate::command::test_support::RecordingCommandRunner;
@@ -485,8 +484,8 @@ mod tests {
 		}
 	}
 
-	fn workdir() -> PathBuf {
-		PathBuf::from("/tmp")
+	fn workdir() -> crate::path::AbsolutePath {
+		crate::path::AbsolutePath::new("/tmp").unwrap()
 	}
 
 	// --- Tests for orchestrate_github_releases ---
@@ -516,7 +515,7 @@ mod tests {
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.2.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
 		let wd = workdir();
@@ -544,7 +543,7 @@ mod tests {
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.2.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
 		let wd = workdir();
@@ -573,7 +572,7 @@ mod tests {
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
 		let wd = workdir();
@@ -596,12 +595,12 @@ mod tests {
 			PublishedPackage {
 				name: "pkg-a".to_string(),
 				version: "1.0.0".parse().unwrap(),
-				project_path: PathBuf::new(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
 			},
 			PublishedPackage {
 				name: "pkg-b".to_string(),
 				version: "2.0.0".parse().unwrap(),
-				project_path: PathBuf::new(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
 			},
 		];
 
@@ -644,16 +643,18 @@ mod tests {
 			pull_request_title: None,
 		};
 
-		let config = Config::new(dir.path()).with_github(github_cfg);
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_github(github_cfg);
 		let client = RecordingGitHubClient::new().with_upload_failure();
 		let runner = RecordingCommandRunner::new(0);
 
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 
 		let (created, failed) =
 			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
@@ -691,7 +692,8 @@ mod tests {
 			artifacts,
 			pull_request_title: None,
 		};
-		let config = Config::new(dir.path()).with_github(github_cfg);
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_github(github_cfg);
 		let client = RecordingGitHubClient::new();
 		let runner = RecordingCommandRunner::new(0);
 
@@ -699,15 +701,16 @@ mod tests {
 			PublishedPackage {
 				name: "pkg-a".to_string(),
 				version: "1.0.0".parse().unwrap(),
-				project_path: PathBuf::new(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
 			},
 			PublishedPackage {
 				name: "pkg-b".to_string(),
 				version: "2.0.0".parse().unwrap(),
-				project_path: PathBuf::new(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
 			},
 		];
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 
 		let (created, failed) =
 			orchestrate_github_releases(&git, &config, &runner, &client, &packages, true).unwrap();
@@ -737,14 +740,15 @@ mod tests {
 	#[test]
 	fn create_and_push_tags_creates_annotated_tags_and_pushes() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(dir.path());
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		// empty stdout → git_tag_exists returns false (no existing tag)
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.2.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
 		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
@@ -771,14 +775,15 @@ mod tests {
 	#[test]
 	fn create_and_push_tags_skips_existing_tag() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(dir.path());
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		// non-empty stdout → git_tag_exists returns true (tag already exists)
 		let runner = RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec());
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
 		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
@@ -794,9 +799,10 @@ mod tests {
 	#[test]
 	fn create_and_push_tags_empty_list_does_nothing() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(dir.path());
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 
 		let (created, skipped) = create_and_push_tags(&[], &config, &git, false).unwrap();
 
@@ -808,13 +814,14 @@ mod tests {
 	#[test]
 	fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(dir.path());
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "2.0.0".parse().unwrap(),
-			project_path: PathBuf::new(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
 		create_and_push_tags(&published, &config, &git, true).unwrap();

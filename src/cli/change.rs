@@ -8,6 +8,7 @@ use anyhow::bail;
 use clap::Args;
 
 use crate::command::CommandRunner;
+use crate::git;
 use crate::model::changeset::{self, ChangeType, Changeset};
 use crate::model::config::Config;
 use crate::tui::change;
@@ -31,7 +32,8 @@ pub struct ChangeArgs {
 }
 
 /// Runs the `change` subcommand.
-pub fn cmd_change(
+pub(crate) fn cmd_change(
+	git: &git::GitWorkdir<'_>,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	env: &crate::Env,
@@ -90,7 +92,7 @@ pub fn cmd_change(
 
 	let changeset = Changeset::new(packages, args.message.clone());
 
-	let path = changeset.write(config.git_workdir())?;
+	let path = changeset.write(git)?;
 
 	if args.message.is_none() {
 		changeset::open_editor(&path, env, runner.as_ref())?;

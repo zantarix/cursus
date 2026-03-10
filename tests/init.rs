@@ -47,7 +47,7 @@ fn init_creates_config_with_npm() {
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
-	let config = config::load(dir.path()).unwrap();
+	let config = config::load(&chronicle::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 	assert!(config.npm.enabled);
 	assert!(!config.cargo.enabled);
 }
@@ -63,7 +63,7 @@ fn init_creates_config_with_cargo() {
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
-	let config = config::load(dir.path()).unwrap();
+	let config = config::load(&chronicle::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 	assert!(!config.npm.enabled);
 	assert!(config.cargo.enabled);
 }

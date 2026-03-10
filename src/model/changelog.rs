@@ -2,18 +2,19 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Context;
 
 use crate::model::changeset::ChangeType;
+use crate::path::AbsolutePath;
 
 /// A changelog entry for a specific version.
 pub struct Changelog {
 	version: semver::Version,
 	date: String,
 	changes: Vec<(ChangeType, Option<String>)>,
-	project_path: PathBuf,
+	project_path: AbsolutePath,
 }
 
 impl Changelog {
@@ -22,7 +23,7 @@ impl Changelog {
 		version: semver::Version,
 		date: String,
 		changes: Vec<(ChangeType, Option<String>)>,
-		project_path: PathBuf,
+		project_path: AbsolutePath,
 	) -> Self {
 		Self {
 			version,
@@ -228,7 +229,7 @@ mod tests {
 			"0.2.0".parse().unwrap(),
 			"2024-06-01".to_string(),
 			changes,
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 		);
 		changelog.update().unwrap();
 
@@ -246,7 +247,7 @@ mod tests {
 			"1.1.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			AbsolutePath::new("/nonexistent").unwrap(),
 		);
 		let entry = changelog.format_entry();
 		assert!(entry.contains("## 1.1.0 - 2024-01-15"));
@@ -263,7 +264,7 @@ mod tests {
 			"1.1.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			AbsolutePath::new("/nonexistent").unwrap(),
 		);
 		let entry = changelog.format_entry();
 		assert!(entry.contains("## 1.1.0 - 2024-01-15"));
@@ -280,7 +281,7 @@ mod tests {
 			"1.1.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			AbsolutePath::new("/nonexistent").unwrap(),
 		);
 		let entry = changelog.format_entry();
 		// Continuation lines must be indented so the list item renders correctly
@@ -297,7 +298,7 @@ mod tests {
 			"1.1.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			AbsolutePath::new("/nonexistent").unwrap(),
 		);
 		let entry = changelog.format_entry();
 		// Blank lines must not be indented
@@ -311,7 +312,7 @@ mod tests {
 			"2.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			AbsolutePath::new("/nonexistent").unwrap(),
 		);
 		let entry = changelog.format_entry();
 		assert!(entry.contains("### Breaking Changes"));
@@ -326,7 +327,7 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 		);
 		changelog.update().unwrap();
 
@@ -348,7 +349,7 @@ mod tests {
 			"0.2.0".parse().unwrap(),
 			"2024-06-01".to_string(),
 			changes,
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 		);
 		changelog.update().unwrap();
 
@@ -372,7 +373,7 @@ mod tests {
 				version.parse().unwrap(),
 				"2024-01-01".to_string(),
 				vec![(ChangeType::Patch, Some(msg.to_string()))],
-				dir.path().to_path_buf(),
+				AbsolutePath::new(dir.path()).unwrap(),
 			)
 		};
 
@@ -393,7 +394,7 @@ mod tests {
 				version.parse().unwrap(),
 				"2024-01-01".to_string(),
 				vec![(ChangeType::Patch, Some(msg.to_string()))],
-				dir.path().to_path_buf(),
+				AbsolutePath::new(dir.path()).unwrap(),
 			)
 		};
 
@@ -424,7 +425,7 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			sub.clone(),
+			AbsolutePath::new(sub.clone()).unwrap(),
 		);
 		changelog.update().unwrap();
 
@@ -444,7 +445,7 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 		);
 		let result = changelog.update();
 
@@ -466,7 +467,7 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 		);
 		let result = changelog.update();
 

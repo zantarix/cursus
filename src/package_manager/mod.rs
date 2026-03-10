@@ -10,10 +10,12 @@ mod npm;
 pub use cargo::{CargoAdapter, CargoConfig};
 pub use npm::{NpmAdapter, NpmConfig};
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use semver::{BuildMetadata, Prerelease, Version};
+use semver::Version;
+
+use crate::path::AbsolutePath;
 
 /// Raw project data returned by package manager adapters.
 ///
@@ -24,7 +26,7 @@ pub struct ProjectInfo {
 	/// The name of the project (e.g., package name).
 	pub name: String,
 	/// The absolute path to the project root.
-	pub path: std::path::PathBuf,
+	pub path: AbsolutePath,
 	/// The current version of the project.
 	pub version: Version,
 	/// Whether the project is publishable (not marked as private).
@@ -33,11 +35,16 @@ pub struct ProjectInfo {
 	pub dependency_names: Vec<String>,
 }
 
-impl Default for ProjectInfo {
-	fn default() -> Self {
+#[cfg(test)]
+impl ProjectInfo {
+	/// Creates a minimal `ProjectInfo` for use in unit tests.
+	///
+	/// Fills in: version `0.0.0-development`, `publishable = true`, empty `dependency_names`.
+	pub fn for_test(name: &str, path: AbsolutePath) -> Self {
+		use semver::{BuildMetadata, Prerelease};
 		Self {
-			name: String::new(),
-			path: std::path::PathBuf::new(),
+			name: name.to_string(),
+			path,
 			version: Version {
 				major: 0,
 				minor: 0,
@@ -104,8 +111,8 @@ impl Project {
 	}
 
 	/// Returns the absolute path to the project root.
-	pub fn path(&self) -> &Path {
-		self.info.path.as_path()
+	pub fn path(&self) -> &AbsolutePath {
+		&self.info.path
 	}
 
 	/// Returns the current version of this project.
@@ -185,14 +192,10 @@ impl Project {
 		runner: Arc<crate::command::test_support::RecordingCommandRunner>,
 	) -> Self {
 		Self {
-			info: ProjectInfo {
-				name: name.to_string(),
-				path: std::path::PathBuf::from(path),
-				..Default::default()
-			},
+			info: ProjectInfo::for_test(name, AbsolutePath::new(path).unwrap()),
 			adapter: Arc::new(NpmAdapter::new(
 				NpmConfig::default(),
-				std::path::PathBuf::from("."),
+				AbsolutePath::new("/nonexistent").unwrap(),
 				runner,
 			)),
 		}
@@ -656,6 +659,7 @@ pub fn build_dependency_graph(projects: &[Project]) -> anyhow::Result<Dependency
 
 #[cfg(test)]
 mod tests {
+	use std::path::Path;
 	use std::sync::Arc;
 
 	use crate::command::test_support::RecordingCommandRunner;
@@ -664,9 +668,9 @@ mod tests {
 
 	#[test]
 	fn project_equality() {
-		let p1 = Project::new_test("test", "packages/test");
-		let p2 = Project::new_test("test", "packages/test");
-		let p3 = Project::new_test("other", "packages/other");
+		let p1 = Project::new_test("test", "/nonexistent/packages/test");
+		let p2 = Project::new_test("test", "/nonexistent/packages/test");
+		let p3 = Project::new_test("other", "/nonexistent/packages/other");
 
 		assert_eq!(p1, p2);
 		assert_ne!(p1, p3);
@@ -674,29 +678,32 @@ mod tests {
 
 	#[test]
 	fn project_debug() {
-		let project = Project::new_test("my-package", "packages/my-package");
+		let project = Project::new_test("my-package", "/nonexistent/packages/my-package");
 		let debug = format!("{:?}", project);
 		assert!(debug.contains("my-package"));
 	}
 
 	#[test]
 	fn project_clone() {
-		let project = Project::new_test("test", "src");
+		let project = Project::new_test("test", "/nonexistent/src");
 		let cloned = project.clone();
 		assert_eq!(project, cloned);
 	}
 
 	#[test]
 	fn project_getters() {
-		let project = Project::new_test("my-pkg", "packages/my-pkg");
+		let project = Project::new_test("my-pkg", "/nonexistent/packages/my-pkg");
 		assert_eq!(project.name(), "my-pkg");
-		assert_eq!(project.path(), Path::new("packages/my-pkg"));
+		assert_eq!(
+			project.path().as_path(),
+			Path::new("/nonexistent/packages/my-pkg")
+		);
 	}
 
 	#[test]
 	fn project_registry_name_delegates_to_adapter() {
 		// new_test uses NpmAdapter, which returns "npm"
-		let project = Project::new_test("my-app", "");
+		let project = Project::new_test("my-app", "/nonexistent");
 		assert_eq!(project.registry_name(), "npm");
 	}
 
@@ -711,7 +718,7 @@ mod tests {
 
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter.clone()]).unwrap();
@@ -734,12 +741,12 @@ mod tests {
 		// Two adapters pointing at the same directory (both will find the package)
 		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 			Arc::new(RecordingCommandRunner::new(0)),
 		));
 
@@ -753,7 +760,7 @@ mod tests {
 
 	#[test]
 	fn enumerate_projects_empty_adapters_returns_empty() {
-		let dir = tempfile::tempdir().unwrap();
+		let _dir = tempfile::tempdir().unwrap();
 		let adapters: [Arc<dyn PackageManagerAdapter>; 0] = [];
 		let projects = enumerate_projects(adapters).unwrap();
 		assert!(projects.is_empty());
@@ -762,8 +769,8 @@ mod tests {
 	#[test]
 	fn filter_projects_empty_names_returns_all() {
 		let projects = vec![
-			Project::new_test("a", "packages/a"),
-			Project::new_test("b", "packages/b"),
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
 		];
 		let result = filter_projects_by_name(&projects, &[]).unwrap();
 		assert_eq!(result.len(), 2);
@@ -772,9 +779,9 @@ mod tests {
 	#[test]
 	fn filter_projects_selects_matching() {
 		let projects = vec![
-			Project::new_test("a", "packages/a"),
-			Project::new_test("b", "packages/b"),
-			Project::new_test("c", "packages/c"),
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+			Project::new_test("c", "/nonexistent/packages/c"),
 		];
 		let names = vec!["b".to_string(), "c".to_string()];
 		let result = filter_projects_by_name(&projects, &names).unwrap();
@@ -785,7 +792,7 @@ mod tests {
 
 	#[test]
 	fn filter_projects_unknown_name_returns_error() {
-		let projects = vec![Project::new_test("a", "packages/a")];
+		let projects = vec![Project::new_test("a", "/nonexistent/packages/a")];
 		let names = vec!["nonexistent".to_string()];
 		let result = filter_projects_by_name(&projects, &names);
 		assert!(result.is_err());
@@ -1535,7 +1542,7 @@ mod tests {
 
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
@@ -1573,7 +1580,7 @@ mod tests {
 
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
@@ -1615,7 +1622,7 @@ mod tests {
 
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
-			dir.path().to_path_buf(),
+			AbsolutePath::new(dir.path()).unwrap(),
 			Arc::new(RecordingCommandRunner::new(0)),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();

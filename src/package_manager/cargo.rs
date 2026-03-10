@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
 use crate::command::CommandRunner;
+use crate::path::AbsolutePath;
 
 /// Configuration for Cargo package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,12 +38,13 @@ impl CargoConfig {
 
 	/// Returns the resolved root directory for this package manager.
 	///
-	/// If a `path` is configured, returns `git_workdir` joined with that path.
-	/// Otherwise, returns a copy of `git_workdir`.
-	fn resolve_root(&self, git_workdir: &Path) -> PathBuf {
+	/// If a `path` is configured, returns `adapter_root` joined with that path.
+	/// Otherwise, returns a copy of `adapter_root`.
+	fn resolve_root(&self, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
 		match &self.path {
-			Some(path) => git_workdir.join(path),
-			None => git_workdir.to_path_buf(),
+			Some(path) => AbsolutePath::new(git_workdir.join(path))
+				.with_context(|| format!("resolve_root: invalid path '{path}'")),
+			None => Ok(git_workdir.clone()),
 		}
 	}
 }
@@ -54,25 +56,29 @@ impl CargoConfig {
 pub struct CargoAdapter {
 	/// Configuration for this package manager.
 	config: CargoConfig,
-	/// Git repository root path.
-	git_workdir: PathBuf,
+	/// Package manager root path.
+	adapter_root: AbsolutePath,
 	/// Command runner for executing cargo commands.
 	runner: Arc<dyn CommandRunner>,
 }
 
 impl CargoAdapter {
 	/// Creates a new Cargo adapter with the given configuration.
-	pub fn new(config: CargoConfig, git_workdir: PathBuf, runner: Arc<dyn CommandRunner>) -> Self {
+	pub fn new(
+		config: CargoConfig,
+		adapter_root: AbsolutePath,
+		runner: Arc<dyn CommandRunner>,
+	) -> Self {
 		Self {
 			config,
-			git_workdir,
+			adapter_root,
 			runner,
 		}
 	}
 
 	/// Returns the resolved root directory for this package manager.
-	fn resolve_root(&self) -> PathBuf {
-		self.config.resolve_root(&self.git_workdir)
+	fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
+		self.config.resolve_root(&self.adapter_root)
 	}
 }
 
@@ -182,7 +188,12 @@ fn read_workspace_member(member_path: &Path) -> anyhow::Result<Option<ProjectInf
 		return Ok(None);
 	};
 
-	let path = member_path.to_path_buf();
+	let path = AbsolutePath::new(member_path.to_path_buf()).with_context(|| {
+		format!(
+			"workspace member path is not absolute: {}",
+			member_path.display()
+		)
+	})?;
 
 	let manifest_path = member_path.join("Cargo.toml");
 	let (version, publishable, dependency_names) = extract_project_metadata(&cargo, package)
@@ -352,7 +363,7 @@ impl PackageManagerAdapter for CargoAdapter {
 	}
 
 	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
-		let pm_root = self.resolve_root();
+		let pm_root = self.resolve_root()?;
 		let Some(root_cargo) = read_cargo_toml(&pm_root)? else {
 			return Ok(Vec::new());
 		};
@@ -425,12 +436,12 @@ impl PackageManagerAdapter for CargoAdapter {
 	}
 
 	fn lock_file_path(&self) -> Option<std::path::PathBuf> {
-		Some(self.resolve_root().join("Cargo.lock"))
+		self.resolve_root().ok().map(|r| r.join("Cargo.lock"))
 	}
 
 	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		// For Cargo, always regenerate the lock file at the workspace root
-		let workspace_root = self.resolve_root();
+		let workspace_root = self.resolve_root()?;
 
 		let output = self
 			.runner
@@ -463,7 +474,7 @@ impl PackageManagerAdapter for CargoAdapter {
 			.run(
 				"cargo",
 				&["publish", "--manifest-path", &manifest_str],
-				&self.git_workdir,
+				&self.adapter_root,
 			)
 			.with_context(|| {
 				format!(
@@ -504,7 +515,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		dependency_name: &str,
 		new_version: &Version,
 	) -> anyhow::Result<Vec<PathBuf>> {
-		let pm_root = self.resolve_root();
+		let pm_root = self.resolve_root()?;
 		let version_str = new_version.to_string();
 		let mut modified = Vec::new();
 
@@ -546,7 +557,7 @@ mod tests {
 	fn recording_adapter(config: CargoConfig, dir: &Path, exit_code: i32) -> CargoAdapter {
 		CargoAdapter::new(
 			config,
-			dir.to_path_buf(),
+			crate::path::AbsolutePath::new(dir).unwrap(),
 			Arc::new(RecordingCommandRunner::new(exit_code)),
 		)
 	}
@@ -557,7 +568,7 @@ mod tests {
 		dir: &Path,
 		runner: Arc<RecordingCommandRunner>,
 	) -> CargoAdapter {
-		CargoAdapter::new(config, dir.to_path_buf(), runner)
+		CargoAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), runner)
 	}
 
 	/// Helper to enumerate projects using the adapter with no configured path.
@@ -601,7 +612,7 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-crate");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 	}
 
 	#[test]
@@ -654,9 +665,15 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "crate-a");
-		assert_eq!(projects[0].path, dir.path().join("crates/crate-a"));
+		assert_eq!(
+			projects[0].path.as_path(),
+			dir.path().join("crates/crate-a")
+		);
 		assert_eq!(projects[1].name, "crate-b");
-		assert_eq!(projects[1].path, dir.path().join("crates/crate-b"));
+		assert_eq!(
+			projects[1].path.as_path(),
+			dir.path().join("crates/crate-b")
+		);
 	}
 
 	#[test]
@@ -690,9 +707,9 @@ version = "0.1.0"
 		assert_eq!(projects.len(), 2);
 		// Root comes first (shorter absolute path sorts first)
 		assert_eq!(projects[0].name, "root-crate");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 		assert_eq!(projects[1].name, "member-crate");
-		assert_eq!(projects[1].path, dir.path().join("crates/member"));
+		assert_eq!(projects[1].path.as_path(), dir.path().join("crates/member"));
 	}
 
 	#[test]
@@ -731,9 +748,9 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "lib");
-		assert_eq!(projects[0].path, dir.path().join("crates/lib"));
+		assert_eq!(projects[0].path.as_path(), dir.path().join("crates/lib"));
 		assert_eq!(projects[1].name, "cli");
-		assert_eq!(projects[1].path, dir.path().join("tools/cli"));
+		assert_eq!(projects[1].path.as_path(), dir.path().join("tools/cli"));
 	}
 
 	#[test]
@@ -859,7 +876,7 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-crate");
-		assert_eq!(projects[0].path, dir.path().join("backend"));
+		assert_eq!(projects[0].path.as_path(), dir.path().join("backend"));
 	}
 
 	#[test]
@@ -900,9 +917,15 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "crate-a");
-		assert_eq!(projects[0].path, dir.path().join("backend/crates/crate-a"));
+		assert_eq!(
+			projects[0].path.as_path(),
+			dir.path().join("backend/crates/crate-a")
+		);
 		assert_eq!(projects[1].name, "crate-b");
-		assert_eq!(projects[1].path, dir.path().join("backend/crates/crate-b"));
+		assert_eq!(
+			projects[1].path.as_path(),
+			dir.path().join("backend/crates/crate-b")
+		);
 	}
 
 	#[test]
@@ -913,11 +936,7 @@ version = "0.1.0"
 	}
 
 	fn project_info(dir: &Path, name: &str, path: &str) -> ProjectInfo {
-		ProjectInfo {
-			name: name.to_string(),
-			path: dir.join(path),
-			..Default::default()
-		}
+		ProjectInfo::for_test(name, AbsolutePath::new(dir.join(path)).unwrap())
 	}
 
 	#[test]
@@ -1069,8 +1088,8 @@ version = "0.1.0"
 			enabled: true,
 			path: None,
 		};
-		let git_workdir = Path::new("/repo");
-		let resolved = config.resolve_root(git_workdir);
+		let git_workdir = AbsolutePath::new("/repo").unwrap();
+		let resolved = config.resolve_root(&git_workdir).unwrap();
 		assert_eq!(resolved, git_workdir);
 	}
 
@@ -1080,9 +1099,12 @@ version = "0.1.0"
 			enabled: true,
 			path: Some("rust-workspace".to_string()),
 		};
-		let git_workdir = Path::new("/repo");
-		let resolved = config.resolve_root(git_workdir);
-		assert_eq!(resolved, Path::new("/repo/rust-workspace"));
+		let git_workdir = AbsolutePath::new("/repo").unwrap();
+		let resolved = config.resolve_root(&git_workdir).unwrap();
+		assert_eq!(
+			*resolved,
+			*AbsolutePath::new("/repo/rust-workspace").unwrap()
+		);
 	}
 
 	#[test]
@@ -1253,11 +1275,7 @@ tempfile = "3.0"
 			dir,
 			"[package]\nname = \"my-crate\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
 		);
-		ProjectInfo {
-			name: "my-crate".to_string(),
-			path: dir.to_path_buf(),
-			..Default::default()
-		}
+		ProjectInfo::for_test("my-crate", AbsolutePath::new(dir.to_path_buf()).unwrap())
 	}
 
 	#[test]
@@ -1360,11 +1378,7 @@ tempfile = "3.0"
 	fn make_member_info(dir: &Path, name: &str, member_path: &str) -> ProjectInfo {
 		let project_dir = dir.join(member_path);
 		std::fs::create_dir_all(&project_dir).unwrap();
-		ProjectInfo {
-			name: name.to_string(),
-			path: dir.join(member_path),
-			..Default::default()
-		}
+		ProjectInfo::for_test(name, AbsolutePath::new(dir.join(member_path)).unwrap())
 	}
 
 	#[test]
@@ -1533,11 +1547,10 @@ tempfile = "3.0"
 		write_cargo_toml(dir.path(), "[workspace]\nmembers = []\n");
 
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let info = ProjectInfo {
-			name: "missing-pkg".to_string(),
-			path: dir.path().join("missing-dir"),
-			..Default::default()
-		};
+		let info = ProjectInfo::for_test(
+			"missing-pkg",
+			AbsolutePath::new(dir.path().join("missing-dir")).unwrap(),
+		);
 		let new_version: Version = "1.0.0".parse().unwrap();
 
 		let modified = adapter

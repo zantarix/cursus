@@ -146,14 +146,13 @@ fn strip_optional_port(s: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-	use std::path::PathBuf;
 
 	use super::*;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::git::GitWorkdir;
 
-	fn workdir() -> PathBuf {
-		PathBuf::from("/tmp")
+	fn workdir() -> crate::path::AbsolutePath {
+		crate::path::AbsolutePath::new("/tmp").unwrap()
 	}
 
 	// --- GitHubRepo::parse_url ---

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
 use crate::command::CommandRunner;
+use crate::path::AbsolutePath;
 
 /// Configuration for npm package manager.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,12 +53,13 @@ impl NpmConfig {
 
 	/// Returns the resolved root directory for this package manager.
 	///
-	/// If a `path` is configured, returns `git_workdir` joined with that path.
-	/// Otherwise, returns a copy of `git_workdir`.
-	fn resolve_root(&self, git_workdir: &Path) -> PathBuf {
+	/// If a `path` is configured, returns `adapter_root` joined with that path.
+	/// Otherwise, returns a copy of `adapter_root`.
+	fn resolve_root(&self, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
 		match &self.path {
-			Some(path) => git_workdir.join(path),
-			None => git_workdir.to_path_buf(),
+			Some(path) => AbsolutePath::new(git_workdir.join(path))
+				.with_context(|| format!("resolve_root: invalid path '{path}'")),
+			None => Ok(git_workdir.clone()),
 		}
 	}
 }
@@ -69,25 +71,29 @@ impl NpmConfig {
 pub struct NpmAdapter {
 	/// Configuration for this package manager.
 	config: NpmConfig,
-	/// Git repository root path.
-	git_workdir: PathBuf,
+	/// Package manager root path.
+	adapter_root: AbsolutePath,
 	/// Command runner for executing npm/pnpm/yarn commands.
 	runner: Arc<dyn CommandRunner>,
 }
 
 impl NpmAdapter {
 	/// Creates a new npm adapter with the given configuration.
-	pub fn new(config: NpmConfig, git_workdir: PathBuf, runner: Arc<dyn CommandRunner>) -> Self {
+	pub fn new(
+		config: NpmConfig,
+		adapter_root: AbsolutePath,
+		runner: Arc<dyn CommandRunner>,
+	) -> Self {
 		Self {
 			config,
-			git_workdir,
+			adapter_root,
 			runner,
 		}
 	}
 
 	/// Returns the resolved root directory for this package manager.
-	fn resolve_root(&self) -> PathBuf {
-		self.config.resolve_root(&self.git_workdir)
+	fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
+		self.config.resolve_root(&self.adapter_root)
 	}
 }
 
@@ -236,7 +242,12 @@ fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<Projec
 		let manifest_path = workspace_path.join("package.json");
 		format!("Missing name in {}", manifest_path.display())
 	})?;
-	let path = workspace_path.to_path_buf();
+	let path = AbsolutePath::new(workspace_path.to_path_buf()).with_context(|| {
+		format!(
+			"workspace path is not absolute: {}",
+			workspace_path.display()
+		)
+	})?;
 
 	let (version, publishable, dependency_names) = extract_project_metadata(&package)
 		.with_context(|| {
@@ -299,7 +310,7 @@ impl PackageManagerAdapter for NpmAdapter {
 	}
 
 	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
-		let pm_root = self.resolve_root();
+		let pm_root = self.resolve_root()?;
 		let Some(root_package) = read_package_json(&pm_root)? else {
 			return Ok(Vec::new());
 		};
@@ -373,7 +384,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		if self.config.lock_command.is_some() {
 			return None;
 		}
-		let workspace_root = self.resolve_root();
+		let workspace_root = self.resolve_root().ok()?;
 		for name in ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"] {
 			let path = workspace_root.join(name);
 			if path.exists() {
@@ -384,7 +395,7 @@ impl PackageManagerAdapter for NpmAdapter {
 	}
 
 	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
-		let workspace_root = self.resolve_root();
+		let workspace_root = self.resolve_root()?;
 
 		// If a custom lock command is configured, execute it via the shell (ADR-011).
 		// We can't know which file the custom command writes, so return None.
@@ -635,7 +646,7 @@ mod tests {
 	fn recording_adapter_default(config: NpmConfig, dir: &Path, exit_code: i32) -> NpmAdapter {
 		NpmAdapter::new(
 			config,
-			dir.to_path_buf(),
+			crate::path::AbsolutePath::new(dir).unwrap(),
 			Arc::new(RecordingCommandRunner::new(exit_code)),
 		)
 	}
@@ -646,7 +657,7 @@ mod tests {
 		dir: &Path,
 		runner: Arc<RecordingCommandRunner>,
 	) -> NpmAdapter {
-		NpmAdapter::new(config, dir.to_path_buf(), runner)
+		NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), runner)
 	}
 
 	/// Helper to enumerate projects using the adapter with no configured path.
@@ -684,7 +695,7 @@ mod tests {
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-app");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 	}
 
 	#[test]
@@ -720,11 +731,17 @@ mod tests {
 		assert_eq!(projects.len(), 3);
 		// Root project first (shorter absolute path sorts first)
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 		assert_eq!(projects[1].name, "@scope/pkg-a");
-		assert_eq!(projects[1].path, dir.path().join("packages/pkg-a"));
+		assert_eq!(
+			projects[1].path.as_path(),
+			dir.path().join("packages/pkg-a")
+		);
 		assert_eq!(projects[2].name, "@scope/pkg-b");
-		assert_eq!(projects[2].path, dir.path().join("packages/pkg-b"));
+		assert_eq!(
+			projects[2].path.as_path(),
+			dir.path().join("packages/pkg-b")
+		);
 	}
 
 	#[test]
@@ -743,7 +760,7 @@ mod tests {
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 		assert_eq!(projects[1].name, "my-pkg");
 	}
 
@@ -787,11 +804,11 @@ mod tests {
 		assert_eq!(projects.len(), 3);
 		// Root first (shorter absolute path), then sorted by path
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 		assert_eq!(projects[1].name, "web");
-		assert_eq!(projects[1].path, dir.path().join("apps/web"));
+		assert_eq!(projects[1].path.as_path(), dir.path().join("apps/web"));
 		assert_eq!(projects[2].name, "lib");
-		assert_eq!(projects[2].path, dir.path().join("packages/lib"));
+		assert_eq!(projects[2].path.as_path(), dir.path().join("packages/lib"));
 	}
 
 	#[test]
@@ -853,7 +870,7 @@ mod tests {
 		assert_eq!(projects[0].name, "root");
 		assert_eq!(projects[1].name, "nested-pkg");
 		assert_eq!(
-			projects[1].path,
+			projects[1].path.as_path(),
 			dir.path().join("packages/group/subpackages/nested-pkg")
 		);
 	}
@@ -928,9 +945,12 @@ mod tests {
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "pnpm-monorepo");
-		assert_eq!(projects[0].path, dir.path());
+		assert_eq!(projects[0].path.as_path(), dir.path());
 		assert_eq!(projects[1].name, "my-pkg");
-		assert_eq!(projects[1].path, dir.path().join("packages/my-pkg"));
+		assert_eq!(
+			projects[1].path.as_path(),
+			dir.path().join("packages/my-pkg")
+		);
 	}
 
 	#[test]
@@ -1048,7 +1068,7 @@ mod tests {
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-app");
-		assert_eq!(projects[0].path, dir.path().join("frontend"));
+		assert_eq!(projects[0].path.as_path(), dir.path().join("frontend"));
 	}
 
 	#[test]
@@ -1072,11 +1092,17 @@ mod tests {
 
 		assert_eq!(projects.len(), 3);
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, dir.path().join("frontend"));
+		assert_eq!(projects[0].path.as_path(), dir.path().join("frontend"));
 		assert_eq!(projects[1].name, "@scope/pkg-a");
-		assert_eq!(projects[1].path, dir.path().join("frontend/packages/pkg-a"));
+		assert_eq!(
+			projects[1].path.as_path(),
+			dir.path().join("frontend/packages/pkg-a")
+		);
 		assert_eq!(projects[2].name, "@scope/pkg-b");
-		assert_eq!(projects[2].path, dir.path().join("frontend/packages/pkg-b"));
+		assert_eq!(
+			projects[2].path.as_path(),
+			dir.path().join("frontend/packages/pkg-b")
+		);
 	}
 
 	#[test]
@@ -1087,11 +1113,7 @@ mod tests {
 	}
 
 	fn project_info(dir: &Path, name: &str, path: &str) -> ProjectInfo {
-		ProjectInfo {
-			name: name.to_string(),
-			path: dir.join(path),
-			..Default::default()
-		}
+		ProjectInfo::for_test(name, AbsolutePath::new(dir.join(path)).unwrap())
 	}
 
 	#[test]
@@ -1350,8 +1372,8 @@ mod tests {
 			lock_command: None,
 			access: None,
 		};
-		let git_workdir = Path::new("/repo");
-		let resolved = config.resolve_root(git_workdir);
+		let git_workdir = AbsolutePath::new("/repo").unwrap();
+		let resolved = config.resolve_root(&git_workdir).unwrap();
 		assert_eq!(resolved, git_workdir);
 	}
 
@@ -1363,9 +1385,9 @@ mod tests {
 			lock_command: None,
 			access: None,
 		};
-		let git_workdir = Path::new("/repo");
-		let resolved = config.resolve_root(git_workdir);
-		assert_eq!(resolved, Path::new("/repo/frontend"));
+		let git_workdir = AbsolutePath::new("/repo").unwrap();
+		let resolved = config.resolve_root(&git_workdir).unwrap();
+		assert_eq!(*resolved, *AbsolutePath::new("/repo/frontend").unwrap());
 	}
 
 	#[test]

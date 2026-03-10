@@ -6,10 +6,12 @@ mod init;
 mod prepare;
 mod publish;
 
-pub use change::{ChangeArgs, cmd_change};
+pub use change::ChangeArgs;
+pub(crate) use change::cmd_change;
 pub use ci::CiArgs;
 pub(crate) use ci::cmd_ci;
-pub use init::{InitArgs, cmd_init};
+pub use init::InitArgs;
+pub(crate) use init::cmd_init;
 pub use prepare::PrepareArgs;
 pub(crate) use prepare::cmd_prepare;
 pub use publish::PublishArgs;

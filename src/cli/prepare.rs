@@ -224,11 +224,11 @@ pub(crate) fn cmd_prepare(
 	runner: Arc<dyn CommandRunner>,
 	github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
-	let adapters = config.create_adapters(Arc::clone(&runner));
+	let adapters = config.create_adapters(Arc::clone(&runner))?;
 	let projects = config.load_projects_for_adapters(&adapters)?;
 
 	// Read all pending changesets
-	let changesets = Changeset::read_all(config.git_workdir())?;
+	let changesets = Changeset::read_all(git)?;
 	if changesets.is_empty() {
 		info!("No pending changesets found. Nothing to prepare.");
 		return Ok(ExitCode::SUCCESS);
@@ -349,7 +349,7 @@ pub(crate) fn cmd_prepare(
 				new_version.clone(),
 				today_iso_date(),
 				changes,
-				project.path().to_path_buf(),
+				project.path().clone(),
 			)
 			.update()?;
 
@@ -585,7 +585,8 @@ mod tests {
 	fn stage_and_commit_empty_releases_is_noop() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let result = stage_and_commit(&git, &[], &[], &[], false);
 		assert!(result.is_ok());
 	}
@@ -598,7 +599,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let result = stage_and_commit(&git, &[], &release_infos, &[], true);
 		assert!(result.is_ok());
 	}
@@ -612,7 +614,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
 		assert!(result.is_err());
 		assert!(
@@ -632,7 +635,8 @@ mod tests {
 			new_version: "1.0.0".parse().unwrap(),
 		}];
 		let runner = RecordingCommandRunner::new(0);
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
 		assert!(result.is_err());
 		assert!(
@@ -717,7 +721,8 @@ mod tests {
 	fn check_dirty_tree_succeeds_when_clean() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = RecordingCommandRunner::new(0); // empty stdout → clean
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let result = check_dirty_tree(&git);
 		assert!(result.is_ok());
 	}
@@ -726,7 +731,8 @@ mod tests {
 	fn check_dirty_tree_fails_when_dirty() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec());
-		let git = git::GitWorkdir::new(&runner, dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(&runner, &dir_abs);
 		let result = check_dirty_tree(&git);
 		assert!(result.is_err());
 		assert!(
@@ -739,8 +745,9 @@ mod tests {
 	fn cmd_prepare_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::enabled());
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::package_manager::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -748,10 +755,11 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 		let runner = make_runner();
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
@@ -760,8 +768,9 @@ mod tests {
 	fn cmd_prepare_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::enabled());
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::package_manager::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -776,10 +785,11 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 		let runner = make_runner();
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_err());
 		assert!(
@@ -794,8 +804,9 @@ mod tests {
 	fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::enabled());
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::package_manager::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -832,14 +843,15 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
 		let runner = make_runner();
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_ok());
 
@@ -869,7 +881,7 @@ mod tests {
 		let original = "+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n";
 		std::fs::write(&changeset_path, original).unwrap();
 
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs {
 			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
@@ -877,7 +889,8 @@ mod tests {
 			..PrepareArgs::default()
 		};
 		let runner = make_runner();
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_ok());
 
@@ -893,8 +906,9 @@ mod tests {
 	fn cmd_prepare_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::enabled());
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::package_manager::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -909,14 +923,15 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
 		let runner = make_runner();
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_err());
 		assert!(
@@ -963,20 +978,21 @@ mod tests {
 	fn setup_branch_strategy_with_github() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg = crate::model::config::Config::new(dir.path())
-			.with_cargo(crate::package_manager::CargoConfig::enabled())
-			.with_git(crate::git::GitConfig {
-				enabled: Some(true),
-				strategy: Some(crate::git::Strategy::Branch),
-				..Default::default()
-			})
-			.with_github(crate::github::GitHubConfig {
-				enabled: true,
-				owner: Some("acme".to_string()),
-				repo: Some("app".to_string()),
-				pull_request_title: Some("My Release PR".to_string()),
-				..Default::default()
-			});
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::package_manager::CargoConfig::enabled())
+				.with_git(crate::git::GitConfig {
+					enabled: Some(true),
+					strategy: Some(crate::git::Strategy::Branch),
+					..Default::default()
+				})
+				.with_github(crate::github::GitHubConfig {
+					enabled: true,
+					owner: Some("acme".to_string()),
+					repo: Some("app".to_string()),
+					pull_request_title: Some("My Release PR".to_string()),
+					..Default::default()
+				});
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -1000,10 +1016,11 @@ mod tests {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let client = Arc::new(RecordingGitHubClient::new());
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(
 			&git,
 			&args,
@@ -1031,10 +1048,11 @@ mod tests {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(
 			&git,
 			&args,
@@ -1054,10 +1072,11 @@ mod tests {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		// No github client — pre-flight check should error
-		let config = config::load(dir.path()).unwrap();
+		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 
-		let git = git::GitWorkdir::new(runner.as_ref(), dir.path());
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
 		let result = cmd_prepare(
 			&git,
 			&args,
