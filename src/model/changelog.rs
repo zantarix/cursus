@@ -33,11 +33,11 @@ impl Changelog {
 		}
 	}
 
-	/// Formats this changelog entry as markdown.
+	/// Formats just the categorised change sections (### headings + bullet items),
+	/// without the `## version - date` heading line.
 	///
-	/// Groups changeset messages by change type (Major → Breaking Changes,
-	/// Minor → Features, Patch → Bug Fixes) and formats them as a markdown section.
-	pub fn format_entry(&self) -> String {
+	/// Returns an empty string when no changeset has a message.
+	pub fn format_sections(&self) -> String {
 		let mut sections: BTreeMap<ChangeType, Vec<&str>> = BTreeMap::new();
 		for (ct, msg) in &self.changes {
 			if let Some(text) = msg.as_deref() {
@@ -45,9 +45,9 @@ impl Changelog {
 			}
 		}
 
-		let mut output = format!("## {} - {}\n", self.version, self.date);
+		let mut output = String::new();
 
-		// Iterate in reverse order (Major first, then Minor, then Patch)
+		// Iterate in order: Major (Breaking Changes) first, then Minor, then Patch
 		for ct in [ChangeType::Major, ChangeType::Minor, ChangeType::Patch] {
 			if let Some(messages) = sections.get(&ct) {
 				let heading = match ct {
@@ -55,7 +55,10 @@ impl Changelog {
 					ChangeType::Minor => "Features",
 					ChangeType::Patch => "Bug Fixes",
 				};
-				let _ = writeln!(output, "\n### {heading}\n");
+				if !output.is_empty() {
+					output.push('\n');
+				}
+				let _ = writeln!(output, "### {heading}\n");
 				for msg in messages {
 					let _ = writeln!(output, "- {}", indent_continuation_lines(msg));
 				}
@@ -63,6 +66,20 @@ impl Changelog {
 		}
 
 		output
+	}
+
+	/// Formats this changelog entry as markdown.
+	///
+	/// Groups changeset messages by change type (Major → Breaking Changes,
+	/// Minor → Features, Patch → Bug Fixes) and formats them as a markdown section
+	/// under a `## version - date` heading.
+	pub fn format_entry(&self) -> String {
+		let sections = self.format_sections();
+		if sections.is_empty() {
+			format!("## {} - {}\n", self.version, self.date)
+		} else {
+			format!("## {} - {}\n\n{}", self.version, self.date, sections)
+		}
 	}
 
 	/// Writes or prepends this changelog entry to the project's CHANGELOG.md.
@@ -235,6 +252,38 @@ mod tests {
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		insta::assert_snapshot!(content);
+	}
+
+	#[test]
+	fn format_sections_returns_sections_without_heading() {
+		let changes = vec![
+			(ChangeType::Minor, Some("Added feature X".to_string())),
+			(ChangeType::Patch, Some("Fixed bug Y".to_string())),
+		];
+		let changelog = Changelog::new(
+			"1.1.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			AbsolutePath::new("/nonexistent").unwrap(),
+		);
+		let sections = changelog.format_sections();
+		assert!(!sections.contains("## 1.1.0"));
+		assert!(sections.contains("### Features"));
+		assert!(sections.contains("- Added feature X"));
+		assert!(sections.contains("### Bug Fixes"));
+		assert!(sections.contains("- Fixed bug Y"));
+	}
+
+	#[test]
+	fn format_sections_returns_empty_when_no_messages() {
+		let changes: Vec<(ChangeType, Option<String>)> = vec![(ChangeType::Minor, None)];
+		let changelog = Changelog::new(
+			"1.1.0".parse().unwrap(),
+			"2024-01-15".to_string(),
+			changes,
+			AbsolutePath::new("/nonexistent").unwrap(),
+		);
+		assert!(changelog.format_sections().is_empty());
 	}
 
 	#[test]
