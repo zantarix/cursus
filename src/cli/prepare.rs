@@ -71,7 +71,7 @@ fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::V
 /// # Errors
 ///
 /// Returns an error if the working tree has uncommitted changes.
-fn check_dirty_tree(git: &git::GitWorkdir<'_>) -> anyhow::Result<()> {
+fn check_dirty_tree(git: &git::GitWorkdir) -> anyhow::Result<()> {
 	let status = git.status_porcelain()?;
 	if !status.trim().is_empty() {
 		anyhow::bail!(
@@ -163,7 +163,7 @@ fn format_commit_message(release_infos: &[ReleaseInfo]) -> String {
 ///
 /// Returns an error if any git command fails.
 fn stage_and_commit(
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	extra_files: &[String],
 	release_infos: &[ReleaseInfo],
 	modified_files: &[PathBuf],
@@ -218,7 +218,7 @@ fn build_pr_body(releases: &[ReleaseInfo]) -> String {
 
 /// Runs the `prepare` subcommand.
 pub(crate) fn cmd_prepare(
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	args: &PrepareArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,
@@ -584,9 +584,12 @@ mod tests {
 	#[test]
 	fn stage_and_commit_empty_releases_is_noop() {
 		let dir = tempfile::tempdir().unwrap();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = stage_and_commit(&git, &[], &[], &[], false);
 		assert!(result.is_ok());
 	}
@@ -598,9 +601,12 @@ mod tests {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
 		}];
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = stage_and_commit(&git, &[], &release_infos, &[], true);
 		assert!(result.is_ok());
 	}
@@ -613,9 +619,12 @@ mod tests {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
 		}];
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
 		assert!(result.is_err());
 		assert!(
@@ -634,9 +643,12 @@ mod tests {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
 		}];
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
 		assert!(result.is_err());
 		assert!(
@@ -720,9 +732,12 @@ mod tests {
 	#[test]
 	fn check_dirty_tree_succeeds_when_clean() {
 		let dir = tempfile::tempdir().unwrap();
-		let runner = RecordingCommandRunner::new(0); // empty stdout → clean
+		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout → clean
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = check_dirty_tree(&git);
 		assert!(result.is_ok());
 	}
@@ -730,9 +745,13 @@ mod tests {
 	#[test]
 	fn check_dirty_tree_fails_when_dirty() {
 		let dir = tempfile::tempdir().unwrap();
-		let runner = RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec());
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = check_dirty_tree(&git);
 		assert!(result.is_err());
 		assert!(
@@ -759,7 +778,10 @@ mod tests {
 		let args = PrepareArgs::default();
 		let runner = make_runner();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
@@ -789,7 +811,10 @@ mod tests {
 		let args = PrepareArgs::default();
 		let runner = make_runner();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_err());
 		assert!(
@@ -851,7 +876,10 @@ mod tests {
 		};
 		let runner = make_runner();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_ok());
 
@@ -890,7 +918,10 @@ mod tests {
 		};
 		let runner = make_runner();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_ok());
 
@@ -931,7 +962,10 @@ mod tests {
 		};
 		let runner = make_runner();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(&git, &args, config, Arc::clone(&runner), no_github());
 		assert!(result.is_err());
 		assert!(
@@ -1020,7 +1054,10 @@ mod tests {
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(
 			&git,
 			&args,
@@ -1052,7 +1089,10 @@ mod tests {
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(
 			&git,
 			&args,
@@ -1076,7 +1116,10 @@ mod tests {
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(runner.as_ref(), &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let result = cmd_prepare(
 			&git,
 			&args,

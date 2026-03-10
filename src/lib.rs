@@ -99,7 +99,10 @@ pub fn run_with(
 ) -> anyhow::Result<ExitCode> {
 	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
 	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
-	let git = git::GitWorkdir::new(runner.as_ref(), &git_workdir);
+	let git = git::GitWorkdir::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		git_workdir.clone(),
+	);
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),

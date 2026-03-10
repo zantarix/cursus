@@ -142,7 +142,7 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub(crate) fn write(&self, git: &GitWorkdir<'_>) -> anyhow::Result<PathBuf> {
+	pub(crate) fn write(&self, git: &GitWorkdir) -> anyhow::Result<PathBuf> {
 		let chronicle_dir = git.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir)
 			.with_context(|| format!("Failed to create directory: {}", chronicle_dir.display()))?;
@@ -163,7 +163,7 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub(crate) fn read_all(git: &GitWorkdir<'_>) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+	pub(crate) fn read_all(git: &GitWorkdir) -> anyhow::Result<Vec<(PathBuf, Self)>> {
 		let chronicle_dir = git.path().join(".chronicle");
 		if !chronicle_dir.is_dir() {
 			return Ok(Vec::new());
@@ -279,15 +279,17 @@ pub fn open_editor(
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::git::GitWorkdir;
 	use crate::path::AbsolutePath;
 
 	use super::*;
 
-	fn make_git(dir: &tempfile::TempDir) -> (AbsolutePath, RecordingCommandRunner) {
+	fn make_git(dir: &tempfile::TempDir) -> (AbsolutePath, Arc<RecordingCommandRunner>) {
 		let abs = AbsolutePath::new(dir.path()).unwrap();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		(abs, runner)
 	}
 
@@ -390,7 +392,7 @@ mod tests {
 	fn write_changeset_creates_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let changeset = single_package_changeset();
 		let path = changeset.write(&git).unwrap();
 		assert!(path.exists(), "Changeset file should exist");
@@ -402,7 +404,7 @@ mod tests {
 	fn write_changeset_creates_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let changeset = single_package_changeset();
 		changeset.write(&git).unwrap();
 		assert!(
@@ -415,7 +417,7 @@ mod tests {
 	fn write_changeset_file_has_correct_content() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
 		let path = changeset.write(&git).unwrap();
@@ -517,7 +519,7 @@ mod tests {
 	fn read_all_changesets_empty_when_no_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let result = Changeset::read_all(&git).unwrap();
 		assert!(result.is_empty());
 	}
@@ -526,7 +528,7 @@ mod tests {
 	fn read_all_changesets_empty_when_no_md_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("config.toml"), "").unwrap();
@@ -538,7 +540,7 @@ mod tests {
 	fn read_all_changesets_single_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(
@@ -557,7 +559,7 @@ mod tests {
 	fn read_all_changesets_multiple_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
@@ -571,7 +573,7 @@ mod tests {
 	fn read_all_changesets_invalid_file_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(&runner, &abs);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("bad.md"), "not a valid changeset").unwrap();

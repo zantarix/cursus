@@ -33,7 +33,7 @@ pub struct ChangeArgs {
 
 /// Runs the `change` subcommand.
 pub(crate) fn cmd_change(
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	env: &crate::Env,

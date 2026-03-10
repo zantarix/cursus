@@ -57,7 +57,7 @@ pub struct CiArgs {
 /// already-published registry step and only retry the tag. Checking registry state directly
 /// would add network dependencies and is not necessary for correctness.
 pub(crate) fn cmd_ci(
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	args: &CiArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,

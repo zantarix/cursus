@@ -84,7 +84,7 @@ impl GitHubRepo {
 	/// # Errors
 	///
 	/// Returns an error if the git command cannot be executed.
-	pub(crate) fn detect_in(git: &GitWorkdir<'_>) -> anyhow::Result<Option<Self>> {
+	pub(crate) fn detect_in(git: &GitWorkdir) -> anyhow::Result<Option<Self>> {
 		match git.remote_origin_url()? {
 			Some(url) => Ok(Self::parse_url(&url)),
 			None => Ok(None),
@@ -100,10 +100,7 @@ impl GitHubRepo {
 	///
 	/// Returns an error if both config fields are partially set (one set, one not),
 	/// or if neither config nor remote detection can determine the repository.
-	pub(crate) fn resolve(
-		github_config: &GitHubConfig,
-		git: &GitWorkdir<'_>,
-	) -> anyhow::Result<Self> {
+	pub(crate) fn resolve(github_config: &GitHubConfig, git: &GitWorkdir) -> anyhow::Result<Self> {
 		match (&github_config.owner, &github_config.repo) {
 			(Some(owner), Some(repo)) => {
 				return GitHubRepo::new(owner, repo);
@@ -146,8 +143,10 @@ fn strip_optional_port(s: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
 
 	use super::*;
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::git::GitWorkdir;
 
@@ -273,10 +272,12 @@ mod tests {
 
 	#[test]
 	fn detect_returns_repo_for_https_remote() {
-		let runner = RecordingCommandRunner::new(0)
-			.with_stdout(b"https://github.com/acme/app.git\n".to_vec());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"https://github.com/acme/app.git\n".to_vec()),
+		);
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 		let invocations = runner.invocations();
@@ -287,29 +288,32 @@ mod tests {
 
 	#[test]
 	fn detect_returns_repo_for_ssh_remote() {
-		let runner =
-			RecordingCommandRunner::new(0).with_stdout(b"git@github.com:acme/app.git\n".to_vec());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0).with_stdout(b"git@github.com:acme/app.git\n".to_vec()),
+		);
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 	}
 
 	#[test]
 	fn detect_returns_none_when_git_fails() {
-		let runner = RecordingCommandRunner::new(1);
+		let runner = Arc::new(RecordingCommandRunner::new(1));
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, None);
 	}
 
 	#[test]
 	fn detect_returns_none_for_non_github_url() {
-		let runner = RecordingCommandRunner::new(0)
-			.with_stdout(b"https://gitlab.com/owner/repo.git\n".to_vec());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"https://gitlab.com/owner/repo.git\n".to_vec()),
+		);
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, None);
 	}
@@ -328,9 +332,9 @@ mod tests {
 	#[test]
 	fn resolve_github_repo_uses_config_when_set() {
 		let config = make_github_config(Some("acme"), Some("app"));
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let gh_repo = GitHubRepo::resolve(&config, &git).unwrap();
 		assert_eq!(gh_repo.owner, "acme");
@@ -342,10 +346,12 @@ mod tests {
 	#[test]
 	fn resolve_github_repo_falls_back_to_git_remote() {
 		let config = make_github_config(None, None);
-		let runner = RecordingCommandRunner::new(0)
-			.with_stdout(b"https://github.com/myorg/myapp.git\n".to_vec());
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"https://github.com/myorg/myapp.git\n".to_vec()),
+		);
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let gh_repo = GitHubRepo::resolve(&config, &git).unwrap();
 		assert_eq!(gh_repo.owner, "myorg");
@@ -355,9 +361,9 @@ mod tests {
 	#[test]
 	fn resolve_github_repo_errors_when_neither_config_nor_remote() {
 		let config = make_github_config(None, None);
-		let runner = RecordingCommandRunner::new(1); // no origin remote
+		let runner = Arc::new(RecordingCommandRunner::new(1)); // no origin remote
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
@@ -371,9 +377,9 @@ mod tests {
 	#[test]
 	fn resolve_github_repo_errors_when_only_owner_set() {
 		let config = make_github_config(Some("acme"), None);
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
@@ -387,9 +393,9 @@ mod tests {
 	#[test]
 	fn resolve_github_repo_errors_when_only_repo_set() {
 		let config = make_github_config(None, Some("app"));
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = GitWorkdir::new(&runner, &wd);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());

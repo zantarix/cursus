@@ -52,7 +52,7 @@ pub struct PublishArgs {
 
 /// Execute the publish command.
 pub(crate) fn cmd_publish(
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	args: &PublishArgs,
 	config: Config,
 	runner: Arc<dyn CommandRunner>,
@@ -234,7 +234,7 @@ pub(crate) fn cmd_publish(
 fn create_and_push_tags(
 	published: &[PublishedPackage],
 	config: &Config,
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	is_multi_package: bool,
 ) -> anyhow::Result<(usize, usize)> {
 	let mut created_tags: Vec<String> = Vec::new();
@@ -344,7 +344,7 @@ fn publish_projects(
 ///
 /// Returns `(releases_created, any_failed)`.
 fn orchestrate_github_releases(
-	git: &git::GitWorkdir<'_>,
+	git: &git::GitWorkdir,
 	config: &Config,
 	runner: &dyn CommandRunner,
 	github_client: &dyn GitHubClient,
@@ -494,12 +494,13 @@ mod tests {
 	fn github_release_skipped_when_no_published_packages() {
 		let config = Config::new(&workdir()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = git::GitWorkdir::new(&runner, &wd);
+		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &runner, &client, &[], false).unwrap();
+			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &[], false)
+				.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(!failed);
@@ -510,7 +511,7 @@ mod tests {
 	fn github_releases_created_for_published_packages() {
 		let config = Config::new(&workdir()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
@@ -519,9 +520,10 @@ mod tests {
 		}];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(&runner, &wd);
+		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
+			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, false)
+				.unwrap();
 
 		assert_eq!(created, 1);
 		assert!(!failed);
@@ -538,7 +540,7 @@ mod tests {
 	fn github_releases_uses_prefixed_tag_for_monorepo() {
 		let config = Config::new(&workdir()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
@@ -547,9 +549,14 @@ mod tests {
 		}];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(&runner, &wd);
+		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let (created, failed) = orchestrate_github_releases(
-			&git, &config, &runner, &client, &packages, true, // is_multi_package
+			&git,
+			&config,
+			runner.as_ref(),
+			&client,
+			&packages,
+			true, // is_multi_package
 		)
 		.unwrap();
 
@@ -567,7 +574,7 @@ mod tests {
 		let config =
 			Config::new(&workdir()).with_github(make_github_config("exit 1", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
-		let runner = RecordingCommandRunner::new(1); // fails
+		let runner = Arc::new(RecordingCommandRunner::new(1)); // fails
 
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
@@ -576,9 +583,10 @@ mod tests {
 		}];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(&runner, &wd);
+		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
+			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, false)
+				.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -589,7 +597,7 @@ mod tests {
 	fn github_release_create_failure_continues_other_packages() {
 		let config = Config::new(&workdir()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new().with_create_failure();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![
 			PublishedPackage {
@@ -605,9 +613,10 @@ mod tests {
 		];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(&runner, &wd);
+		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &runner, &client, &packages, true).unwrap();
+			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, true)
+				.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -646,7 +655,7 @@ mod tests {
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_github(github_cfg);
 		let client = RecordingGitHubClient::new().with_upload_failure();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
@@ -654,10 +663,14 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 
 		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &runner, &client, &packages, false).unwrap();
+			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, false)
+				.unwrap();
 
 		// Release was created even though uploads failed
 		assert_eq!(created, 1);
@@ -695,7 +708,7 @@ mod tests {
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_github(github_cfg);
 		let client = RecordingGitHubClient::new();
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![
 			PublishedPackage {
@@ -710,10 +723,14 @@ mod tests {
 			},
 		];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 
 		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &runner, &client, &packages, true).unwrap();
+			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, true)
+				.unwrap();
 
 		assert_eq!(created, 2);
 		assert!(!failed);
@@ -742,9 +759,12 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		// empty stdout → git_tag_exists returns false (no existing tag)
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.2.0".parse().unwrap(),
@@ -777,9 +797,12 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		// non-empty stdout → git_tag_exists returns true (tag already exists)
-		let runner = RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec());
+		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
@@ -800,9 +823,12 @@ mod tests {
 	fn create_and_push_tags_empty_list_does_nothing() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 
 		let (created, skipped) = create_and_push_tags(&[], &config, &git, false).unwrap();
 
@@ -815,9 +841,12 @@ mod tests {
 	fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		let runner = RecordingCommandRunner::new(0);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(&runner, &dir_abs);
+		let git = git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			dir_abs.clone(),
+		);
 		let published = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "2.0.0".parse().unwrap(),
