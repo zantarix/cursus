@@ -331,8 +331,8 @@ pub(crate) fn cmd_prepare(
 		let new_version = bump_version(current_version, *change_type);
 
 		// Always track which files would be staged (used for git lifecycle and dry-run display).
-		modified_files.push(project.manifest_path(git.path()));
-		modified_files.push(git.path().join(project.path()).join("CHANGELOG.md"));
+		modified_files.push(project.manifest_path());
+		modified_files.push(project.path().join("CHANGELOG.md"));
 
 		if args.dry_run {
 			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
@@ -351,7 +351,7 @@ pub(crate) fn cmd_prepare(
 				changes,
 				project.path().to_path_buf(),
 			)
-			.update(config.git_workdir())?;
+			.update()?;
 
 			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		}
@@ -381,7 +381,7 @@ pub(crate) fn cmd_prepare(
 					);
 					// Predict the manifest that would be modified so git lifecycle
 					// dry-run can report it as a file that would be staged.
-					modified_files.push(project.manifest_path(git.path()));
+					modified_files.push(project.manifest_path());
 				} else {
 					let paths = project.update_dependency_version(dep_name, new_version)?;
 					modified_files.extend(paths);

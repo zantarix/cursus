@@ -74,8 +74,8 @@ impl Changelog {
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be read or written.
-	pub fn update(&self, git_workdir: &Path) -> anyhow::Result<()> {
-		let changelog_path = git_workdir.join(&self.project_path).join("CHANGELOG.md");
+	pub fn update(&self) -> anyhow::Result<()> {
+		let changelog_path = self.project_path.join("CHANGELOG.md");
 		let entry = self.format_entry();
 		let content = if changelog_path.exists() {
 			let existing = std::fs::read_to_string(&changelog_path)
@@ -228,9 +228,9 @@ mod tests {
 			"0.2.0".parse().unwrap(),
 			"2024-06-01".to_string(),
 			changes,
-			PathBuf::new(),
+			dir.path().to_path_buf(),
 		);
-		changelog.update(dir.path()).unwrap();
+		changelog.update().unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		insta::assert_snapshot!(content);
@@ -326,9 +326,9 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			dir.path().to_path_buf(),
 		);
-		changelog.update(dir.path()).unwrap();
+		changelog.update().unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("# Changelog"));
@@ -348,9 +348,9 @@ mod tests {
 			"0.2.0".parse().unwrap(),
 			"2024-06-01".to_string(),
 			changes,
-			PathBuf::new(),
+			dir.path().to_path_buf(),
 		);
-		changelog.update(dir.path()).unwrap();
+		changelog.update().unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("## 0.2.0 - 2024-06-01"));
@@ -372,13 +372,13 @@ mod tests {
 				version.parse().unwrap(),
 				"2024-01-01".to_string(),
 				vec![(ChangeType::Patch, Some(msg.to_string()))],
-				PathBuf::new(),
+				dir.path().to_path_buf(),
 			)
 		};
 
-		make("1.0.0", "Initial release").update(dir.path()).unwrap();
-		make("1.0.1", "Second release").update(dir.path()).unwrap();
-		make("1.0.2", "Third release").update(dir.path()).unwrap();
+		make("1.0.0", "Initial release").update().unwrap();
+		make("1.0.1", "Second release").update().unwrap();
+		make("1.0.2", "Third release").update().unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		insta::assert_snapshot!(content);
@@ -393,13 +393,13 @@ mod tests {
 				version.parse().unwrap(),
 				"2024-01-01".to_string(),
 				vec![(ChangeType::Patch, Some(msg.to_string()))],
-				PathBuf::new(),
+				dir.path().to_path_buf(),
 			)
 		};
 
-		make("1.0.0", "Initial release").update(dir.path()).unwrap();
-		make("1.0.1", "Second release").update(dir.path()).unwrap();
-		make("1.0.2", "Third release").update(dir.path()).unwrap();
+		make("1.0.0", "Initial release").update().unwrap();
+		make("1.0.1", "Second release").update().unwrap();
+		make("1.0.2", "Third release").update().unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert_eq!(content.matches("# Changelog").count(), 1);
@@ -424,9 +424,9 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::from("packages/my-pkg"),
+			sub.clone(),
 		);
-		changelog.update(dir.path()).unwrap();
+		changelog.update().unwrap();
 
 		let content = std::fs::read_to_string(sub.join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("## 1.0.0 - 2024-01-15"));
@@ -444,9 +444,9 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			dir.path().to_path_buf(),
 		);
-		let result = changelog.update(dir.path());
+		let result = changelog.update();
 
 		// Should fail because CHANGELOG.md is a directory, not a file
 		assert!(result.is_err());
@@ -466,9 +466,9 @@ mod tests {
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
 			changes,
-			PathBuf::new(),
+			dir.path().to_path_buf(),
 		);
-		let result = changelog.update(dir.path());
+		let result = changelog.update();
 
 		// Restore permissions before assertions for cleanup
 		let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();

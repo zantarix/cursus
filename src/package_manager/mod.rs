@@ -23,7 +23,7 @@ use semver::{BuildMetadata, Prerelease, Version};
 pub struct ProjectInfo {
 	/// The name of the project (e.g., package name).
 	pub name: String,
-	/// The path to the project root, relative to the git root.
+	/// The absolute path to the project root.
 	pub path: std::path::PathBuf,
 	/// The current version of the project.
 	pub version: Version,
@@ -103,14 +103,9 @@ impl Project {
 		&self.info.name
 	}
 
-	/// Returns the path to the project root, relative to the git root.
+	/// Returns the absolute path to the project root.
 	pub fn path(&self) -> &Path {
-		&self.info.path
-	}
-
-	/// Returns a reference to the project metadata.
-	pub fn info(&self) -> &ProjectInfo {
-		&self.info
+		self.info.path.as_path()
 	}
 
 	/// Returns the current version of this project.
@@ -169,12 +164,10 @@ impl Project {
 
 	/// Returns the absolute path to this project's manifest file.
 	///
-	/// Combines the git working directory with the project's relative path and
-	/// the adapter-specific manifest filename (e.g., `Cargo.toml` or `package.json`).
-	pub fn manifest_path(&self, git_workdir: &Path) -> std::path::PathBuf {
-		git_workdir
-			.join(&self.info.path)
-			.join(self.adapter.manifest_filename())
+	/// Combines the project's absolute path with the adapter-specific manifest
+	/// filename (e.g., `Cargo.toml` or `package.json`).
+	pub fn manifest_path(&self) -> std::path::PathBuf {
+		self.info.path.join(self.adapter.manifest_filename())
 	}
 
 	/// Creates a minimal `Project` with a dummy adapter for use in unit tests.
@@ -607,7 +600,6 @@ pub fn filter_projects_by_name(
 /// # Arguments
 ///
 /// * `adapters` - The package manager adapters to use.
-/// * `git_workdir` - The root directory of the git repository.
 ///
 /// # Errors
 ///
@@ -702,14 +694,6 @@ mod tests {
 	}
 
 	#[test]
-	fn project_info_returns_project_metadata() {
-		let project = Project::new_test("my-app", "packages/my-app");
-		let info = project.info();
-		assert_eq!(info.name, "my-app");
-		assert_eq!(info.path, std::path::PathBuf::from("packages/my-app"));
-	}
-
-	#[test]
 	fn project_registry_name_delegates_to_adapter() {
 		// new_test uses NpmAdapter, which returns "npm"
 		let project = Project::new_test("my-app", "");
@@ -769,7 +753,7 @@ mod tests {
 
 	#[test]
 	fn enumerate_projects_empty_adapters_returns_empty() {
-		let _dir = tempfile::tempdir().unwrap();
+		let dir = tempfile::tempdir().unwrap();
 		let adapters: [Arc<dyn PackageManagerAdapter>; 0] = [];
 		let projects = enumerate_projects(adapters).unwrap();
 		assert!(projects.is_empty());

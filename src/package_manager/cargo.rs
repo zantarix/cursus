@@ -168,10 +168,7 @@ fn extract_project_metadata(
 /// Attempts to create a ProjectInfo from a workspace member directory.
 ///
 /// Returns `Ok(None)` if the path is not a valid crate (not a directory or no Cargo.toml).
-fn read_workspace_member(
-	git_workdir: &Path,
-	member_path: &Path,
-) -> anyhow::Result<Option<ProjectInfo>> {
+fn read_workspace_member(member_path: &Path) -> anyhow::Result<Option<ProjectInfo>> {
 	if !member_path.is_dir() {
 		return Ok(None);
 	}
@@ -185,10 +182,7 @@ fn read_workspace_member(
 		return Ok(None);
 	};
 
-	let path = member_path
-		.strip_prefix(git_workdir)
-		.context("Member path is not under git root")?
-		.to_path_buf();
+	let path = member_path.to_path_buf();
 
 	let manifest_path = member_path.join("Cargo.toml");
 	let (version, publishable, dependency_names) = extract_project_metadata(&cargo, package)
@@ -210,13 +204,9 @@ fn read_workspace_member(
 
 /// Expands a workspace member glob pattern and returns all matching projects.
 ///
-/// Globs are resolved relative to `pm_root`, but paths in the returned
-/// [`ProjectInfo`] are stripped relative to `git_workdir`.
-fn expand_member_pattern(
-	git_workdir: &Path,
-	pm_root: &Path,
-	pattern: &str,
-) -> anyhow::Result<Vec<ProjectInfo>> {
+/// Globs are resolved relative to `pm_root`. Paths in the returned
+/// [`ProjectInfo`] are absolute paths to each member directory.
+fn expand_member_pattern(pm_root: &Path, pattern: &str) -> anyhow::Result<Vec<ProjectInfo>> {
 	let full_pattern = pm_root.join(pattern);
 	let pattern_str = full_pattern
 		.to_str()
@@ -227,7 +217,7 @@ fn expand_member_pattern(
 		.map(|entry| {
 			let member_path = entry
 				.with_context(|| format!("Failed to read glob entry for pattern: {}", pattern))?;
-			read_workspace_member(git_workdir, &member_path)
+			read_workspace_member(&member_path)
 		})
 		.filter_map(Result::transpose)
 		.collect()
@@ -345,7 +335,7 @@ fn update_member_dep(
 
 impl PackageManagerAdapter for CargoAdapter {
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
-		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
+		let manifest_path = project.path.join("Cargo.toml");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let mut doc = contents
@@ -366,11 +356,6 @@ impl PackageManagerAdapter for CargoAdapter {
 		let Some(root_cargo) = read_cargo_toml(&pm_root)? else {
 			return Ok(Vec::new());
 		};
-
-		let pm_relative_path = pm_root
-			.strip_prefix(&self.git_workdir)
-			.unwrap_or(Path::new(""))
-			.to_path_buf();
 
 		let root_manifest_path = pm_root.join("Cargo.toml");
 
@@ -396,7 +381,7 @@ impl PackageManagerAdapter for CargoAdapter {
 				})?;
 			return Ok(vec![ProjectInfo {
 				name: package.name.clone(),
-				path: pm_relative_path,
+				path: pm_root.clone(),
 				version,
 				publishable,
 				dependency_names,
@@ -406,7 +391,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		// Workspace with members
 		let mut projects: Vec<ProjectInfo> = members
 			.iter()
-			.map(|pattern| expand_member_pattern(&self.git_workdir, &pm_root, pattern))
+			.map(|pattern| expand_member_pattern(&pm_root, pattern))
 			.collect::<anyhow::Result<Vec<_>>>()?
 			.into_iter()
 			.flatten()
@@ -425,7 +410,7 @@ impl PackageManagerAdapter for CargoAdapter {
 				0,
 				ProjectInfo {
 					name: package.name.clone(),
-					path: pm_relative_path,
+					path: pm_root.clone(),
 					version,
 					publishable,
 					dependency_names,
@@ -470,7 +455,7 @@ impl PackageManagerAdapter for CargoAdapter {
 	}
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
-		let manifest_path = self.git_workdir.join(&project.path).join("Cargo.toml");
+		let manifest_path = project.path.join("Cargo.toml");
 		let manifest_str = manifest_path.to_string_lossy();
 
 		let output = self
@@ -529,7 +514,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		}
 
 		// Skip member update when the member IS the workspace root (already handled above)
-		let member_toml_path = self.git_workdir.join(&project.path).join("Cargo.toml");
+		let member_toml_path = project.path.join("Cargo.toml");
 		if member_toml_path != workspace_toml_path
 			&& update_member_dep(&member_toml_path, dependency_name, &version_str)?
 		{
@@ -616,7 +601,7 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-crate");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 	}
 
 	#[test]
@@ -669,9 +654,9 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "crate-a");
-		assert_eq!(projects[0].path, Path::new("crates/crate-a"));
+		assert_eq!(projects[0].path, dir.path().join("crates/crate-a"));
 		assert_eq!(projects[1].name, "crate-b");
-		assert_eq!(projects[1].path, Path::new("crates/crate-b"));
+		assert_eq!(projects[1].path, dir.path().join("crates/crate-b"));
 	}
 
 	#[test]
@@ -703,11 +688,11 @@ version = "0.1.0"
 		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 2);
-		// Root comes first (empty path sorts first)
+		// Root comes first (shorter absolute path sorts first)
 		assert_eq!(projects[0].name, "root-crate");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 		assert_eq!(projects[1].name, "member-crate");
-		assert_eq!(projects[1].path, Path::new("crates/member"));
+		assert_eq!(projects[1].path, dir.path().join("crates/member"));
 	}
 
 	#[test]
@@ -746,9 +731,9 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "lib");
-		assert_eq!(projects[0].path, Path::new("crates/lib"));
+		assert_eq!(projects[0].path, dir.path().join("crates/lib"));
 		assert_eq!(projects[1].name, "cli");
-		assert_eq!(projects[1].path, Path::new("tools/cli"));
+		assert_eq!(projects[1].path, dir.path().join("tools/cli"));
 	}
 
 	#[test]
@@ -874,7 +859,7 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-crate");
-		assert_eq!(projects[0].path, Path::new("backend"));
+		assert_eq!(projects[0].path, dir.path().join("backend"));
 	}
 
 	#[test]
@@ -915,9 +900,9 @@ version = "0.1.0"
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "crate-a");
-		assert_eq!(projects[0].path, Path::new("backend/crates/crate-a"));
+		assert_eq!(projects[0].path, dir.path().join("backend/crates/crate-a"));
 		assert_eq!(projects[1].name, "crate-b");
-		assert_eq!(projects[1].path, Path::new("backend/crates/crate-b"));
+		assert_eq!(projects[1].path, dir.path().join("backend/crates/crate-b"));
 	}
 
 	#[test]
@@ -927,10 +912,10 @@ version = "0.1.0"
 		assert!(projects.is_empty());
 	}
 
-	fn project_info(name: &str, path: &str) -> ProjectInfo {
+	fn project_info(dir: &Path, name: &str, path: &str) -> ProjectInfo {
 		ProjectInfo {
 			name: name.to_string(),
-			path: std::path::PathBuf::from(path),
+			path: dir.join(path),
 			..Default::default()
 		}
 	}
@@ -984,7 +969,7 @@ version = "not-a-version"
 	fn write_version_file_not_found() {
 		let dir = temp_dir();
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let info = project_info("my-crate", "");
+		let info = project_info(dir.path(), "my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
@@ -995,7 +980,7 @@ version = "not-a-version"
 		let dir = temp_dir();
 		write_cargo_toml(dir.path(), "not valid toml [[[");
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let info = project_info("my-crate", "");
+		let info = project_info(dir.path(), "my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
@@ -1006,7 +991,7 @@ version = "not-a-version"
 		let dir = temp_dir();
 		write_cargo_toml(dir.path(), "[dependencies]\n");
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let info = project_info("my-crate", "");
+		let info = project_info(dir.path(), "my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
@@ -1031,7 +1016,7 @@ edition = "2024"
 "#,
 		);
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let info = project_info("my-crate", "");
+		let info = project_info(dir.path(), "my-crate", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
 
@@ -1053,7 +1038,7 @@ version = "0.1.0"
 "#,
 		);
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let info = project_info("my-crate", "");
+		let info = project_info(dir.path(), "my-crate", "");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
 		adapter.write_version(&info, &new_v).unwrap();
@@ -1270,7 +1255,7 @@ tempfile = "3.0"
 		);
 		ProjectInfo {
 			name: "my-crate".to_string(),
-			path: std::path::PathBuf::new(),
+			path: dir.to_path_buf(),
 			..Default::default()
 		}
 	}
@@ -1377,7 +1362,7 @@ tempfile = "3.0"
 		std::fs::create_dir_all(&project_dir).unwrap();
 		ProjectInfo {
 			name: name.to_string(),
-			path: std::path::PathBuf::from(member_path),
+			path: dir.join(member_path),
 			..Default::default()
 		}
 	}
@@ -1550,7 +1535,7 @@ tempfile = "3.0"
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = ProjectInfo {
 			name: "missing-pkg".to_string(),
-			path: std::path::PathBuf::from("missing-dir"),
+			path: dir.path().join("missing-dir"),
 			..Default::default()
 		};
 		let new_version: Version = "1.0.0".parse().unwrap();

@@ -223,10 +223,7 @@ fn extract_project_metadata(package: &PackageJson) -> anyhow::Result<(Version, b
 /// Attempts to create a ProjectInfo from a workspace directory path.
 ///
 /// Returns `Ok(None)` if the path is not a valid workspace (not a directory or no package.json).
-fn read_workspace_project(
-	git_workdir: &Path,
-	workspace_path: &Path,
-) -> anyhow::Result<Option<ProjectInfo>> {
+fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<ProjectInfo>> {
 	if !workspace_path.is_dir() {
 		return Ok(None);
 	}
@@ -239,10 +236,7 @@ fn read_workspace_project(
 		let manifest_path = workspace_path.join("package.json");
 		format!("Missing name in {}", manifest_path.display())
 	})?;
-	let path = workspace_path
-		.strip_prefix(git_workdir)
-		.context("Workspace path is not under git root")?
-		.to_path_buf();
+	let path = workspace_path.to_path_buf();
 
 	let (version, publishable, dependency_names) = extract_project_metadata(&package)
 		.with_context(|| {
@@ -264,13 +258,9 @@ fn read_workspace_project(
 
 /// Expands a workspace glob pattern and returns all matching projects.
 ///
-/// Globs are resolved relative to `pm_root`, but paths in the returned
-/// [`ProjectInfo`] are stripped relative to `git_workdir`.
-fn expand_workspace_pattern(
-	git_workdir: &Path,
-	pm_root: &Path,
-	pattern: &str,
-) -> anyhow::Result<Vec<ProjectInfo>> {
+/// Globs are resolved relative to `pm_root`. Paths in the returned
+/// [`ProjectInfo`] are absolute paths to each workspace directory.
+fn expand_workspace_pattern(pm_root: &Path, pattern: &str) -> anyhow::Result<Vec<ProjectInfo>> {
 	let full_pattern = pm_root.join(pattern);
 	let pattern_str = full_pattern
 		.to_str()
@@ -281,7 +271,7 @@ fn expand_workspace_pattern(
 		.map(|entry| {
 			let workspace_path = entry
 				.with_context(|| format!("Failed to read glob entry for pattern: {}", pattern))?;
-			read_workspace_project(git_workdir, &workspace_path)
+			read_workspace_project(&workspace_path)
 		})
 		.filter_map(Result::transpose)
 		.collect()
@@ -289,7 +279,7 @@ fn expand_workspace_pattern(
 
 impl PackageManagerAdapter for NpmAdapter {
 	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
-		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
+		let manifest_path = project.path.join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let root = CstRootNode::parse(&contents, &ParseOptions::default())
@@ -315,11 +305,6 @@ impl PackageManagerAdapter for NpmAdapter {
 		};
 		let pnpm_workspace = read_pnpm_workspace(&pm_root)?;
 
-		let pm_relative_path = pm_root
-			.strip_prefix(&self.git_workdir)
-			.unwrap_or(Path::new(""))
-			.to_path_buf();
-
 		let root_manifest_path = pm_root.join("package.json");
 
 		let Some(workspace_patterns) =
@@ -339,7 +324,7 @@ impl PackageManagerAdapter for NpmAdapter {
 				})?;
 			return Ok(vec![ProjectInfo {
 				name,
-				path: pm_relative_path,
+				path: pm_root.clone(),
 				version,
 				publishable,
 				dependency_names,
@@ -360,7 +345,7 @@ impl PackageManagerAdapter for NpmAdapter {
 			})?;
 		let root_project = ProjectInfo {
 			name: root_name,
-			path: pm_relative_path,
+			path: pm_root.clone(),
 			version,
 			publishable,
 			dependency_names,
@@ -370,7 +355,7 @@ impl PackageManagerAdapter for NpmAdapter {
 			.chain(
 				workspace_patterns
 					.iter()
-					.map(|pattern| expand_workspace_pattern(&self.git_workdir, &pm_root, pattern))
+					.map(|pattern| expand_workspace_pattern(&pm_root, pattern))
 					.collect::<anyhow::Result<Vec<_>>>()?
 					.into_iter()
 					.flatten(),
@@ -507,7 +492,7 @@ impl PackageManagerAdapter for NpmAdapter {
 	}
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
-		let project_dir = self.git_workdir.join(&project.path);
+		let project_dir = project.path.clone();
 
 		let mut args = vec!["publish"];
 
@@ -558,7 +543,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		dependency_name: &str,
 		new_version: &Version,
 	) -> anyhow::Result<Vec<PathBuf>> {
-		let manifest_path = self.git_workdir.join(&project.path).join("package.json");
+		let manifest_path = project.path.join("package.json");
 		if !manifest_path.exists() {
 			return Ok(Vec::new());
 		}
@@ -699,7 +684,7 @@ mod tests {
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-app");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 	}
 
 	#[test]
@@ -733,13 +718,13 @@ mod tests {
 		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 3);
-		// Root project first (empty path sorts first)
+		// Root project first (shorter absolute path sorts first)
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 		assert_eq!(projects[1].name, "@scope/pkg-a");
-		assert_eq!(projects[1].path, Path::new("packages/pkg-a"));
+		assert_eq!(projects[1].path, dir.path().join("packages/pkg-a"));
 		assert_eq!(projects[2].name, "@scope/pkg-b");
-		assert_eq!(projects[2].path, Path::new("packages/pkg-b"));
+		assert_eq!(projects[2].path, dir.path().join("packages/pkg-b"));
 	}
 
 	#[test]
@@ -758,7 +743,7 @@ mod tests {
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "root");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 		assert_eq!(projects[1].name, "my-pkg");
 	}
 
@@ -800,13 +785,13 @@ mod tests {
 		let projects = enumerate(dir.path()).unwrap();
 
 		assert_eq!(projects.len(), 3);
-		// Root first (empty path), then sorted by path
+		// Root first (shorter absolute path), then sorted by path
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 		assert_eq!(projects[1].name, "web");
-		assert_eq!(projects[1].path, Path::new("apps/web"));
+		assert_eq!(projects[1].path, dir.path().join("apps/web"));
 		assert_eq!(projects[2].name, "lib");
-		assert_eq!(projects[2].path, Path::new("packages/lib"));
+		assert_eq!(projects[2].path, dir.path().join("packages/lib"));
 	}
 
 	#[test]
@@ -869,7 +854,7 @@ mod tests {
 		assert_eq!(projects[1].name, "nested-pkg");
 		assert_eq!(
 			projects[1].path,
-			Path::new("packages/group/subpackages/nested-pkg")
+			dir.path().join("packages/group/subpackages/nested-pkg")
 		);
 	}
 
@@ -943,9 +928,9 @@ mod tests {
 
 		assert_eq!(projects.len(), 2);
 		assert_eq!(projects[0].name, "pnpm-monorepo");
-		assert_eq!(projects[0].path, Path::new(""));
+		assert_eq!(projects[0].path, dir.path());
 		assert_eq!(projects[1].name, "my-pkg");
-		assert_eq!(projects[1].path, Path::new("packages/my-pkg"));
+		assert_eq!(projects[1].path, dir.path().join("packages/my-pkg"));
 	}
 
 	#[test]
@@ -1063,7 +1048,7 @@ mod tests {
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name, "my-app");
-		assert_eq!(projects[0].path, Path::new("frontend"));
+		assert_eq!(projects[0].path, dir.path().join("frontend"));
 	}
 
 	#[test]
@@ -1087,11 +1072,11 @@ mod tests {
 
 		assert_eq!(projects.len(), 3);
 		assert_eq!(projects[0].name, "monorepo");
-		assert_eq!(projects[0].path, Path::new("frontend"));
+		assert_eq!(projects[0].path, dir.path().join("frontend"));
 		assert_eq!(projects[1].name, "@scope/pkg-a");
-		assert_eq!(projects[1].path, Path::new("frontend/packages/pkg-a"));
+		assert_eq!(projects[1].path, dir.path().join("frontend/packages/pkg-a"));
 		assert_eq!(projects[2].name, "@scope/pkg-b");
-		assert_eq!(projects[2].path, Path::new("frontend/packages/pkg-b"));
+		assert_eq!(projects[2].path, dir.path().join("frontend/packages/pkg-b"));
 	}
 
 	#[test]
@@ -1101,10 +1086,10 @@ mod tests {
 		assert!(projects.is_empty());
 	}
 
-	fn project_info(name: &str, path: &str) -> ProjectInfo {
+	fn project_info(dir: &Path, name: &str, path: &str) -> ProjectInfo {
 		ProjectInfo {
 			name: name.to_string(),
-			path: std::path::PathBuf::from(path),
+			path: dir.join(path),
 			..Default::default()
 		}
 	}
@@ -1141,7 +1126,7 @@ mod tests {
 	fn write_version_file_not_found() {
 		let dir = temp_dir();
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
@@ -1152,7 +1137,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), "not valid json");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
 		let result = adapter.write_version(&info, &version);
 		assert!(result.is_err());
@@ -1163,7 +1148,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
 
@@ -1180,7 +1165,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "0.1.0"}"#);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
 		adapter.write_version(&info, &new_v).unwrap();
@@ -1198,7 +1183,7 @@ mod tests {
 		let json = "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"some-lib\": \"1.0.0\"\n  }\n}\n";
 		write_package_json(dir.path(), json);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
 
@@ -1219,7 +1204,7 @@ mod tests {
 		let tab_json = "{\n\t\"name\": \"my-app\",\n\t\"version\": \"1.0.0\"\n}\n";
 		write_package_json(dir.path(), tab_json);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
 
@@ -1244,7 +1229,7 @@ mod tests {
 		let four_space_json = "{\n    \"name\": \"my-app\",\n    \"version\": \"1.0.0\"\n}\n";
 		write_package_json(dir.path(), four_space_json);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
 
@@ -1267,7 +1252,7 @@ mod tests {
 		let json = "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\",\n  \"description\": \"A test\"\n}\n";
 		write_package_json(dir.path(), json);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
 		adapter.write_version(&info, &new_version).unwrap();
 
@@ -1613,7 +1598,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		assert_eq!(adapter.publish(&info).unwrap(), PublishOutcome::Published);
 	}
 
@@ -1624,7 +1609,7 @@ mod tests {
 			RecordingCommandRunner::new(1).with_stderr(b"npm error code EPUBLISHCONFLICT".to_vec()),
 		);
 		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		assert_eq!(
 			adapter.publish(&info).unwrap(),
 			PublishOutcome::AlreadyPublished
@@ -1638,7 +1623,7 @@ mod tests {
 			b"npm error cannot publish over the previously published version".to_vec(),
 		));
 		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		assert_eq!(
 			adapter.publish(&info).unwrap(),
 			PublishOutcome::AlreadyPublished
@@ -1652,7 +1637,7 @@ mod tests {
 			RecordingCommandRunner::new(1).with_stderr(b"npm error 403 Forbidden".to_vec()),
 		);
 		let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		assert!(adapter.publish(&info).is_err());
 	}
 
@@ -1661,7 +1646,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
-		let info = project_info("@scope/my-pkg", "");
+		let info = project_info(dir.path(), "@scope/my-pkg", "");
 		adapter.publish(&info).unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -1690,7 +1675,7 @@ mod tests {
 			dir.path(),
 			Arc::clone(&runner),
 		);
-		let info = project_info("@scope/my-pkg", "");
+		let info = project_info(dir.path(), "@scope/my-pkg", "");
 		adapter.publish(&info).unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -1704,7 +1689,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
-		let info = project_info("my-app", "");
+		let info = project_info(dir.path(), "my-app", "");
 		adapter.publish(&info).unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -1838,14 +1823,14 @@ mod tests {
 		let content =
 			format!(r#"{{"name": "pkg-a", "version": "0.1.0", "dependencies": {deps_json}}}"#);
 		write_package_json(dir, &content);
-		project_info("pkg-a", "")
+		project_info(dir, "pkg-a", "")
 	}
 
 	#[test]
 	fn update_dep_version_missing_manifest_returns_empty() {
 		let dir = temp_dir();
 		// No package.json written
-		let info = project_info("pkg-a", "");
+		let info = project_info(dir.path(), "pkg-a", "");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
 		let modified = adapter
@@ -1858,7 +1843,7 @@ mod tests {
 	fn update_dep_version_invalid_json_returns_error() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), "not valid json {{{{");
-		let info = project_info("pkg-a", "");
+		let info = project_info(dir.path(), "pkg-a", "");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
 		let result = adapter.update_dependency_version(&info, "pkg-b", &new_version);
@@ -1948,7 +1933,7 @@ mod tests {
 		let content =
 			r#"{"name": "pkg-a", "version": "0.1.0", "devDependencies": {"pkg-b": "^1.0.0"}}"#;
 		write_package_json(dir.path(), content);
-		let info = project_info("pkg-a", "");
+		let info = project_info(dir.path(), "pkg-a", "");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
 
@@ -1982,7 +1967,7 @@ mod tests {
 		let content =
 			r#"{"name": "pkg-a", "version": "0.1.0", "peerDependencies": {"pkg-b": "^1.0.0"}}"#;
 		write_package_json(dir.path(), content);
-		let info = project_info("pkg-a", "");
+		let info = project_info(dir.path(), "pkg-a", "");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
 
@@ -2001,7 +1986,7 @@ mod tests {
 		let content =
 			r#"{"name": "pkg-a", "version": "0.1.0", "optionalDependencies": {"pkg-b": "~1.0.0"}}"#;
 		write_package_json(dir.path(), content);
-		let info = project_info("pkg-a", "");
+		let info = project_info(dir.path(), "pkg-a", "");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
 
@@ -2017,8 +2002,8 @@ mod tests {
 	#[test]
 	fn update_dep_version_in_root_workspace_project() {
 		// The root package.json in an npm workspace can depend on workspace members.
-		// project.path is "" for the root, so update_dependency_version should write
-		// to git_workdir/package.json.
+		// project.path is the absolute dir path for the root, so update_dependency_version
+		// should write to dir/package.json.
 		let dir = temp_dir();
 		let content = r#"{
   "name": "my-monorepo",
@@ -2031,8 +2016,8 @@ mod tests {
 }"#;
 		write_package_json(dir.path(), content);
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		// Root project has path = ""
-		let info = project_info("my-monorepo", "");
+		// Root project path is the absolute dir path
+		let info = project_info(dir.path(), "my-monorepo", "");
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter

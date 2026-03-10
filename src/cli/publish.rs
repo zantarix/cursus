@@ -32,7 +32,7 @@ struct PublishedPackage {
 	name: String,
 	/// Published version.
 	version: semver::Version,
-	/// Path to the project root, relative to the git root.
+	/// Absolute path to the project root.
 	project_path: PathBuf,
 }
 
@@ -385,7 +385,7 @@ fn orchestrate_github_releases(
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 
 		// Read changelog body for the release
-		let changelog_path = git.path().join(&pkg.project_path).join("CHANGELOG.md");
+		let changelog_path = pkg.project_path.join("CHANGELOG.md");
 		let body = if changelog_path.exists() {
 			match extract_version_body(&changelog_path, &pkg.version) {
 				Ok(text) => text,
