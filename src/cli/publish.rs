@@ -9,6 +9,7 @@ use clap::Args;
 use log::{error, info, warn};
 
 use crate::command::CommandRunner;
+use crate::git;
 use crate::github::client::GitHubClient;
 use crate::github::remote::detect_github_repo;
 use crate::model::changelog::extract_version_body;
@@ -44,6 +45,9 @@ pub struct PublishArgs {
 	/// Only publish specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
+	/// Skip git tag creation, tag pushing, and GitHub Releases even if enabled in config
+	#[arg(long)]
+	pub no_git: bool,
 }
 
 /// Execute the publish command.
@@ -100,7 +104,7 @@ pub fn cmd_publish(
 	}
 
 	// Fail fast: validate GitHub token before publishing anything
-	if config.github.enabled && !args.dry_run && github_client.is_none() {
+	if config.github.enabled && !args.no_git && !args.dry_run && github_client.is_none() {
 		bail!(
 			"GitHub Releases is enabled but no GitHub token found. \
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
@@ -112,8 +116,33 @@ pub fn cmd_publish(
 	let (published_packages, skipped_count, publish_failed) =
 		publish_projects(&sorted_projects, args.dry_run)?;
 
-	// GitHub Release orchestration
-	let (github_created, github_failed) = if config.github.enabled {
+	// Git tag creation
+	let git_enabled = config.git.enabled.unwrap_or(false) && !args.no_git;
+	let (tags_created, tags_skipped) = if git_enabled {
+		if args.dry_run {
+			for pkg in &published_packages {
+				let tag = config
+					.git
+					.tag_format
+					.tag(&pkg.name, &pkg.version, is_multi_package);
+				info!("Would create tag {tag}");
+			}
+			(0usize, 0usize)
+		} else {
+			create_and_push_tags(
+				&published_packages,
+				&config,
+				runner.as_ref(),
+				git_workdir,
+				is_multi_package,
+			)?
+		}
+	} else {
+		(0, 0)
+	};
+
+	// GitHub Release orchestration — skipped when --no-git is set
+	let (github_created, github_failed) = if config.github.enabled && !args.no_git {
 		if args.dry_run {
 			// Dry-run: print what would happen without making API calls
 			for pkg in &published_packages {
@@ -150,12 +179,17 @@ pub fn cmd_publish(
 	// Summary
 	info!("");
 	if args.dry_run {
+		let tag_note = if git_enabled && !published_packages.is_empty() {
+			format!(", {} would be tagged", published_packages.len())
+		} else {
+			String::new()
+		};
 		info!(
-			"Summary: {} would be published, {} would be skipped",
+			"Summary: {} would be published, {} would be skipped{tag_note}",
 			published_packages.len(),
 			skipped_count
 		);
-	} else if config.github.enabled {
+	} else if config.github.enabled && !args.no_git {
 		match (github_created, github_failed) {
 			(created, false) => info!(
 				"Summary: {} published, {} skipped, {} GitHub Releases created",
@@ -183,12 +217,69 @@ pub fn cmd_publish(
 			skipped_count
 		);
 	}
+	if !args.dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
+		info!(
+			"{tags_created} tag{} created, {tags_skipped} skipped",
+			if tags_created == 1 { "" } else { "s" }
+		);
+	}
 
 	if publish_failed || github_failed {
 		Ok(ExitCode::FAILURE)
 	} else {
 		Ok(ExitCode::SUCCESS)
 	}
+}
+
+/// Creates an annotated git tag for each published package and pushes all new tags.
+///
+/// Tags that already exist in the repository are skipped (making the operation idempotent).
+/// Tags are pushed in a single `git push origin --tags` call after all tags are created.
+///
+/// Returns `(tags_created, tags_skipped)`.
+fn create_and_push_tags(
+	published: &[PublishedPackage],
+	config: &config::Config,
+	runner: &dyn CommandRunner,
+	git_workdir: &Path,
+	is_multi_package: bool,
+) -> anyhow::Result<(usize, usize)> {
+	let mut created_tags: Vec<String> = Vec::new();
+	let mut skipped = 0;
+
+	for pkg in published {
+		let tag = config
+			.git
+			.tag_format
+			.tag(&pkg.name, &pkg.version, is_multi_package);
+
+		if git::git_tag_exists(runner, git_workdir, &tag)? {
+			info!("Tag {tag} already exists, skipping");
+			skipped += 1;
+			continue;
+		}
+
+		let message = format!("Release {} version {}", pkg.name, pkg.version);
+		git::git_tag(runner, git_workdir, &tag, &message)?;
+		info!("Created tag {tag}");
+		created_tags.push(tag);
+	}
+
+	// Push only the tags created in this invocation (not all local tags).
+	for tag_name in &created_tags {
+		git::git_push_tag(runner, git_workdir, tag_name)?;
+	}
+
+	let created = created_tags.len();
+	if created > 0 {
+		info!(
+			"Pushed {} tag{} to origin",
+			created,
+			if created == 1 { "" } else { "s" }
+		);
+	}
+
+	Ok((created, skipped))
 }
 
 /// Publishes the given projects to their registries, tracking outcomes.
@@ -751,5 +842,101 @@ mod tests {
 		let args = PublishArgs::default();
 		assert!(!args.dry_run);
 		assert!(args.packages.is_empty());
+		assert!(!args.no_git);
+	}
+
+	// --- Tests for create_and_push_tags ---
+
+	#[test]
+	fn create_and_push_tags_creates_annotated_tags_and_pushes() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(dir.path());
+		// empty stdout → git_tag_exists returns false (no existing tag)
+		let runner = RecordingCommandRunner::new(0);
+		let published = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.2.0".parse().unwrap(),
+			project_path: PathBuf::new(),
+		}];
+
+		let (created, skipped) =
+			create_and_push_tags(&published, &config, &runner, dir.path(), false).unwrap();
+
+		assert_eq!(created, 1);
+		assert_eq!(skipped, 0);
+		let invocations = runner.invocations();
+		// tag -l (exists check), tag -a (create), push origin <tag>
+		assert_eq!(invocations.len(), 3);
+		assert!(invocations[0].args.contains(&"-l".to_string()));
+		assert!(invocations[1].args.contains(&"-a".to_string()));
+		// Pushes the specific tag, not all tags
+		assert!(
+			invocations[2].args.contains(&"v1.2.0".to_string()),
+			"Expected specific tag push, got: {:?}",
+			invocations[2].args
+		);
+		assert!(
+			!invocations[2].args.contains(&"--tags".to_string()),
+			"Should not push --tags (all local tags)"
+		);
+	}
+
+	#[test]
+	fn create_and_push_tags_skips_existing_tag() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(dir.path());
+		// non-empty stdout → git_tag_exists returns true (tag already exists)
+		let runner = RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec());
+		let published = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.0.0".parse().unwrap(),
+			project_path: PathBuf::new(),
+		}];
+
+		let (created, skipped) =
+			create_and_push_tags(&published, &config, &runner, dir.path(), false).unwrap();
+
+		assert_eq!(created, 0);
+		assert_eq!(skipped, 1);
+		// Only the tag -l check; no tag creation or push
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(invocations[0].args.contains(&"-l".to_string()));
+	}
+
+	#[test]
+	fn create_and_push_tags_empty_list_does_nothing() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(dir.path());
+		let runner = RecordingCommandRunner::new(0);
+
+		let (created, skipped) =
+			create_and_push_tags(&[], &config, &runner, dir.path(), false).unwrap();
+
+		assert_eq!(created, 0);
+		assert_eq!(skipped, 0);
+		assert!(runner.invocations().is_empty());
+	}
+
+	#[test]
+	fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(dir.path());
+		let runner = RecordingCommandRunner::new(0);
+		let published = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "2.0.0".parse().unwrap(),
+			project_path: PathBuf::new(),
+		}];
+
+		create_and_push_tags(&published, &config, &runner, dir.path(), true).unwrap();
+
+		let invocations = runner.invocations();
+		// The tag -l check should use the prefixed tag name
+		assert!(
+			invocations[0].args.contains(&"my-app@2.0.0".to_string()),
+			"Expected monorepo tag name, got: {:?}",
+			invocations[0].args
+		);
 	}
 }

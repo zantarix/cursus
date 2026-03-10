@@ -9,7 +9,7 @@ mod operations;
 pub use config::{GitConfig, Strategy, TagFormat};
 pub(crate) use operations::{
 	git_checkout, git_checkout_new_branch, git_current_branch, git_push, git_push_branch,
-	git_status_porcelain,
+	git_push_tag, git_status_porcelain, git_tag, git_tag_exists,
 };
 
 use std::path::{Path, PathBuf};

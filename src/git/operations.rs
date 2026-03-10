@@ -68,8 +68,6 @@ pub(crate) fn git_commit(
 /// # Errors
 ///
 /// Returns an error if `git tag` exits with a non-zero status.
-// Used in cmd_publish (Commit 4 — tags moved from release to publish step).
-#[allow(dead_code)]
 pub(crate) fn git_tag(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -244,8 +242,6 @@ pub(crate) fn git_push_branch(
 /// # Errors
 ///
 /// Returns an error if `git tag` exits with a non-zero status.
-// Used in cmd_publish tag creation (Commit 4).
-#[allow(dead_code)]
 pub(crate) fn git_tag_exists(
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
@@ -263,6 +259,30 @@ pub(crate) fn git_tag_exists(
 	Ok(!output.stdout.is_empty())
 }
 
+/// Pushes a specific tag to origin.
+///
+/// Runs `git push origin <tag>`, pushing only that tag rather than all local tags.
+///
+/// # Errors
+///
+/// Returns an error if `git push` exits with a non-zero status.
+pub(crate) fn git_push_tag(
+	runner: &dyn CommandRunner,
+	git_workdir: &Path,
+	tag: &str,
+) -> anyhow::Result<()> {
+	let output = runner
+		.run("git", &["push", "origin", tag], git_workdir)
+		.context("Failed to run git push tag")?;
+
+	if !output.status.success() {
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		bail!("git push tag failed: {stderr}");
+	}
+
+	Ok(())
+}
+
 /// Pushes all local tags to origin.
 ///
 /// Runs `git push origin --tags`.
@@ -270,7 +290,6 @@ pub(crate) fn git_tag_exists(
 /// # Errors
 ///
 /// Returns an error if `git push` exits with a non-zero status.
-// Used in cmd_publish after tag creation (Commit 4).
 #[allow(dead_code)]
 pub(crate) fn git_push_tags(runner: &dyn CommandRunner, git_workdir: &Path) -> anyhow::Result<()> {
 	let output = runner
@@ -553,6 +572,31 @@ mod tests {
 		assert!(
 			msg.contains("git checkout failed"),
 			"Expected 'git checkout failed', got: {msg}"
+		);
+	}
+
+	#[test]
+	fn git_push_tag_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		git_push_tag(runner.as_ref(), dir.path(), "v1.2.0").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args, ["push", "origin", "v1.2.0"]);
+		assert_eq!(invocations[0].cwd, dir.path());
+	}
+
+	#[test]
+	fn git_push_tag_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repo");
+		let result = git_push_tag(runner.as_ref(), dir.path(), "v1.0.0");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git push tag failed"),
+			"Expected 'git push tag failed', got: {msg}"
 		);
 	}
 
