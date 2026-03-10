@@ -191,12 +191,14 @@ impl Project {
 		path: &str,
 		runner: Arc<crate::command::test_support::RecordingCommandRunner>,
 	) -> Self {
+		use crate::command::CommandRunner;
+		let env = crate::Env::new(runner as Arc<dyn CommandRunner>);
 		Self {
 			info: ProjectInfo::for_test(name, AbsolutePath::new(path).unwrap()),
 			adapter: Arc::new(NpmAdapter::new(
 				NpmConfig::default(),
 				AbsolutePath::new("/nonexistent").unwrap(),
-				runner,
+				env,
 			)),
 		}
 	}
@@ -662,6 +664,7 @@ mod tests {
 	use std::path::Path;
 	use std::sync::Arc;
 
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 
 	use super::*;
@@ -719,7 +722,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			Arc::new(RecordingCommandRunner::new(0)),
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
 		));
 		let projects = enumerate_projects([adapter.clone()]).unwrap();
 
@@ -742,12 +745,12 @@ mod tests {
 		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			Arc::new(RecordingCommandRunner::new(0)),
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
 		));
 		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			Arc::new(RecordingCommandRunner::new(0)),
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
 		));
 
 		let projects = enumerate_projects([adapter1, adapter2]).unwrap();
@@ -1543,7 +1546,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			Arc::new(RecordingCommandRunner::new(0)),
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
 		let graph = build_dependency_graph(&projects).unwrap();
@@ -1581,7 +1584,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			Arc::new(RecordingCommandRunner::new(0)),
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
 		let graph = build_dependency_graph(&projects).unwrap();
@@ -1623,7 +1626,7 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			Arc::new(RecordingCommandRunner::new(0)),
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
 		));
 		let projects = enumerate_projects([adapter]).unwrap();
 		let graph = build_dependency_graph(&projects).unwrap();

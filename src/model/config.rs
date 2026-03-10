@@ -5,7 +5,6 @@ use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::command::CommandRunner;
 use crate::git::GitConfig;
 use crate::github::GitHubConfig;
 use crate::package_manager::{
@@ -131,7 +130,7 @@ impl Config {
 	/// Returns an error if this `Config` was not constructed via [`Config::new`] or [`load`].
 	pub fn create_adapters(
 		&self,
-		runner: Arc<dyn CommandRunner>,
+		env: &crate::Env,
 	) -> anyhow::Result<Vec<Arc<dyn PackageManagerAdapter>>> {
 		let workdir = self.git_workdir.as_ref().context(
 			"git_workdir not set — Config must be constructed via Config::new() or config::load()",
@@ -143,12 +142,12 @@ impl Config {
 					PackageManager::Npm => Arc::new(NpmAdapter::new(
 						self.npm.clone(),
 						workdir.clone(),
-						Arc::clone(&runner),
+						env.clone(),
 					)),
 					PackageManager::Cargo => Arc::new(CargoAdapter::new(
 						self.cargo.clone(),
 						workdir.clone(),
-						Arc::clone(&runner),
+						env.clone(),
 					)),
 				}
 			})
@@ -186,8 +185,8 @@ impl Config {
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
 	/// - No projects are found
-	pub fn load_projects(&self, runner: Arc<dyn CommandRunner>) -> anyhow::Result<Vec<Project>> {
-		let adapters = self.create_adapters(runner)?;
+	pub fn load_projects(&self, env: &crate::Env) -> anyhow::Result<Vec<Project>> {
+		let adapters = self.create_adapters(env)?;
 		self.load_projects_for_adapters(&adapters)
 	}
 
@@ -292,6 +291,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::*;
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::github::GitHubConfig;
 	use tempfile::TempDir;
@@ -637,8 +637,9 @@ mod tests {
 		.unwrap();
 
 		let config = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
-		let projects = config.load_projects(runner).unwrap();
+		let env =
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>);
+		let projects = config.load_projects(&env).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -656,8 +657,9 @@ mod tests {
 		.unwrap();
 
 		let config = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
-		let projects = config.load_projects(runner).unwrap();
+		let env =
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>);
+		let projects = config.load_projects(&env).unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -671,8 +673,9 @@ mod tests {
 		// No Cargo.toml file, so no projects will be found
 
 		let config = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
-		let result = config.load_projects(runner);
+		let env =
+			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>);
+		let result = config.load_projects(&env);
 		assert!(result.is_err());
 		assert!(
 			result

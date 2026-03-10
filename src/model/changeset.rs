@@ -10,7 +10,6 @@ use anyhow::Context;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::command::CommandRunner;
 use crate::git::GitWorkdir;
 
 /// The type of semantic version change.
@@ -228,12 +227,11 @@ impl Changeset {
 }
 
 /// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
-fn find_default_editor(runner: &dyn CommandRunner, cwd: &Path) -> Option<String> {
+fn find_default_editor(env: &crate::Env, cwd: &Path) -> Option<String> {
 	["nano", "vim", "vi"]
 		.into_iter()
 		.find(|cmd| {
-			runner
-				.run("which", &[cmd], cwd)
+			env.run("which", &[cmd], cwd)
 				.is_ok_and(|o| o.status.success())
 		})
 		.map(String::from)
@@ -241,17 +239,13 @@ fn find_default_editor(runner: &dyn CommandRunner, cwd: &Path) -> Option<String>
 
 /// Opens the user's editor to edit the changeset file.
 ///
-/// Resolves the editor from `env.visual` first, then `env.editor`,
-/// falling back to the first available editor from `nano`, `vim`, `vi`.
+/// Resolves the editor from `env.editor`, falling back to the first
+/// available editor from `nano`, `vim`, `vi`.
 ///
 /// # Errors
 ///
 /// Returns an error if no editor is found or the editor process fails.
-pub fn open_editor(
-	path: &Path,
-	env: &crate::Env,
-	runner: &dyn CommandRunner,
-) -> anyhow::Result<()> {
+pub fn open_editor(path: &Path, env: &crate::Env) -> anyhow::Result<()> {
 	// Changeset files always live under `.chronicle/`, so parent() will always
 	// return a non-empty path. The `.` fallback handles bare filenames (where
 	// parent() returns Some("")) or root paths (where it returns None).
@@ -260,15 +254,13 @@ pub fn open_editor(
 		.filter(|p| !p.as_os_str().is_empty())
 		.unwrap_or(Path::new("."));
 	let editor = env
-		.visual
-		.as_deref()
+		.editor()
 		.filter(|v| !v.is_empty())
-		.or_else(|| env.editor.as_deref().filter(|v| !v.is_empty()))
 		.map(String::from)
-		.or_else(|| find_default_editor(runner, cwd))
+		.or_else(|| find_default_editor(env, cwd))
 		.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
 	let path_str = path.to_string_lossy();
-	let status = runner
+	let status = env
 		.run_interactive(&editor, &[path_str.as_ref()], cwd)
 		.with_context(|| format!("Failed to open editor: {editor}"))?;
 	if !status.success() {
@@ -281,6 +273,7 @@ pub fn open_editor(
 mod tests {
 	use std::sync::Arc;
 
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::git::GitWorkdir;
 	use crate::path::AbsolutePath;
@@ -392,7 +385,8 @@ mod tests {
 	fn write_changeset_creates_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let changeset = single_package_changeset();
 		let path = changeset.write(&git).unwrap();
 		assert!(path.exists(), "Changeset file should exist");
@@ -404,7 +398,8 @@ mod tests {
 	fn write_changeset_creates_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let changeset = single_package_changeset();
 		changeset.write(&git).unwrap();
 		assert!(
@@ -417,7 +412,8 @@ mod tests {
 	fn write_changeset_file_has_correct_content() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
 		let path = changeset.write(&git).unwrap();
@@ -519,7 +515,8 @@ mod tests {
 	fn read_all_changesets_empty_when_no_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let result = Changeset::read_all(&git).unwrap();
 		assert!(result.is_empty());
 	}
@@ -528,7 +525,8 @@ mod tests {
 	fn read_all_changesets_empty_when_no_md_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("config.toml"), "").unwrap();
@@ -540,7 +538,8 @@ mod tests {
 	fn read_all_changesets_single_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(
@@ -559,7 +558,8 @@ mod tests {
 	fn read_all_changesets_multiple_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
@@ -573,7 +573,8 @@ mod tests {
 	fn read_all_changesets_invalid_file_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, abs.clone());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
 		let chronicle_dir = dir.path().join(".chronicle");
 		std::fs::create_dir_all(&chronicle_dir).unwrap();
 		std::fs::write(chronicle_dir.join("bad.md"), "not a valid changeset").unwrap();
@@ -750,26 +751,34 @@ mod tests {
 	}
 
 	// open_editor tests
-	fn make_env(visual: Option<&str>, editor: Option<&str>) -> crate::Env {
-		crate::Env {
-			visual: visual.map(String::from),
-			editor: editor.map(String::from),
+	fn make_env_with_runner(
+		editor: Option<&str>,
+		runner: Arc<dyn crate::command::CommandRunner>,
+	) -> crate::Env {
+		let mut env = crate::Env::new(runner);
+		if let Some(e) = editor {
+			env = env.with_editor(e.to_string());
 		}
+		env
 	}
 
 	#[test]
-	fn open_editor_visual_takes_priority_over_editor() {
+	fn open_editor_uses_editor_when_set() {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let runner = RecordingCommandRunner::new(0);
-		let result = open_editor(&path, &make_env(Some("vim"), Some("nano")), &runner);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = make_env_with_runner(
+			Some("vim"),
+			Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>,
+		);
+		let result = open_editor(&path, &env);
 		assert!(result.is_ok(), "Expected success: {result:?}");
 		let invocations = runner.invocations();
 		assert_eq!(
 			invocations[0].program, "vim",
-			"VISUAL should be used, got: {:?}",
+			"EDITOR should be used, got: {:?}",
 			invocations[0].program
 		);
 		assert!(
@@ -779,33 +788,26 @@ mod tests {
 	}
 
 	#[test]
-	fn open_editor_falls_back_to_editor_when_visual_empty() {
+	fn open_editor_ignores_empty_editor_string() {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let runner = RecordingCommandRunner::new(0);
-		let result = open_editor(&path, &make_env(Some(""), Some("nano")), &runner);
-		assert!(result.is_ok(), "Expected success: {result:?}");
-		let invocations = runner.invocations();
-		assert_eq!(
-			invocations[0].program, "nano",
-			"EDITOR should be used when VISUAL is empty, got: {:?}",
-			invocations[0].program
+		// Empty editor → falls back to find_default_editor → runner returns 0 → "nano"
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = make_env_with_runner(
+			Some(""),
+			Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>,
 		);
-	}
-
-	#[test]
-	fn open_editor_editor_used_when_visual_absent() {
-		let dir = tempfile::tempdir().unwrap();
-		let path = dir.path().join("changeset.md");
-		std::fs::write(&path, "").unwrap();
-
-		let runner = RecordingCommandRunner::new(0);
-		let result = open_editor(&path, &make_env(None, Some("nano")), &runner);
+		let result = open_editor(&path, &env);
 		assert!(result.is_ok(), "Expected success: {result:?}");
 		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "nano");
+		let editor_call = invocations.last().unwrap();
+		assert_eq!(
+			editor_call.program, "nano",
+			"Should fall back to nano when editor is empty, got: {:?}",
+			editor_call.program
+		);
 	}
 
 	#[test]
@@ -814,8 +816,12 @@ mod tests {
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let runner = RecordingCommandRunner::new(1);
-		let result = open_editor(&path, &make_env(Some("vim"), None), &runner);
+		let runner = Arc::new(RecordingCommandRunner::new(1));
+		let env = make_env_with_runner(
+			Some("vim"),
+			Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>,
+		);
+		let result = open_editor(&path, &env);
 		assert!(result.is_err(), "Expected error when editor exits non-zero");
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -833,12 +839,11 @@ mod tests {
 		std::fs::write(&path, "").unwrap();
 
 		// Use RealCommandRunner so the spawn actually fails for a non-existent program.
-		let runner = RealCommandRunner;
-		let result = open_editor(
-			&path,
-			&make_env(Some("__chronicle_no_such_editor__"), None),
-			&runner,
+		let env = make_env_with_runner(
+			Some("__chronicle_no_such_editor__"),
+			Arc::new(RealCommandRunner),
 		);
+		let result = open_editor(&path, &env);
 		assert!(result.is_err(), "Expected error for nonexistent editor");
 		let msg = result.unwrap_err().to_string();
 		assert!(
@@ -853,8 +858,9 @@ mod tests {
 	fn find_default_editor_returns_first_available_editor() {
 		// Runner always succeeds → which nano succeeds → returns Some("nano")
 		let dir = tempfile::tempdir().unwrap();
-		let runner = RecordingCommandRunner::new(0);
-		let result = find_default_editor(&runner, dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>);
+		let result = find_default_editor(&env, dir.path());
 		assert_eq!(result, Some("nano".to_string()));
 	}
 
@@ -862,22 +868,27 @@ mod tests {
 	fn find_default_editor_returns_none_when_no_editor_found() {
 		// Runner always fails → all `which` calls fail → None
 		let dir = tempfile::tempdir().unwrap();
-		let runner = RecordingCommandRunner::new(1);
-		let result = find_default_editor(&runner, dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(1));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>);
+		let result = find_default_editor(&env, dir.path());
 		assert_eq!(result, None);
 	}
 
 	#[test]
 	fn open_editor_falls_back_to_default_when_env_empty() {
-		// When both VISUAL and EDITOR are absent, find_default_editor is called.
+		// When EDITOR is absent, find_default_editor is called.
 		// Runner exit_code=0 means `which nano` succeeds, so "nano" is the editor,
 		// and run_interactive("nano", ...) also exits 0.
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let runner = RecordingCommandRunner::new(0);
-		let result = open_editor(&path, &make_env(None, None), &runner);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = make_env_with_runner(
+			None,
+			Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>,
+		);
+		let result = open_editor(&path, &env);
 		assert!(result.is_ok(), "Expected success: {result:?}");
 		let invocations = runner.invocations();
 		// First call: which nano; last call: run_interactive("nano", ...)
@@ -892,8 +903,12 @@ mod tests {
 		let path = dir.path().join("changeset.md");
 		std::fs::write(&path, "").unwrap();
 
-		let runner = RecordingCommandRunner::new(1);
-		let result = open_editor(&path, &make_env(None, None), &runner);
+		let runner = Arc::new(RecordingCommandRunner::new(1));
+		let env = make_env_with_runner(
+			None,
+			Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>,
+		);
+		let result = open_editor(&path, &env);
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(

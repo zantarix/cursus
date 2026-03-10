@@ -1,7 +1,6 @@
 //! Cargo package manager adapter.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::Context;
 use glob::glob;
@@ -9,7 +8,6 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
-use crate::command::CommandRunner;
 use crate::path::AbsolutePath;
 
 /// Configuration for Cargo package manager.
@@ -58,21 +56,17 @@ pub struct CargoAdapter {
 	config: CargoConfig,
 	/// Package manager root path.
 	adapter_root: AbsolutePath,
-	/// Command runner for executing cargo commands.
-	runner: Arc<dyn CommandRunner>,
+	/// Environment for executing cargo commands.
+	env: crate::Env,
 }
 
 impl CargoAdapter {
 	/// Creates a new Cargo adapter with the given configuration.
-	pub fn new(
-		config: CargoConfig,
-		adapter_root: AbsolutePath,
-		runner: Arc<dyn CommandRunner>,
-	) -> Self {
+	pub fn new(config: CargoConfig, adapter_root: AbsolutePath, env: crate::Env) -> Self {
 		Self {
 			config,
 			adapter_root,
-			runner,
+			env,
 		}
 	}
 
@@ -444,7 +438,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		let workspace_root = self.resolve_root()?;
 
 		let output = self
-			.runner
+			.env
 			.run("cargo", &["generate-lockfile"], &workspace_root)
 			.with_context(|| {
 				format!(
@@ -470,7 +464,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		let manifest_str = manifest_path.to_string_lossy();
 
 		let output = self
-			.runner
+			.env
 			.run(
 				"cargo",
 				&["publish", "--manifest-path", &manifest_str],
@@ -551,15 +545,15 @@ mod tests {
 
 	use std::sync::Arc;
 
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 
 	/// Creates a `CargoAdapter` backed by a fresh recording runner with the given exit code.
 	fn recording_adapter(config: CargoConfig, dir: &Path, exit_code: i32) -> CargoAdapter {
-		CargoAdapter::new(
-			config,
-			crate::path::AbsolutePath::new(dir).unwrap(),
-			Arc::new(RecordingCommandRunner::new(exit_code)),
-		)
+		let env = crate::Env::new(
+			Arc::new(RecordingCommandRunner::new(exit_code)) as Arc<dyn CommandRunner>
+		);
+		CargoAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 	}
 
 	/// Creates a `CargoAdapter` backed by a shared recording runner for inspection.
@@ -568,7 +562,8 @@ mod tests {
 		dir: &Path,
 		runner: Arc<RecordingCommandRunner>,
 	) -> CargoAdapter {
-		CargoAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), runner)
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		CargoAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 	}
 
 	/// Helper to enumerate projects using the adapter with no configured path.

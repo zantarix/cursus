@@ -5,9 +5,7 @@
 #![allow(dead_code)]
 
 use std::process::Command;
-use std::sync::Arc;
 
-use chronicle::command::CommandRunner;
 use chronicle::git::GitConfig;
 use chronicle::model::config::{Config, PackageManager};
 use chronicle::package_manager::{CargoConfig, NpmConfig};
@@ -23,8 +21,12 @@ pub fn run_chronicle(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
-	let runner: Arc<dyn CommandRunner> = Arc::new(chronicle::command::RealCommandRunner);
-	chronicle::run(args, cwd, chronicle::Env::default(), runner, None)
+	chronicle::run(
+		args,
+		cwd,
+		chronicle::Env::new(std::sync::Arc::new(chronicle::command::RealCommandRunner)
+			as std::sync::Arc<dyn chronicle::command::CommandRunner>),
+	)
 }
 
 /// Runs a git command in the given directory and panics on failure.

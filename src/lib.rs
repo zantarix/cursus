@@ -4,6 +4,7 @@
 
 pub mod cli;
 pub mod command;
+pub(crate) mod env;
 pub mod git;
 pub mod github;
 pub mod model;
@@ -21,12 +22,12 @@ pub mod test_logging;
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
 
-use crate::command::CommandRunner;
+pub use env::Env;
+
 use crate::path::AbsolutePath;
 
 /// Finds the git working directory by walking up from the given path.
@@ -40,30 +41,12 @@ fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
 	.and_then(|p| AbsolutePath::new(p).ok())
 }
 
-/// Environment variables used by Chronicle.
-///
-/// Populated from the process environment at the binary boundary and threaded
-/// into the library so that internal functions never read `std::env` directly.
-#[derive(Debug, Clone, Default)]
-pub struct Env {
-	/// Value of the `VISUAL` environment variable.
-	pub visual: Option<String>,
-	/// Value of the `EDITOR` environment variable.
-	pub editor: Option<String>,
-}
-
 /// Main entry point for the chronicle application.
 ///
 /// Parses CLI arguments from the provided iterator, then delegates to
 /// [`run_with`]. Use [`run_with`] directly when the arguments have already
 /// been parsed (e.g., to initialise logging from the flags before running).
-pub fn run<I, T>(
-	args: I,
-	cwd: &Path,
-	env: Env,
-	runner: Arc<dyn CommandRunner>,
-	github_client: Option<Arc<dyn github::client::GitHubClient>>,
-) -> anyhow::Result<ExitCode>
+pub fn run<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
@@ -82,7 +65,7 @@ where
 			return Ok(exit_code);
 		}
 	};
-	run_with(cli, cwd, env, runner, github_client)
+	run_with(cli, cwd, env)
 }
 
 /// Dispatches a pre-parsed CLI to the appropriate subcommand.
@@ -90,19 +73,10 @@ where
 /// Prefer this over [`run`] when the caller has already parsed the arguments
 /// (for example, to read the verbose/silent flags and initialise logging before
 /// any library code runs).
-pub fn run_with(
-	cli: cli::Cli,
-	cwd: &Path,
-	env: Env,
-	runner: Arc<dyn CommandRunner>,
-	github_client: Option<Arc<dyn github::client::GitHubClient>>,
-) -> anyhow::Result<ExitCode> {
+pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode> {
 	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
 	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
-	let git = git::GitWorkdir::new(
-		Arc::clone(&runner) as Arc<dyn CommandRunner>,
-		git_workdir.clone(),
-	);
+	let git = git::GitWorkdir::new(&env, git_workdir.clone());
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
@@ -110,25 +84,14 @@ pub fn run_with(
 			let config = model::config::load(&git_workdir)?;
 			match command {
 				Some(cli::Command::Change(args)) => {
-					cli::cmd_change(&git, &args, &cli.global, &env, config, Arc::clone(&runner))
+					cli::cmd_change(&git, &args, &cli.global, &env, config)
 				}
-				Some(cli::Command::Prepare(args)) => {
-					cli::cmd_prepare(&git, &args, config, Arc::clone(&runner), github_client)
+				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&git, &args, config, &env),
+				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, config, &env),
+				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, config, &env),
+				None => {
+					cli::cmd_change(&git, &cli::ChangeArgs::default(), &cli.global, &env, config)
 				}
-				Some(cli::Command::Publish(args)) => {
-					cli::cmd_publish(&git, &args, config, Arc::clone(&runner), github_client)
-				}
-				Some(cli::Command::Ci(args)) => {
-					cli::cmd_ci(&git, &args, config, Arc::clone(&runner), github_client)
-				}
-				None => cli::cmd_change(
-					&git,
-					&cli::ChangeArgs::default(),
-					&cli.global,
-					&env,
-					config,
-					Arc::clone(&runner),
-				),
 				Some(cli::Command::Init(_)) => {
 					// The outer match arm already handles Init; this arm cannot be reached.
 					anyhow::bail!(
