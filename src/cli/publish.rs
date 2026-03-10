@@ -53,10 +53,10 @@ pub(crate) fn cmd_publish(
 	git: &git::GitWorkdir,
 	args: &PublishArgs,
 	config: Config,
-	env: &crate::Env,
 ) -> anyhow::Result<ExitCode> {
+	let env = config.env().context("env not set")?;
 	// Enumerate projects
-	let projects = config.load_projects(env)?;
+	let projects = config.load_projects()?;
 
 	// Filter projects by --package flags if specified
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;

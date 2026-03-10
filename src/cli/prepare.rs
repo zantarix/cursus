@@ -218,9 +218,9 @@ pub(crate) fn cmd_prepare(
 	git: &git::GitWorkdir,
 	args: &PrepareArgs,
 	config: Config,
-	env: &crate::Env,
 ) -> anyhow::Result<ExitCode> {
-	let adapters = config.create_adapters(env)?;
+	let env = config.env().context("env not set")?;
+	let adapters = config.create_adapters()?;
 	let projects = config.load_projects_for_adapters(&adapters)?;
 
 	// Read all pending changesets
@@ -767,16 +767,17 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 		let runner = make_runner();
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config, &env).unwrap();
+		let result = cmd_prepare(&git, &args, config).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -801,16 +802,17 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
 		let args = PrepareArgs::default();
 		let runner = make_runner();
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -863,20 +865,21 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let runner = make_runner();
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -905,21 +908,22 @@ mod tests {
 		let original = "+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n";
 		std::fs::write(&changeset_path, original).unwrap();
 
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let runner = make_runner();
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs {
 			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -951,20 +955,21 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let runner = make_runner();
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -1051,12 +1056,13 @@ mod tests {
 		let client = Arc::new(RecordingGitHubClient::new());
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
 			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 		let invocations = client.invocations();
@@ -1080,12 +1086,13 @@ mod tests {
 		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
 			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		// PR failure is non-fatal — command should still succeed
 		assert!(
 			result.is_ok(),
@@ -1099,12 +1106,13 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		// No github client — pre-flight check should error
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
-		let config = config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
-		let result = cmd_prepare(&git, &args, config, &env);
+		let result = cmd_prepare(&git, &args, config);
 		assert!(result.is_err(), "Expected Err without github client");
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

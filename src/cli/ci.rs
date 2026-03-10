@@ -57,7 +57,6 @@ pub(crate) fn cmd_ci(
 	git: &git::GitWorkdir,
 	args: &CiArgs,
 	config: Config,
-	env: &crate::Env,
 ) -> anyhow::Result<ExitCode> {
 	// Step 1: check for pending changesets.
 	let changesets = Changeset::read_all(git)?;
@@ -69,13 +68,13 @@ pub(crate) fn cmd_ci(
 			no_git: args.no_git,
 			branch: args.branch.clone(),
 		};
-		return cmd_prepare(git, &prepare_args, config, env);
+		return cmd_prepare(git, &prepare_args, config);
 	}
 
 	// Step 2: when git is enabled and --no-git is not set, check for packages that
 	// have not yet been tagged (post-release, pre-publish state).
 	if config.git.enabled.unwrap_or(false) && !args.no_git {
-		let projects = config.load_projects(env)?;
+		let projects = config.load_projects()?;
 		let selected = filter_projects_by_name(&projects, &args.packages)?;
 		let is_multi = projects.len() > 1;
 
@@ -93,7 +92,7 @@ pub(crate) fn cmd_ci(
 				packages: args.packages.clone(),
 				no_git: args.no_git,
 			};
-			return cmd_publish(git, &publish_args, config, env);
+			return cmd_publish(git, &publish_args, config);
 		}
 	}
 

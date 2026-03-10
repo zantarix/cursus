@@ -81,17 +81,15 @@ pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
 		command => {
-			let config = model::config::load(&git_workdir)?;
+			let config = model::config::load(&git_workdir, &env)?;
 			match command {
 				Some(cli::Command::Change(args)) => {
-					cli::cmd_change(&git, &args, &cli.global, &env, config)
+					cli::cmd_change(&git, &args, &cli.global, config)
 				}
-				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&git, &args, config, &env),
-				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, config, &env),
-				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, config, &env),
-				None => {
-					cli::cmd_change(&git, &cli::ChangeArgs::default(), &cli.global, &env, config)
-				}
+				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&git, &args, config),
+				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, config),
+				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, config),
+				None => cli::cmd_change(&git, &cli::ChangeArgs::default(), &cli.global, config),
 				Some(cli::Command::Init(_)) => {
 					// The outer match arm already handles Init; this arm cannot be reached.
 					anyhow::bail!(
