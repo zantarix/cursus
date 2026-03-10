@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use clap::Args;
 
 use crate::git;
@@ -34,10 +34,10 @@ pub(crate) fn cmd_change(
 	git: &git::GitWorkdir,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
-	env: &crate::Env,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let projects = config.load_projects(env)?;
+	let env = config.env().context("env not set")?;
+	let projects = config.load_projects()?;
 
 	let project_indices = if !args.projects.is_empty() {
 		let indices: Vec<usize> = args

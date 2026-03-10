@@ -47,7 +47,13 @@ fn init_creates_config_with_npm() {
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
-	let config = config::load(&chronicle::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+	let env = chronicle::Env::new(std::sync::Arc::new(chronicle::command::RealCommandRunner)
+		as std::sync::Arc<dyn chronicle::command::CommandRunner>);
+	let config = config::load(
+		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
+		&env,
+	)
+	.unwrap();
 	assert!(config.npm.enabled);
 	assert!(!config.cargo.enabled);
 }
@@ -63,7 +69,13 @@ fn init_creates_config_with_cargo() {
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
-	let config = config::load(&chronicle::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+	let env = chronicle::Env::new(std::sync::Arc::new(chronicle::command::RealCommandRunner)
+		as std::sync::Arc<dyn chronicle::command::CommandRunner>);
+	let config = config::load(
+		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
+		&env,
+	)
+	.unwrap();
 	assert!(!config.npm.enabled);
 	assert!(config.cargo.enabled);
 }

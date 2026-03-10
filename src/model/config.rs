@@ -31,7 +31,7 @@ pub enum PackageManager {
 }
 
 /// Chronicle configuration for a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
 	/// Global configuration settings.
@@ -55,6 +55,13 @@ pub struct Config {
 	/// `None` only when deserialized directly from TOML (which skips this field).
 	#[serde(skip)]
 	git_workdir: Option<AbsolutePath>,
+	/// Runtime environment (command runner, GitHub client, etc.).
+	///
+	/// Always `Some` when constructed via [`load`].
+	/// `None` only when deserialized directly from TOML or constructed via [`Config::new`]
+	/// without a subsequent [`Config::with_env`] call.
+	#[serde(skip)]
+	env: Option<crate::Env>,
 }
 
 impl Config {
@@ -67,6 +74,7 @@ impl Config {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			git_workdir: Some(git_workdir.clone()),
+			env: None,
 		}
 	}
 
@@ -100,6 +108,20 @@ impl Config {
 		self
 	}
 
+	/// Sets the runtime environment (builder pattern).
+	pub fn with_env(mut self, env: crate::Env) -> Self {
+		self.env = Some(env);
+		self
+	}
+
+	/// Returns the runtime environment, if set.
+	///
+	/// Returns `None` only when `Config` was not constructed via [`load`] and
+	/// [`Config::with_env`] has not been called.
+	pub fn env(&self) -> Option<&crate::Env> {
+		self.env.as_ref()
+	}
+
 	/// Returns the git repository root path, if set.
 	///
 	/// Returns `None` only when `Config` was deserialized directly from TOML without
@@ -127,14 +149,16 @@ impl Config {
 	///
 	/// # Errors
 	///
-	/// Returns an error if this `Config` was not constructed via [`Config::new`] or [`load`].
-	pub fn create_adapters(
-		&self,
-		env: &crate::Env,
-	) -> anyhow::Result<Vec<Arc<dyn PackageManagerAdapter>>> {
+	/// Returns an error if this `Config` was not constructed via [`load`] or
+	/// [`Config::with_env`] has not been called.
+	pub fn create_adapters(&self) -> anyhow::Result<Vec<Arc<dyn PackageManagerAdapter>>> {
 		let workdir = self.git_workdir.as_ref().context(
 			"git_workdir not set — Config must be constructed via Config::new() or config::load()",
 		)?;
+		let env = self
+			.env
+			.as_ref()
+			.context("env not set — call Config::with_env() or use config::load()")?;
 		Ok(self
 			.enabled_package_managers()
 			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
@@ -185,8 +209,8 @@ impl Config {
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
 	/// - No projects are found
-	pub fn load_projects(&self, env: &crate::Env) -> anyhow::Result<Vec<Project>> {
-		let adapters = self.create_adapters(env)?;
+	pub fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
+		let adapters = self.create_adapters()?;
 		self.load_projects_for_adapters(&adapters)
 	}
 
@@ -224,7 +248,7 @@ pub fn exists(git_workdir: &Path) -> bool {
 	path(git_workdir).exists()
 }
 
-fn load_impl(git_workdir: &AbsolutePath) -> anyhow::Result<Config> {
+fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
 	if !exists(git_workdir) {
 		bail!("No configuration found. Run 'chronicle init' to create one.");
 	}
@@ -256,8 +280,9 @@ fn load_impl(git_workdir: &AbsolutePath) -> anyhow::Result<Config> {
 		});
 	}
 
-	// Set the git root
+	// Set the git root and environment
 	config.git_workdir = Some(git_workdir.clone());
+	config.env = Some(env.clone());
 
 	Ok(config)
 }
@@ -270,8 +295,8 @@ fn load_impl(git_workdir: &AbsolutePath) -> anyhow::Result<Config> {
 ///
 /// Returns an error if the config file cannot be read or parsed.
 #[cfg(feature = "test-support")]
-pub fn load(git_workdir: &AbsolutePath) -> anyhow::Result<Config> {
-	load_impl(git_workdir)
+pub fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
+	load_impl(git_workdir, env)
 }
 
 /// Loads the Chronicle configuration from the repository.
@@ -282,8 +307,8 @@ pub fn load(git_workdir: &AbsolutePath) -> anyhow::Result<Config> {
 ///
 /// Returns an error if the config file cannot be read or parsed.
 #[cfg(not(feature = "test-support"))]
-pub(crate) fn load(git_workdir: &AbsolutePath) -> anyhow::Result<Config> {
-	load_impl(git_workdir)
+pub(crate) fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
+	load_impl(git_workdir, env)
 }
 
 #[cfg(test)]
@@ -298,6 +323,10 @@ mod tests {
 
 	fn temp_dir() -> TempDir {
 		tempfile::tempdir().expect("Failed to create temp dir")
+	}
+
+	fn make_env() -> crate::Env {
+		crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>)
 	}
 
 	#[test]
@@ -341,7 +370,11 @@ mod tests {
 			.with_npm(NpmConfig::enabled());
 		config.save().unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		// After load, strategy is derived: Push (no github)
 		assert!(loaded.npm.enabled);
 		assert!(!loaded.cargo.enabled);
@@ -351,7 +384,10 @@ mod tests {
 	#[test]
 	fn load_fails_when_no_config() {
 		let dir = temp_dir();
-		let result = load(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		let result = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -368,7 +404,10 @@ mod tests {
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "invalid toml {{{").unwrap();
 
-		let result = load(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		let result = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		);
 		assert!(result.is_err());
 	}
 
@@ -379,7 +418,10 @@ mod tests {
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "").unwrap();
 
-		let result = load(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		let result = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -396,7 +438,11 @@ mod tests {
 			.with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		// After load, strategy is derived: Push (no github)
 		assert!(loaded.cargo.enabled);
 		assert_eq!(loaded.git.strategy, Some(crate::git::Strategy::Push));
@@ -411,6 +457,7 @@ mod tests {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			git_workdir: None,
+			env: None,
 		};
 		assert!(!config.npm.enabled);
 		assert!(!config.cargo.enabled);
@@ -461,6 +508,7 @@ mod tests {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			git_workdir: None,
+			env: None,
 		};
 		let enabled: Vec<_> = config.enabled_package_managers().collect();
 		assert!(enabled.is_empty());
@@ -493,6 +541,7 @@ mod tests {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			git_workdir: None,
+			env: None,
 		};
 		config.npm.enabled = true;
 		config.cargo.enabled = true;
@@ -528,7 +577,11 @@ mod tests {
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "[rust]\nenabled = true").unwrap();
 
-		let err = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap_err();
+		let err = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap_err();
 		let chain = format!("{err:#}");
 		assert!(
 			chain.contains("unknown field"),
@@ -547,7 +600,11 @@ mod tests {
 		)
 		.unwrap();
 
-		let err = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap_err();
+		let err = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap_err();
 		let chain = format!("{err:#}");
 		assert!(
 			chain.contains("unknown field"),
@@ -598,7 +655,11 @@ mod tests {
 			.with_npm(NpmConfig::enabled());
 		config.npm.path = Some("frontend".to_string());
 		config.save().unwrap();
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert_eq!(loaded.npm.path, Some("frontend".to_string()));
 	}
 
@@ -618,7 +679,11 @@ mod tests {
 				}
 			};
 			config.save().unwrap();
-			let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+			let loaded = load(
+				&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				&make_env(),
+			)
+			.unwrap();
 			let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 			assert_eq!(enabled, vec![pm]);
 		}
@@ -636,10 +701,12 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
-		let env =
-			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>);
-		let projects = config.load_projects(&env).unwrap();
+		let config = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
+		let projects = config.load_projects().unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -656,10 +723,12 @@ mod tests {
 		)
 		.unwrap();
 
-		let config = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
-		let env =
-			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>);
-		let projects = config.load_projects(&env).unwrap();
+		let config = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
+		let projects = config.load_projects().unwrap();
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test-package");
 	}
@@ -672,16 +741,49 @@ mod tests {
 		config.save().unwrap();
 		// No Cargo.toml file, so no projects will be found
 
-		let config = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
-		let env =
-			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>);
-		let result = config.load_projects(&env);
+		let config = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
+		let result = config.load_projects();
 		assert!(result.is_err());
 		assert!(
 			result
 				.unwrap_err()
 				.to_string()
 				.contains("No projects found")
+		);
+	}
+
+	#[test]
+	fn with_env_sets_env_and_env_returns_it() {
+		let dir = temp_dir();
+		let env = make_env();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_cargo(CargoConfig::enabled())
+			.with_env(env);
+		assert!(config.env().is_some());
+	}
+
+	#[test]
+	fn env_returns_none_when_not_set() {
+		let dir = temp_dir();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_cargo(CargoConfig::enabled());
+		assert!(config.env().is_none());
+	}
+
+	#[test]
+	fn create_adapters_fails_when_env_not_set() {
+		let dir = temp_dir();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_cargo(CargoConfig::enabled());
+		let result = config.create_adapters();
+		assert!(result.is_err());
+		assert!(
+			result.unwrap_err().to_string().contains("env not set"),
+			"Expected 'env not set' error"
 		);
 	}
 
@@ -721,7 +823,11 @@ enabled = true
 			.with_global(global)
 			.with_npm(NpmConfig::enabled());
 		config.save().unwrap();
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert!(loaded.global.disable_dependency_cycle_warnings);
 	}
 
@@ -736,7 +842,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let err = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap_err();
+		let err = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap_err();
 		let chain = format!("{err:#}");
 		assert!(
 			chain.contains("unknown field"),
@@ -778,7 +888,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert!(loaded.github.enabled);
 		assert_eq!(
 			loaded.git.enabled,
@@ -798,7 +912,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert!(loaded.github.enabled);
 		assert_eq!(
 			loaded.git.enabled,
@@ -818,7 +936,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert_eq!(
 			loaded.git.strategy,
 			Some(crate::git::Strategy::Branch),
@@ -837,7 +959,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert_eq!(
 			loaded.git.strategy,
 			Some(crate::git::Strategy::Push),
@@ -856,7 +982,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let loaded = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
 		assert_eq!(
 			loaded.git.strategy,
 			Some(crate::git::Strategy::Push),
@@ -875,7 +1005,11 @@ enabled = true
 		)
 		.unwrap();
 
-		let err = load(&crate::path::AbsolutePath::new(dir.path()).unwrap()).unwrap_err();
+		let err = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap_err();
 		let chain = format!("{err:#}");
 		assert!(
 			chain.contains("unknown field"),
