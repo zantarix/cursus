@@ -11,7 +11,7 @@ use crate::command::CommandRunner;
 use crate::git;
 use crate::github::client::GitHubClient;
 use crate::model::changeset::Changeset;
-use crate::model::config;
+use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
 
 use super::{PublishArgs, ReleaseArgs, cmd_publish, cmd_release};
@@ -60,11 +60,10 @@ pub struct CiArgs {
 pub fn cmd_ci(
 	git_workdir: &Path,
 	args: &CiArgs,
+	config: Config,
 	runner: Arc<dyn CommandRunner>,
 	github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
-	let config = config::load(git_workdir)?;
-
 	// Step 1: check for pending changesets.
 	let changesets = Changeset::read_all(config.git_workdir())?;
 	if !changesets.is_empty() {
@@ -78,6 +77,7 @@ pub fn cmd_ci(
 		return cmd_release(
 			git_workdir,
 			&release_args,
+			config,
 			Arc::clone(&runner),
 			github_client,
 		);
@@ -107,6 +107,7 @@ pub fn cmd_ci(
 			return cmd_publish(
 				git_workdir,
 				&publish_args,
+				config,
 				Arc::clone(&runner),
 				github_client,
 			);

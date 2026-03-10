@@ -8,5 +8,6 @@ mod config;
 pub mod remote;
 pub mod rest;
 
-pub use config::GitHubConfig;
+pub use config::{DEFAULT_PR_TITLE, GitHubConfig};
+pub use remote::GitHubRepo;
 pub use rest::RestGitHubClient;

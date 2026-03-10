@@ -86,13 +86,18 @@ fn main() -> ExitCode {
 	let env = chronicle::Env {
 		visual: std::env::var("VISUAL").ok(),
 		editor: std::env::var("EDITOR").ok(),
-		github_token: std::env::var("GH_TOKEN")
-			.ok()
-			.or_else(|| std::env::var("GITHUB_TOKEN").ok()),
 	};
+	let github_client: Option<Arc<dyn chronicle::github::client::GitHubClient>> =
+		std::env::var("GH_TOKEN")
+			.ok()
+			.or_else(|| std::env::var("GITHUB_TOKEN").ok())
+			.map(|token| {
+				Arc::new(chronicle::github::RestGitHubClient::new(token))
+					as Arc<dyn chronicle::github::client::GitHubClient>
+			});
 	let runner: Arc<dyn chronicle::command::CommandRunner> =
 		Arc::new(VerboseCommandRunner::new(RealCommandRunner));
-	match chronicle::run_with(cli, &cwd, env, runner) {
+	match chronicle::run_with(cli, &cwd, env, runner, github_client) {
 		Ok(code) => code,
 		Err(e) => {
 			log::error!("{e:#}");

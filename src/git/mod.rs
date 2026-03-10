@@ -1,12 +1,13 @@
 //! Git lifecycle automation for Chronicle releases.
 //!
-//! This module provides optional post-release git automation: creating a commit
-//! and optionally pushing. Tags are created during `publish`, not `release`.
+//! This module commits release changes after version bumps and changelog
+//! generation.  Pushing (via the configured strategy) and tagging (during
+//! `publish`) are handled by the calling command, not by this module.
 
 mod config;
 mod operations;
 
-pub use config::{GitConfig, Strategy, TagFormat};
+pub use config::{DEFAULT_RELEASE_BRANCH_PREFIX, GitConfig, Strategy, TagFormat};
 pub(crate) use operations::{
 	git_checkout, git_checkout_new_branch, git_current_branch, git_push, git_push_branch,
 	git_push_tag, git_status_porcelain, git_tag, git_tag_exists,
@@ -66,8 +67,8 @@ pub(crate) fn format_commit_message(releases: &[ReleaseInfo]) -> String {
 /// Stages files and creates a commit after a release.
 ///
 /// This is the core git operation for the release step — it only commits.
-/// Tagging happens in `publish`, and branch pushing is handled separately by
-/// the strategy dispatch in `cmd_release`.
+/// Pushing is handled by the strategy dispatch in `cmd_release`, and tagging
+/// happens in `publish`.
 ///
 /// If `dry_run` is `true`, prints what would be done without executing any git commands.
 ///

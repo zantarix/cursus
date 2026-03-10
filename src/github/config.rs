@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Default pull request title when none is set in config.
+pub const DEFAULT_PR_TITLE: &str = "Release updates";
+
 /// Configuration for opt-in GitHub Releases creation after publish.
 ///
 /// When `enabled` is `true`, Chronicle will create a GitHub Release for each

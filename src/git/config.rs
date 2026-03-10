@@ -1,5 +1,8 @@
 //! Git lifecycle configuration types.
 
+/// Default prefix for release branches in the `branch` strategy.
+pub const DEFAULT_RELEASE_BRANCH_PREFIX: &str = "chronicle-release/";
+
 use serde::{Deserialize, Serialize};
 
 /// Controls which tag name format is used when creating git tags.

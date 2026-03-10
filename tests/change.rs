@@ -355,7 +355,6 @@ fn change_interactive_with_message_does_not_open_editor() {
 	let env = chronicle::Env {
 		visual: Some("__chronicle_test_nonexistent_editor__".to_string()),
 		editor: None,
-		github_token: None,
 	};
 	let runner: Arc<dyn chronicle::command::CommandRunner> = Arc::new(RealCommandRunner);
 	let result = chronicle::run(
@@ -363,6 +362,7 @@ fn change_interactive_with_message_does_not_open_editor() {
 		dir.path(),
 		env,
 		runner,
+		None,
 	);
 	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
 }

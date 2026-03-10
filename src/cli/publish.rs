@@ -10,10 +10,10 @@ use log::{error, info, warn};
 
 use crate::command::CommandRunner;
 use crate::git;
+use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
-use crate::github::remote::resolve_github_repo;
 use crate::model::changelog::extract_version_body;
-use crate::model::config;
+use crate::model::config::Config;
 use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
 
 /// Result of attempting to publish a package.
@@ -54,11 +54,11 @@ pub struct PublishArgs {
 pub fn cmd_publish(
 	git_workdir: &Path,
 	args: &PublishArgs,
+	config: Config,
 	runner: Arc<dyn CommandRunner>,
 	github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
-	// Load configuration and enumerate projects
-	let config = config::load(git_workdir)?;
+	// Enumerate projects
 	let projects = config.load_projects(Arc::clone(&runner))?;
 
 	// Filter projects by --package flags if specified
@@ -239,7 +239,7 @@ pub fn cmd_publish(
 /// Returns `(tags_created, tags_skipped)`.
 fn create_and_push_tags(
 	published: &[PublishedPackage],
-	config: &config::Config,
+	config: &Config,
 	runner: &dyn CommandRunner,
 	git_workdir: &Path,
 	is_multi_package: bool,
@@ -352,7 +352,7 @@ fn publish_projects(
 /// Returns `(releases_created, any_failed)`.
 fn orchestrate_github_releases(
 	git_workdir: &Path,
-	config: &config::Config,
+	config: &Config,
 	runner: &dyn CommandRunner,
 	github_client: &dyn GitHubClient,
 	published_packages: &[PublishedPackage],
@@ -363,7 +363,7 @@ fn orchestrate_github_releases(
 	}
 
 	// Resolve owner/repo from config or git remote
-	let (owner, repo) = resolve_github_repo(&config.github, runner, git_workdir)?;
+	let gh_repo = GitHubRepo::resolve(&config.github, git_workdir, runner)?;
 
 	// Run build command if configured
 	let mut github_failed = false;
@@ -406,7 +406,7 @@ fn orchestrate_github_releases(
 		};
 
 		// Create the release
-		match github_client.create_release(&owner, &repo, &tag, &tag, &body) {
+		match github_client.create_release(&gh_repo.owner, &gh_repo.repo, &tag, &tag, &body) {
 			Ok(release_id) => {
 				info!("Created GitHub Release for {tag}");
 				created_count += 1;
@@ -415,8 +415,8 @@ fn orchestrate_github_releases(
 				for (display_name, artifact_path) in &config.github.artifacts {
 					let full_path = git_workdir.join(artifact_path);
 					match github_client.upload_asset(
-						&owner,
-						&repo,
+						&gh_repo.owner,
+						&gh_repo.repo,
 						&release_id,
 						display_name,
 						&full_path,

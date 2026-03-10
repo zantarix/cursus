@@ -10,19 +10,14 @@ use clap::Args;
 use log::info;
 
 use crate::command::CommandRunner;
-use crate::git::{self, ReleaseInfo, Strategy};
+use crate::git::{self, DEFAULT_RELEASE_BRANCH_PREFIX, ReleaseInfo, Strategy};
 use crate::github::client::GitHubClient;
+use crate::github::{DEFAULT_PR_TITLE, GitHubRepo};
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
-use crate::model::config;
+use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
 use crate::utils::today_iso_date;
-
-/// Default prefix for release branches in the `branch` strategy.
-const DEFAULT_RELEASE_BRANCH_PREFIX: &str = "chronicle-release/";
-
-/// Default pull request title when none is set in config.
-const DEFAULT_PR_TITLE: &str = "Release updates";
 
 /// Arguments for the `release` subcommand.
 #[derive(Args, Default)]
@@ -117,10 +112,10 @@ fn build_pr_body(releases: &[ReleaseInfo]) -> String {
 pub fn cmd_release(
 	git_workdir: &Path,
 	args: &ReleaseArgs,
+	config: Config,
 	runner: Arc<dyn CommandRunner>,
 	github_client: Option<Arc<dyn GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
-	let config = config::load(git_workdir)?;
 	let adapters = config.create_adapters(Arc::clone(&runner));
 	let projects = config.load_projects_for_adapters(&adapters)?;
 
@@ -172,32 +167,44 @@ pub fn cmd_release(
 		log::warn!("--branch has no effect with the push strategy; ignoring");
 	}
 
+	// Pre-flight: fail early if GitHub integration requires a client that was not supplied.
+	if git_enabled
+		&& strategy == Strategy::Branch
+		&& config.github.enabled
+		&& !args.dry_run
+		&& github_client.is_none()
+	{
+		anyhow::bail!(
+			"GitHub integration is enabled but no GitHub token found. \
+			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
+		);
+	}
+
 	// Pre-flight dirty-tree check and branch strategy setup (before filesystem changes).
-	let (original_branch, release_branch) = if git_enabled && !args.dry_run {
-		check_dirty_tree(runner.as_ref(), git_workdir)?;
+	let (original_branch, release_branch) = if git_enabled {
+		if !args.dry_run {
+			check_dirty_tree(runner.as_ref(), git_workdir)?;
+		}
 		if strategy == Strategy::Branch {
-			let current = git::git_current_branch(runner.as_ref(), git_workdir)?;
+			let current = if args.dry_run {
+				git::git_current_branch(runner.as_ref(), git_workdir)
+					.ok()
+					.flatten()
+			} else {
+				git::git_current_branch(runner.as_ref(), git_workdir)?
+			};
 			let branch = compute_release_branch(
 				args.branch.as_deref(),
 				config.git.release_branch_prefix.as_deref(),
 				current.as_deref(),
 			);
-			git::git_checkout_new_branch(runner.as_ref(), git_workdir, &branch)?;
+			if !args.dry_run {
+				git::git_checkout_new_branch(runner.as_ref(), git_workdir, &branch)?;
+			}
 			(current, Some(branch))
 		} else {
 			(None, None)
 		}
-	} else if git_enabled && args.dry_run && strategy == Strategy::Branch {
-		// Compute branch name for dry-run reporting; no actual git operations.
-		let current = git::git_current_branch(runner.as_ref(), git_workdir)
-			.ok()
-			.flatten();
-		let branch = compute_release_branch(
-			args.branch.as_deref(),
-			config.git.release_branch_prefix.as_deref(),
-			current.as_deref(),
-		);
-		(current, Some(branch))
 	} else {
 		(None, None)
 	};
@@ -318,13 +325,19 @@ pub fn cmd_release(
 		)?;
 
 		// Strategy push dispatch
-		if args.dry_run {
-			match strategy {
-				Strategy::Push => info!("Would push to origin"),
-				Strategy::Branch => {
-					if let Some(ref branch) = release_branch {
+		match strategy {
+			Strategy::Push => {
+				if args.dry_run {
+					info!("Would push to origin");
+				} else {
+					git::git_push(runner.as_ref(), git_workdir)?;
+				}
+			}
+			Strategy::Branch => {
+				if let Some(ref branch) = release_branch {
+					if args.dry_run {
 						info!("Would push branch '{branch}' to origin");
-						if config.github.enabled && github_client.is_some() {
+						if config.github.enabled {
 							let title = config
 								.github
 								.pull_request_title
@@ -332,49 +345,31 @@ pub fn cmd_release(
 								.unwrap_or(DEFAULT_PR_TITLE);
 							info!("Would create pull request: '{title}'");
 						}
-					}
-					match &original_branch {
-						Some(orig) => info!("Would return to branch '{orig}'"),
-						None => {
-							info!("HEAD is detached; would remain on release branch after push")
-						}
-					}
-				}
-			}
-		} else {
-			match strategy {
-				Strategy::Push => {
-					git::git_push(runner.as_ref(), git_workdir)?;
-				}
-				Strategy::Branch => {
-					if let Some(ref branch) = release_branch {
+					} else {
 						git::git_push_branch(runner.as_ref(), git_workdir, branch).with_context(
 							|| {
 								format!(
 									"Failed to push release branch '{branch}'. \
-								 You are still on the release branch; run \
-								 `git checkout <your-branch>` to return."
+									 You are still on the release branch; run \
+									 `git checkout <your-branch>` to return."
 								)
 							},
 						)?;
 
 						// PR creation is non-fatal; warn on failure.
+						// github_client is guaranteed Some by the pre-flight check above.
 						if config.github.enabled
 							&& let Some(ref client) = github_client
 						{
 							let base = original_branch.as_deref().unwrap_or_else(|| {
 								log::warn!(
-									"HEAD is detached; using \"main\" as the PR base branch. \
-								 Configure [github].default_branch if your repo uses a different name."
+									"HEAD is detached; using \"main\" as the PR base branch."
 								);
 								"main"
 							});
-							match crate::github::remote::resolve_github_repo(
-								&config.github,
-								runner.as_ref(),
-								git_workdir,
-							) {
-								Ok((owner, repo)) => {
+							match GitHubRepo::resolve(&config.github, git_workdir, runner.as_ref())
+							{
+								Ok(gh_repo) => {
 									let title = config
 										.github
 										.pull_request_title
@@ -382,7 +377,12 @@ pub fn cmd_release(
 										.unwrap_or(DEFAULT_PR_TITLE);
 									let pr_body = build_pr_body(&release_infos);
 									match client.create_pull_request(
-										&owner, &repo, title, &pr_body, branch, base,
+										&gh_repo.owner,
+										&gh_repo.repo,
+										title,
+										&pr_body,
+										branch,
+										base,
 									) {
 										Ok(url) => info!("Created pull request: {url}"),
 										Err(e) => {
@@ -396,9 +396,16 @@ pub fn cmd_release(
 							}
 						}
 					}
-					if let Some(ref orig) = original_branch {
-						git::git_checkout(runner.as_ref(), git_workdir, orig)?;
+				}
+				if args.dry_run {
+					match &original_branch {
+						Some(orig) => info!("Would return to branch '{orig}'"),
+						None => {
+							info!("HEAD is detached; would remain on release branch after push")
+						}
 					}
+				} else if let Some(ref orig) = original_branch {
+					git::git_checkout(runner.as_ref(), git_workdir, orig)?;
 				}
 			}
 		}
@@ -412,6 +419,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::model::config;
 
 	use super::*;
 
@@ -514,35 +522,21 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_no_config_fails() {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
-		assert!(result.is_err());
-		assert!(
-			result
-				.unwrap_err()
-				.to_string()
-				.contains("No configuration found")
-		);
-	}
-
-	#[test]
 	fn cmd_release_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::new(dir.path())
+		let cfg = crate::model::config::Config::new(dir.path())
 			.with_cargo(crate::package_manager::CargoConfig::enabled());
-		config.save().unwrap();
+		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
 		)
 		.unwrap();
 
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, make_runner(), no_github()).unwrap();
+		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github()).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -550,9 +544,9 @@ mod tests {
 	fn cmd_release_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::new(dir.path())
+		let cfg = crate::model::config::Config::new(dir.path())
 			.with_cargo(crate::package_manager::CargoConfig::enabled());
-		config.save().unwrap();
+		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
@@ -566,8 +560,9 @@ mod tests {
 		)
 		.unwrap();
 
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs::default();
-		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
+		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -581,9 +576,9 @@ mod tests {
 	fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::new(dir.path())
+		let cfg = crate::model::config::Config::new(dir.path())
 			.with_cargo(crate::package_manager::CargoConfig::enabled());
-		config.save().unwrap();
+		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
@@ -619,12 +614,13 @@ mod tests {
 		)
 		.unwrap();
 
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..ReleaseArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
+		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -653,13 +649,14 @@ mod tests {
 		let original = "+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n";
 		std::fs::write(&changeset_path, original).unwrap();
 
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs {
 			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..ReleaseArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
+		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -674,9 +671,9 @@ mod tests {
 	fn cmd_release_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::new(dir.path())
+		let cfg = crate::model::config::Config::new(dir.path())
 			.with_cargo(crate::package_manager::CargoConfig::enabled());
-		config.save().unwrap();
+		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
@@ -690,12 +687,13 @@ mod tests {
 		)
 		.unwrap();
 
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 			..ReleaseArgs::default()
 		};
-		let result = cmd_release(dir.path(), &args, make_runner(), no_github());
+		let result = cmd_release(dir.path(), &args, config, make_runner(), no_github());
 		assert!(result.is_err());
 		assert!(
 			result
@@ -741,7 +739,7 @@ mod tests {
 	fn setup_branch_strategy_with_github() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let config = crate::model::config::Config::new(dir.path())
+		let cfg = crate::model::config::Config::new(dir.path())
 			.with_cargo(crate::package_manager::CargoConfig::enabled())
 			.with_git(crate::git::GitConfig {
 				enabled: Some(true),
@@ -755,7 +753,7 @@ mod tests {
 				pull_request_title: Some("My Release PR".to_string()),
 				..Default::default()
 			});
-		config.save().unwrap();
+		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test-pkg\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
@@ -778,11 +776,13 @@ mod tests {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let client = Arc::new(RecordingGitHubClient::new());
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs::default();
 
 		let result = cmd_release(
 			dir.path(),
 			&args,
+			config,
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Some(Arc::clone(&client) as Arc<dyn GitHubClient>),
 		);
@@ -809,11 +809,13 @@ mod tests {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs::default();
 
 		let result = cmd_release(
 			dir.path(),
 			&args,
+			config,
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Some(Arc::clone(&client) as Arc<dyn GitHubClient>),
 		);
@@ -825,21 +827,25 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_release_no_github_client_no_pr() {
+	fn cmd_release_no_github_client_errors() {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
-		// No github client — PR creation should be skipped entirely
+		// No github client — pre-flight check should error
+		let config = config::load(dir.path()).unwrap();
 		let args = ReleaseArgs::default();
 
 		let result = cmd_release(
 			dir.path(),
 			&args,
+			config,
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			no_github(),
 		);
+		assert!(result.is_err(), "Expected Err without github client");
+		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
-			result.is_ok(),
-			"Expected Ok without github client, got: {result:?}"
+			msg.contains("no GitHub token"),
+			"Expected 'no GitHub token' error, got: {msg}"
 		);
 	}
 }

@@ -2,7 +2,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{run_chronicle, run_chronicle_with_env, temp_git_repo};
+use common::{run_chronicle, temp_git_repo};
 
 /// Runs chronicle as a subprocess with the given environment variables, capturing stdout/stderr.
 ///
@@ -90,14 +90,9 @@ fn github_enabled_implies_git_enabled_integration() {
 	)
 	.unwrap();
 
-	let env = chronicle::Env {
-		github_token: Some("test-token".to_string()),
-		..Default::default()
-	};
-	let result = run_chronicle_with_env(
+	let result = run_chronicle(
 		["chronicle", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-		env,
 	);
 	// The command should succeed (dry-run, no network). The key assertion is
 	// that config loading did not fail, which would mean github→git derivation worked.

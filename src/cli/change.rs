@@ -1,7 +1,6 @@
 //! The `change` subcommand.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -10,7 +9,7 @@ use clap::Args;
 
 use crate::command::CommandRunner;
 use crate::model::changeset::{self, ChangeType, Changeset};
-use crate::model::config;
+use crate::model::config::Config;
 use crate::tui::change;
 
 use super::GlobalArgs;
@@ -33,13 +32,12 @@ pub struct ChangeArgs {
 
 /// Runs the `change` subcommand.
 pub fn cmd_change(
-	git_workdir: &Path,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	env: &crate::Env,
+	config: Config,
 	runner: Arc<dyn CommandRunner>,
 ) -> anyhow::Result<ExitCode> {
-	let config = config::load(git_workdir)?;
 	let projects = config.load_projects(Arc::clone(&runner))?;
 
 	let project_indices = if !args.projects.is_empty() {

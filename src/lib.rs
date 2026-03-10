@@ -44,8 +44,6 @@ pub struct Env {
 	pub visual: Option<String>,
 	/// Value of the `EDITOR` environment variable.
 	pub editor: Option<String>,
-	/// GitHub API token, from `GH_TOKEN` or `GITHUB_TOKEN`.
-	pub github_token: Option<String>,
 }
 
 /// Main entry point for the chronicle application.
@@ -58,6 +56,7 @@ pub fn run<I, T>(
 	cwd: &Path,
 	env: Env,
 	runner: Arc<dyn CommandRunner>,
+	github_client: Option<Arc<dyn github::client::GitHubClient>>,
 ) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
@@ -77,7 +76,7 @@ where
 			return Ok(exit_code);
 		}
 	};
-	run_with(cli, cwd, env, runner)
+	run_with(cli, cwd, env, runner, github_client)
 }
 
 /// Dispatches a pre-parsed CLI to the appropriate subcommand.
@@ -90,45 +89,54 @@ pub fn run_with(
 	cwd: &Path,
 	env: Env,
 	runner: Arc<dyn CommandRunner>,
+	github_client: Option<Arc<dyn github::client::GitHubClient>>,
 ) -> anyhow::Result<ExitCode> {
 	let git_workdir = find_git_workdir(cwd).context("No git repository found")?;
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
-		Some(cli::Command::Change(args)) => {
-			cli::cmd_change(&git_workdir, &args, &cli.global, &env, Arc::clone(&runner))
+		command => {
+			let config = model::config::load(&git_workdir)?;
+			match command {
+				Some(cli::Command::Change(args)) => {
+					cli::cmd_change(&args, &cli.global, &env, config, Arc::clone(&runner))
+				}
+				Some(cli::Command::Release(args)) => cli::cmd_release(
+					&git_workdir,
+					&args,
+					config,
+					Arc::clone(&runner),
+					github_client,
+				),
+				Some(cli::Command::Publish(args)) => cli::cmd_publish(
+					&git_workdir,
+					&args,
+					config,
+					Arc::clone(&runner),
+					github_client,
+				),
+				Some(cli::Command::Ci(args)) => cli::cmd_ci(
+					&git_workdir,
+					&args,
+					config,
+					Arc::clone(&runner),
+					github_client,
+				),
+				None => cli::cmd_change(
+					&cli::ChangeArgs::default(),
+					&cli.global,
+					&env,
+					config,
+					Arc::clone(&runner),
+				),
+				Some(cli::Command::Init(_)) => {
+					// The outer match arm already handles Init; this arm cannot be reached.
+					anyhow::bail!(
+						"Unexpected Init command in inner dispatch - this is a bug, please report it."
+					)
+				}
+			}
 		}
-		Some(cli::Command::Publish(args)) => {
-			let github_client: Option<Arc<dyn github::client::GitHubClient>> =
-				env.github_token.as_ref().map(|token| {
-					Arc::new(github::RestGitHubClient::new(token.clone()))
-						as Arc<dyn github::client::GitHubClient>
-				});
-			cli::cmd_publish(&git_workdir, &args, Arc::clone(&runner), github_client)
-		}
-		Some(cli::Command::Ci(args)) => {
-			let github_client: Option<Arc<dyn github::client::GitHubClient>> =
-				env.github_token.as_ref().map(|token| {
-					Arc::new(github::RestGitHubClient::new(token.clone()))
-						as Arc<dyn github::client::GitHubClient>
-				});
-			cli::cmd_ci(&git_workdir, &args, Arc::clone(&runner), github_client)
-		}
-		Some(cli::Command::Release(args)) => {
-			let github_client: Option<Arc<dyn github::client::GitHubClient>> =
-				env.github_token.as_ref().map(|token| {
-					Arc::new(github::RestGitHubClient::new(token.clone()))
-						as Arc<dyn github::client::GitHubClient>
-				});
-			cli::cmd_release(&git_workdir, &args, Arc::clone(&runner), github_client)
-		}
-		None => cli::cmd_change(
-			&git_workdir,
-			&cli::ChangeArgs::default(),
-			&cli.global,
-			&env,
-			Arc::clone(&runner),
-		),
 	}
 }
 
