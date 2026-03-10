@@ -352,17 +352,14 @@ fn change_interactive_with_message_does_not_open_editor() {
 	// call to open_editor returns an error — this catches mutations that would
 	// cause the editor to be opened unnecessarily.
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let env = chronicle::Env {
-		visual: Some("__chronicle_test_nonexistent_editor__".to_string()),
-		editor: None,
-	};
-	let runner: Arc<dyn chronicle::command::CommandRunner> = Arc::new(RealCommandRunner);
+	let env = chronicle::Env::new(
+		Arc::new(RealCommandRunner) as Arc<dyn chronicle::command::CommandRunner>
+	)
+	.with_editor("__chronicle_test_nonexistent_editor__".to_string());
 	let result = chronicle::run(
 		["chronicle", "change", "-t", "minor", "-m", "bump"],
 		dir.path(),
 		env,
-		runner,
-		None,
 	);
 	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
 }

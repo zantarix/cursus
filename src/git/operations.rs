@@ -1,11 +1,9 @@
 //! Low-level git command wrappers.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, bail};
 
-use crate::command::CommandRunner;
 use crate::path::AbsolutePath;
 
 /// A git working directory paired with a command runner.
@@ -16,13 +14,16 @@ use crate::path::AbsolutePath;
 #[derive(Debug)]
 pub(crate) struct GitWorkdir {
 	path: AbsolutePath,
-	runner: Arc<dyn CommandRunner>,
+	env: crate::Env,
 }
 
 impl GitWorkdir {
-	/// Creates a new `GitWorkdir` from a command runner and repository root path.
-	pub(crate) fn new(runner: Arc<dyn CommandRunner>, path: AbsolutePath) -> Self {
-		Self { path, runner }
+	/// Creates a new `GitWorkdir` from an environment and repository root path.
+	pub(crate) fn new(env: &crate::Env, path: AbsolutePath) -> Self {
+		Self {
+			path,
+			env: env.clone(),
+		}
 	}
 
 	/// Returns the repository root path.
@@ -50,7 +51,7 @@ impl GitWorkdir {
 		args.extend_from_slice(&file_str_refs);
 
 		let output = self
-			.runner
+			.env
 			.run("git", &args, &self.path)
 			.context("Failed to run git add")?;
 
@@ -69,7 +70,7 @@ impl GitWorkdir {
 	/// Returns an error if `git commit` exits with a non-zero status.
 	pub(crate) fn commit(&self, message: &str) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["commit", "-m", message], &self.path)
 			.context("Failed to run git commit")?;
 
@@ -88,7 +89,7 @@ impl GitWorkdir {
 	/// Returns an error if `git tag` exits with a non-zero status.
 	pub(crate) fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["tag", "-a", tag_name, "-m", message], &self.path)
 			.context("Failed to run git tag")?;
 
@@ -112,7 +113,7 @@ impl GitWorkdir {
 	/// Returns an error if `git push` exits with a non-zero status.
 	pub(crate) fn push(&self) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["push", "origin", "HEAD"], &self.path)
 			.context("Failed to run git push")?;
 
@@ -134,7 +135,7 @@ impl GitWorkdir {
 	/// Returns an error if `git status` exits with a non-zero status.
 	pub(crate) fn status_porcelain(&self) -> anyhow::Result<String> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["status", "--porcelain"], &self.path)
 			.context("Failed to run git status")?;
 
@@ -156,7 +157,7 @@ impl GitWorkdir {
 	/// Returns an error if `git rev-parse` exits with a non-zero status.
 	pub(crate) fn current_branch(&self) -> anyhow::Result<Option<String>> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["rev-parse", "--abbrev-ref", "HEAD"], &self.path)
 			.context("Failed to run git rev-parse")?;
 
@@ -182,7 +183,7 @@ impl GitWorkdir {
 	/// Returns an error if `git checkout` exits with a non-zero status.
 	pub(crate) fn checkout_new_branch(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["checkout", "-b", branch], &self.path)
 			.context("Failed to run git checkout")?;
 
@@ -203,7 +204,7 @@ impl GitWorkdir {
 	/// Returns an error if `git checkout` exits with a non-zero status.
 	pub(crate) fn checkout(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["checkout", branch], &self.path)
 			.context("Failed to run git checkout")?;
 
@@ -224,7 +225,7 @@ impl GitWorkdir {
 	/// Returns an error if `git push` exits with a non-zero status.
 	pub(crate) fn push_branch(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["push", "origin", branch], &self.path)
 			.context("Failed to run git push branch")?;
 
@@ -245,7 +246,7 @@ impl GitWorkdir {
 	/// Returns an error if `git tag` exits with a non-zero status.
 	pub(crate) fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["tag", "-l", tag], &self.path)
 			.context("Failed to run git tag -l")?;
 
@@ -267,7 +268,7 @@ impl GitWorkdir {
 	/// Returns an error if the git command cannot be executed at all.
 	pub(crate) fn remote_origin_url(&self) -> anyhow::Result<Option<String>> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["remote", "get-url", "origin"], &self.path)
 			.context("Failed to query git remote URL")?;
 
@@ -289,7 +290,7 @@ impl GitWorkdir {
 	/// Returns an error if `git push` exits with a non-zero status.
 	pub(crate) fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
 		let output = self
-			.runner
+			.env
 			.run("git", &["push", "origin", tag], &self.path)
 			.context("Failed to run git push tag")?;
 
@@ -309,6 +310,7 @@ mod tests {
 	use tempfile::TempDir;
 
 	use super::*;
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::path::AbsolutePath;
 
@@ -328,15 +330,21 @@ mod tests {
 		Arc::new(RecordingCommandRunner::new(exit_code).with_stderr(stderr.to_vec()))
 	}
 
+	fn make_git(
+		runner: Arc<RecordingCommandRunner>,
+		dir_abs: AbsolutePath,
+	) -> (GitWorkdir, Arc<RecordingCommandRunner>) {
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, dir_abs);
+		(git, runner)
+	}
+
 	#[test]
 	fn git_add_empty_files_is_noop() {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		let result = git.add(&[]);
 		assert!(result.is_ok());
 		assert!(
@@ -350,10 +358,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.add(&[dir.path().join("file.txt")]);
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -368,10 +373,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		let file = dir.path().join("file.txt");
 		git.add(&[file.clone()]).unwrap();
 		let invocations = runner.invocations();
@@ -388,10 +390,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.commit("test commit");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -406,10 +405,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.commit("chore(release): my-pkg@1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -426,10 +422,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repository");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.tag("v1.0.0", "Release 1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -444,10 +437,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.tag("v1.0.0", "Release 1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -464,10 +454,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		let result = git.push();
 		assert!(result.is_ok());
 		let invocations = runner.invocations();
@@ -482,10 +469,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.push();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -500,10 +484,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.status_porcelain().unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -517,10 +498,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.status_porcelain();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -536,10 +514,7 @@ mod tests {
 		let runner =
 			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.status_porcelain().unwrap();
 		assert_eq!(result, " M src/main.rs\n");
 	}
@@ -549,10 +524,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"main\n".to_vec()));
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.current_branch().unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -566,10 +538,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"main\n".to_vec()));
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.current_branch().unwrap();
 		assert_eq!(result, Some("main".to_string()));
 	}
@@ -579,10 +548,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"HEAD\n".to_vec()));
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.current_branch().unwrap();
 		assert_eq!(result, None);
 	}
@@ -592,10 +558,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.current_branch();
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -610,10 +573,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.checkout_new_branch("feature/my-branch").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -627,10 +587,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: branch already exists");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.checkout_new_branch("main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -645,10 +602,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.checkout("main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -662,10 +616,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"error: pathspec 'main' did not match");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.checkout("main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -680,10 +631,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.push_tag("v1.2.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -697,10 +645,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.push_tag("v1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -715,10 +660,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.push_branch("chronicle-release/main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -735,10 +677,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.push_branch("release/main");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -753,10 +692,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		git.tag_exists("v1.0.0").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -770,10 +706,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.tag_exists("v1.0.0").unwrap();
 		assert!(result);
 	}
@@ -783,10 +716,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.tag_exists("v1.0.0").unwrap();
 		assert!(!result);
 	}
@@ -796,10 +726,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording_with_stderr(1, b"fatal: not a git repo");
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.tag_exists("v1.0.0");
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
@@ -819,10 +746,7 @@ mod tests {
 				.with_stdout(b"https://github.com/owner/repo.git\n".to_vec()),
 		);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, runner) = make_git(runner, dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(
 			result,
@@ -838,10 +762,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = recording(1); // non-zero exit → no origin remote
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(result, None);
 	}
@@ -854,10 +775,7 @@ mod tests {
 				.with_stdout(b"  git@github.com:owner/repo.git  \n".to_vec()),
 		);
 		let dir_abs = abs(&dir);
-		let git = GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let (git, _) = make_git(runner, dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(result, Some("git@github.com:owner/repo.git".to_string()));
 	}

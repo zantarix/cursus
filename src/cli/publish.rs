@@ -1,13 +1,11 @@
 //! Publish command implementation.
 
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use clap::Args;
 use log::{error, info, warn};
 
-use crate::command::CommandRunner;
 use crate::git;
 use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
@@ -55,11 +53,10 @@ pub(crate) fn cmd_publish(
 	git: &git::GitWorkdir,
 	args: &PublishArgs,
 	config: Config,
-	runner: Arc<dyn CommandRunner>,
-	github_client: Option<Arc<dyn GitHubClient>>,
+	env: &crate::Env,
 ) -> anyhow::Result<ExitCode> {
 	// Enumerate projects
-	let projects = config.load_projects(Arc::clone(&runner))?;
+	let projects = config.load_projects(env)?;
 
 	// Filter projects by --package flags if specified
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
@@ -104,7 +101,7 @@ pub(crate) fn cmd_publish(
 	}
 
 	// Fail fast: validate GitHub token before publishing anything
-	if config.github.enabled && !args.no_git && !args.dry_run && github_client.is_none() {
+	if config.github.enabled && !args.no_git && !args.dry_run && env.github_client().is_none() {
 		bail!(
 			"GitHub Releases is enabled but no GitHub token found. \
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
@@ -153,14 +150,14 @@ pub(crate) fn cmd_publish(
 		} else {
 			// The early token check above guarantees github_client is Some here.
 			// If it is somehow None, bail rather than panic.
-			let client = match github_client.as_deref() {
+			let client = match env.github_client() {
 				Some(c) => c,
 				None => bail!("GitHub client not available despite token being set"),
 			};
 			orchestrate_github_releases(
 				git,
 				&config,
-				runner.as_ref(),
+				env,
 				client,
 				&published_packages,
 				is_multi_package,
@@ -346,7 +343,7 @@ fn publish_projects(
 fn orchestrate_github_releases(
 	git: &git::GitWorkdir,
 	config: &Config,
-	runner: &dyn CommandRunner,
+	env: &crate::Env,
 	github_client: &dyn GitHubClient,
 	published_packages: &[PublishedPackage],
 	is_multi_package: bool,
@@ -362,7 +359,7 @@ fn orchestrate_github_releases(
 	let mut github_failed = false;
 	if !config.github.build_command.is_empty() {
 		info!("Running build command: {}", config.github.build_command);
-		let output = runner
+		let output = env
 			.run_shell(&config.github.build_command, git.path())
 			.with_context(|| {
 				format!(
@@ -463,7 +460,10 @@ fn do_publish(project: &package_manager::Project) -> PublishResult {
 mod tests {
 	use std::collections::BTreeMap;
 
+	use std::sync::Arc;
+
 	use super::*;
+	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::github::GitHubConfig;
 	use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
@@ -496,11 +496,20 @@ mod tests {
 		let client = RecordingGitHubClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			wd.clone(),
+		);
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &[], false)
-				.unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&client,
+			&[],
+			false,
+		)
+		.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(!failed);
@@ -520,10 +529,19 @@ mod tests {
 		}];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, false)
-				.unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			wd.clone(),
+		);
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&client,
+			&packages,
+			false,
+		)
+		.unwrap();
 
 		assert_eq!(created, 1);
 		assert!(!failed);
@@ -549,11 +567,14 @@ mod tests {
 		}];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			wd.clone(),
+		);
 		let (created, failed) = orchestrate_github_releases(
 			&git,
 			&config,
-			runner.as_ref(),
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			&client,
 			&packages,
 			true, // is_multi_package
@@ -583,10 +604,19 @@ mod tests {
 		}];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, false)
-				.unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			wd.clone(),
+		);
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&client,
+			&packages,
+			false,
+		)
+		.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -613,10 +643,19 @@ mod tests {
 		];
 
 		let wd = workdir();
-		let git = git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, true)
-				.unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			wd.clone(),
+		);
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&client,
+			&packages,
+			true,
+		)
+		.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -664,13 +703,19 @@ mod tests {
 		}];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, false)
-				.unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&client,
+			&packages,
+			false,
+		)
+		.unwrap();
 
 		// Release was created even though uploads failed
 		assert_eq!(created, 1);
@@ -724,13 +769,19 @@ mod tests {
 		];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, runner.as_ref(), &client, &packages, true)
-				.unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&client,
+			&packages,
+			true,
+		)
+		.unwrap();
 
 		assert_eq!(created, 2);
 		assert!(!failed);
@@ -762,7 +813,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
 		let published = vec![PublishedPackage {
@@ -800,7 +851,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
 		let published = vec![PublishedPackage {
@@ -826,7 +877,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
 
@@ -844,7 +895,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
 		let published = vec![PublishedPackage {

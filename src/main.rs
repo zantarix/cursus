@@ -83,21 +83,23 @@ fn main() -> ExitCode {
 		}
 	};
 
-	let env = chronicle::Env {
-		visual: std::env::var("VISUAL").ok(),
-		editor: std::env::var("EDITOR").ok(),
-	};
-	let github_client: Option<Arc<dyn chronicle::github::client::GitHubClient>> =
-		std::env::var("GH_TOKEN")
-			.ok()
-			.or_else(|| std::env::var("GITHUB_TOKEN").ok())
-			.map(|token| {
-				Arc::new(chronicle::github::RestGitHubClient::new(token))
-					as Arc<dyn chronicle::github::client::GitHubClient>
-			});
 	let runner: Arc<dyn chronicle::command::CommandRunner> =
 		Arc::new(VerboseCommandRunner::new(RealCommandRunner));
-	match chronicle::run_with(cli, &cwd, env, runner, github_client) {
+	let editor = std::env::var("VISUAL")
+		.ok()
+		.filter(|s| !s.is_empty())
+		.or_else(|| std::env::var("EDITOR").ok().filter(|s| !s.is_empty()));
+	let github_client = std::env::var("GH_TOKEN")
+		.ok()
+		.or_else(|| std::env::var("GITHUB_TOKEN").ok())
+		.map(|token| {
+			Arc::new(chronicle::github::RestGitHubClient::new(token))
+				as Arc<dyn chronicle::github::client::GitHubClient>
+		});
+	let env = chronicle::Env::new(runner)
+		.with_editor_opt(editor)
+		.with_github_client_opt(github_client);
+	match chronicle::run_with(cli, &cwd, env) {
 		Ok(code) => code,
 		Err(e) => {
 			log::error!("{e:#}");

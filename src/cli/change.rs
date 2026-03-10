@@ -2,12 +2,10 @@
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use anyhow::bail;
 use clap::Args;
 
-use crate::command::CommandRunner;
 use crate::git;
 use crate::model::changeset::{self, ChangeType, Changeset};
 use crate::model::config::Config;
@@ -38,9 +36,8 @@ pub(crate) fn cmd_change(
 	global: &GlobalArgs,
 	env: &crate::Env,
 	config: Config,
-	runner: Arc<dyn CommandRunner>,
 ) -> anyhow::Result<ExitCode> {
-	let projects = config.load_projects(Arc::clone(&runner))?;
+	let projects = config.load_projects(env)?;
 
 	let project_indices = if !args.projects.is_empty() {
 		let indices: Vec<usize> = args
@@ -95,7 +92,7 @@ pub(crate) fn cmd_change(
 	let path = changeset.write(git)?;
 
 	if args.message.is_none() {
-		changeset::open_editor(&path, env, runner.as_ref())?;
+		changeset::open_editor(&path, env)?;
 	}
 
 	Ok(ExitCode::SUCCESS)
