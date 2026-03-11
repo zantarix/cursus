@@ -37,9 +37,6 @@ struct PublishedPackage {
 /// Arguments for the publish subcommand.
 #[derive(Args, Default)]
 pub struct PublishArgs {
-	/// Preview without publishing
-	#[arg(long)]
-	pub dry_run: bool,
 	/// Only publish specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
@@ -52,6 +49,7 @@ pub struct PublishArgs {
 pub(crate) fn cmd_publish(
 	git: &git::GitWorkdir,
 	args: &PublishArgs,
+	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	let env = config.env().context("env not set")?;
@@ -101,7 +99,7 @@ pub(crate) fn cmd_publish(
 	}
 
 	// Fail fast: validate GitHub token before publishing anything
-	if config.github.enabled && !args.no_git && !args.dry_run && env.github_client().is_none() {
+	if config.github.enabled && !args.no_git && !dry_run && env.github_client().is_none() {
 		bail!(
 			"GitHub Releases is enabled but no GitHub token found. \
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
@@ -111,12 +109,12 @@ pub(crate) fn cmd_publish(
 	let is_multi_package = projects.len() > 1;
 
 	let (published_packages, skipped_count, publish_failed) =
-		publish_projects(&sorted_projects, args.dry_run)?;
+		publish_projects(&sorted_projects, dry_run)?;
 
 	// Git tag creation
 	let git_enabled = config.git.enabled.unwrap_or(false) && !args.no_git;
 	let (tags_created, tags_skipped) = if git_enabled {
-		if args.dry_run {
+		if dry_run {
 			for pkg in &published_packages {
 				let tag = config
 					.git
@@ -134,7 +132,7 @@ pub(crate) fn cmd_publish(
 
 	// GitHub Release orchestration — skipped when --no-git is set
 	let (github_created, github_failed) = if config.github.enabled && !args.no_git {
-		if args.dry_run {
+		if dry_run {
 			// Dry-run: print what would happen without making API calls
 			for pkg in &published_packages {
 				let tag = config
@@ -169,7 +167,7 @@ pub(crate) fn cmd_publish(
 
 	// Summary
 	info!("");
-	if args.dry_run {
+	if dry_run {
 		let tag_note = if git_enabled && !published_packages.is_empty() {
 			format!(", {} would be tagged", published_packages.len())
 		} else {
@@ -208,7 +206,7 @@ pub(crate) fn cmd_publish(
 			skipped_count
 		);
 	}
-	if !args.dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
+	if !dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
 		info!(
 			"{tags_created} tag{} created, {tags_skipped} skipped",
 			if tags_created == 1 { "" } else { "s" }
@@ -798,7 +796,6 @@ mod tests {
 	#[test]
 	fn default_publish_args() {
 		let args = PublishArgs::default();
-		assert!(!args.dry_run);
 		assert!(args.packages.is_empty());
 		assert!(!args.no_git);
 	}

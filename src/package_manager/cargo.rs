@@ -267,6 +267,7 @@ fn update_workspace_dep(
 	workspace_toml_path: &Path,
 	dependency_name: &str,
 	new_version: &str,
+	dry_run: bool,
 ) -> anyhow::Result<bool> {
 	if !workspace_toml_path.exists() {
 		return Ok(false);
@@ -285,8 +286,10 @@ fn update_workspace_dep(
 	if let Some(dep_item) = workspace_dep
 		&& update_dep_item_version(dep_item, new_version)
 	{
-		std::fs::write(workspace_toml_path, doc.to_string())
-			.with_context(|| format!("Failed to write {}", workspace_toml_path.display()))?;
+		if !dry_run {
+			std::fs::write(workspace_toml_path, doc.to_string())
+				.with_context(|| format!("Failed to write {}", workspace_toml_path.display()))?;
+		}
 		return Ok(true);
 	}
 	Ok(false)
@@ -296,12 +299,13 @@ fn update_workspace_dep(
 ///
 /// Scans `[dependencies]`, `[dev-dependencies]`, and `[build-dependencies]`.
 /// Entries with `workspace = true` are skipped (those are managed via the
-/// workspace root). Writes the file if any entry was modified.
-/// Returns `true` if the file was modified.
+/// workspace root). Writes the file if any entry was modified (skipped when
+/// `dry_run` is `true`). Returns `true` if the file was (or would be) modified.
 fn update_member_dep(
 	member_toml_path: &Path,
 	dependency_name: &str,
 	new_version: &str,
+	dry_run: bool,
 ) -> anyhow::Result<bool> {
 	if !member_toml_path.exists() {
 		return Ok(false);
@@ -331,7 +335,7 @@ fn update_member_dep(
 		}
 	}
 
-	if changed {
+	if changed && !dry_run {
 		std::fs::write(member_toml_path, doc.to_string())
 			.with_context(|| format!("Failed to write {}", member_toml_path.display()))?;
 	}
@@ -339,7 +343,12 @@ fn update_member_dep(
 }
 
 impl PackageManagerAdapter for CargoAdapter {
-	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
+	fn write_version(
+		&self,
+		project: &ProjectInfo,
+		version: &Version,
+		dry_run: bool,
+	) -> anyhow::Result<()> {
 		let manifest_path = project.path.join("Cargo.toml");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
@@ -351,8 +360,10 @@ impl PackageManagerAdapter for CargoAdapter {
 			.and_then(|p| p.as_table_like_mut())
 			.with_context(|| format!("No [package] table in {}", manifest_path.display()))?;
 		package.insert("version", toml_edit::value(version.to_string()));
-		std::fs::write(&manifest_path, doc.to_string())
-			.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+		if !dry_run {
+			std::fs::write(&manifest_path, doc.to_string())
+				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+		}
 		Ok(())
 	}
 
@@ -429,17 +440,15 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(projects)
 	}
 
-	fn lock_file_path(&self) -> Option<std::path::PathBuf> {
-		self.resolve_root().ok().map(|r| r.join("Cargo.lock"))
-	}
-
 	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
-		// For Cargo, always regenerate the lock file at the workspace root
+		// Resolve the lock file path unconditionally — this is known regardless of dry-run.
 		let workspace_root = self.resolve_root()?;
+		let lock_path = workspace_root.join("Cargo.lock");
 
+		// run_mut is a no-op when DryRunCommandRunner is active, so this is always safe to call.
 		let output = self
 			.env
-			.run("cargo", &["generate-lockfile"], &workspace_root)
+			.run_mut("cargo", &["generate-lockfile"], &workspace_root)
 			.with_context(|| {
 				format!(
 					"Failed to execute cargo generate-lockfile in {}",
@@ -456,7 +465,7 @@ impl PackageManagerAdapter for CargoAdapter {
 			);
 		}
 
-		Ok(Some(workspace_root.join("Cargo.lock")))
+		Ok(Some(lock_path))
 	}
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
@@ -465,7 +474,7 @@ impl PackageManagerAdapter for CargoAdapter {
 
 		let output = self
 			.env
-			.run(
+			.run_mut(
 				"cargo",
 				&["publish", "--manifest-path", &manifest_str],
 				&self.adapter_root,
@@ -508,20 +517,21 @@ impl PackageManagerAdapter for CargoAdapter {
 		project: &ProjectInfo,
 		dependency_name: &str,
 		new_version: &Version,
+		dry_run: bool,
 	) -> anyhow::Result<Vec<PathBuf>> {
 		let pm_root = self.resolve_root()?;
 		let version_str = new_version.to_string();
 		let mut modified = Vec::new();
 
 		let workspace_toml_path = pm_root.join("Cargo.toml");
-		if update_workspace_dep(&workspace_toml_path, dependency_name, &version_str)? {
+		if update_workspace_dep(&workspace_toml_path, dependency_name, &version_str, dry_run)? {
 			modified.push(workspace_toml_path.clone());
 		}
 
 		// Skip member update when the member IS the workspace root (already handled above)
 		let member_toml_path = project.path.join("Cargo.toml");
 		if member_toml_path != workspace_toml_path
-			&& update_member_dep(&member_toml_path, dependency_name, &version_str)?
+			&& update_member_dep(&member_toml_path, dependency_name, &version_str, dry_run)?
 		{
 			modified.push(member_toml_path);
 		}
@@ -985,7 +995,7 @@ version = "not-a-version"
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(&info, &version);
+		let result = adapter.write_version(&info, &version, false);
 		assert!(result.is_err());
 	}
 
@@ -996,7 +1006,7 @@ version = "not-a-version"
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(&info, &version);
+		let result = adapter.write_version(&info, &version, false);
 		assert!(result.is_err());
 	}
 
@@ -1007,7 +1017,7 @@ version = "not-a-version"
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-crate", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(&info, &version);
+		let result = adapter.write_version(&info, &version, false);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -1032,7 +1042,7 @@ edition = "2024"
 		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-crate", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter.write_version(&info, &new_version).unwrap();
+		adapter.write_version(&info, &new_version, false).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
 		assert!(contents.contains("version = \"2.0.0\""));
@@ -1055,7 +1065,7 @@ version = "0.1.0"
 		let info = project_info(dir.path(), "my-crate", "");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
-		adapter.write_version(&info, &new_v).unwrap();
+		adapter.write_version(&info, &new_v, false).unwrap();
 
 		// Re-enumerate to verify the write
 		let projects = enumerate(dir.path()).unwrap();
@@ -1353,12 +1363,21 @@ tempfile = "3.0"
 	}
 
 	#[test]
-	fn lock_file_path_returns_cargo_lock_at_root() {
+	fn update_lock_file_dry_run_skips_command_but_returns_path() {
+		use crate::command::DryRunCommandRunner;
 		let dir = temp_dir();
-		let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-		let lock_path = adapter.lock_file_path();
-		assert!(lock_path.is_some(), "expected Some lock path");
-		assert_eq!(lock_path.unwrap(), dir.path().join("Cargo.lock"));
+		let inner: Arc<dyn CommandRunner> =
+			Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
+		let dry_runner: Arc<dyn CommandRunner> =
+			Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
+		let env = crate::Env::new(dry_runner);
+		let adapter = CargoAdapter::new(
+			CargoConfig::default(),
+			crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			env,
+		);
+		let result = adapter.update_lock_file().unwrap();
+		assert_eq!(result, Some(dir.path().join("Cargo.lock")));
 	}
 
 	#[test]
@@ -1393,7 +1412,7 @@ tempfile = "3.0"
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1, "Expected one file modified");
@@ -1417,7 +1436,7 @@ tempfile = "3.0"
 		let new_version: Version = "1.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1442,7 +1461,7 @@ tempfile = "3.0"
 		let new_version: Version = "1.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1469,7 +1488,7 @@ tempfile = "3.0"
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1493,7 +1512,7 @@ tempfile = "3.0"
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1518,7 +1537,7 @@ tempfile = "3.0"
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		// Path-only dependency — no version field to update
@@ -1549,7 +1568,7 @@ tempfile = "3.0"
 		let new_version: Version = "1.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert!(modified.is_empty());
@@ -1571,7 +1590,7 @@ tempfile = "3.0"
 		let new_version: Version = "1.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1600,7 +1619,7 @@ tempfile = "3.0"
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1630,7 +1649,7 @@ tempfile = "3.0"
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		// Only the root workspace Cargo.toml should be modified, not the member
@@ -1661,7 +1680,7 @@ tempfile = "3.0"
 		let new_version: Version = "1.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "nonexistent-dep", &new_version)
+			.update_dependency_version(&info, "nonexistent-dep", &new_version, false)
 			.unwrap();
 
 		assert!(modified.is_empty());

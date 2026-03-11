@@ -37,6 +37,10 @@ pub struct GlobalArgs {
 	/// Suppress all output except errors
 	#[arg(short = 's', long, global = true, action = ArgAction::SetTrue, conflicts_with = "verbose")]
 	pub silent: bool,
+
+	/// Preview changes without modifying any files or running registry commands
+	#[arg(short = 'n', long, global = true, action = ArgAction::SetTrue)]
+	pub dry_run: bool,
 }
 
 impl Default for GlobalArgs {
@@ -46,6 +50,7 @@ impl Default for GlobalArgs {
 			no_interactive: false,
 			verbose: 0,
 			silent: false,
+			dry_run: false,
 		}
 	}
 }
@@ -87,6 +92,31 @@ mod tests {
 		assert!(!args.no_interactive);
 		assert_eq!(args.verbose, 0);
 		assert!(!args.silent);
+		assert!(!args.dry_run);
+	}
+
+	#[test]
+	fn dry_run_flag_sets_true() {
+		let cli = Cli::try_parse_from(["chronicle", "--dry-run"]).unwrap();
+		assert!(cli.global.dry_run);
+	}
+
+	#[test]
+	fn dry_run_short_flag_sets_true() {
+		let cli = Cli::try_parse_from(["chronicle", "-n"]).unwrap();
+		assert!(cli.global.dry_run);
+	}
+
+	#[test]
+	fn dry_run_flag_after_subcommand_sets_true() {
+		let cli = Cli::try_parse_from(["chronicle", "prepare", "--dry-run"]).unwrap();
+		assert!(cli.global.dry_run);
+	}
+
+	#[test]
+	fn dry_run_short_flag_after_subcommand_sets_true() {
+		let cli = Cli::try_parse_from(["chronicle", "prepare", "-n"]).unwrap();
+		assert!(cli.global.dry_run);
 	}
 
 	#[test]

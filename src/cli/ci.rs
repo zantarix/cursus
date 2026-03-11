@@ -15,10 +15,6 @@ use super::{PrepareArgs, PublishArgs, cmd_prepare, cmd_publish};
 /// Arguments for the `ci` subcommand.
 #[derive(Args, Default)]
 pub struct CiArgs {
-	/// Preview changes without modifying any files
-	#[arg(long)]
-	pub dry_run: bool,
-
 	/// Only process specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
@@ -56,6 +52,7 @@ pub struct CiArgs {
 pub(crate) fn cmd_ci(
 	git: &git::GitWorkdir,
 	args: &CiArgs,
+	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	// Step 1: check for pending changesets.
@@ -63,12 +60,11 @@ pub(crate) fn cmd_ci(
 	if !changesets.is_empty() {
 		info!("ci: pending changesets found, running prepare");
 		let prepare_args = PrepareArgs {
-			dry_run: args.dry_run,
 			packages: args.packages.clone(),
 			no_git: args.no_git,
 			branch: args.branch.clone(),
 		};
-		return cmd_prepare(git, &prepare_args, config);
+		return cmd_prepare(git, &prepare_args, dry_run, config);
 	}
 
 	// Step 2: when git is enabled and --no-git is not set, check for packages that
@@ -88,11 +84,10 @@ pub(crate) fn cmd_ci(
 		if any_tag_missing {
 			info!("ci: no changesets but unpublished tags detected, running publish");
 			let publish_args = PublishArgs {
-				dry_run: args.dry_run,
 				packages: args.packages.clone(),
 				no_git: args.no_git,
 			};
-			return cmd_publish(git, &publish_args, config);
+			return cmd_publish(git, &publish_args, dry_run, config);
 		}
 	}
 
@@ -107,7 +102,6 @@ mod tests {
 	#[test]
 	fn ci_args_default() {
 		let args = CiArgs::default();
-		assert!(!args.dry_run);
 		assert!(args.packages.is_empty());
 		assert!(args.branch.is_none());
 		assert!(!args.no_git);

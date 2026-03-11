@@ -23,10 +23,6 @@ use crate::utils::today_iso_date;
 /// Arguments for the `prepare` subcommand.
 #[derive(Args, Default)]
 pub struct PrepareArgs {
-	/// Preview changes without modifying any files
-	#[arg(long)]
-	pub dry_run: bool,
-
 	/// Only prepare specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
@@ -168,7 +164,6 @@ fn stage_and_commit(
 	extra_files: &[String],
 	release_infos: &[ReleaseInfo],
 	modified_files: &[PathBuf],
-	dry_run: bool,
 ) -> anyhow::Result<()> {
 	if release_infos.is_empty() {
 		return Ok(());
@@ -190,16 +185,6 @@ fn stage_and_commit(
 		all_files.push(resolved);
 	}
 
-	if dry_run {
-		info!("Would create commit: {commit_message}");
-		info!("Would stage files:");
-		for file in &all_files {
-			info!("  {}", file.display());
-		}
-		return Ok(());
-	}
-
-	// Stage and commit
 	git.add(&all_files)
 		.context("Failed to stage files for git commit")?;
 	git.commit(&commit_message)
@@ -262,6 +247,7 @@ fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
 pub(crate) fn cmd_prepare(
 	git: &git::GitWorkdir,
 	args: &PrepareArgs,
+	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	let env = config.env().context("env not set")?;
@@ -320,7 +306,7 @@ pub(crate) fn cmd_prepare(
 	if git_enabled
 		&& strategy == Strategy::Branch
 		&& config.github.enabled
-		&& !args.dry_run
+		&& !dry_run
 		&& env.github_client().is_none()
 	{
 		anyhow::bail!(
@@ -331,11 +317,11 @@ pub(crate) fn cmd_prepare(
 
 	// Pre-flight dirty-tree check and branch strategy setup (before filesystem changes).
 	let (original_branch, release_branch) = if git_enabled {
-		if !args.dry_run {
+		if !dry_run {
 			check_dirty_tree(git)?;
 		}
 		if strategy == Strategy::Branch {
-			let current = if args.dry_run {
+			let current = if dry_run {
 				git.current_branch().ok().flatten()
 			} else {
 				git.current_branch()?
@@ -345,9 +331,7 @@ pub(crate) fn cmd_prepare(
 				config.git.release_branch_prefix.as_deref(),
 				current.as_deref(),
 			);
-			if !args.dry_run {
-				git.checkout_or_reset_branch(&branch)?;
-			}
+			git.checkout_or_reset_branch(&branch)?;
 			(current, Some(branch))
 		} else {
 			(None, None)
@@ -388,13 +372,9 @@ pub(crate) fn cmd_prepare(
 		);
 		let changelog_entry = changelog.format_sections();
 
-		if args.dry_run {
-			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
-		} else {
-			project.write_version(&new_version)?;
-			changelog.update()?;
-			info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
-		}
+		project.write_version(&new_version, dry_run)?;
+		changelog.update(dry_run)?;
+		info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 
 		release_infos.push(ReleaseInfo {
 			package_name: pkg_name.clone(),
@@ -413,45 +393,49 @@ pub(crate) fn cmd_prepare(
 	for project in &projects {
 		for dep_name in project.dependency_names() {
 			if let Some(new_version) = bumped_versions.get(dep_name.as_str()) {
-				if args.dry_run {
+				let paths = project.update_dependency_version(dep_name, new_version, dry_run)?;
+				if !paths.is_empty() {
+					let verb = if dry_run { "would update" } else { "update" };
 					info!(
-						"  {}: would update dependency {} to {}",
+						"  {}: {verb} dependency {} to {}",
 						project.name(),
 						dep_name,
 						new_version
 					);
-					// Predict the manifest that would be modified so git lifecycle
-					// dry-run can report it as a file that would be staged.
-					modified_files.push(project.manifest_path());
-				} else {
-					let paths = project.update_dependency_version(dep_name, new_version)?;
 					modified_files.extend(paths);
 				}
 			}
 		}
 	}
 
-	// Collect lock file paths. During dry-run, use lock_file_path() to predict which
-	// file would be updated without running the update command.
+	// Collect lock file paths. run_mut is a no-op in dry-run so this is always safe to call.
 	for adapter in &adapters {
-		if args.dry_run {
-			if let Some(lock_path) = adapter.lock_file_path() {
-				modified_files.push(lock_path);
-			}
-		} else if let Some(lock_path) = adapter.update_lock_file()? {
+		if let Some(lock_path) = adapter.update_lock_file()? {
 			modified_files.push(lock_path);
 		}
 	}
 
 	// Consume changesets: delete fully consumed, rewrite partially consumed.
-	// Always track which changesets would be staged, but only consume during a real release.
 	let released: BTreeSet<String> = aggregated.keys().cloned().collect();
 	for (path, cs) in &changesets {
-		// Only stage changesets that touch at least one released package
-		if cs.packages.keys().any(|name| released.contains(name)) {
+		let released_pkgs: Vec<&String> = cs
+			.packages
+			.keys()
+			.filter(|name| released.contains(*name))
+			.collect();
+		if !released_pkgs.is_empty() {
 			modified_files.push(path.clone());
 		}
-		if !args.dry_run {
+		if dry_run {
+			if !released_pkgs.is_empty() {
+				let pkg_list = released_pkgs
+					.iter()
+					.map(|s| s.as_str())
+					.collect::<Vec<_>>()
+					.join(", ");
+				info!("Would consume changeset {}: {pkg_list}", path.display());
+			}
+		} else {
 			cs.consume(path, &released)?;
 		}
 	}
@@ -467,44 +451,30 @@ pub(crate) fn cmd_prepare(
 			&config.git.extra_files,
 			&release_infos,
 			&modified_files,
-			args.dry_run,
 		)?;
 
 		// Strategy push dispatch
 		match strategy {
 			Strategy::Push => {
-				if args.dry_run {
-					info!("Would push to origin");
-				} else {
-					git.push()?;
-				}
+				git.push()?;
 			}
 			Strategy::Branch => {
 				if let Some(ref branch) = release_branch {
-					if args.dry_run {
-						info!("Would push branch '{branch}' to origin");
-						if config.github.enabled {
-							let title = config
-								.github
-								.pull_request_title
-								.as_deref()
-								.unwrap_or(DEFAULT_PR_TITLE);
-							info!("Would create or update pull request: '{title}'");
-						}
-					} else {
-						git.force_push_branch(branch).with_context(|| {
-							format!(
-								"Failed to push release branch '{branch}'. \
-									 You are still on the release branch; run \
-									 `git checkout <your-branch>` to return."
-							)
-						})?;
+					info!("Pushing branch '{branch}' to origin");
+					git.force_push_branch(branch).with_context(|| {
+						format!(
+							"Failed to push release branch '{branch}'. \
+								 You are still on the release branch; run \
+								 `git checkout <your-branch>` to return."
+						)
+					})?;
 
-						// PR upsert is non-fatal; warn on failure.
-						// github_client is guaranteed Some by the pre-flight check above.
-						if config.github.enabled
-							&& let Some(client) = env.github_client()
-						{
+					// PR upsert: intentional exception per ADR-017 — outcome of the GitHub API
+					// call is unpredictable without making it, so the call itself remains gated.
+					if config.github.enabled {
+						if dry_run {
+							info!("Would attempt to create or update a PR in GitHub.");
+						} else if let Some(client) = env.github_client() {
 							let base = original_branch.as_deref().unwrap_or_else(|| {
 								log::warn!(
 									"HEAD is detached; using \"main\" as the PR base branch."
@@ -534,14 +504,7 @@ pub(crate) fn cmd_prepare(
 						}
 					}
 				}
-				if args.dry_run {
-					match &original_branch {
-						Some(orig) => info!("Would return to branch '{orig}'"),
-						None => {
-							info!("HEAD is detached; would remain on release branch after push")
-						}
-					}
-				} else if let Some(ref orig) = original_branch {
+				if let Some(ref orig) = original_branch {
 					git.checkout(orig)?;
 				}
 			}
@@ -630,26 +593,30 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &[], &[], &[], false);
+		let result = stage_and_commit(&git, &[], &[], &[]);
 		assert!(result.is_ok());
 	}
 
 	#[test]
-	fn stage_and_commit_dry_run_prints_summary() {
+	fn stage_and_commit_dry_run_suppresses_git_commands() {
 		let dir = tempfile::tempdir().unwrap();
 		let release_infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
 			changelog_entry: String::new(),
 		}];
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let inner = Arc::new(RecordingCommandRunner::new(0));
+		let dry_run_runner =
+			crate::command::DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(Arc::new(dry_run_runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &[], &release_infos, &[], true);
+		let result = stage_and_commit(&git, &[], &release_infos, &[]);
 		assert!(result.is_ok());
+		// DryRunCommandRunner suppresses run_mut calls — the inner recorder receives nothing.
+		assert!(inner.invocations().is_empty());
 	}
 
 	#[test]
@@ -667,7 +634,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -692,7 +659,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &extra_files, &release_infos, &[], true);
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -827,7 +794,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config).unwrap();
+		let result = cmd_prepare(&git, &args, false, config).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -862,7 +829,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, false, config);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -929,7 +896,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, false, config);
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -963,7 +930,6 @@ mod tests {
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs {
-			dry_run: true,
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
@@ -973,7 +939,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, true, config);
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped
@@ -1019,7 +985,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, false, config);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -1157,7 +1123,7 @@ mod tests {
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, false, config);
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 		let invocations = client.invocations();
@@ -1187,7 +1153,7 @@ mod tests {
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, false, config);
 		// PR failure is non-fatal — command should still succeed
 		assert!(
 			result.is_ok(),
@@ -1350,7 +1316,7 @@ mod tests {
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
-		let result = cmd_prepare(&git, &args, config);
+		let result = cmd_prepare(&git, &args, false, config);
 		assert!(result.is_err(), "Expected Err without github client");
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

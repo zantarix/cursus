@@ -124,9 +124,10 @@ impl Project {
 
 	/// Writes a new version to this project's manifest file.
 	///
+	/// When `dry_run` is `true`, detects changes but does not write to disk.
 	/// Delegates to the underlying package manager adapter.
-	pub fn write_version(&self, version: &Version) -> anyhow::Result<()> {
-		self.adapter.write_version(&self.info, version)
+	pub fn write_version(&self, version: &Version, dry_run: bool) -> anyhow::Result<()> {
+		self.adapter.write_version(&self.info, version, dry_run)
 	}
 
 	/// Publishes this project to its package registry.
@@ -159,14 +160,16 @@ impl Project {
 
 	/// Updates a dependency version in this project's manifest file.
 	///
+	/// When `dry_run` is `true`, detects which files would change but does not write them.
 	/// Delegates to the underlying package manager adapter.
 	pub fn update_dependency_version(
 		&self,
 		dependency_name: &str,
 		new_version: &Version,
+		dry_run: bool,
 	) -> anyhow::Result<Vec<PathBuf>> {
 		self.adapter
-			.update_dependency_version(&self.info, dependency_name, new_version)
+			.update_dependency_version(&self.info, dependency_name, new_version, dry_run)
 	}
 
 	/// Returns the absolute path to this project's manifest file.
@@ -226,28 +229,37 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 
 	/// Writes a new version to a project's manifest file, preserving formatting.
 	///
+	/// When `dry_run` is `true`, the method validates but does not write to disk.
+	///
 	/// # Arguments
 	///
 	/// * `project` - The project to update.
 	/// * `version` - The new version to write.
+	/// * `dry_run` - If `true`, skip the filesystem write.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the manifest file cannot be read or written.
-	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()>;
+	fn write_version(
+		&self,
+		project: &ProjectInfo,
+		version: &Version,
+		dry_run: bool,
+	) -> anyhow::Result<()>;
 
 	/// Updates the lock file after version changes.
 	///
-	/// This method should regenerate or update the lock file to reflect the new
-	/// version information. The implementation may use a custom command from the
-	/// configuration or fall back to package-manager-specific defaults.
+	/// Resolves the lock file path unconditionally, then runs the update command
+	/// via `run_mut` (which is a no-op when [`DryRunCommandRunner`] is active).
+	/// This means the path is always returned so that callers can track it for
+	/// git staging — even in dry-run mode, the path is known without running any command.
 	///
 	/// This is a workspace-level operation and should be called once per adapter
 	/// after all version writes are complete.
 	///
-	/// Returns `Some(path)` with the lock file path that was updated (so callers
-	/// can stage it for git), or `None` if no lock file exists or the lock file
-	/// location cannot be determined (e.g. when a custom command is used).
+	/// Returns `Some(path)` with the lock file path that was (or would be) updated,
+	/// or `None` if no lock file exists or the location cannot be determined (e.g.
+	/// when a custom `lock_command` is configured).
 	///
 	/// # Errors
 	///
@@ -267,6 +279,13 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// Returns an error if the publish operation fails for reasons other than
 	/// the package already existing.
+	///
+	/// # Note on dry-run
+	///
+	/// This method uses `run_mut` internally, so `DryRunCommandRunner` suppresses the
+	/// subprocess. However, the synthetic success output causes `publish()` to return
+	/// `PublishOutcome::Published`. Callers that need dry-run semantics **must** gate
+	/// this call themselves — see `publish_projects()` in `src/cli/publish.rs`.
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome>;
 
 	/// Returns the name of the registry this adapter publishes to.
@@ -277,33 +296,27 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// Returns the filename of the package manifest (e.g., `"Cargo.toml"` or `"package.json"`).
 	fn manifest_filename(&self) -> &str;
 
-	/// Returns the path of the lock file that `update_lock_file` would write, without
-	/// running any commands.
-	///
-	/// Returns `None` when no lock file can be determined in advance — for example, when
-	/// a custom `lock_command` is configured (the command's output file is unknown) or
-	/// when no lock file currently exists in the workspace.
-	///
-	/// This is used during dry-run mode so that Chronicle can report which files *would*
-	/// be staged without actually executing the lock file update.
-	fn lock_file_path(&self) -> Option<PathBuf>;
-
 	/// Updates a dependency version in a project's manifest file.
 	///
 	/// `dependency_name` is the name of the dependency to update.
 	/// `new_version` is the version to write.
+	///
+	/// When `dry_run` is `true`, detects which files would change but does not write them.
+	/// Still returns the paths of files that would be modified so callers can track them
+	/// for git staging purposes.
 	///
 	/// Returns a list of modified file paths (may include the project's own
 	/// manifest and/or a workspace-level manifest).
 	///
 	/// # Errors
 	///
-	/// Returns an error if a manifest file cannot be read or written.
+	/// Returns an error if a manifest file cannot be read or (when `dry_run` is false) written.
 	fn update_dependency_version(
 		&self,
 		project: &ProjectInfo,
 		dependency_name: &str,
 		new_version: &Version,
+		dry_run: bool,
 	) -> anyhow::Result<Vec<PathBuf>>;
 }
 

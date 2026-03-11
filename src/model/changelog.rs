@@ -89,10 +89,12 @@ impl Changelog {
 	/// text above it. If no such heading exists, the entry is appended to the file.
 	/// If the file does not exist, a new file is created with a `# Changelog` header.
 	///
+	/// When `dry_run` is `true` the file is not written.
+	///
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be read or written.
-	pub fn update(&self) -> anyhow::Result<()> {
+	pub fn update(&self, dry_run: bool) -> anyhow::Result<()> {
 		let changelog_path = self.project_path.join("CHANGELOG.md");
 		let entry = self.format_entry();
 		let content = if changelog_path.exists() {
@@ -103,8 +105,10 @@ impl Changelog {
 		} else {
 			format!("# Changelog\n\n{entry}\n")
 		};
-		std::fs::write(&changelog_path, content)
-			.with_context(|| format!("Failed to write {}", changelog_path.display()))?;
+		if !dry_run {
+			std::fs::write(&changelog_path, content)
+				.with_context(|| format!("Failed to write {}", changelog_path.display()))?;
+		}
 		Ok(())
 	}
 }
@@ -248,7 +252,7 @@ mod tests {
 			changes,
 			AbsolutePath::new(dir.path()).unwrap(),
 		);
-		changelog.update().unwrap();
+		changelog.update(false).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		insta::assert_snapshot!(content);
@@ -378,7 +382,7 @@ mod tests {
 			changes,
 			AbsolutePath::new(dir.path()).unwrap(),
 		);
-		changelog.update().unwrap();
+		changelog.update(false).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("# Changelog"));
@@ -400,7 +404,7 @@ mod tests {
 			changes,
 			AbsolutePath::new(dir.path()).unwrap(),
 		);
-		changelog.update().unwrap();
+		changelog.update(false).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("## 0.2.0 - 2024-06-01"));
@@ -426,9 +430,9 @@ mod tests {
 			)
 		};
 
-		make("1.0.0", "Initial release").update().unwrap();
-		make("1.0.1", "Second release").update().unwrap();
-		make("1.0.2", "Third release").update().unwrap();
+		make("1.0.0", "Initial release").update(false).unwrap();
+		make("1.0.1", "Second release").update(false).unwrap();
+		make("1.0.2", "Third release").update(false).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		insta::assert_snapshot!(content);
@@ -447,9 +451,9 @@ mod tests {
 			)
 		};
 
-		make("1.0.0", "Initial release").update().unwrap();
-		make("1.0.1", "Second release").update().unwrap();
-		make("1.0.2", "Third release").update().unwrap();
+		make("1.0.0", "Initial release").update(false).unwrap();
+		make("1.0.1", "Second release").update(false).unwrap();
+		make("1.0.2", "Third release").update(false).unwrap();
 
 		let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 		assert_eq!(content.matches("# Changelog").count(), 1);
@@ -476,7 +480,7 @@ mod tests {
 			changes,
 			AbsolutePath::new(sub.clone()).unwrap(),
 		);
-		changelog.update().unwrap();
+		changelog.update(false).unwrap();
 
 		let content = std::fs::read_to_string(sub.join("CHANGELOG.md")).unwrap();
 		assert!(content.contains("## 1.0.0 - 2024-01-15"));
@@ -496,7 +500,7 @@ mod tests {
 			changes,
 			AbsolutePath::new(dir.path()).unwrap(),
 		);
-		let result = changelog.update();
+		let result = changelog.update(false);
 
 		// Should fail because CHANGELOG.md is a directory, not a file
 		assert!(result.is_err());
@@ -518,7 +522,7 @@ mod tests {
 			changes,
 			AbsolutePath::new(dir.path()).unwrap(),
 		);
-		let result = changelog.update();
+		let result = changelog.update(false);
 
 		// Restore permissions before assertions for cleanup
 		let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();

@@ -283,7 +283,12 @@ fn expand_workspace_pattern(pm_root: &Path, pattern: &str) -> anyhow::Result<Vec
 }
 
 impl PackageManagerAdapter for NpmAdapter {
-	fn write_version(&self, project: &ProjectInfo, version: &Version) -> anyhow::Result<()> {
+	fn write_version(
+		&self,
+		project: &ProjectInfo,
+		version: &Version,
+		dry_run: bool,
+	) -> anyhow::Result<()> {
 		let manifest_path = project.path.join("package.json");
 		let contents = std::fs::read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
@@ -296,10 +301,12 @@ impl PackageManagerAdapter for NpmAdapter {
 			.get("version")
 			.with_context(|| format!("Missing 'version' field in {}", manifest_path.display()))?;
 		prop.set_value(CstInputValue::String(version.to_string()));
-		// Ensure the file always ends with exactly one newline.
-		let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
-		std::fs::write(&manifest_path, output)
-			.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+		if !dry_run {
+			// Ensure the file always ends with exactly one newline.
+			let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
+			std::fs::write(&manifest_path, output)
+				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+		}
 		Ok(())
 	}
 
@@ -373,21 +380,6 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(projects)
 	}
 
-	fn lock_file_path(&self) -> Option<std::path::PathBuf> {
-		// Custom commands write to an unknown location — report None.
-		if self.config.lock_command.is_some() {
-			return None;
-		}
-		let workspace_root = self.resolve_root().ok()?;
-		for name in ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"] {
-			let path = workspace_root.join(name);
-			if path.exists() {
-				return Some(path);
-			}
-		}
-		None
-	}
-
 	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		let workspace_root = self.resolve_root()?;
 
@@ -398,9 +390,10 @@ impl PackageManagerAdapter for NpmAdapter {
 				anyhow::bail!("lock_command is empty");
 			}
 
+			// run_shell_mut is a no-op when DryRunCommandRunner is active.
 			let output = self
 				.env
-				.run_shell(lock_command, &workspace_root)
+				.run_shell_mut(lock_command, &workspace_root)
 				.with_context(|| {
 					format!(
 						"Failed to execute lock command '{}' in {}",
@@ -422,11 +415,13 @@ impl PackageManagerAdapter for NpmAdapter {
 			return Ok(None);
 		}
 
-		// Auto-detect lock file and run appropriate command
+		// Auto-detect lock file and run appropriate command.
+		// Resolve the path before the run_mut call so it is always available.
 		if workspace_root.join("package-lock.json").exists() {
+			let lock_path = workspace_root.join("package-lock.json");
 			let output = self
 				.env
-				.run("npm", &["install", "--package-lock-only"], &workspace_root)
+				.run_mut("npm", &["install", "--package-lock-only"], &workspace_root)
 				.with_context(|| {
 					format!(
 						"Failed to execute npm install --package-lock-only in {}",
@@ -443,11 +438,12 @@ impl PackageManagerAdapter for NpmAdapter {
 				);
 			}
 
-			Ok(Some(workspace_root.join("package-lock.json")))
+			Ok(Some(lock_path))
 		} else if workspace_root.join("pnpm-lock.yaml").exists() {
+			let lock_path = workspace_root.join("pnpm-lock.yaml");
 			let output = self
 				.env
-				.run("pnpm", &["install", "--lockfile-only"], &workspace_root)
+				.run_mut("pnpm", &["install", "--lockfile-only"], &workspace_root)
 				.with_context(|| {
 					format!(
 						"Failed to execute pnpm install --lockfile-only in {}",
@@ -464,11 +460,12 @@ impl PackageManagerAdapter for NpmAdapter {
 				);
 			}
 
-			Ok(Some(workspace_root.join("pnpm-lock.yaml")))
+			Ok(Some(lock_path))
 		} else if workspace_root.join("yarn.lock").exists() {
+			let lock_path = workspace_root.join("yarn.lock");
 			let output = self
 				.env
-				.run(
+				.run_mut(
 					"yarn",
 					&["install", "--mode", "update-lockfile"],
 					&workspace_root,
@@ -489,7 +486,7 @@ impl PackageManagerAdapter for NpmAdapter {
 				);
 			}
 
-			Ok(Some(workspace_root.join("yarn.lock")))
+			Ok(Some(lock_path))
 		} else {
 			// No lock file found - no-op
 			Ok(None)
@@ -513,9 +510,10 @@ impl PackageManagerAdapter for NpmAdapter {
 			args.push(&access_owned);
 		}
 
+		// run_mut is a no-op when DryRunCommandRunner is active.
 		let output = self
 			.env
-			.run("npm", &args, &project_dir)
+			.run_mut("npm", &args, &project_dir)
 			.with_context(|| format!("Failed to execute npm publish for {}", project.name))?;
 
 		if output.status.success() {
@@ -547,6 +545,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		project: &ProjectInfo,
 		dependency_name: &str,
 		new_version: &Version,
+		dry_run: bool,
 	) -> anyhow::Result<Vec<PathBuf>> {
 		let manifest_path = project.path.join("package.json");
 		if !manifest_path.exists() {
@@ -609,9 +608,11 @@ impl PackageManagerAdapter for NpmAdapter {
 		}
 
 		if modified {
-			let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
-			std::fs::write(&manifest_path, output)
-				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+			if !dry_run {
+				let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
+				std::fs::write(&manifest_path, output)
+					.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+			}
 			return Ok(vec![manifest_path]);
 		}
 
@@ -1145,7 +1146,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(&info, &version);
+		let result = adapter.write_version(&info, &version, false);
 		assert!(result.is_err());
 	}
 
@@ -1156,7 +1157,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let version: semver::Version = "1.0.0".parse().unwrap();
-		let result = adapter.write_version(&info, &version);
+		let result = adapter.write_version(&info, &version, false);
 		assert!(result.is_err());
 	}
 
@@ -1167,7 +1168,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter.write_version(&info, &new_version).unwrap();
+		adapter.write_version(&info, &new_version, false).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
 		assert!(
@@ -1185,7 +1186,7 @@ mod tests {
 		let info = project_info(dir.path(), "my-app", "");
 
 		let new_v: semver::Version = "0.2.0".parse().unwrap();
-		adapter.write_version(&info, &new_v).unwrap();
+		adapter.write_version(&info, &new_v, false).unwrap();
 
 		// Re-enumerate to verify the write
 		let projects = enumerate(dir.path()).unwrap();
@@ -1202,7 +1203,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter.write_version(&info, &new_version).unwrap();
+		adapter.write_version(&info, &new_version, false).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
 		assert!(
@@ -1223,7 +1224,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter.write_version(&info, &new_version).unwrap();
+		adapter.write_version(&info, &new_version, false).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
 		assert!(
@@ -1248,7 +1249,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter.write_version(&info, &new_version).unwrap();
+		adapter.write_version(&info, &new_version, false).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
 		assert!(
@@ -1271,7 +1272,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let info = project_info(dir.path(), "my-app", "");
 		let new_version: semver::Version = "2.0.0".parse().unwrap();
-		adapter.write_version(&info, &new_version).unwrap();
+		adapter.write_version(&info, &new_version, false).unwrap();
 
 		let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
 		let name_pos = contents.find("\"name\"").unwrap();
@@ -1765,12 +1766,22 @@ mod tests {
 		assert!(result.unwrap_err().to_string().contains("Lock command"));
 	}
 
-	// lock_file_path tests
+	// update_lock_file path-resolution tests (using DryRunCommandRunner to skip execution)
+
+	fn dry_run_adapter(config: NpmConfig, dir: &Path) -> NpmAdapter {
+		use crate::command::DryRunCommandRunner;
+		let inner: Arc<dyn CommandRunner> =
+			Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
+		let dry_runner: Arc<dyn CommandRunner> =
+			Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
+		let env = crate::Env::new(dry_runner);
+		NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
+	}
 
 	#[test]
-	fn lock_file_path_returns_none_when_lock_command_set() {
+	fn update_lock_file_dry_run_custom_command_returns_none() {
 		let dir = temp_dir();
-		let adapter = recording_adapter_default(
+		let adapter = dry_run_adapter(
 			NpmConfig {
 				enabled: true,
 				path: None,
@@ -1778,46 +1789,48 @@ mod tests {
 				access: None,
 			},
 			dir.path(),
-			0,
 		);
-		assert_eq!(adapter.lock_file_path(), None);
+		assert_eq!(adapter.update_lock_file().unwrap(), None);
 	}
 
 	#[test]
-	fn lock_file_path_returns_none_when_no_lock_file_exists() {
+	fn update_lock_file_dry_run_no_lock_file_returns_none() {
 		let dir = temp_dir();
-		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		assert_eq!(adapter.lock_file_path(), None);
+		let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
+		assert_eq!(adapter.update_lock_file().unwrap(), None);
 	}
 
 	#[test]
-	fn lock_file_path_returns_package_lock_json_when_present() {
+	fn update_lock_file_dry_run_package_lock_json_returns_path() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
-		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
 		assert_eq!(
-			adapter.lock_file_path(),
+			adapter.update_lock_file().unwrap(),
 			Some(dir.path().join("package-lock.json"))
 		);
 	}
 
 	#[test]
-	fn lock_file_path_returns_pnpm_lock_yaml_when_present() {
+	fn update_lock_file_dry_run_pnpm_lock_yaml_returns_path() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
-		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+		let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
 		assert_eq!(
-			adapter.lock_file_path(),
+			adapter.update_lock_file().unwrap(),
 			Some(dir.path().join("pnpm-lock.yaml"))
 		);
 	}
 
 	#[test]
-	fn lock_file_path_returns_yarn_lock_when_present() {
+	fn update_lock_file_dry_run_yarn_lock_returns_path() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("yarn.lock"), "").unwrap();
-		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-		assert_eq!(adapter.lock_file_path(), Some(dir.path().join("yarn.lock")));
+		let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
+		assert_eq!(
+			adapter.update_lock_file().unwrap(),
+			Some(dir.path().join("yarn.lock"))
+		);
 	}
 
 	#[test]
@@ -1851,7 +1864,7 @@ mod tests {
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 		assert!(modified.is_empty());
 	}
@@ -1863,7 +1876,7 @@ mod tests {
 		let info = project_info(dir.path(), "pkg-a", "");
 		let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 		let new_version: Version = "2.0.0".parse().unwrap();
-		let result = adapter.update_dependency_version(&info, "pkg-b", &new_version);
+		let result = adapter.update_dependency_version(&info, "pkg-b", &new_version, false);
 		assert!(result.is_err());
 	}
 
@@ -1875,7 +1888,7 @@ mod tests {
 		let new_version: Version = "2.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1891,7 +1904,7 @@ mod tests {
 		let new_version: Version = "1.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1907,7 +1920,7 @@ mod tests {
 		let new_version: Version = "2.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1924,7 +1937,7 @@ mod tests {
 
 		// Should not error, should return empty (skipped)
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert!(modified.is_empty(), "workspace: deps should be skipped");
@@ -1938,7 +1951,7 @@ mod tests {
 		let new_version: Version = "2.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "nonexistent", &new_version)
+			.update_dependency_version(&info, "nonexistent", &new_version, false)
 			.unwrap();
 
 		assert!(modified.is_empty());
@@ -1955,7 +1968,7 @@ mod tests {
 		let new_version: Version = "2.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -1989,7 +2002,7 @@ mod tests {
 		let new_version: Version = "2.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -2008,7 +2021,7 @@ mod tests {
 		let new_version: Version = "2.0.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);
@@ -2038,7 +2051,7 @@ mod tests {
 		let new_version: Version = "0.3.0".parse().unwrap();
 
 		let modified = adapter
-			.update_dependency_version(&info, "pkg-b", &new_version)
+			.update_dependency_version(&info, "pkg-b", &new_version, false)
 			.unwrap();
 
 		assert_eq!(modified.len(), 1);

@@ -73,9 +73,24 @@ where
 /// Prefer this over [`run`] when the caller has already parsed the arguments
 /// (for example, to read the verbose/silent flags and initialise logging before
 /// any library code runs).
+///
+/// When `--dry-run` is set, the environment's command runner is automatically
+/// wrapped in a [`crate::command::DryRunCommandRunner`] so that mutating
+/// subprocess calls (git commits, cargo publish, etc.) are suppressed across
+/// all code paths — both the binary and integration tests.
 pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode> {
 	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
 	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
+
+	// Wrap the runner with DryRunCommandRunner when --dry-run is active so that
+	// all mutating subprocess calls are silently suppressed.
+	let dry_run = cli.global.dry_run;
+	let env = if dry_run {
+		env.with_dry_run_runner()
+	} else {
+		env
+	};
+
 	let git = git::GitWorkdir::new(&env, git_workdir.clone());
 
 	match cli.command {
@@ -86,9 +101,9 @@ pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 				Some(cli::Command::Change(args)) => {
 					cli::cmd_change(&git, &args, &cli.global, config)
 				}
-				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&git, &args, config),
-				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, config),
-				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, config),
+				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&git, &args, dry_run, config),
+				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, dry_run, config),
+				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, dry_run, config),
 				None => cli::cmd_change(&git, &cli::ChangeArgs::default(), &cli.global, config),
 				Some(cli::Command::Init(_)) => {
 					// The outer match arm already handles Init; this arm cannot be reached.

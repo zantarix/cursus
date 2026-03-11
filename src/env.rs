@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::{ExitStatus, Output};
 use std::sync::Arc;
 
-use crate::command::CommandRunner;
+use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::github::client::GitHubClient;
 
 /// Environment variables and runtime dependencies used by Chronicle.
@@ -66,6 +66,22 @@ impl Env {
 		self
 	}
 
+	/// Wraps the current command runner in a [`DryRunCommandRunner`] that suppresses
+	/// all mutating operations.
+	///
+	/// This is called automatically by [`crate::run_with`] when `--dry-run` is set,
+	/// so all code paths (both the binary and integration tests) benefit from the
+	/// dry-run protection without any manual composition.
+	pub(crate) fn with_dry_run_runner(self) -> Self {
+		let dry_runner: Arc<dyn CommandRunner> =
+			Arc::new(DryRunCommandRunner::new(Arc::clone(&self.runner)));
+		Self {
+			runner: dry_runner,
+			editor: self.editor,
+			github_client: self.github_client,
+		}
+	}
+
 	/// Returns the configured editor, if one was set.
 	pub(crate) fn editor(&self) -> Option<&str> {
 		self.editor.as_deref()
@@ -78,21 +94,35 @@ impl Env {
 
 	/// Runs a program with the given arguments in the specified directory.
 	///
-	/// Delegates to the underlying [`CommandRunner`].
+	/// Delegates to the underlying [`CommandRunner`]. Read-only.
 	pub fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		self.runner.run(program, args, cwd)
 	}
 
 	/// Runs a shell command via `/bin/sh -c` in the specified directory.
 	///
-	/// Delegates to the underlying [`CommandRunner`].
+	/// Delegates to the underlying [`CommandRunner`]. Read-only.
 	pub fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		self.runner.run_shell(command, cwd)
 	}
 
+	/// Runs a mutating program with the given arguments in the specified directory.
+	///
+	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
+	pub fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		self.runner.run_mut(program, args, cwd)
+	}
+
+	/// Runs a mutating shell command via `/bin/sh -c` in the specified directory.
+	///
+	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
+	pub fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		self.runner.run_shell_mut(command, cwd)
+	}
+
 	/// Runs a program with inherited stdin/stdout/stderr for interactive use.
 	///
-	/// Delegates to the underlying [`CommandRunner`].
+	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
 	pub fn run_interactive(
 		&self,
 		program: &str,
@@ -192,11 +222,51 @@ mod tests {
 	}
 
 	#[test]
+	fn run_mut_delegates_to_runner() {
+		let (runner, env) = recording_env(0);
+		env.run_mut("git", &["commit", "-m", "msg"], Path::new("."))
+			.unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args, ["commit", "-m", "msg"]);
+	}
+
+	#[test]
+	fn run_shell_mut_delegates_to_runner() {
+		let (runner, env) = recording_env(0);
+		env.run_shell_mut("npm install", Path::new(".")).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations[0].program, "/bin/sh");
+		assert!(invocations[0].is_shell);
+	}
+
+	#[test]
 	fn run_interactive_delegates_to_runner() {
 		let (runner, env) = recording_env(0);
 		env.run_interactive("vim", &[], Path::new(".")).unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, "vim");
 		assert!(invocations[0].is_interactive);
+	}
+
+	#[test]
+	fn with_dry_run_runner_suppresses_run_mut() {
+		let (runner, env) = recording_env(0);
+		let dry_env = env.with_dry_run_runner();
+		dry_env
+			.run_mut("git", &["push", "origin", "HEAD"], Path::new("."))
+			.unwrap();
+		// The inner recording runner must NOT have been called (DryRunCommandRunner intercepts)
+		assert!(runner.invocations().is_empty());
+	}
+
+	#[test]
+	fn with_dry_run_runner_still_forwards_run() {
+		let (runner, env) = recording_env(0);
+		let dry_env = env.with_dry_run_runner();
+		dry_env.run("git", &["status"], Path::new(".")).unwrap();
+		// Read-only run is forwarded to the inner runner
+		assert_eq!(runner.invocations().len(), 1);
+		assert_eq!(runner.invocations()[0].program, "git");
 	}
 }

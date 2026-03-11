@@ -39,8 +39,8 @@ Key differences from old style:
 
 ## ADR Status Quick Reference
 
-- ADR-001 to ADR-016: Accepted
-- Next ADR number: 017
+- ADR-001 to ADR-017: Accepted
+- Next ADR number: 018
 
 ## Project ADR Rules (from CLAUDE.md)
 

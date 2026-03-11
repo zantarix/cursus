@@ -52,7 +52,7 @@ impl GitWorkdir {
 
 		let output = self
 			.env
-			.run("git", &args, &self.path)
+			.run_mut("git", &args, &self.path)
 			.context("Failed to run git add")?;
 
 		if !output.status.success() {
@@ -71,7 +71,7 @@ impl GitWorkdir {
 	pub(crate) fn commit(&self, message: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run("git", &["commit", "-m", message], &self.path)
+			.run_mut("git", &["commit", "-m", message], &self.path)
 			.context("Failed to run git commit")?;
 
 		if !output.status.success() {
@@ -90,7 +90,7 @@ impl GitWorkdir {
 	pub(crate) fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run("git", &["tag", "-a", tag_name, "-m", message], &self.path)
+			.run_mut("git", &["tag", "-a", tag_name, "-m", message], &self.path)
 			.context("Failed to run git tag")?;
 
 		if !output.status.success() {
@@ -114,7 +114,7 @@ impl GitWorkdir {
 	pub(crate) fn push(&self) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run("git", &["push", "origin", "HEAD"], &self.path)
+			.run_mut("git", &["push", "origin", "HEAD"], &self.path)
 			.context("Failed to run git push")?;
 
 		if !output.status.success() {
@@ -184,7 +184,7 @@ impl GitWorkdir {
 	pub(crate) fn checkout(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run("git", &["checkout", branch], &self.path)
+			.run_mut("git", &["checkout", branch], &self.path)
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
@@ -250,7 +250,7 @@ impl GitWorkdir {
 	pub(crate) fn checkout_or_reset_branch(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run("git", &["checkout", "-B", branch], &self.path)
+			.run_mut("git", &["checkout", "-B", branch], &self.path)
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
@@ -273,7 +273,7 @@ impl GitWorkdir {
 	pub(crate) fn force_push_branch(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run(
+			.run_mut(
 				"git",
 				&["push", "--force-with-lease", "origin", branch],
 				&self.path,
@@ -298,7 +298,7 @@ impl GitWorkdir {
 	pub(crate) fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run("git", &["push", "origin", tag], &self.path)
+			.run_mut("git", &["push", "origin", tag], &self.path)
 			.context("Failed to run git push tag")?;
 
 		if !output.status.success() {
