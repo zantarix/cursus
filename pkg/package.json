@@ -3,16 +3,16 @@
 	"version": "0.0.1",
 	"private": true,
 	"description": "Release management with style",
-	"homepage": "https://github.com/mscharley/chronicle#readme",
+	"homepage": "https://github.com/zantarix/chronicle#readme",
 	"bugs": {
-		"url": "https://github.com/mscharley/chronicle/issues"
+		"url": "https://github.com/zantarix/chronicle/issues"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/mscharley/chronicle.git"
+		"url": "git+https://github.com/zantarix/chronicle.git"
 	},
 	"license": "MPL-2.0",
-	"author": "Matthew Scharley <github@scharley.me>",
+	"author": "Matthew Scharley <github@zantarix.com>",
 	"type": "module",
 	"bin": "bin/chronicle",
 	"scripts": {
