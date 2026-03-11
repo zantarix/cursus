@@ -46,4 +46,5 @@ jobs:
           # Override the default GITHUB_TOKEN so chronicle uses the App token
           # for all GitHub API calls (PRs, releases).
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          # TODO: Cargo and NPM credentials will be needed eventually.
         run: ./target/release/chronicle ci --no-interactive

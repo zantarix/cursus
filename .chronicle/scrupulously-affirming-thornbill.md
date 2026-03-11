@@ -1,5 +1,5 @@
 +++
-"@mscharley/chronicle" = "minor"
+"@zantarix/chronicle" = "minor"
 chronicle = "minor"
 +++
 
