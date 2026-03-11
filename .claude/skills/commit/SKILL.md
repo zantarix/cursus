@@ -5,7 +5,7 @@ description: Use to verify and commit staged or unstaged changes with a well-cra
 
 Commit the current changes following this project's standards. Perform the steps below in order, stopping and reporting any failures.
 
-1. **Verify** the code quality using the `verify-code` skill. Fix any failures before proceeding.
+1. **Verify** the code quality using the `verify-code` skill, if any files in the `src/` folder have changed. Fix any failures before proceeding.
 
 2. **Stage** changes: prefer adding specific files by name rather than `git add -A`. Never stage secrets, credentials, or large binaries.
 
