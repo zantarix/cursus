@@ -591,6 +591,49 @@ fn prepare_branch_flag_overrides_prefix() {
 	);
 }
 
+/// `prepare --branch` with the branch strategy must NOT warn "no effect".
+///
+/// This guards against a mutation that inverts the strategy equality check (`== Push` →
+/// `!= Push`), which would incorrectly warn whenever `--branch` is used with branch strategy.
+#[test]
+fn prepare_branch_arg_with_branch_strategy_no_warning() {
+	use chronicle::test_logging::{init_test_logger, take_logs};
+	init_test_logger();
+	let _ = take_logs();
+
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"prepare",
+			"--branch",
+			"custom-release-branch",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "release failed: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("no effect") && m.contains("branch")),
+		"Should not warn when --branch is used with branch strategy, got: {logs:?}"
+	);
+}
+
 #[test]
 fn prepare_git_config_old_run_until_field_fails_to_load() {
 	// Old configs with run_until must produce a clear parse error.

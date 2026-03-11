@@ -879,6 +879,74 @@ mod tests {
 	}
 
 	#[test]
+	fn create_and_push_tags_does_not_log_when_nothing_created() {
+		// When no packages are published the "Pushed N tag(s)" info line must NOT appear.
+		// This guards against mutations that make the `if created > 0` guard always true
+		// (e.g. replace `>` with `>=`), which would log a misleading message for 0 tags.
+		use crate::test_logging::{init_test_logger, take_logs};
+		init_test_logger();
+		let _ = take_logs();
+
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs,
+		);
+
+		let (created, skipped) = create_and_push_tags(&[], &config, &git, false).unwrap();
+		assert_eq!(created, 0);
+		assert_eq!(skipped, 0);
+
+		let logs = take_logs();
+		assert!(
+			!logs
+				.iter()
+				.any(|(_, m)| m.contains("Pushed") && m.contains("tag")),
+			"Should not log a 'Pushed N tag(s)' message when nothing was created, got: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn create_and_push_tags_logs_when_tags_created() {
+		// When a tag IS created the "Pushed N tag(s)" info line MUST appear.
+		// This guards against mutations that make `if created > 0` always false
+		// (e.g. replace `>` with `<`), which would suppress the log even when tags
+		// were actually pushed.
+		use crate::test_logging::{init_test_logger, take_logs};
+		init_test_logger();
+		let _ = take_logs();
+
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		// Empty stdout → git_tag_exists returns false → tag gets created
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs,
+		);
+		let published = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.2.0".parse().unwrap(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
+		}];
+
+		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
+		assert_eq!(created, 1);
+		assert_eq!(skipped, 0);
+
+		let logs = take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("Pushed") && m.contains("tag")),
+			"Should log 'Pushed N tag(s)' when tags were created, got: {logs:?}"
+		);
+	}
+
+	#[test]
 	fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());

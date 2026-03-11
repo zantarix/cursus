@@ -1000,6 +1000,37 @@ enabled = true
 	}
 
 	#[test]
+	fn git_workdir_returns_some_after_new() {
+		let dir = temp_dir();
+		let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let config = Config::new(&abs);
+		assert_eq!(
+			config.git_workdir(),
+			Some(&abs),
+			"git_workdir() should return Some after Config::new"
+		);
+	}
+
+	#[test]
+	fn load_impl_fails_when_no_config_file() {
+		// Call load_impl directly to cover the non-test-support `load` code path,
+		// which is otherwise compiled out when the test-support feature is active.
+		let dir = temp_dir();
+		let result = load_impl(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("No configuration found"),
+			"Expected 'No configuration found' from load_impl"
+		);
+	}
+
+	#[test]
 	fn load_fails_on_old_run_until_field() {
 		let dir = temp_dir();
 		let config_dir = dir.path().join(".chronicle");

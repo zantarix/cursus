@@ -916,4 +916,33 @@ mod tests {
 			"Error should mention no editor found, got: {msg}"
 		);
 	}
+
+	#[test]
+	fn open_editor_uses_parent_dir_as_cwd() {
+		// The editor must be invoked with the file's parent directory as cwd,
+		// not the process cwd or ".". This verifies the `filter(|p| !p.as_os_str().is_empty())`
+		// guard preserves the real parent path.
+		let dir = tempfile::tempdir().unwrap();
+		let subdir = dir.path().join(".chronicle");
+		std::fs::create_dir_all(&subdir).unwrap();
+		let path = subdir.join("my-changeset.md");
+		std::fs::write(&path, "").unwrap();
+
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = make_env_with_runner(
+			Some("vim"),
+			Arc::clone(&runner) as Arc<dyn crate::command::CommandRunner>,
+		);
+		open_editor(&path, &env).unwrap();
+
+		let invocations = runner.invocations();
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive)
+			.expect("Expected an interactive editor invocation");
+		assert_eq!(
+			editor_call.cwd, subdir,
+			"Editor should be invoked with the file's parent directory as cwd"
+		);
+	}
 }

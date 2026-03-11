@@ -343,6 +343,42 @@ fn ci_fails_when_no_config() {
 	assert!(result.is_err(), "Expected Err when config is missing");
 }
 
+/// Multi-package: `ci` logs "nothing to do" when all packages have their expected tags.
+///
+/// This test verifies that `is_multi` is computed as `projects.len() > 1` (not `< 1`).
+/// With two packages both tagged in `pkg@version` format, CI should detect all tags present
+/// and log "nothing to do" — not trigger a "running publish" dispatch.
+#[test]
+fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_cargo_workspace(
+		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
+		git_enabled_config(),
+	);
+
+	// Both packages tagged in multi-package (pkg@version) format.
+	git_tag(dir.path(), "pkg-a@1.0.0");
+	git_tag(dir.path(), "pkg-b@2.0.0");
+
+	let result = run_chronicle(
+		["chronicle", "--no-interactive", "ci", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("nothing to do")),
+		"Expected 'ci: nothing to do' when all multi-package tags are present, got: {logs:?}"
+	);
+	assert!(
+		!logs.iter().any(|(_, m)| m.contains("running publish")),
+		"Should not trigger publish when all tags are present, got: {logs:?}"
+	);
+}
+
 /// `ci` returns an error when a requested package does not exist (with git enabled).
 #[test]
 fn ci_fails_when_package_filter_names_unknown_package() {

@@ -386,6 +386,26 @@ mod tests {
 	}
 
 	#[test]
+	fn git_config_with_tag_format_returns_modified_self() {
+		let config = GitConfig::default().with_tag_format(TagFormat::Prefixed);
+		assert_eq!(
+			config.tag_format,
+			TagFormat::Prefixed,
+			"with_tag_format should set tag_format on self"
+		);
+	}
+
+	#[test]
+	fn git_config_with_extra_files_returns_modified_self() {
+		let files = vec!["custom.lock".to_string(), "dist/manifest.json".to_string()];
+		let config = GitConfig::default().with_extra_files(files.clone());
+		assert_eq!(
+			config.extra_files, files,
+			"with_extra_files should set extra_files on self"
+		);
+	}
+
+	#[test]
 	fn tag_format_auto_single_package() {
 		let version = semver::Version::new(1, 2, 3);
 		assert_eq!(TagFormat::Auto.tag("my-pkg", &version, false), "v1.2.3");

@@ -640,4 +640,36 @@ Initial release
 		let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
 		assert!(body.is_empty());
 	}
+
+	#[test]
+	fn extract_version_body_strips_leading_blank_lines() {
+		// Multiple blank lines before content — the result must not start with a blank line.
+		let changelog = "# Changelog\n\n## 1.0.0\n\n\n\nContent here\n";
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, changelog).unwrap();
+
+		let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+		assert!(
+			!body.starts_with('\n'),
+			"body should not start with blank line, got: {body:?}"
+		);
+		assert!(body.contains("Content here"));
+	}
+
+	#[test]
+	fn extract_version_body_strips_trailing_blank_lines() {
+		// Trailing blank lines between sections — the result must not end with a blank line.
+		let changelog = "# Changelog\n\n## 1.0.0\n\nContent here\n\n\n## 0.9.0\n\nPrevious\n";
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("CHANGELOG.md");
+		std::fs::write(&path, changelog).unwrap();
+
+		let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+		assert!(
+			!body.ends_with('\n'),
+			"body should not end with blank line, got: {body:?}"
+		);
+		assert!(body.contains("Content here"));
+	}
 }

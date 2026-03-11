@@ -696,6 +696,67 @@ fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
 	assert_eq!(original_a, after_a, "dry-run must not modify dep files");
 }
 
+/// `prepare` issues a warning when `--branch` is given with the push strategy.
+#[test]
+fn prepare_branch_arg_with_push_strategy_warns() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\ntest-project = \"patch\"\n+++\n\nFix\n",
+	);
+
+	// Push strategy is the default (no [git] section). Passing --branch should warn.
+	let result = common::run_chronicle(
+		[
+			"chronicle",
+			"--no-interactive",
+			"prepare",
+			"--branch",
+			"custom-branch",
+		],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Warn && m.contains("no effect")),
+		"Expected a 'no effect' warning when --branch is given with push strategy, got: {logs:?}"
+	);
+}
+
+/// `prepare` without `--branch` and push strategy must NOT issue the "no effect" warning.
+///
+/// This guards against mutations that weaken `&&` to `||` in the branch-warning predicate,
+/// which would incorrectly warn whenever push strategy is active even without a `--branch` arg.
+#[test]
+fn prepare_no_branch_arg_with_push_strategy_no_warning() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\ntest-project = \"patch\"\n+++\n\nFix\n",
+	);
+
+	// No --branch arg, push strategy (default) → warning must NOT appear.
+	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("no effect") && m.contains("branch")),
+		"Should not warn about --branch when it was not passed, got: {logs:?}"
+	);
+}
+
 #[test]
 fn prepare_updates_npm_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
