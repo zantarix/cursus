@@ -18,18 +18,18 @@ jobs:
           app-id: ${{ vars.ZANTARIX_APP_ID }}
           private-key: ${{ secrets.ZANTARIX_APP_PRIVATE_KEY }}
 
+      # Fetch full history so that `chronicle ci` can detect existing git tags.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
       # Use the GitHub App bot as the git committer so release commits are
       # attributed to the App rather than to a personal account.
       - name: Configure git identity
         run: |
           git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
           git config user.email "${{ vars.ZANTARIX_APP_ID }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
-
-      # Fetch full history so that `chronicle ci` can detect existing git tags.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          fetch-depth: 0
 
       - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
