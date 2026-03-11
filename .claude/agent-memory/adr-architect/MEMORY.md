@@ -39,8 +39,9 @@ Key differences from old style:
 
 ## ADR Status Quick Reference
 
-- ADR-001 to ADR-017: Accepted
-- Next ADR number: 018
+- ADR-001 to ADR-018: Accepted
+- ADR-013: backend sub-decision superseded by ADR-018 (log facade decision still valid)
+- Next ADR number: 019
 
 ## Project ADR Rules (from CLAUDE.md)
 

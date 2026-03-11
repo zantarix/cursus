@@ -5,14 +5,10 @@ mod common;
 use std::process::ExitCode;
 
 use chronicle::model::config::PackageManager;
-use common::{temp_git_repo, temp_git_repo_with_cargo_workspace, temp_git_repo_with_project};
-
-/// Helper to create a changeset file in the .chronicle directory.
-fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
-	let chronicle_dir = dir.join(".chronicle");
-	std::fs::create_dir_all(&chronicle_dir).unwrap();
-	std::fs::write(chronicle_dir.join(filename), content).unwrap();
-}
+use chronicle::test_logging::{init_test_logger, take_logs};
+use common::{
+	temp_git_repo, temp_git_repo_with_cargo_workspace, temp_git_repo_with_project, write_changeset,
+};
 
 #[test]
 fn prepare_fails_when_no_config() {
@@ -29,15 +25,27 @@ fn prepare_fails_when_no_config() {
 
 #[test]
 fn prepare_with_no_changesets_is_noop() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info
+				&& m.contains("No pending changesets found")),
+		"Expected info 'No pending changesets found' log, got: {logs:?}"
+	);
 }
 
 #[test]
 fn prepare_with_single_changeset_cargo() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -48,6 +56,13 @@ fn prepare_with_single_changeset_cargo() {
 	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		logs.iter().any(|(level, m)| *level == log::Level::Info
+			&& m.contains("test-project: 0.1.0 -> 0.2.0 (minor)")),
+		"Expected info version bump summary log, got: {logs:?}"
+	);
 
 	// Verify version was bumped
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -131,6 +146,8 @@ fn prepare_aggregates_to_highest_change_type() {
 
 #[test]
 fn prepare_dry_run_does_not_modify_files() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
 		dir.path(),
@@ -146,6 +163,13 @@ fn prepare_dry_run_does_not_modify_files() {
 	);
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("Would consume changeset")),
+		"Expected info 'Would consume changeset' log in dry-run, got: {logs:?}"
+	);
 
 	// Cargo.toml should not be modified
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();

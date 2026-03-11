@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (backend sub-decision superseded by ADR-018)
 
 ## Context
 
@@ -111,3 +111,7 @@ Using `simplelog` as the backend. Its `TermLogger` supports splitting output bet
 ### No migration of existing output
 
 Adopting `log` only for new diagnostic output while leaving existing `println!()`/`eprintln!()` calls in place. This was rejected because it would create two parallel output systems -- some messages controlled by the level filter and others always printed regardless. This defeats the purpose of having a unified logging infrastructure and would make it impossible for a future verbose flag to act as a single knob for output control.
+
+## Errata
+
+- **2026-03-11:** The backend sub-decision (choosing `fern` as the `log::Log` implementation) is superseded by ADR-018, which replaces fern with a hand-rolled `CliLogger`. The `log` facade decision and all other aspects of this ADR remain valid.

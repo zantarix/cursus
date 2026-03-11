@@ -89,9 +89,8 @@ fn make_success_exit_status() -> std::process::ExitStatus {
 /// A command runner decorator that logs each invocation at `debug` level.
 ///
 /// Wraps any [`CommandRunner`] and emits a `log::debug!` message before
-/// delegating to the inner runner. Fern filters the messages according to the
-/// configured log level, so this wrapper is always active and has no effect
-/// when the log level is above `Debug`.
+/// delegating to the inner runner. The global log level filter suppresses
+/// these messages when the level is above `Debug`.
 #[derive(Debug)]
 pub struct VerboseCommandRunner<R: CommandRunner> {
 	inner: R,
@@ -509,6 +508,26 @@ mod dry_run_tests {
 			.map(|(_, m)| m.as_str())
 			.expect("expected a log message about npm install");
 		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
+	}
+
+	#[test]
+	fn dry_run_runner_logs_run_interactive_at_info() {
+		init_test_logger();
+		let _ = take_logs();
+		let runner = make_dry_run_runner();
+		let cwd = Path::new("/edit");
+		let _ = runner.run_interactive("vim", &["README.md"], cwd);
+		let logs = take_logs();
+		let (level, msg) = logs
+			.iter()
+			.find(|(_, m)| m.contains("vim"))
+			.expect("expected a log message about vim");
+		assert_eq!(*level, log::Level::Info, "should log at info level");
+		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
+		assert!(
+			msg.contains("interactive"),
+			"log should mention interactive: {msg}"
+		);
 	}
 }
 

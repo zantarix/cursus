@@ -5,6 +5,7 @@ mod common;
 use std::process::Command;
 
 use chronicle::model::config::PackageManager;
+use chronicle::test_logging::{init_test_logger, take_logs};
 use common::{
 	git_enabled_config, git_tag_exists, git_tags, run_chronicle, temp_git_repo,
 	temp_git_repo_with_project, temp_real_git_repo_with_cargo_workspace,
@@ -32,6 +33,8 @@ fn git_tag(dir: &std::path::Path, tag: &str) {
 /// When pending changesets exist, `ci` should delegate to `prepare`.
 #[test]
 fn ci_with_changesets_runs_release() {
+	init_test_logger();
+	let _ = take_logs();
 	// Use a simple fake-git repo with git disabled to avoid real git ops.
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	write_changeset(
@@ -53,6 +56,14 @@ fn ci_with_changesets_runs_release() {
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
+	let logs = take_logs();
+	assert!(
+		logs.iter().any(|(level, m)| *level == log::Level::Info
+			&& m.contains("pending changesets found")
+			&& m.contains("prepare")),
+		"Expected info 'pending changesets found, running prepare' log, got: {logs:?}"
+	);
+
 	// Verify no version bump happened (dry-run)
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
 	assert!(
@@ -64,6 +75,8 @@ fn ci_with_changesets_runs_release() {
 /// When no changesets exist and all tags are present, `ci` does nothing.
 #[test]
 fn ci_when_all_tags_present_nothing_to_do() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 
 	// No changesets created; tag the current version manually.
@@ -75,6 +88,13 @@ fn ci_when_all_tags_present_nothing_to_do() {
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("nothing to do")),
+		"Expected info 'ci: nothing to do' log, got: {logs:?}"
+	);
+
 	// No new tags should have been created.
 	let tags = git_tags(dir.path());
 	assert_eq!(tags, vec!["v1.0.0"], "No new tags should have been created");
@@ -83,6 +103,8 @@ fn ci_when_all_tags_present_nothing_to_do() {
 /// When there are no changesets and git is disabled, `ci` does nothing.
 #[test]
 fn ci_git_disabled_no_changesets_nothing_to_do() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	// No changesets. Git is not enabled in config (no [git] section).
 
@@ -91,11 +113,20 @@ fn ci_git_disabled_no_changesets_nothing_to_do() {
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("nothing to do")),
+		"Expected info 'ci: nothing to do' log, got: {logs:?}"
+	);
 }
 
 /// When no changesets exist but tags are missing, `ci` delegates to `publish` (dry-run).
 #[test]
 fn ci_tags_missing_triggers_publish_dry_run() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 
 	// No changesets. Tag for v1.0.0 is absent → post-release, pre-publish state.
@@ -107,6 +138,14 @@ fn ci_tags_missing_triggers_publish_dry_run() {
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter().any(|(level, m)| *level == log::Level::Info
+			&& m.contains("unpublished tags detected")
+			&& m.contains("publish")),
+		"Expected info 'no changesets but unpublished tags detected, running publish' log, got: {logs:?}"
+	);
 
 	// Dry-run should not create actual tags.
 	assert!(

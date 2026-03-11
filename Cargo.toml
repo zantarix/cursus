@@ -6,7 +6,6 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "=1.0.102"
-fern = "=0.7.1"
 log = "=0.4.29"
 time = { version = "=0.3.47", default-features = false, features = ["std"] }
 clap = { version = "=4.5.60", features = ["derive"] }

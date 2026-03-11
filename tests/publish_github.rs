@@ -1,30 +1,27 @@
 mod common;
 
-use std::path::Path;
+use std::sync::Arc;
 
+use chronicle::command::RealCommandRunner;
+use chronicle::test_logging::{init_test_logger, take_logs};
 use common::{run_chronicle, temp_git_repo};
 
-/// Runs chronicle as a subprocess with the given environment variables, capturing stdout/stderr.
+/// Runs chronicle in-process with a fake GitHub token configured.
 ///
-/// Returns `(success, stdout, stderr)`.
-fn run_chronicle_subprocess_with_env(
-	args: &[&str],
-	cwd: &Path,
-	env_vars: &[(&str, &str)],
-) -> (bool, String, String) {
-	let bin = env!("CARGO_BIN_EXE_chronicle");
-	let mut cmd = std::process::Command::new(bin);
-	cmd.args(args).current_dir(cwd);
-	// Clear GitHub token vars to prevent leaking from the test runner's environment.
-	cmd.env_remove("GH_TOKEN");
-	cmd.env_remove("GITHUB_TOKEN");
-	for (key, val) in env_vars {
-		cmd.env(key, val);
-	}
-	let output = cmd.output().expect("Failed to spawn chronicle subprocess");
-	let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-	let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-	(output.status.success(), stdout, stderr)
+/// Equivalent to `run_chronicle` but with a `RestGitHubClient` set up
+/// using the provided token string, matching what `main.rs` does at runtime.
+fn run_chronicle_with_token(
+	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+	cwd: &std::path::Path,
+	token: &str,
+) -> anyhow::Result<std::process::ExitCode> {
+	let github_client = Arc::new(chronicle::github::RestGitHubClient::new(token.to_string()))
+		as Arc<dyn chronicle::github::client::GitHubClient>;
+	let env = chronicle::Env::new(
+		Arc::new(RealCommandRunner) as Arc<dyn chronicle::command::CommandRunner>
+	)
+	.with_github_client(github_client);
+	chronicle::run(args, cwd, env)
 }
 
 /// Helper: write a config file with the given TOML content under `.chronicle/`.
@@ -99,9 +96,11 @@ fn github_enabled_implies_git_enabled_integration() {
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
-/// Dry-run with GitHub enabled prints "Would create GitHub Release" to stdout.
+/// Dry-run with GitHub enabled prints "Would create GitHub Release" to log.
 #[test]
 fn publish_dry_run_with_github_shows_would_create() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -113,15 +112,18 @@ fn publish_dry_run_with_github_shows_would_create() {
 	)
 	.unwrap();
 
-	let (success, stdout, stderr) = run_chronicle_subprocess_with_env(
-		&["publish", "--dry-run", "--no-interactive"],
+	let result = run_chronicle_with_token(
+		["chronicle", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-		&[("GH_TOKEN", "test-token")],
+		"test-token",
 	);
-	assert!(success, "Expected success, stderr: {stderr}");
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
+
+	let logs = take_logs();
 	assert!(
-		stdout.contains("Would create GitHub Release for v1.0.0"),
-		"Expected 'Would create GitHub Release for v1.0.0' in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Would create GitHub Release for v1.0.0")),
+		"Expected 'Would create GitHub Release for v1.0.0' in logs, got: {logs:?}"
 	);
 }
 
@@ -140,16 +142,16 @@ fn publish_dry_run_with_github_no_build_command_executed() {
 	)
 	.unwrap();
 
-	let (success, _stdout, stderr) = run_chronicle_subprocess_with_env(
-		&["publish", "--dry-run", "--no-interactive"],
+	let result = run_chronicle_with_token(
+		["chronicle", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-		&[("GH_TOKEN", "test-token")],
+		"test-token",
 	);
 	// If build_command were executed, `false` (exits 1) would cause orchestration to fail.
 	// In dry-run it must be skipped → success.
 	assert!(
-		success,
-		"Expected success (build_command skipped in dry-run), stderr: {stderr}"
+		result.is_ok(),
+		"Expected success (build_command skipped in dry-run), got: {result:?}"
 	);
 }
 
@@ -168,22 +170,21 @@ fn publish_github_missing_token_fails() {
 	)
 	.unwrap();
 
-	// Run without dry-run and without a token — should fail before publishing
-	let (success, _stdout, stderr) = run_chronicle_subprocess_with_env(
-		&["publish", "--no-interactive"],
-		dir.path(),
-		&[], // no GH_TOKEN
-	);
-	assert!(!success, "Expected failure, stderr: {stderr}");
+	// Run without a token — Env has no github client, so it should fail before publishing.
+	let result = run_chronicle(["chronicle", "publish", "--no-interactive"], dir.path());
+	let err = result.unwrap_err();
+	let msg = format!("{err:#}");
 	assert!(
-		stderr.contains("no GitHub token"),
-		"Expected token error in stderr, got: {stderr}"
+		msg.contains("no GitHub token"),
+		"Expected token error in error message, got: {msg}"
 	);
 }
 
 /// Dry-run with artifacts configured prints "Would attach: {name}" for each artifact.
 #[test]
 fn publish_dry_run_with_artifacts_shows_would_attach() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -195,14 +196,17 @@ fn publish_dry_run_with_artifacts_shows_would_attach() {
 	)
 	.unwrap();
 
-	let (success, stdout, stderr) = run_chronicle_subprocess_with_env(
-		&["publish", "--dry-run", "--no-interactive"],
+	let result = run_chronicle_with_token(
+		["chronicle", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-		&[("GH_TOKEN", "test-token")],
+		"test-token",
 	);
-	assert!(success, "Expected success, stderr: {stderr}");
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
+
+	let logs = take_logs();
 	assert!(
-		stdout.contains("Would attach: linux-amd64"),
-		"Expected 'Would attach: linux-amd64' in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Would attach: linux-amd64")),
+		"Expected 'Would attach: linux-amd64' in logs, got: {logs:?}"
 	);
 }

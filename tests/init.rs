@@ -5,7 +5,7 @@ mod common;
 use std::process::ExitCode;
 
 use chronicle::model::config::{self, PackageManager};
-use common::{temp_git_repo, temp_git_repo_with_config};
+use common::{run_chronicle, temp_git_repo, temp_git_repo_with_config};
 
 #[test]
 fn init_fails_when_config_already_exists() {
@@ -26,13 +26,15 @@ fn init_fails_when_config_already_exists() {
 #[test]
 fn init_fails_when_not_in_git_repo() {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
-	let (success, _, stderr) =
-		common::run_chronicle_subprocess(&["--no-interactive", "init", "-p", "npm"], dir.path());
-
-	assert!(!success);
+	let result = run_chronicle(
+		["chronicle", "--no-interactive", "init", "-p", "npm"],
+		dir.path(),
+	);
+	let err = result.unwrap_err();
+	let msg = format!("{err:#}");
 	assert!(
-		stderr.contains("No git repository found"),
-		"Expected 'No git repository found' in stderr, got: {stderr}"
+		msg.contains("No git repository found"),
+		"Expected 'No git repository found' in error message, got: {msg}"
 	);
 }
 

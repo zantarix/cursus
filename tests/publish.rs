@@ -2,9 +2,8 @@
 
 mod common;
 
-use common::temp_git_repo;
-
-use crate::common::run_chronicle_subprocess;
+use chronicle::test_logging::{init_test_logger, take_logs};
+use common::{run_chronicle, run_chronicle_subprocess, temp_git_repo};
 
 #[test]
 fn publish_with_no_config_fails() {
@@ -396,6 +395,8 @@ fn publish_dry_run_explicitly_naming_private_package() {
 
 #[test]
 fn publish_dry_run_cyclic_npm_workspace() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
@@ -432,34 +433,48 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	)
 	.unwrap();
 
-	// Run as subprocess to capture stdout/stderr output
-	let (success, stdout, stderr) =
-		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
-
-	// Should succeed despite circular dependencies
-	assert!(success, "Expected success, stderr: {stderr}");
-
-	// Should warn about circular dependencies on stderr
-	assert!(
-		stderr.contains("circular dependencies detected between"),
-		"Expected cycle warning in stderr, got: {stderr}"
+	let result = run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
 	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
+
+	let logs = take_logs();
+
+	// Should warn about circular dependencies
+	let warn_msg = logs
+		.iter()
+		.find(|(level, m)| {
+			*level == log::Level::Warn && m.contains("circular dependencies detected between")
+		})
+		.map(|(_, m)| m.as_str())
+		.expect("Expected cycle warning log");
 	assert!(
-		stderr.contains("@test/types") && stderr.contains("@test/utils"),
-		"Expected cycle members in warning, got: {stderr}"
+		warn_msg.contains("@test/types") && warn_msg.contains("@test/utils"),
+		"Expected cycle members in warning, got: {warn_msg}"
 	);
 
-	// @test/app (dependent) must appear after @test/types and @test/utils (the cycle group)
-	let pos_types = stdout
-		.find("@test/types")
-		.expect("@test/types not in stdout");
-	let pos_utils = stdout
-		.find("@test/utils")
-		.expect("@test/utils not in stdout");
-	let pos_app = stdout.find("@test/app").expect("@test/app not in stdout");
+	// @test/app (dependent) must appear after @test/types and @test/utils in the log ordering
+	let info_msgs: Vec<&str> = logs
+		.iter()
+		.filter(|(level, _)| *level == log::Level::Info)
+		.map(|(_, m)| m.as_str())
+		.collect();
+	let pos_types = info_msgs
+		.iter()
+		.position(|m| m.contains("@test/types"))
+		.expect("@test/types not in info logs");
+	let pos_utils = info_msgs
+		.iter()
+		.position(|m| m.contains("@test/utils"))
+		.expect("@test/utils not in info logs");
+	let pos_app = info_msgs
+		.iter()
+		.position(|m| m.contains("@test/app"))
+		.expect("@test/app not in info logs");
 	assert!(
 		pos_types < pos_app && pos_utils < pos_app,
-		"Expected @test/types and @test/utils before @test/app in stdout"
+		"Expected @test/types and @test/utils before @test/app in logs"
 	);
 }
 
@@ -509,6 +524,8 @@ fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 
 #[test]
 fn publish_dry_run_summary_single_public_package() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
@@ -524,22 +541,29 @@ fn publish_dry_run_summary_single_public_package() {
 	)
 	.unwrap();
 
-	let (success, stdout, stderr) =
-		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
-	assert!(success, "Expected success, stderr: {stderr}");
+	let logs = take_logs();
 	assert!(
-		stdout.contains("Would publish my-pkg@1.2.3"),
-		"Expected per-package line in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Would publish my-pkg@1.2.3")),
+		"Expected per-package line in logs, got: {logs:?}"
 	);
 	assert!(
-		stdout.contains("Summary: 1 would be published, 0 would be skipped"),
-		"Expected summary 'Summary: 1 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Summary: 1 would be published, 0 would be skipped")),
+		"Expected summary log, got: {logs:?}"
 	);
 }
 
 #[test]
 fn publish_dry_run_summary_multiple_public_packages() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
@@ -569,18 +593,24 @@ fn publish_dry_run_summary_multiple_public_packages() {
 	)
 	.unwrap();
 
-	let (success, stdout, stderr) =
-		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
-	assert!(success, "Expected success, stderr: {stderr}");
+	let logs = take_logs();
 	assert!(
-		stdout.contains("Summary: 2 would be published, 0 would be skipped"),
-		"Expected summary 'Summary: 2 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Summary: 2 would be published, 0 would be skipped")),
+		"Expected summary log, got: {logs:?}"
 	);
 }
 
 #[test]
 fn publish_dry_run_summary_mixed_public_private_packages() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
@@ -610,19 +640,25 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	)
 	.unwrap();
 
-	let (success, stdout, stderr) =
-		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
-	assert!(success, "Expected success, stderr: {stderr}");
+	let logs = take_logs();
 	// Only the public package is counted; private is silently excluded
 	assert!(
-		stdout.contains("Summary: 1 would be published, 0 would be skipped"),
-		"Expected summary 'Summary: 1 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Summary: 1 would be published, 0 would be skipped")),
+		"Expected summary log, got: {logs:?}"
 	);
 }
 
 #[test]
 fn publish_dry_run_summary_all_private_packages() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
@@ -638,12 +674,16 @@ fn publish_dry_run_summary_all_private_packages() {
 	)
 	.unwrap();
 
-	let (success, stdout, stderr) =
-		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+	let result = run_chronicle(
+		["chronicle", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
-	assert!(success, "Expected success, stderr: {stderr}");
+	let logs = take_logs();
 	assert!(
-		stdout.contains("Summary: 0 would be published, 0 would be skipped"),
-		"Expected summary 'Summary: 0 would be published, 0 would be skipped' in stdout, got: {stdout}"
+		logs.iter()
+			.any(|(_, m)| m.contains("Summary: 0 would be published, 0 would be skipped")),
+		"Expected summary log, got: {logs:?}"
 	);
 }

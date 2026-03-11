@@ -6,32 +6,60 @@ use std::sync::Arc;
 use chronicle::command::{RealCommandRunner, VerboseCommandRunner};
 use clap::Parser as _;
 
+/// A minimal `log::Log` implementation that splits output by level.
+///
+/// Info/Debug/Trace go to stdout; Warn/Error go to stderr.
+/// Formatting mirrors the previous fern configuration.
+struct CliLogger;
+
+#[coverage(off)]
+#[mutants::skip]
+impl log::Log for CliLogger {
+	/// Always returns `true`; actual level filtering is handled by
+	/// [`log::set_max_level`] in [`init_logging`].
+	fn enabled(&self, _: &log::Metadata) -> bool {
+		true
+	}
+
+	fn log(&self, record: &log::Record) {
+		use std::io::Write as _;
+		let target = record.target();
+		let args = record.args();
+		match record.level() {
+			log::Level::Info => {
+				let _ = writeln!(std::io::stdout().lock(), "{args}");
+			}
+			log::Level::Warn => {
+				let _ = writeln!(std::io::stderr().lock(), "[warning] {args}");
+			}
+			log::Level::Error => {
+				let _ = writeln!(std::io::stderr().lock(), "[error] {args}");
+			}
+			log::Level::Debug => {
+				let _ = writeln!(std::io::stdout().lock(), "debug: {target}: {args}");
+			}
+			log::Level::Trace => {
+				let _ = writeln!(std::io::stdout().lock(), "trace: {target}: {args}");
+			}
+		}
+	}
+
+	fn flush(&self) {
+		use std::io::Write as _;
+		let _ = std::io::stdout().flush();
+		let _ = std::io::stderr().flush();
+	}
+}
+
+static LOGGER: CliLogger = CliLogger;
+
 #[coverage(off)]
 #[mutants::skip]
 fn init_logging(level: log::LevelFilter) {
-	if let Err(e) = fern::Dispatch::new()
-		.format(|out, message, record| match record.level() {
-			log::Level::Info => out.finish(format_args!("{message}")),
-			log::Level::Warn => out.finish(format_args!("[warning] {message}")),
-			log::Level::Error => out.finish(format_args!("[error] {message}")),
-			log::Level::Debug => out.finish(format_args!("debug: {}: {message}", record.target())),
-			log::Level::Trace => out.finish(format_args!("trace: {}: {message}", record.target())),
-		})
-		.level(level)
-		.chain(
-			fern::Dispatch::new()
-				.filter(|meta| meta.level() >= log::Level::Info)
-				.chain(std::io::stdout()),
-		)
-		.chain(
-			fern::Dispatch::new()
-				.filter(|meta| meta.level() < log::Level::Info)
-				.chain(std::io::stderr()),
-		)
-		.apply()
-	{
+	if let Err(e) = log::set_logger(&LOGGER) {
 		eprintln!("warning: failed to initialize logging: {e}");
 	}
+	log::set_max_level(level);
 }
 
 /// Maps parsed global flags to the corresponding [`log::LevelFilter`].
