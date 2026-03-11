@@ -16,6 +16,7 @@ use chronicle::github::GitHubRepo;
 use chronicle::github::RestGitHubClient;
 use chronicle::github::client::GitHubClient as _;
 use httpmock::prelude::*;
+use proptest::prelude::*;
 use serde_json::Value;
 use tempfile::NamedTempFile;
 
@@ -707,4 +708,182 @@ fn upload_asset_handles_api_error() {
 		err.contains("file.tar.gz"),
 		"Error message should mention the filename, got: {err}"
 	);
+}
+
+// ── property-based spec compliance tests ──────────────────────────────────────
+
+#[test]
+fn create_release_always_spec_compliant() {
+	let spec = match try_load_spec() {
+		Some(s) => s,
+		None => {
+			eprintln!(
+				"Skipping create_release_always_spec_compliant: \
+                 OpenAPI spec not available at {OPENAPI_SPEC_PATH}"
+			);
+			return;
+		}
+	};
+	let schema = create_release_schema(&spec)
+		.expect("could not extract create_release schema from spec — update the path pointer");
+
+	proptest!(ProptestConfig::with_cases(64), |(
+		tag_name in "\\PC{1,200}",
+		name in "\\PC{0,200}",
+		changelog_body in "\\PC{0,500}",
+	)| {
+		let captured_body: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+		let captured_body_clone = Arc::clone(&captured_body);
+
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST)
+				.path("/repos/owner/repo/releases")
+				.is_true(move |req| {
+					*captured_body_clone.lock().unwrap() = req.body_string();
+					true
+				});
+			then.status(201)
+				.header("Content-Type", "application/json")
+				.body(r#"{"id": 99999}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		client
+			.create_release(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				&tag_name,
+				&name,
+				&changelog_body,
+			)
+			.expect("create_release should succeed against mock server");
+
+		let body_str = captured_body.lock().unwrap().clone();
+		let body_json: Value =
+			serde_json::from_str(&body_str).expect("client sent non-JSON request body");
+
+		validate(&body_json, &schema)
+			.unwrap_or_else(|e| panic!("create_release body not spec-compliant:\n{e}"));
+	});
+}
+
+#[test]
+fn create_pull_request_always_spec_compliant() {
+	let spec = match try_load_spec() {
+		Some(s) => s,
+		None => {
+			eprintln!(
+				"Skipping create_pull_request_always_spec_compliant: \
+                 OpenAPI spec not available at {OPENAPI_SPEC_PATH}"
+			);
+			return;
+		}
+	};
+	let schema = create_pull_request_schema(&spec)
+		.expect("could not extract create_pull_request schema from spec — update the path pointer");
+
+	proptest!(ProptestConfig::with_cases(64), |(
+		title in "\\PC{1,200}",
+		body in "\\PC{0,500}",
+		head in "\\PC{1,200}",
+		base in "\\PC{1,200}",
+	)| {
+		let captured_body: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+		let captured_body_clone = Arc::clone(&captured_body);
+
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(POST)
+				.path("/repos/acme/app/pulls")
+				.is_true(move |req| {
+					*captured_body_clone.lock().unwrap() = req.body_string();
+					true
+				});
+			then.status(201)
+				.header("Content-Type", "application/json")
+				.body(r#"{"id": 1, "number": 1, "html_url": "https://github.com/acme/app/pull/1"}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		client
+			.create_pull_request(
+				&GitHubRepo::new("acme", "app").unwrap(),
+				&title,
+				&body,
+				&head,
+				&base,
+			)
+			.expect("create_pull_request should succeed against mock server");
+
+		let body_str = captured_body.lock().unwrap().clone();
+		let body_json: Value =
+			serde_json::from_str(&body_str).expect("client sent non-JSON request body");
+
+		validate(&body_json, &schema)
+			.unwrap_or_else(|e| panic!("create_pull_request body not spec-compliant:\n{e}"));
+	});
+}
+
+#[test]
+fn update_pull_request_always_spec_compliant() {
+	let spec = match try_load_spec() {
+		Some(s) => s,
+		None => {
+			eprintln!(
+				"Skipping update_pull_request_always_spec_compliant: \
+                 OpenAPI spec not available at {OPENAPI_SPEC_PATH}"
+			);
+			return;
+		}
+	};
+	let schema = update_pull_request_schema(&spec)
+		.expect("could not extract update_pull_request schema from spec — update the path pointer");
+
+	proptest!(ProptestConfig::with_cases(64), |(
+		title in "\\PC{1,200}",
+		body in "\\PC{0,500}",
+		pull_number in 1u64..=100_000u64,
+	)| {
+		let captured_body: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+		let captured_body_clone = Arc::clone(&captured_body);
+
+		let server = MockServer::start();
+		let path = format!("/repos/acme/app/pulls/{pull_number}");
+		let _mock = server.mock(|when, then| {
+			when.method(PATCH)
+				.path(path)
+				.is_true(move |req| {
+					*captured_body_clone.lock().unwrap() = req.body_string();
+					true
+				});
+			then.status(200)
+				.header("Content-Type", "application/json")
+				.body(format!(
+					r#"{{"id": 1, "number": {pull_number}, "html_url": "https://github.com/acme/app/pull/{pull_number}"}}"#
+				));
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		client
+			.update_pull_request(
+				&GitHubRepo::new("acme", "app").unwrap(),
+				pull_number,
+				&title,
+				&body,
+			)
+			.expect("update_pull_request should succeed against mock server");
+
+		let body_str = captured_body.lock().unwrap().clone();
+		let body_json: Value =
+			serde_json::from_str(&body_str).expect("client sent non-JSON request body");
+
+		validate(&body_json, &schema)
+			.unwrap_or_else(|e| panic!("update_pull_request body not spec-compliant:\n{e}"));
+	});
 }
