@@ -6,8 +6,7 @@ use anyhow::bail;
 use clap::Args;
 use log::info;
 
-use crate::model::config::{self, Config, PackageManager};
-use crate::package_manager::{CargoConfig, NpmConfig};
+use crate::model::config::{CargoConfig, Config, NpmConfig, PackageManager, exists};
 use crate::path::AbsolutePath;
 use crate::tui::init;
 
@@ -27,7 +26,7 @@ pub(crate) fn cmd_init(
 	args: &InitArgs,
 	global: &GlobalArgs,
 ) -> anyhow::Result<ExitCode> {
-	if config::exists(git_workdir) {
+	if exists(git_workdir) {
 		bail!("Configuration already exists.");
 	}
 

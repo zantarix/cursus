@@ -3,7 +3,7 @@
 use anyhow::bail;
 
 use crate::git::GitWorkdir;
-use crate::github::GitHubConfig;
+use crate::model::config::GitHubConfig;
 
 /// A parsed GitHub repository owner and name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +101,7 @@ impl GitHubRepo {
 	/// Returns an error if both config fields are partially set (one set, one not),
 	/// or if neither config nor remote detection can determine the repository.
 	pub(crate) fn resolve(github_config: &GitHubConfig, git: &GitWorkdir) -> anyhow::Result<Self> {
-		match (&github_config.owner, &github_config.repo) {
+		match (github_config.owner(), github_config.repo()) {
 			(Some(owner), Some(repo)) => {
 				return GitHubRepo::new(owner, repo);
 			}
@@ -333,12 +333,14 @@ mod tests {
 	// --- GitHubRepo::resolve ---
 
 	fn make_github_config(owner: Option<&str>, repo: Option<&str>) -> GitHubConfig {
-		GitHubConfig {
-			enabled: true,
-			owner: owner.map(str::to_string),
-			repo: repo.map(str::to_string),
-			..Default::default()
+		let mut config = GitHubConfig::enabled_config();
+		if let Some(o) = owner {
+			config = config.with_owner(o.to_string());
 		}
+		if let Some(r) = repo {
+			config = config.with_repo(r.to_string());
+		}
+		config
 	}
 
 	#[test]

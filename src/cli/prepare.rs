@@ -11,12 +11,12 @@ use log::info;
 
 use semver::Version;
 
-use crate::git::{self, DEFAULT_RELEASE_BRANCH_PREFIX, Strategy};
+use crate::git;
+use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
-use crate::github::{DEFAULT_PR_TITLE, GitHubRepo};
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
-use crate::model::config::Config;
+use crate::model::config::{Config, Strategy};
 use crate::package_manager::filter_projects_by_name;
 use crate::utils::today_iso_date;
 
@@ -82,18 +82,17 @@ fn check_dirty_tree(git: &git::GitWorkdir) -> anyhow::Result<()> {
 /// Priority order:
 /// 1. `args_branch` — explicit `--branch` flag
 /// 2. `{config_prefix}{current_branch}` — derived from config prefix and current branch
-/// 3. `chronicle-release/detached` — fallback when HEAD is detached
+/// 3. `{config_prefix}detached` — fallback when HEAD is detached
 fn compute_release_branch(
 	args_branch: Option<&str>,
-	config_prefix: Option<&str>,
+	config_prefix: &str,
 	current_branch: Option<&str>,
 ) -> String {
 	if let Some(branch) = args_branch {
 		return branch.to_string();
 	}
-	let prefix = config_prefix.unwrap_or(DEFAULT_RELEASE_BRANCH_PREFIX);
 	let base = current_branch.unwrap_or("detached");
-	format!("{prefix}{base}")
+	format!("{config_prefix}{base}")
 }
 
 /// Information about a single package prepared for release.
@@ -294,9 +293,8 @@ pub(crate) fn cmd_prepare(
 		changes_per_package.retain(|name, _| args.packages.contains(name));
 	}
 
-	let git_enabled = config.git.enabled.unwrap_or(false) && !args.no_git;
-	// strategy is always Some after config::load(); unwrap_or is a defensive fallback.
-	let strategy = config.git.strategy.unwrap_or(Strategy::Push);
+	let git_enabled = config.git.enabled() && !args.no_git;
+	let strategy = config.git.strategy();
 
 	if args.branch.is_some() && strategy == Strategy::Push {
 		log::warn!("--branch has no effect with the push strategy; ignoring");
@@ -328,7 +326,7 @@ pub(crate) fn cmd_prepare(
 			};
 			let branch = compute_release_branch(
 				args.branch.as_deref(),
-				config.git.release_branch_prefix.as_deref(),
+				config.git.release_branch_prefix(),
 				current.as_deref(),
 			);
 			git.checkout_or_reset_branch(&branch)?;
@@ -483,11 +481,7 @@ pub(crate) fn cmd_prepare(
 							});
 							match GitHubRepo::resolve(&config.github, git) {
 								Ok(gh_repo) => {
-									let title = config
-										.github
-										.pull_request_title
-										.as_deref()
-										.unwrap_or(DEFAULT_PR_TITLE);
+									let title = config.github.pull_request_title();
 									let pr_body = build_pr_body(&release_infos, base);
 									if let Err(e) = upsert_pull_request(
 										client, &gh_repo, title, &pr_body, branch, base,
@@ -710,7 +704,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_flag_over_all() {
 		assert_eq!(
-			compute_release_branch(Some("my-branch"), Some("release/"), Some("main")),
+			compute_release_branch(Some("my-branch"), "release/", Some("main")),
 			"my-branch"
 		);
 	}
@@ -718,7 +712,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_config_prefix() {
 		assert_eq!(
-			compute_release_branch(None, Some("release/"), Some("main")),
+			compute_release_branch(None, "release/", Some("main")),
 			"release/main"
 		);
 	}
@@ -726,7 +720,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_default_prefix() {
 		assert_eq!(
-			compute_release_branch(None, None, Some("main")),
+			compute_release_branch(None, "chronicle-release/", Some("main")),
 			"chronicle-release/main"
 		);
 	}
@@ -734,7 +728,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_detached_fallback() {
 		assert_eq!(
-			compute_release_branch(None, None, None),
+			compute_release_branch(None, "chronicle-release/", None),
 			"chronicle-release/detached"
 		);
 	}
@@ -776,7 +770,7 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::package_manager::CargoConfig::enabled());
+				.with_cargo(crate::model::config::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -804,7 +798,7 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::package_manager::CargoConfig::enabled());
+				.with_cargo(crate::model::config::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -845,7 +839,7 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::package_manager::CargoConfig::enabled());
+				.with_cargo(crate::model::config::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -956,7 +950,7 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::package_manager::CargoConfig::enabled());
+				.with_cargo(crate::model::config::CargoConfig::enabled());
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -1078,19 +1072,17 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::package_manager::CargoConfig::enabled())
-				.with_git(crate::git::GitConfig {
-					enabled: Some(true),
-					strategy: Some(crate::git::Strategy::Branch),
-					..Default::default()
-				})
-				.with_github(crate::github::GitHubConfig {
-					enabled: true,
-					owner: Some("acme".to_string()),
-					repo: Some("app".to_string()),
-					pull_request_title: Some("My Release PR".to_string()),
-					..Default::default()
-				});
+				.with_cargo(crate::model::config::CargoConfig::enabled())
+				.with_git(
+					crate::model::config::GitConfig::enabled_config()
+						.with_strategy(crate::model::config::Strategy::Branch),
+				)
+				.with_github(
+					crate::model::config::GitHubConfig::enabled_config()
+						.with_owner("acme".to_string())
+						.with_repo("app".to_string())
+						.with_pull_request_title("My Release PR".to_string()),
+				);
 		cfg.save().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),

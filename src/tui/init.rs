@@ -2,8 +2,7 @@ use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 
 use super::widgets::{self, ButtonDef, KeyResult};
-use crate::model::config::{Config, PackageManager};
-use crate::package_manager::{CargoConfig, NpmConfig};
+use crate::model::config::{CargoConfig, Config, NpmConfig, PackageManager};
 use crate::path::AbsolutePath;
 use std::path::Path;
 

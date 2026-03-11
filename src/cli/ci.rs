@@ -69,7 +69,7 @@ pub(crate) fn cmd_ci(
 
 	// Step 2: when git is enabled and --no-git is not set, check for packages that
 	// have not yet been tagged (post-release, pre-publish state).
-	if config.git.enabled.unwrap_or(false) && !args.no_git {
+	if config.git.enabled() && !args.no_git {
 		let projects = config.load_projects()?;
 		let selected = filter_projects_by_name(&projects, &args.packages)?;
 		let is_multi = projects.len() > 1;

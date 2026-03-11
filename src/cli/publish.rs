@@ -112,7 +112,7 @@ pub(crate) fn cmd_publish(
 		publish_projects(&sorted_projects, dry_run)?;
 
 	// Git tag creation
-	let git_enabled = config.git.enabled.unwrap_or(false) && !args.no_git;
+	let git_enabled = config.git.enabled() && !args.no_git;
 	let (tags_created, tags_skipped) = if git_enabled {
 		if dry_run {
 			for pkg in &published_packages {
@@ -463,23 +463,20 @@ mod tests {
 	use super::*;
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::github::GitHubConfig;
 	use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
-	use crate::model::config::Config;
+	use crate::model::config::{Config, GitHubConfig};
 
 	/// Builds a config with GitHub enabled, using known owner/repo to avoid git detection.
 	fn make_github_config(
 		build_command: &str,
 		artifacts: BTreeMap<String, String>,
 	) -> GitHubConfig {
-		GitHubConfig {
-			enabled: true,
-			owner: Some("acme".to_string()),
-			repo: Some("app".to_string()),
-			build_command: build_command.to_string(),
-			artifacts,
-			pull_request_title: None,
-		}
+		let mut config = GitHubConfig::enabled_config();
+		config.build_command = build_command.to_string();
+		config.artifacts = artifacts;
+		config
+			.with_owner("acme".to_string())
+			.with_repo("app".to_string())
 	}
 
 	fn workdir() -> crate::path::AbsolutePath {
@@ -680,13 +677,11 @@ mod tests {
 			macos_path.to_string_lossy().into_owned(),
 		);
 
-		let github_cfg = GitHubConfig {
-			enabled: true,
-			owner: Some("acme".to_string()),
-			repo: Some("app".to_string()),
-			build_command: String::new(),
-			artifacts: artifacts_with_paths,
-			pull_request_title: None,
+		let github_cfg = {
+			let mut c = GitHubConfig::enabled_config();
+			c.artifacts = artifacts_with_paths;
+			c.with_owner("acme".to_string())
+				.with_repo("app".to_string())
 		};
 
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
@@ -740,13 +735,11 @@ mod tests {
 			artifact_path.to_string_lossy().into_owned(),
 		);
 
-		let github_cfg = GitHubConfig {
-			enabled: true,
-			owner: Some("acme".to_string()),
-			repo: Some("app".to_string()),
-			build_command: String::new(),
-			artifacts,
-			pull_request_title: None,
+		let github_cfg = {
+			let mut c = GitHubConfig::enabled_config();
+			c.artifacts = artifacts;
+			c.with_owner("acme".to_string())
+				.with_repo("app".to_string())
 		};
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_github(github_cfg);

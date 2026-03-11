@@ -8,59 +8,11 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use log::warn;
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
+use crate::model::config::NpmConfig;
 use crate::path::AbsolutePath;
-
-/// Configuration for npm package manager.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NpmConfig {
-	/// Whether this package manager is enabled for the project.
-	#[serde(default)]
-	pub enabled: bool,
-	/// Optional path to the package manager root, relative to the git root.
-	///
-	/// When set, the package manager will look for its manifest files in this
-	/// subdirectory instead of the git repository root.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub path: Option<String>,
-	/// Optional custom command to update the lock file after version bumps.
-	///
-	/// When set, this command will be executed to update the lock file. Otherwise,
-	/// the package manager adapter will auto-detect the lock file type.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub lock_command: Option<String>,
-	/// Access level for scoped packages ("public" or "restricted").
-	///
-	/// Only used when publishing scoped packages (e.g., @scope/package).
-	/// If not specified, defaults to "restricted" for scoped packages.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub access: Option<String>,
-}
-
-impl NpmConfig {
-	/// Creates a new enabled npm configuration.
-	pub fn enabled() -> Self {
-		Self {
-			enabled: true,
-			..Default::default()
-		}
-	}
-
-	/// Returns the resolved root directory for this package manager.
-	///
-	/// If a `path` is configured, returns `adapter_root` joined with that path.
-	/// Otherwise, returns a copy of `adapter_root`.
-	fn resolve_root(&self, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
-		match &self.path {
-			Some(path) => AbsolutePath::new(git_workdir.join(path))
-				.with_context(|| format!("resolve_root: invalid path '{path}'")),
-			None => Ok(git_workdir.clone()),
-		}
-	}
-}
 
 /// Adapter for npm-based projects.
 ///
@@ -501,11 +453,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		// For scoped packages, add --access flag
 		let access_owned;
 		if project.name.starts_with('@') {
-			access_owned = self
-				.config
-				.access
-				.clone()
-				.unwrap_or_else(|| "restricted".to_string());
+			access_owned = self.config.access().to_string();
 			args.push("--access");
 			args.push(&access_owned);
 		}
@@ -663,16 +611,8 @@ mod tests {
 
 	/// Helper to enumerate projects using the adapter with a configured path.
 	fn enumerate_with_path(dir: &Path, path: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-		recording_adapter_default(
-			NpmConfig {
-				enabled: true,
-				path: Some(path.to_string()),
-				..Default::default()
-			},
-			dir,
-			0,
-		)
-		.enumerate_projects()
+		recording_adapter_default(NpmConfig::enabled().with_path(path.to_string()), dir, 0)
+			.enumerate_projects()
 	}
 
 	#[test]
@@ -1300,12 +1240,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let adapter = recording_adapter_default(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("".to_string()),
 			dir.path(),
 			0,
 		);
@@ -1327,12 +1262,7 @@ mod tests {
 		let runner =
 			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"command not found".to_vec()));
 		let adapter = recording_adapter(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("nonexistent-command-12345".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("nonexistent-command-12345".to_string()),
 			dir.path(),
 			runner,
 		);
@@ -1343,62 +1273,13 @@ mod tests {
 	}
 
 	#[test]
-	fn npm_config_defaults_to_disabled() {
-		let config = NpmConfig::default();
-		assert!(!config.enabled);
-		assert_eq!(config.path, None);
-		assert_eq!(config.lock_command, None);
-		assert_eq!(config.access, None);
-	}
-
-	#[test]
-	fn npm_config_enabled_creates_enabled_config() {
-		let config = NpmConfig::enabled();
-		assert!(config.enabled);
-		assert_eq!(config.path, None);
-		assert_eq!(config.lock_command, None);
-		assert_eq!(config.access, None);
-	}
-
-	#[test]
-	fn npm_config_resolve_root_without_path() {
-		let config = NpmConfig {
-			enabled: true,
-			path: None,
-			lock_command: None,
-			access: None,
-		};
-		let git_workdir = AbsolutePath::new("/repo").unwrap();
-		let resolved = config.resolve_root(&git_workdir).unwrap();
-		assert_eq!(resolved, git_workdir);
-	}
-
-	#[test]
-	fn npm_config_resolve_root_with_path() {
-		let config = NpmConfig {
-			enabled: true,
-			path: Some("frontend".to_string()),
-			lock_command: None,
-			access: None,
-		};
-		let git_workdir = AbsolutePath::new("/repo").unwrap();
-		let resolved = config.resolve_root(&git_workdir).unwrap();
-		assert_eq!(*resolved, *AbsolutePath::new("/repo/frontend").unwrap());
-	}
-
-	#[test]
 	fn update_lock_file_custom_command_with_exit_code_fails() {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let runner =
 			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"exit status 1".to_vec()));
 		let adapter = recording_adapter(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("false".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("false".to_string()),
 			dir.path(),
 			runner,
 		);
@@ -1413,12 +1294,7 @@ mod tests {
 		let dir = temp_dir();
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let adapter = recording_adapter_default(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("true".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("true".to_string()),
 			dir.path(),
 			0,
 		);
@@ -1684,12 +1560,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let adapter = recording_adapter(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: None,
-				access: Some("public".to_string()),
-			},
+			NpmConfig::enabled().with_access("public".to_string()),
 			dir.path(),
 			Arc::clone(&runner),
 		);
@@ -1726,12 +1597,7 @@ mod tests {
 		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let adapter = recording_adapter(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("custom-lock-cmd --flag".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("custom-lock-cmd --flag".to_string()),
 			dir.path(),
 			Arc::clone(&runner),
 		);
@@ -1752,12 +1618,7 @@ mod tests {
 		let runner =
 			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"command not found".to_vec()));
 		let adapter = recording_adapter(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("bad-cmd".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("bad-cmd".to_string()),
 			dir.path(),
 			runner,
 		);
@@ -1782,12 +1643,7 @@ mod tests {
 	fn update_lock_file_dry_run_custom_command_returns_none() {
 		let dir = temp_dir();
 		let adapter = dry_run_adapter(
-			NpmConfig {
-				enabled: true,
-				path: None,
-				lock_command: Some("my-lock-cmd".to_string()),
-				access: None,
-			},
+			NpmConfig::enabled().with_lock_command("my-lock-cmd".to_string()),
 			dir.path(),
 		);
 		assert_eq!(adapter.update_lock_file().unwrap(), None);

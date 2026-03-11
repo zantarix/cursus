@@ -4,9 +4,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Default pull request title when none is set in config.
-pub const DEFAULT_PR_TITLE: &str = "Release updates";
-
 /// Configuration for opt-in GitHub Releases creation after publish.
 ///
 /// When `enabled` is `true`, Chronicle will create a GitHub Release for each
@@ -23,12 +20,12 @@ pub struct GitHubConfig {
 	///
 	/// If not set, Chronicle will attempt to detect it from the git remote URL.
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub owner: Option<String>,
+	owner: Option<String>,
 	/// GitHub repository name.
 	///
 	/// If not set, Chronicle will attempt to detect it from the git remote URL.
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub repo: Option<String>,
+	repo: Option<String>,
 	/// Optional shell command to build release artifacts before uploading.
 	///
 	/// Run in the git root directory. Defaults to empty (no build step).
@@ -43,7 +40,52 @@ pub struct GitHubConfig {
 	///
 	/// Defaults to `"Release updates"` when not set.
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub pull_request_title: Option<String>,
+	pull_request_title: Option<String>,
+}
+
+impl GitHubConfig {
+	/// Returns a [`GitHubConfig`] with `enabled` set to `true`.
+	pub fn enabled_config() -> Self {
+		Self {
+			enabled: true,
+			..Default::default()
+		}
+	}
+
+	/// Returns the GitHub repository owner, or `None` for auto-detection.
+	pub fn owner(&self) -> Option<&str> {
+		self.owner.as_deref()
+	}
+
+	/// Returns the GitHub repository name, or `None` for auto-detection.
+	pub fn repo(&self) -> Option<&str> {
+		self.repo.as_deref()
+	}
+
+	/// Returns the pull request title, defaulting to `"Release updates"`.
+	pub fn pull_request_title(&self) -> &str {
+		self.pull_request_title
+			.as_deref()
+			.unwrap_or("Release updates")
+	}
+
+	/// Sets the repository owner (builder pattern).
+	pub fn with_owner(mut self, owner: String) -> Self {
+		self.owner = Some(owner);
+		self
+	}
+
+	/// Sets the repository name (builder pattern).
+	pub fn with_repo(mut self, repo: String) -> Self {
+		self.repo = Some(repo);
+		self
+	}
+
+	/// Sets the pull request title (builder pattern).
+	pub fn with_pull_request_title(mut self, title: String) -> Self {
+		self.pull_request_title = Some(title);
+		self
+	}
 }
 
 #[cfg(test)]
@@ -54,8 +96,8 @@ mod tests {
 	fn github_config_defaults() {
 		let config = GitHubConfig::default();
 		assert!(!config.enabled);
-		assert_eq!(config.owner, None);
-		assert_eq!(config.repo, None);
+		assert_eq!(config.owner(), None);
+		assert_eq!(config.repo(), None);
 		assert!(config.build_command.is_empty());
 		assert!(config.artifacts.is_empty());
 	}
@@ -64,16 +106,16 @@ mod tests {
 	fn github_config_deserializes_empty() {
 		let config: GitHubConfig = toml::from_str("").unwrap();
 		assert!(!config.enabled);
-		assert_eq!(config.owner, None);
-		assert_eq!(config.repo, None);
+		assert_eq!(config.owner(), None);
+		assert_eq!(config.repo(), None);
 	}
 
 	#[test]
 	fn github_config_deserializes_enabled_only() {
 		let config: GitHubConfig = toml::from_str("enabled = true").unwrap();
 		assert!(config.enabled);
-		assert_eq!(config.owner, None);
-		assert_eq!(config.repo, None);
+		assert_eq!(config.owner(), None);
+		assert_eq!(config.repo(), None);
 	}
 
 	#[test]
@@ -88,8 +130,8 @@ build_command = "cargo build --release"
 "#;
 		let config: GitHubConfig = toml::from_str(toml_str).unwrap();
 		assert!(config.enabled);
-		assert_eq!(config.owner.as_deref(), Some("acme"));
-		assert_eq!(config.repo.as_deref(), Some("my-app"));
+		assert_eq!(config.owner(), Some("acme"));
+		assert_eq!(config.repo(), Some("my-app"));
 		assert_eq!(config.build_command, "cargo build --release");
 		assert_eq!(
 			config.artifacts.get("linux-amd64").map(|s| s.as_str()),
@@ -109,12 +151,12 @@ build_command = "cargo build --release"
 		artifacts.insert("linux".to_string(), "target/app".to_string());
 		let config = GitHubConfig {
 			enabled: true,
-			owner: Some("owner".to_string()),
-			repo: Some("repo".to_string()),
 			build_command: "make release".to_string(),
 			artifacts,
-			pull_request_title: None,
-		};
+			..Default::default()
+		}
+		.with_owner("owner".to_string())
+		.with_repo("repo".to_string());
 		let toml_str = toml::to_string(&config).unwrap();
 		let deserialized: GitHubConfig = toml::from_str(&toml_str).unwrap();
 		assert_eq!(config, deserialized);
@@ -138,10 +180,7 @@ build_command = "cargo build --release"
 
 	#[test]
 	fn github_config_serializes_some_owner() {
-		let config = GitHubConfig {
-			owner: Some("myorg".to_string()),
-			..Default::default()
-		};
+		let config = GitHubConfig::default().with_owner("myorg".to_string());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("owner = \"myorg\""));
 	}
@@ -157,15 +196,15 @@ build_command = "cargo build --release"
 	}
 
 	#[test]
-	fn github_config_pull_request_title_defaults_to_none() {
+	fn github_config_pull_request_title_defaults_to_constant() {
 		let config = GitHubConfig::default();
-		assert_eq!(config.pull_request_title, None);
+		assert_eq!(config.pull_request_title(), "Release updates");
 	}
 
 	#[test]
 	fn github_config_deserializes_pull_request_title() {
 		let config: GitHubConfig = toml::from_str("pull_request_title = \"Release PR\"").unwrap();
-		assert_eq!(config.pull_request_title.as_deref(), Some("Release PR"));
+		assert_eq!(config.pull_request_title(), "Release PR");
 	}
 
 	#[test]
@@ -180,10 +219,7 @@ build_command = "cargo build --release"
 
 	#[test]
 	fn github_config_serializes_pull_request_title_when_set() {
-		let config = GitHubConfig {
-			pull_request_title: Some("My Release".to_string()),
-			..Default::default()
-		};
+		let config = GitHubConfig::default().with_pull_request_title("My Release".to_string());
 		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("pull_request_title = \"My Release\""));
 	}

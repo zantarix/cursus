@@ -1,3 +1,5 @@
+//! Chronicle configuration types and persistence.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -5,12 +7,30 @@ use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::git::GitConfig;
-use crate::github::GitHubConfig;
-use crate::package_manager::{
-	self, CargoAdapter, CargoConfig, NpmAdapter, NpmConfig, PackageManagerAdapter, Project,
-};
+mod cargo;
+mod git;
+mod github;
+mod npm;
+
+pub use cargo::CargoConfig;
+pub use git::{GitConfig, Strategy, TagFormat};
+pub use github::GitHubConfig;
+pub use npm::NpmConfig;
+
+use crate::package_manager::{self, CargoAdapter, NpmAdapter, PackageManagerAdapter, Project};
 use crate::path::AbsolutePath;
+
+/// Resolves an optional sub-path relative to `git_workdir`.
+///
+/// Used by package manager config types to locate their workspace root.
+/// Returns `git_workdir` unchanged when `path` is `None`.
+fn resolve_root(path: &Option<String>, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
+	match path {
+		Some(p) => AbsolutePath::new(git_workdir.join(p))
+			.with_context(|| format!("resolve_root: invalid path '{p}'")),
+		None => Ok(git_workdir.clone()),
+	}
+}
 
 /// Global configuration settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -264,21 +284,8 @@ fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Con
 		bail!("Configuration must have at least one package manager enabled");
 	}
 
-	// Derived default: [github].enabled = true implies [git].enabled = true,
-	// unless [git].enabled was explicitly set in the config file.
-	if config.github.enabled && config.git.enabled.is_none() {
-		config.git.enabled = Some(true);
-	}
-
-	// Derived default: strategy is Branch when github.enabled, else Push.
-	// Only set when not explicitly configured.
-	if config.git.strategy.is_none() {
-		config.git.strategy = Some(if config.github.enabled {
-			crate::git::Strategy::Branch
-		} else {
-			crate::git::Strategy::Push
-		});
-	}
+	// Apply cross-config derived defaults (git.enabled, git.strategy).
+	config.git.resolve_defaults(config.github.enabled);
 
 	// Set the git root and environment
 	config.git_workdir = Some(git_workdir.clone());
@@ -315,10 +322,10 @@ pub(crate) fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Resu
 mod tests {
 	use std::sync::Arc;
 
+	use super::Strategy;
 	use super::*;
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::github::GitHubConfig;
 	use tempfile::TempDir;
 
 	fn temp_dir() -> TempDir {
@@ -378,7 +385,7 @@ mod tests {
 		// After load, strategy is derived: Push (no github)
 		assert!(loaded.npm.enabled);
 		assert!(!loaded.cargo.enabled);
-		assert_eq!(loaded.git.strategy, Some(crate::git::Strategy::Push));
+		assert_eq!(loaded.git.strategy(), Strategy::Push);
 	}
 
 	#[test]
@@ -445,7 +452,7 @@ mod tests {
 		.unwrap();
 		// After load, strategy is derived: Push (no github)
 		assert!(loaded.cargo.enabled);
-		assert_eq!(loaded.git.strategy, Some(crate::git::Strategy::Push));
+		assert_eq!(loaded.git.strategy(), Strategy::Push);
 	}
 
 	#[test]
@@ -894,10 +901,9 @@ enabled = true
 		)
 		.unwrap();
 		assert!(loaded.github.enabled);
-		assert_eq!(
-			loaded.git.enabled,
-			Some(true),
-			"git.enabled should be derived Some(true) when github.enabled = true"
+		assert!(
+			loaded.git.enabled(),
+			"git.enabled should be true when github.enabled = true"
 		);
 	}
 
@@ -918,9 +924,8 @@ enabled = true
 		)
 		.unwrap();
 		assert!(loaded.github.enabled);
-		assert_eq!(
-			loaded.git.enabled,
-			Some(false),
+		assert!(
+			!loaded.git.enabled(),
 			"explicit [git].enabled = false must not be overridden"
 		);
 	}
@@ -942,8 +947,8 @@ enabled = true
 		)
 		.unwrap();
 		assert_eq!(
-			loaded.git.strategy,
-			Some(crate::git::Strategy::Branch),
+			loaded.git.strategy(),
+			Strategy::Branch,
 			"strategy should be derived as Branch when github.enabled = true"
 		);
 	}
@@ -965,8 +970,8 @@ enabled = true
 		)
 		.unwrap();
 		assert_eq!(
-			loaded.git.strategy,
-			Some(crate::git::Strategy::Push),
+			loaded.git.strategy(),
+			Strategy::Push,
 			"strategy should be derived as Push when github is not enabled"
 		);
 	}
@@ -988,8 +993,8 @@ enabled = true
 		)
 		.unwrap();
 		assert_eq!(
-			loaded.git.strategy,
-			Some(crate::git::Strategy::Push),
+			loaded.git.strategy(),
+			Strategy::Push,
 			"explicit strategy must not be overridden by derivation"
 		);
 	}

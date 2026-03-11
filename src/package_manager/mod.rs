@@ -7,8 +7,8 @@
 mod cargo;
 mod npm;
 
-pub use cargo::{CargoAdapter, CargoConfig};
-pub use npm::{NpmAdapter, NpmConfig};
+pub use cargo::CargoAdapter;
+pub use npm::NpmAdapter;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -195,6 +195,7 @@ impl Project {
 		runner: Arc<crate::command::test_support::RecordingCommandRunner>,
 	) -> Self {
 		use crate::command::CommandRunner;
+		use crate::model::config::NpmConfig;
 		let env = crate::Env::new(runner as Arc<dyn CommandRunner>);
 		Self {
 			info: ProjectInfo::for_test(name, AbsolutePath::new(path).unwrap()),
@@ -679,6 +680,7 @@ mod tests {
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::model::config::NpmConfig;
 
 	use super::*;
 

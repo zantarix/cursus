@@ -6,9 +6,7 @@
 
 use std::process::Command;
 
-use chronicle::git::GitConfig;
-use chronicle::model::config::{Config, PackageManager};
-use chronicle::package_manager::{CargoConfig, NpmConfig};
+use chronicle::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageManager};
 use chronicle::path::AbsolutePath;
 use tempfile::TempDir;
 
@@ -390,8 +388,5 @@ pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 
 /// Returns a [`GitConfig`] with git lifecycle enabled and all other fields at their defaults.
 pub fn git_enabled_config() -> GitConfig {
-	GitConfig {
-		enabled: Some(true),
-		..Default::default()
-	}
+	GitConfig::enabled_config()
 }

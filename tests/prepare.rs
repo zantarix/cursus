@@ -703,7 +703,7 @@ fn prepare_updates_npm_intra_workspace_dep_version() {
 	let config = chronicle::model::config::Config::new(
 		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
 	)
-	.with_npm(chronicle::package_manager::NpmConfig::enabled());
+	.with_npm(chronicle::model::config::NpmConfig::enabled());
 	config.save().unwrap();
 
 	// Root package.json with workspace config

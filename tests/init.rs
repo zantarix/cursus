@@ -4,7 +4,7 @@ mod common;
 
 use std::process::ExitCode;
 
-use chronicle::model::config::{self, PackageManager};
+use chronicle::model::config::{PackageManager, load};
 use common::{run_chronicle, temp_git_repo, temp_git_repo_with_config};
 
 #[test]
@@ -51,7 +51,7 @@ fn init_creates_config_with_npm() {
 
 	let env = chronicle::Env::new(std::sync::Arc::new(chronicle::command::RealCommandRunner)
 		as std::sync::Arc<dyn chronicle::command::CommandRunner>);
-	let config = config::load(
+	let config = load(
 		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
 		&env,
 	)
@@ -73,7 +73,7 @@ fn init_creates_config_with_cargo() {
 
 	let env = chronicle::Env::new(std::sync::Arc::new(chronicle::command::RealCommandRunner)
 		as std::sync::Arc<dyn chronicle::command::CommandRunner>);
-	let config = config::load(
+	let config = load(
 		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
 		&env,
 	)

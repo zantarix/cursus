@@ -4,8 +4,8 @@ mod common;
 
 use std::process::{Command, Stdio};
 
-use chronicle::git::{GitConfig, Strategy, TagFormat};
 use chronicle::model::config::PackageManager;
+use chronicle::model::config::{GitConfig, Strategy, TagFormat};
 use common::{
 	add_local_remote, git_current_branch, git_enabled_config, git_local_branch_exists, git_log,
 	git_push_to_remote, git_tags, temp_git_repo_with_project,
@@ -125,11 +125,7 @@ fn prepare_git_does_not_create_tags() {
 #[test]
 fn prepare_git_tag_format_config_no_tags_at_release() {
 	// Tag format only affects publish step now; release just commits.
-	let config = GitConfig {
-		enabled: Some(true),
-		tag_format: TagFormat::Prefixed,
-		..Default::default()
-	};
+	let config = GitConfig::enabled_config().with_tag_format(TagFormat::Prefixed);
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
 	setup_single_cargo_package(dir.path(), "solo", "1.0.0");
 	write_changeset(
@@ -308,11 +304,7 @@ fn prepare_git_extra_files_are_staged() {
 	// An extra file produced by a custom lock_command should be staged in the release
 	// commit. We use an npm project with a lock_command that writes custom.lock so the
 	// file is created WITHIN chronicle's execution (after the dirty-tree check).
-	let git_config = GitConfig {
-		enabled: Some(true),
-		extra_files: vec!["custom.lock".to_string()],
-		..Default::default()
-	};
+	let git_config = GitConfig::enabled_config().with_extra_files(vec!["custom.lock".to_string()]);
 	let dir = temp_real_git_repo_with_config(PackageManager::Npm, git_config);
 
 	// Write config with a lock_command that produces custom.lock during the release.
@@ -362,11 +354,7 @@ fn prepare_git_extra_files_are_staged() {
 
 /// Config helper for branch strategy tests.
 fn branch_strategy_config() -> GitConfig {
-	GitConfig {
-		enabled: Some(true),
-		strategy: Some(Strategy::Branch),
-		..Default::default()
-	}
+	GitConfig::enabled_config().with_strategy(Strategy::Branch)
 }
 
 #[test]
@@ -704,10 +692,10 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	use std::sync::Arc;
 
 	use chronicle::command::RealCommandRunner;
+	use chronicle::github::RestGitHubClient;
 	use chronicle::github::client::GitHubClient;
-	use chronicle::github::{GitHubConfig, RestGitHubClient};
-	use chronicle::model::config::Config;
-	use chronicle::package_manager::CargoConfig;
+	use chronicle::model::config::CargoConfig;
+	use chronicle::model::config::{Config, GitHubConfig};
 	use chronicle::path::AbsolutePath;
 	use httpmock::prelude::*;
 
@@ -720,12 +708,11 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	Config::new(&abs)
 		.with_cargo(CargoConfig::enabled())
 		.with_git(branch_strategy_config())
-		.with_github(GitHubConfig {
-			enabled: true,
-			owner: Some("acme".into()),
-			repo: Some("app".into()),
-			..Default::default()
-		})
+		.with_github(
+			GitHubConfig::enabled_config()
+				.with_owner("acme".into())
+				.with_repo("app".into()),
+		)
 		.save()
 		.unwrap();
 
