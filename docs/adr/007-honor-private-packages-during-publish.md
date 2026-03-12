@@ -6,7 +6,7 @@ Accepted (2026-02-21)
 
 ## Context
 
-Chronicle's `chronicle publish` command (ADR-004) publishes all configured packages to their respective registries. It iterates over every project enumerated by the enabled package manager adapters and invokes the registry-specific publish command for each one.
+Chronicle's `chronicle publish` command ([ADR-004](004-publish-command.md)) publishes all configured packages to their respective registries. It iterates over every project enumerated by the enabled package manager adapters and invokes the registry-specific publish command for each one.
 
 Some packages are not intended for registry publication. A prominent example is GitHub Actions: they are developed as standard npm packages (TypeScript/JavaScript with `package.json`, versioned with semver), but they are consumed directly from git repositories via tags and GitHub Releases (`uses: owner/repo@v1.2.3`), not from the npm registry. Publishing such a package to npm would be incorrect.
 
@@ -20,8 +20,8 @@ Currently, Chronicle does not read these fields. When `chronicle publish` runs, 
 The desired workflow for a GitHub Action repository is:
 
 1. `chronicle release` -- bumps version in `package.json`, generates changelog, deletes changesets (works today)
-2. Git operations -- commit, tag, push (manual or via ADR-006)
-3. GitHub Release creation -- creates release with changelog (ADR-005)
+2. Git operations -- commit, tag, push (manual or via [ADR-006](006-git-lifecycle-hooks.md))
+3. GitHub Release creation -- creates release with changelog ([ADR-005](005-github-releases.md))
 4. `chronicle publish` -- runs without error because the private package is silently excluded
 
 In a mixed monorepo (e.g., a publishable npm library alongside a GitHub Action), the publish step should publish the library to npm and silently ignore the GitHub Action.
@@ -98,7 +98,7 @@ This decision introduces no new fields in `.chronicle/config.toml`. The behavior
 
 ### Neutral
 
-- This decision is complementary to ADR-005 (GitHub Releases). A GitHub Action repository would typically enable `[github]` for releases and set `"private": true` in `package.json` to skip npm publishing. The two features compose naturally.
+- This decision is complementary to [ADR-005](005-github-releases.md) (GitHub Releases). A GitHub Action repository would typically enable `[github]` for releases and set `"private": true` in `package.json` to skip npm publishing. The two features compose naturally.
 - Future package manager adapters should follow the same pattern: check for the ecosystem's native "do not publish" marker before attempting to publish.
 
 ## Alternatives Considered
@@ -121,4 +121,4 @@ Chronicle could treat an explicit `--package my-private-pkg` as an error, on the
 
 ## Errata
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

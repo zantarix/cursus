@@ -21,7 +21,7 @@ Shared infrastructure change affecting both packages
 
 The current implementation has a correctness bug: when `release --package pkg-a` runs, version bumping and changelog generation are correctly scoped to `pkg-a`, but **all** changeset files are unconditionally deleted afterwards -- including changesets that contain entries for packages not part of this release. This silently discards pending changes for unreleased packages.
 
-ADR-003 defined changeset consumption as "delete all processed `.chronicle/*.md` files" but did not anticipate scoped releases. The `--package` flag was added to the implementation without updating the consumption semantics.
+[ADR-003](003-release-command.md) defined changeset consumption as "delete all processed `.chronicle/*.md` files" but did not anticipate scoped releases. The `--package` flag was added to the implementation without updating the consumption semantics.
 
 ## Decision
 
@@ -57,7 +57,7 @@ When `release` runs with a `--package` scope, changeset consumption will follow 
 
 - Dry-run mode remains unaffected. Rewriting only happens during actual (non-dry-run) releases.
 - This decision does not affect how changesets are created, only how they are consumed.
-- Git lifecycle hooks (ADR-006), if enabled, will commit the rewritten changesets as part of the release commit, so the intermediate state is captured in version control.
+- Git lifecycle hooks ([ADR-006](006-git-lifecycle-hooks.md)), if enabled, will commit the rewritten changesets as part of the release commit, so the intermediate state is captured in version control.
 
 ## Alternatives Considered
 
@@ -71,4 +71,4 @@ Maintain a `.chronicle/released.toml` recording which package entries have been 
 
 ## Errata
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `release` as a subcommand name in this ADR now refer to `chronicle prepare`. The scoped changeset consumption behavior is unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `release` as a subcommand name in this ADR now refer to `chronicle prepare`. The scoped changeset consumption behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

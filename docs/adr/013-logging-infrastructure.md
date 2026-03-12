@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (backend sub-decision superseded by ADR-018)
+Accepted (backend sub-decision superseded by [ADR-018](018-replace-fern-with-cli-logger.md))
 
 ## Context
 
@@ -28,7 +28,7 @@ The `log` crate (facade) will be a dependency of the library crate. The library 
 
 The concrete backend (`fern`) will be a dependency of the binary crate only and will be initialised in `main()` in `src/main.rs`, before calling `run()`. The level filter will default to `Info`, which preserves Chronicle's current behaviour: operational messages, warnings, and errors are all visible.
 
-ADR-014 will later replace this hardcoded default with dynamic control via the `--verbose` / `-v` and `--silent` / `-s` flags, allowing users to raise the level filter to `Debug` or `Trace`, or lower it to `Error`. Because initialisation already lives in `main()`, this extension only requires changing the level filter value passed to the fern dispatch.
+[ADR-014](014-verbose-mode.md) will later replace this hardcoded default with dynamic control via the `--verbose` / `-v` and `--silent` / `-s` flags, allowing users to raise the level filter to `Debug` or `Trace`, or lower it to `Error`. Because initialisation already lives in `main()`, this extension only requires changing the level filter value passed to the fern dispatch.
 
 **Stream routing:**
 
@@ -77,7 +77,7 @@ Fern is a lightweight, composable logging backend whose only mandatory dependenc
 - The stdout/stderr split is preserved: operational output stays on stdout, warnings and errors stay on stderr
 - Call sites use stable `log` macros that are decoupled from the backend, so the logger implementation can be swapped later without changing library code
 - The library crate has no opinion on the logging backend, so consumers that embed chronicle as a library can install their own `log` implementation
-- The infrastructure is ready for ADR-014's `--verbose` and `--silent` flags to plug in -- only the level filter value in `main()` needs to change
+- The infrastructure is ready for [ADR-014](014-verbose-mode.md)'s `--verbose` and `--silent` flags to plug in -- only the level filter value in `main()` needs to change
 - Fern's only mandatory dependency is `log`, keeping the transitive dependency footprint minimal
 
 ### Negative
@@ -114,4 +114,4 @@ Adopting `log` only for new diagnostic output while leaving existing `println!()
 
 ## Errata
 
-- **2026-03-11:** The backend sub-decision (choosing `fern` as the `log::Log` implementation) is superseded by ADR-018, which replaces fern with a hand-rolled `CliLogger`. The `log` facade decision and all other aspects of this ADR remain valid.
+- **2026-03-11:** The backend sub-decision (choosing `fern` as the `log::Log` implementation) is superseded by [ADR-018](018-replace-fern-with-cli-logger.md), which replaces fern with a hand-rolled `CliLogger`. The `log` facade decision and all other aspects of this ADR remain valid.

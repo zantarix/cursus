@@ -59,7 +59,7 @@ Both adapters respect the optional `path` configuration to resolve manifest file
 
 ### Storage
 
-The `.chronicle/` directory at the git root serves as the home for both configuration and changeset files (see ADR-002). The directory is created automatically by `chronicle init`.
+The `.chronicle/` directory at the git root serves as the home for both configuration and changeset files (see [ADR-002](002-changeset-recording.md)). The directory is created automatically by `chronicle init`.
 
 ## Consequences
 
@@ -73,4 +73,4 @@ The `.chronicle/` directory at the git root serves as the home for both configur
 
 The original consequences section stated that `deny_unknown_fields` makes adding new configuration options a breaking change. This is incorrect. Adding new fields is non-breaking: existing config files simply won't contain the new field, and `serde(default)` provides sensible defaults. The constraint only prevents *users* from having fields in their config that Chronicle doesn't recognise, catching typos and stale configuration. *Removing* a previously supported field would be breaking, since existing configs referencing it would fail to parse.
 
-**2026-03-11:** ADR-019 expands the init workflow to cover git automation, GitHub integration, multi-package-manager selection, and manifest path prompting. The package manager screen changes from a single-select to a multi-select. The `--package-manager` non-interactive flag is removed; init becomes interactive-only. The generated config includes commented-out documentation for all available options.
+**2026-03-11:** [ADR-019](019-improved-init-workflow.md) expands the init workflow to cover git automation, GitHub integration, multi-package-manager selection, and manifest path prompting. The package manager screen changes from a single-select to a multi-select. The `--package-manager` non-interactive flag is removed; init becomes interactive-only. The generated config includes commented-out documentation for all available options.

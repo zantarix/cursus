@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Chronicle supports `--dry-run` across `prepare`, `publish`, and `ci` commands, governed by ADR-008's strict local-only invariant. Dry-run must preview what an operation would do without performing any mutations or remote operations.
+Chronicle supports `--dry-run` across `prepare`, `publish`, and `ci` commands, governed by [ADR-008](008-dry-run-local-only-guarantee.md)'s strict local-only invariant. Dry-run must preview what an operation would do without performing any mutations or remote operations.
 
 There are two broad approaches to implementing dry-run in a multi-step command pipeline. The first -- "early branching" -- places `if dry_run { log } else { do_it }` checks at each point where a side effect occurs, creating parallel code paths that must independently compute the same values, track the same files, and produce equivalent log output. The second -- "late guarding" -- runs all computation, logging, and decision-making unconditionally, and only guards the final mutation itself.
 
@@ -48,7 +48,7 @@ Subcommands that do not currently support dry-run (`init`, `change`) will simply
 
 Two categories of early `if dry_run` guards remain as intentional divergences, not duplicated logic:
 
-1. **Pre-flight checks for resources that will not be used.** Per ADR-008, dry-run must not perform remote operations. Skipping the GitHub token requirement or dirty-tree validation during dry-run is a genuine behavioral difference: these checks guard operations that will not run.
+1. **Pre-flight checks for resources that will not be used.** Per [ADR-008](008-dry-run-local-only-guarantee.md), dry-run must not perform remote operations. Skipping the GitHub token requirement or dirty-tree validation during dry-run is a genuine behavioral difference: these checks guard operations that will not run.
 
 2. **Operations whose outcome cannot be predicted locally.** Registry publish operations are inherently branched because dry-run cannot invoke the registry and cannot determine whether a publish would succeed, be skipped (version already exists), or fail. The dry-run path can only report what it would attempt.
 
@@ -64,13 +64,13 @@ Two categories of early `if dry_run` guards remain as intentional divergences, n
 
 ### Negative
 
-- The `DryRunCommandRunner` must classify commands as read-only or mutating. An incorrect classification could either suppress a needed read (breaking dry-run output) or allow a mutation through (violating ADR-008). This classification logic is a new responsibility that must be maintained as new commands are added.
+- The `DryRunCommandRunner` must classify commands as read-only or mutating. An incorrect classification could either suppress a needed read (breaking dry-run output) or allow a mutation through (violating [ADR-008](008-dry-run-local-only-guarantee.md)). This classification logic is a new responsibility that must be maintained as new commands are added.
 - `PackageManagerAdapter` methods that do direct filesystem I/O (`write_version`, `update_dependency_version`) still gain a `dry_run: bool` parameter, since the `CommandRunner` decorator cannot intercept `std::fs::write` calls. This creates a mixed model: some mutations are guarded by the decorator, others by explicit parameters.
 - Subcommands that do not support dry-run (`init`, `change`) will silently accept `--dry-run` as a global flag without effect. This is mildly surprising but harmless, and consistent with how `--verbose` and `--silent` already work.
 
 ### Neutral
 
-- ADR-008's strict local-only invariant is unchanged. The late guard pattern still ensures no remote operations occur during dry-run; it moves the guard from the caller to lower-level abstractions but does not weaken it.
+- [ADR-008](008-dry-run-local-only-guarantee.md)'s strict local-only invariant is unchanged. The late guard pattern still ensures no remote operations occur during dry-run; it moves the guard from the caller to lower-level abstractions but does not weaken it.
 - Test coverage for dry-run paths becomes more valuable: dry-run tests now exercise the same computation logic as real tests, with only the final mutation skipped.
 - The `GitHubClient` trait itself is unchanged. Its calls are already skipped at the call site during dry-run because the entire GitHub orchestration block is gated on `!dry_run`. This is the "inherently branched" exception described above.
 

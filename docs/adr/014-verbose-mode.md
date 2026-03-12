@@ -12,7 +12,7 @@ Chronicle is a release management CLI that orchestrates external commands (git o
 
 2. **Shell command execution**: The `CommandRunner` trait runs git commands, lock-file updates, and user-configurable `build_command`/`lock_command` strings. When a command fails, users may not know exactly what was invoked, in which directory, or what stderr contained. This is especially opaque for shell commands passed through `/bin/sh -c`.
 
-Chronicle already has a `GlobalArgs` struct that carries cross-cutting CLI concerns (`--interactive`/`--no-interactive`). Verbosity flags fit naturally alongside these. Beyond increasing verbosity for diagnostics, there is also a need to suppress output entirely -- for example, when running Chronicle in CI pipelines or scripts where only the exit code matters and any non-error output is noise. The question is how these flags map to the logging infrastructure (ADR-013) and what the initial scope of verbose output covers.
+Chronicle already has a `GlobalArgs` struct that carries cross-cutting CLI concerns (`--interactive`/`--no-interactive`). Verbosity flags fit naturally alongside these. Beyond increasing verbosity for diagnostics, there is also a need to suppress output entirely -- for example, when running Chronicle in CI pipelines or scripts where only the exit code matters and any non-error output is noise. The question is how these flags map to the logging infrastructure ([ADR-013](013-logging-infrastructure.md)) and what the initial scope of verbose output covers.
 
 ## Decision
 
@@ -21,7 +21,7 @@ We will add two global CLI flags to `GlobalArgs`:
 - `--verbose` / `-v`: stackable flag that increases the log level by one step per occurrence.
 - `--silent` / `-s`: boolean flag that restricts log output to errors only.
 
-These flags are **mutually exclusive**. Passing both `--verbose` and `--silent` in the same invocation is a usage error and will be rejected by clap at parse time (via `conflicts_with`). As established in ADR-013, logger initialisation lives in `main()`. The flag values from `GlobalArgs` will be used in `main()` to set the logger's level filter before calling `run()`.
+These flags are **mutually exclusive**. Passing both `--verbose` and `--silent` in the same invocation is a usage error and will be rejected by clap at parse time (via `conflicts_with`). As established in [ADR-013](013-logging-infrastructure.md), logger initialisation lives in `main()`. The flag values from `GlobalArgs` will be used in `main()` to set the logger's level filter before calling `run()`.
 
 **Log level mapping:**
 

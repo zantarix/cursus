@@ -14,7 +14,7 @@ The release workflow is a three-step process:
 
 1. **Update the filesystem** — bump versions, generate changelogs, consume changesets (this ADR)
 2. **Commit to source control** — managed by the user or CI, not by Chronicle
-3. **Publish to registries** — handled by a separate `chronicle publish` command (see ADR-004)
+3. **Publish to registries** — handled by a separate `chronicle publish` command (see [ADR-004](004-publish-command.md))
 
 Chronicle intentionally does not handle the commit step. Users run different CI systems, may want different commit strategies (single commit vs. per-package), and may require GPG signing or other policies that Chronicle should not assume.
 
@@ -128,8 +128,8 @@ The release command does not require a TUI. It is a batch operation suitable for
 
 ## Errata
 
-**2026-02-20**: ADR-006 introduces opt-in git lifecycle hooks that allow Chronicle to optionally handle commit, tag, and push operations after the filesystem modifications described in this ADR. When `[git].enabled = false` (the default), ADR-003's original behaviour applies: Chronicle only modifies the filesystem, and users manage source control manually. When git hooks are enabled, Chronicle automates the commit step described in line 16 as part of the `chronicle release` workflow. See ADR-006 for details.
+**2026-02-20**: [ADR-006](006-git-lifecycle-hooks.md) introduces opt-in git lifecycle hooks that allow Chronicle to optionally handle commit, tag, and push operations after the filesystem modifications described in this ADR. When `[git].enabled = false` (the default), ADR-003's original behaviour applies: Chronicle only modifies the filesystem, and users manage source control manually. When git hooks are enabled, Chronicle automates the commit step described in line 16 as part of the `chronicle release` workflow. See [ADR-006](006-git-lifecycle-hooks.md) for details.
 
-**2026-03-09**: ADR-015 further extends git integration beyond what ADR-006 introduced. The three-step workflow described in this ADR's Context section listed step 2 as "Commit to source control -- managed by the user or CI, not by Chronicle." When `[git].strategy = "branch"` (ADR-015), Chronicle also creates a release branch, pushes it to origin, and optionally opens a pull request. The statement that Chronicle "intentionally does not handle the commit step" is now only accurate when `[git].enabled = false`. See ADR-015 for the full CI-managed release workflow.
+**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) further extends git integration beyond what [ADR-006](006-git-lifecycle-hooks.md) introduced. The three-step workflow described in this ADR's Context section listed step 2 as "Commit to source control -- managed by the user or CI, not by Chronicle." When `[git].strategy = "branch"` ([ADR-015](015-ci-managed-release-workflow.md)), Chronicle also creates a release branch, pushes it to origin, and optionally opens a pull request. The statement that Chronicle "intentionally does not handle the commit step" is now only accurate when `[git].enabled = false`. See [ADR-015](015-ci-managed-release-workflow.md) for the full CI-managed release workflow.
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. All references to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. All references to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

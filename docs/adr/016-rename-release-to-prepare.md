@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-Chronicle's three-step release workflow has evolved across several ADRs (ADR-003, ADR-006, ADR-015) into a clear separation of concerns: the first step prepares release artifacts (version bumps, changelogs, changeset deletion, commits, branch management), and the second step makes them public (registry publishing, tag creation, GitHub Releases). The subcommands that drive these steps are `chronicle release` and `chronicle publish`.
+Chronicle's three-step release workflow has evolved across several ADRs ([ADR-003](003-release-command.md), [ADR-006](006-git-lifecycle-hooks.md), [ADR-015](015-ci-managed-release-workflow.md)) into a clear separation of concerns: the first step prepares release artifacts (version bumps, changelogs, changeset deletion, commits, branch management), and the second step makes them public (registry publishing, tag creation, GitHub Releases). The subcommands that drive these steps are `chronicle release` and `chronicle publish`.
 
-The name `release` for the first step is a misnomer. The `release` subcommand does not release anything -- it prepares the repository for a release. The actual releasing happens during `publish`, which pushes packages to registries, creates tags, and creates GitHub Releases. ADR-015 made this distinction even sharper by stating "the `release` command is strictly concerned with filesystem changes and branch management" and "`publish` is the single place where all 'make this release public' actions happen."
+The name `release` for the first step is a misnomer. The `release` subcommand does not release anything -- it prepares the repository for a release. The actual releasing happens during `publish`, which pushes packages to registries, creates tags, and creates GitHub Releases. [ADR-015](015-ci-managed-release-workflow.md) made this distinction even sharper by stating "the `release` command is strictly concerned with filesystem changes and branch management" and "`publish` is the single place where all 'make this release public' actions happen."
 
 The consequence is a confusing user-facing vocabulary. The phrase "`release` prepares, `publish` releases" is an accurate description of the current architecture, but it is counterintuitive: users reasonably expect a command named `release` to perform a release. This naming friction will compound as Chronicle gains adoption, appearing in documentation, CI configurations, error messages, and support conversations. Renaming the subcommand now, before Chronicle reaches a stable release, eliminates this source of confusion permanently.
 
@@ -26,15 +26,15 @@ We will rename the `chronicle release` subcommand to `chronicle prepare`.
 4. Computes next versions using semver bumping rules.
 5. Writes new versions to manifest files and updates lock files.
 6. Generates changelog entries.
-7. Deletes consumed changeset files (with scoped rewriting per ADR-010).
-8. When `[git].enabled = true`: commits changes, pushes to the current branch or a release branch (per `[git].strategy`), and optionally creates a PR (per ADR-015).
+7. Deletes consumed changeset files (with scoped rewriting per [ADR-010](010-scoped-release-changeset-consumption.md)).
+8. When `[git].enabled = true`: commits changes, pushes to the current branch or a release branch (per `[git].strategy`), and optionally creates a PR (per [ADR-015](015-ci-managed-release-workflow.md)).
 9. Prints a summary.
 
 All existing flags are preserved: `--dry-run`, `--no-git`, `--package/-p`, `--branch`, `--no-interactive`.
 
 ### How `chronicle ci` is affected
 
-`chronicle ci` internally dispatches to either `prepare` or `publish` based on repository state. The state detection logic is unchanged (ADR-015):
+`chronicle ci` internally dispatches to either `prepare` or `publish` based on repository state. The state detection logic is unchanged ([ADR-015](015-ci-managed-release-workflow.md)):
 
 - If pending changesets exist, run `prepare`.
 - If no pending changesets exist and current manifest versions are untagged/unpublished, run `publish`.
@@ -64,9 +64,9 @@ The `prepare` subcommand's help text will describe its purpose without using the
 The rename of the subcommand does not require renaming configuration fields or git concepts that use "release" in a broader sense:
 
 - **`release_branch_prefix`** (`[git]` config field): Retained as-is. The branch carries release changes, regardless of which subcommand created it. The prefix `chronicle-release/` describes the branch's purpose (it is a release branch), not the subcommand that created it.
-- **`chore(release):` commit message** (ADR-006): Retained as-is. The commit message describes what the commit contains (release changes), not which subcommand produced it. This convention is well-established in the ecosystem (e.g., Lerna, Changesets, semantic-release all use `chore(release):` or similar).
-- **`[github].pull_request_title`** (ADR-015): The default value `"chore: release"` is retained. PR titles describe the content of the PR (a release), not the CLI command.
-- **`Release {package} version {version}` tag message** (ADR-006): Retained. Tags describe releases.
+- **`chore(release):` commit message** ([ADR-006](006-git-lifecycle-hooks.md)): Retained as-is. The commit message describes what the commit contains (release changes), not which subcommand produced it. This convention is well-established in the ecosystem (e.g., Lerna, Changesets, semantic-release all use `chore(release):` or similar).
+- **`[github].pull_request_title`** ([ADR-015](015-ci-managed-release-workflow.md)): The default value `"chore: release"` is retained. PR titles describe the content of the PR (a release), not the CLI command.
+- **`Release {package} version {version}` tag message** ([ADR-006](006-git-lifecycle-hooks.md)): Retained. Tags describe releases.
 
 The guiding principle is that "release" as a *noun* (describing what is being prepared) remains correct throughout configuration and git metadata. Only "release" as a *verb* (the subcommand action) is misleading, and that is what this rename addresses.
 

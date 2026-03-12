@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Chronicle's current three-step release workflow (ADR-003, ADR-004, ADR-006) works well for manual releases: a developer runs `chronicle release` locally, commits and pushes (or lets git hooks handle it), then runs `chronicle publish`. However, this workflow does not map cleanly onto CI-managed approval flows where releases must go through a pull request review before landing on the main branch.
+Chronicle's current three-step release workflow ([ADR-003](003-release-command.md), [ADR-004](004-publish-command.md), [ADR-006](006-git-lifecycle-hooks.md)) works well for manual releases: a developer runs `chronicle release` locally, commits and pushes (or lets git hooks handle it), then runs `chronicle publish`. However, this workflow does not map cleanly onto CI-managed approval flows where releases must go through a pull request review before landing on the main branch.
 
 In a CI-managed workflow, the desired flow is:
 
@@ -16,7 +16,7 @@ In a CI-managed workflow, the desired flow is:
 
 The current `chronicle release` command with `[git].strategy = "push"` commits directly to the current branch. There is no mechanism to push release changes to a separate branch for review. Additionally, there is no single CI-friendly entrypoint that can infer what action to take based on the repository's current state -- CI pipelines must be manually wired to call `release` or `publish` at the right time.
 
-GitHub Releases are currently modelled as a post-publish action in ADR-005, created during `chronicle publish` after packages are uploaded to registries. Since GitHub Releases are metadata about git tags rather than registry artifacts, it is more natural to create them at tag-push time, which happens during the publish phase when git operations run.
+GitHub Releases are currently modelled as a post-publish action in [ADR-005](005-github-releases.md), created during `chronicle publish` after packages are uploaded to registries. Since GitHub Releases are metadata about git tags rather than registry artifacts, it is more natural to create them at tag-push time, which happens during the publish phase when git operations run.
 
 ## Decision
 
@@ -39,7 +39,7 @@ We will add a `chronicle ci` subcommand that serves as a smart CI entrypoint. It
 The state detection logic is:
 
 - **Changesets present**: Chronicle already has `read_all_changesets()` which globs `.chronicle/*.md`. If this returns a non-empty set, there is work for `release` to do.
-- **Post-release state**: After a release PR is merged, changesets have been consumed and versions are bumped. Chronicle detects this by checking whether the current manifest versions have been released. Specifically, for each configured package, if no git tag matching the current manifest version exists and the package has not yet been published at that version to its registry, `publish` should run. This combines two signals -- the absence of a tag and the absence of a published version -- to determine that the current version represents an unreleased release. The existing idempotency logic from ADR-004 still applies: packages already published are skipped during the publish operation itself.
+- **Post-release state**: After a release PR is merged, changesets have been consumed and versions are bumped. Chronicle detects this by checking whether the current manifest versions have been released. Specifically, for each configured package, if no git tag matching the current manifest version exists and the package has not yet been published at that version to its registry, `publish` should run. This combines two signals -- the absence of a tag and the absence of a published version -- to determine that the current version represents an unreleased release. The existing idempotency logic from [ADR-004](004-publish-command.md) still applies: packages already published are skipped during the publish operation itself.
 
 `chronicle ci` accepts the same flags as both `release` and `publish` (e.g., `--package`, `--dry-run`, `--branch`). Flags that are irrelevant to the inferred action are ignored.
 
@@ -47,7 +47,7 @@ The state detection logic is:
 
 ### Git strategies for `release`
 
-The `[git].strategy` field controls how Chronicle handles git operations after the release command completes its filesystem modifications. Unlike the previous `run_until` field (ADR-006), which modelled a sequential pipeline of steps, the two strategies are distinct approaches to delivering release changes rather than a progression:
+The `[git].strategy` field controls how Chronicle handles git operations after the release command completes its filesystem modifications. Unlike the previous `run_until` field ([ADR-006](006-git-lifecycle-hooks.md)), which modelled a sequential pipeline of steps, the two strategies are distinct approaches to delivering release changes rather than a progression:
 
 - `push` -- create a release commit and push it directly to the current branch on origin.
 - `branch` -- create a release commit on a release branch, push it to origin, and return to the original branch.
@@ -57,7 +57,7 @@ The default value for `strategy` is derived at runtime rather than being a stati
 - If `[github].enabled = true`, the default is `"branch"`. When GitHub integration is active, Chronicle can create a pull request from the release branch, making the approval flow useful. The value of the `branch` strategy comes from the ability to review release changes before they land.
 - Otherwise, the default is `"push"`. Without GitHub integration (or a similar PR mechanism), pushing to a separate branch would leave release changes stranded on a remote branch with no automated way to create a review. Direct push to the current branch is the sensible default in this case.
 
-Explicit configuration of `[git].strategy` always overrides the derived default. This follows the same derivation pattern as `[git].enabled`, which defaults to `true` when `[github].enabled = true` (ADR-006).
+Explicit configuration of `[git].strategy` always overrides the derived default. This follows the same derivation pattern as `[git].enabled`, which defaults to `true` when `[github].enabled = true` ([ADR-006](006-git-lifecycle-hooks.md)).
 
 When `strategy = "push"`, Chronicle:
 
@@ -108,7 +108,7 @@ When `pull_request_title` is not configured, the default title is `"Release upda
 
 The PR body will contain the release summary (the same version bump summary that Chronicle prints to the terminal). The PR is created as a regular (non-draft) pull request.
 
-PR creation uses the same `GITHUB_TOKEN` authentication as GitHub Releases (ADR-005). If PR creation fails (e.g., due to authentication or network errors), Chronicle reports the failure but does not roll back the branch push. The release branch exists on the remote and the user can create the PR manually.
+PR creation uses the same `GITHUB_TOKEN` authentication as GitHub Releases ([ADR-005](005-github-releases.md)). If PR creation fails (e.g., due to authentication or network errors), Chronicle reports the failure but does not roll back the branch push. The release branch exists on the remote and the user can create the PR manually.
 
 When `[github].enabled = false`, no PR is created regardless of the strategy. The release branch is pushed but no further action is taken. This is the scenario where `strategy` defaults to `"push"` -- pushing to a branch without PR creation is rarely useful, which is why `branch` is only the default when GitHub integration is available.
 
@@ -123,9 +123,9 @@ When `chronicle publish` runs and `[git].enabled = true`, it performs git operat
 
 Tags are created and pushed *after* registry publishing, not before. This ordering prevents a state detection inconsistency: if tags were pushed first and then registry publishing failed, `chronicle ci` would see "tag exists" and incorrectly conclude that publishing is not needed on retry. By creating tags only after successful registry publication, the absence of a tag remains a reliable signal that a version has not been fully released.
 
-Tag creation uses the same `tag_format` configuration and naming conventions established in ADR-006. The tag message format remains `Release {package} version {version}`.
+Tag creation uses the same `tag_format` configuration and naming conventions established in [ADR-006](006-git-lifecycle-hooks.md). The tag message format remains `Release {package} version {version}`.
 
-If a tag already exists for a given package version, Chronicle skips tag creation for that package -- consistent with the idempotency principle from ADR-004 where "version already exists" errors are treated as success.
+If a tag already exists for a given package version, Chronicle skips tag creation for that package -- consistent with the idempotency principle from [ADR-004](004-publish-command.md) where "version already exists" errors are treated as success.
 
 Tag creation and pushing is governed solely by `[git].enabled`:
 
@@ -134,7 +134,7 @@ Tag creation and pushing is governed solely by `[git].enabled`:
 
 ### The `--no-git` flag on `release` and `publish`
 
-ADR-006 introduced `--no-git` for `chronicle release`. We will extend `--no-git` to `chronicle publish` as well, with the same semantics: skip all git operations for that invocation, regardless of the `[git]` configuration.
+[ADR-006](006-git-lifecycle-hooks.md) introduced `--no-git` for `chronicle release`. We will extend `--no-git` to `chronicle publish` as well, with the same semantics: skip all git operations for that invocation, regardless of the `[git]` configuration.
 
 On `release`, `--no-git` skips committing, pushing, branch creation, and PR creation. Chronicle performs only filesystem modifications.
 
@@ -168,7 +168,7 @@ The current branch name is resolved at runtime by reading `HEAD`. If HEAD is det
 
 ### GitHub Releases timing
 
-GitHub Releases will be created during the publish phase after tag creation, which is consistent with ADR-005. The full publish ordering is: registry publish, then tag creation/push, then GitHub Releases -- all within the same `publish` invocation:
+GitHub Releases will be created during the publish phase after tag creation, which is consistent with [ADR-005](005-github-releases.md). The full publish ordering is: registry publish, then tag creation/push, then GitHub Releases -- all within the same `publish` invocation:
 
 1. `chronicle release` (or `ci` in release mode) bumps versions, generates changelogs, pushes to a release branch, and optionally creates a PR.
 2. After the release PR is merged (or immediately in manual workflows), `chronicle publish` (or `ci` in publish mode) publishes to registries, creates tags, pushes tags, and creates GitHub Releases.
@@ -205,7 +205,7 @@ This single workflow handles both scenarios: when changesets are present it crea
 
 ### Dry-run support
 
-`chronicle ci --dry-run` reports which action would be taken (release or publish) and what that action would do, without performing any filesystem writes, git operations, or remote operations. This is consistent with ADR-008.
+`chronicle ci --dry-run` reports which action would be taken (release or publish) and what that action would do, without performing any filesystem writes, git operations, or remote operations. This is consistent with [ADR-008](008-dry-run-local-only-guarantee.md).
 
 ## Consequences
 
@@ -227,7 +227,7 @@ This single workflow handles both scenarios: when changesets are present it crea
 - The `chronicle ci` subcommand adds complexity to Chronicle's command surface. Users must understand when to use `ci` versus explicit `release`/`publish` commands.
 - State detection for the publish phase requires Chronicle to query both git tags and registries, which adds a network dependency to what was previously a local-only detection step. If registry queries fail, `ci` cannot determine whether to publish.
 - Detached HEAD in CI environments requires fallback logic for branch naming, adding an edge case that must be handled and tested.
-- Moving tag creation from `release` to `publish` changes the existing contract from ADR-006 where tags were created during the release step. Users who relied on tags existing after `release` but before `publish` will need to adjust their workflows.
+- Moving tag creation from `release` to `publish` changes the existing contract from [ADR-006](006-git-lifecycle-hooks.md) where tags were created during the release step. Users who relied on tags existing after `release` but before `publish` will need to adjust their workflows.
 - Both strategies require a clean working tree when git is enabled, which may be inconvenient for developers who want to prepare a release while they have work in progress. They must stash or commit changes first.
 - Automatic PR creation couples Chronicle more tightly to the GitHub API. Projects not using GitHub cannot benefit from the `branch` strategy's full workflow without external tooling to create PRs.
 
@@ -257,7 +257,7 @@ This was rejected because it introduces a new stateful artifact that must be com
 
 ### Commit message convention for state detection
 
-Detect post-release state by looking for a commit message matching the `chore(release):` pattern from ADR-006. If the latest commit matches, infer that publishing is needed.
+Detect post-release state by looking for a commit message matching the `chore(release):` pattern from [ADR-006](006-git-lifecycle-hooks.md). If the latest commit matches, infer that publishing is needed.
 
 This was rejected because commit message parsing is fragile. Users may amend, squash, or reword commits. Merge commits from PRs may not preserve the original message format. Version-based detection (checking tags and registry state against manifest versions) is more robust because it relies on actual published state rather than commit metadata that can be rewritten.
 

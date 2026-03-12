@@ -10,7 +10,7 @@ Chronicle needs a way for developers to record what has changed in a repository 
 
 A changeset must capture which packages are affected, the severity of the change (for semver bumping), and an optional human-readable description. Multiple developers working on separate branches must be able to create changesets without conflicts.
 
-This command requires a repository that has been initialised with `chronicle init` (see ADR-001).
+This command requires a repository that has been initialised with `chronicle init` (see [ADR-001](001-project-initialisation.md)).
 
 ## Decision
 
@@ -50,7 +50,7 @@ Description message here
 - Changesets are stored as `.chronicle/*.md` alongside `config.toml`
 - Filenames are randomly generated three-word petnames (e.g., `scrupulously-affirming-thornbill.md`) to avoid naming conflicts when multiple developers create changesets concurrently
 - The `.chronicle/` directory is created automatically if it doesn't exist
-- Changeset files are intended to be committed to source control and accumulate on the main branch until consumed by a release (see ADR-003)
+- Changeset files are intended to be committed to source control and accumulate on the main branch until consumed by a release (see [ADR-003](003-release-command.md))
 
 ### When changesets are NOT created
 

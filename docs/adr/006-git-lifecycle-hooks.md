@@ -10,9 +10,9 @@ Chronicle's release workflow is currently a three-step manual process:
 
 1. **`chronicle release`** — Updates the filesystem (version bumps, changelog generation, changeset deletion)
 2. **Manual git operations** — User commits changes, creates tags, and pushes to remote
-3. **`chronicle publish`** — Publishes packages to registries and creates GitHub Releases (ADR-004, ADR-005)
+3. **`chronicle publish`** — Publishes packages to registries and creates GitHub Releases ([ADR-004](004-publish-command.md), [ADR-005](005-github-releases.md))
 
-ADR-003 explicitly states that Chronicle "intentionally does not handle the commit step" because "users run different CI systems, may want different commit strategies, and may require GPG signing or other policies that Chronicle should not assume."
+[ADR-003](003-release-command.md) explicitly states that Chronicle "intentionally does not handle the commit step" because "users run different CI systems, may want different commit strategies, and may require GPG signing or other policies that Chronicle should not assume."
 
 Without git automation, there is a manual gap between steps 1 and 3. After running `chronicle release`, users must manually:
 
@@ -23,7 +23,7 @@ Without git automation, there is a manual gap between steps 1 and 3. After runni
 
 This manual workflow is error-prone and tedious, especially in monorepos where multiple packages are released simultaneously, each requiring its own tag.
 
-While ADR-003's reasoning is sound for general-purpose commit workflows, a significant portion of Chronicle users likely follow a standard pattern: commit all release changes, tag each package, and push to origin. For these users, automating the git lifecycle would reduce friction without imposing unwanted policies.
+While [ADR-003](003-release-command.md)'s reasoning is sound for general-purpose commit workflows, a significant portion of Chronicle users likely follow a standard pattern: commit all release changes, tag each package, and push to origin. For these users, automating the git lifecycle would reduce friction without imposing unwanted policies.
 
 ## Decision
 
@@ -52,7 +52,7 @@ extra_files = []         # list of paths — additional files to stage before co
   - `"tag"` (default): Create a release commit and annotated tags
   - `"push"`: Create a release commit, annotated tags, and push to origin
   - This enum design eliminates nonsensical configurations that independent booleans would allow (e.g., tagging without committing). The git lifecycle is inherently sequential, so `run_until` models it as a high-water mark rather than independent toggles.
-- `tag_format`: Tag naming strategy, also used by ADR-005's GitHub Releases (see Relationship to ADR-005 below)
+- `tag_format`: Tag naming strategy, also used by [ADR-005](005-github-releases.md)'s GitHub Releases (see Relationship to [ADR-005](005-github-releases.md) below)
   - `"auto"` (default): Use `pkg@version` for multi-package repos, `v{version}` for single-package repos. "Multi-package" is determined by the total project count in the workspace, not the number of packages released in a given run.
   - `"prefixed"`: Always use `pkg@version` format
   - `"simple"`: Always use `v{version}` format (suitable for single-package repos only)
@@ -115,7 +115,7 @@ The steps run sequentially, up to and including the step specified by `run_until
 
 When `chronicle release --dry-run` is invoked:
 
-- All filesystem modifications are skipped (existing ADR-003 behaviour)
+- All filesystem modifications are skipped (existing [ADR-003](003-release-command.md) behaviour)
 - All git operations are skipped
 - Summary output includes what **would** have been done, up to the configured `run_until` step
 
@@ -133,26 +133,26 @@ Git operations may fail for various reasons (uncommitted conflicts, no remote co
 
 **Rationale:** Rolling back filesystem changes after a git failure would be complex and risky. The release operation (bumping versions, writing changelogs) is the primary concern. Git operations are convenience automation. If they fail, users can complete them manually without losing the release work.
 
-### Relationship to ADR-003
+### Relationship to [ADR-003](003-release-command.md)
 
-ADR-003 (Accepted) states: "Chronicle intentionally does not handle the commit step."
+[ADR-003](003-release-command.md) (Accepted) states: "Chronicle intentionally does not handle the commit step."
 
-This ADR introduces an **opt-in alternative** to that position while preserving ADR-003's behaviour as the default:
+This ADR introduces an **opt-in alternative** to that position while preserving [ADR-003](003-release-command.md)'s behaviour as the default:
 
-- The default behaviour remains unchanged: git operations are disabled by default, preserving ADR-003's filesystem-only approach
-- Users who prefer manual git control (the ADR-003 stance) simply leave `[git].enabled = false` or omit the `[git]` section entirely
+- The default behaviour remains unchanged: git operations are disabled by default, preserving [ADR-003](003-release-command.md)'s filesystem-only approach
+- Users who prefer manual git control (the [ADR-003](003-release-command.md) stance) simply leave `[git].enabled = false` or omit the `[git]` section entirely
 - Users who want automation opt in explicitly
 - The original reasoning (different CI systems, commit strategies, GPG signing) still holds for users who need those workflows — they continue to manage git manually
-- An Errata note has been added to ADR-003 documenting this optional extension
+- An Errata note has been added to [ADR-003](003-release-command.md) documenting this optional extension
 
-### Relationship to ADR-005
+### Relationship to [ADR-005](005-github-releases.md)
 
-ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, identified by git tags. The two ADRs share responsibility for tag naming and creation.
+[ADR-005](005-github-releases.md) (GitHub Releases) creates GitHub Releases during `chronicle publish`, identified by git tags. The two ADRs share responsibility for tag naming and creation.
 
 **Tag format configuration:**
 
 - `tag_format` lives in `[git]` because git tags are a git concept, not a GitHub-specific concept
-- ADR-005's GitHub Releases reference `[git].tag_format` when determining which tag corresponds to each release
+- [ADR-005](005-github-releases.md)'s GitHub Releases reference `[git].tag_format` when determining which tag corresponds to each release
 - For backward compatibility, if `[github].tag_format` is present but `[git].tag_format` is not, Chronicle uses the value from `[github]` and prints a deprecation warning
 
 **Tag creation:**
@@ -165,10 +165,10 @@ ADR-005 (GitHub Releases) creates GitHub Releases during `chronicle publish`, id
 ### Positive
 
 - Reduces manual steps: users no longer need to remember the correct tag format, stage the right files, or manually push after every release.
-- Opt-in by default: the feature is disabled unless explicitly enabled (or `[github].enabled = true`), preserving ADR-003's conservative stance.
+- Opt-in by default: the feature is disabled unless explicitly enabled (or `[github].enabled = true`), preserving [ADR-003](003-release-command.md)'s conservative stance.
 - Simple mental model: `run_until` eliminates nonsensical configurations (e.g., tagging without committing) by modelling the git lifecycle as a sequential pipeline with a single stopping point.
 - Consistent with existing patterns: uses the same config-driven approach as `[npm]`, `[cargo]`, and `[github]` sections.
-- Improves GitHub Releases workflow: when combined with ADR-005, users can go from changesets to published packages with GitHub Releases in a single command sequence: `chronicle release && chronicle publish`.
+- Improves GitHub Releases workflow: when combined with [ADR-005](005-github-releases.md), users can go from changesets to published packages with GitHub Releases in a single command sequence: `chronicle release && chronicle publish`.
 - Backward compatible: existing configurations with no `[git]` section behave identically to before (no git operations).
 - Forward compatible: adding `[git]` configuration to an existing repository opts into the new behaviour without breaking existing workflows.
 
@@ -193,10 +193,10 @@ The original design proposed three independent boolean fields: `commit = true`, 
 
 ### No git integration (status quo)
 
-Continuing to rely on manual git operations, as established by ADR-003. This was rejected because the manual workflow is error-prone and tedious, especially in monorepos. The opt-in nature of `[git].enabled` preserves the status quo as the default for users who prefer manual control.
+Continuing to rely on manual git operations, as established by [ADR-003](003-release-command.md). This was rejected because the manual workflow is error-prone and tedious, especially in monorepos. The opt-in nature of `[git].enabled` preserves the status quo as the default for users who prefer manual control.
 
 ## Errata
 
-**2026-03-09**: ADR-015 replaces the `run_until` field (with variants `commit | tag | push`) with a `strategy` field (with variants `push | branch`). The `tag` step described in section "2. Tag" is removed from the release workflow entirely -- tags are now created during `chronicle publish`, not during `chronicle release`. The `commit` variant is also removed; both strategies include committing as an inherent step. The `--no-git` flag, originally defined in this ADR only for `chronicle release`, now also applies to `chronicle publish`. See ADR-015 for the revised git integration model.
+**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) replaces the `run_until` field (with variants `commit | tag | push`) with a `strategy` field (with variants `push | branch`). The `tag` step described in section "2. Tag" is removed from the release workflow entirely -- tags are now created during `chronicle publish`, not during `chronicle release`. The `commit` variant is also removed; both strategies include committing as an inherent step. The `--no-git` flag, originally defined in this ADR only for `chronicle release`, now also applies to `chronicle publish`. See [ADR-015](015-ci-managed-release-workflow.md) for the revised git integration model.
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

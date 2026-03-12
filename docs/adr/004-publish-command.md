@@ -6,11 +6,11 @@ Accepted
 
 ## Context
 
-After `chronicle release` updates versions and changelogs (ADR-003), and the user commits and pushes those changes, the affected packages need to be published to their respective registries (crates.io, npm, etc.).
+After `chronicle release` updates versions and changelogs ([ADR-003](003-release-command.md)), and the user commits and pushes those changes, the affected packages need to be published to their respective registries (crates.io, npm, etc.).
 
 Chronicle already knows which package managers are configured and which packages exist in the repository. It is the natural place to drive the publish step, rather than requiring users to manually invoke the correct publish command for each package manager and each affected package.
 
-This is step 3 of the three-step release workflow described in ADR-003.
+This is step 3 of the three-step release workflow described in [ADR-003](003-release-command.md).
 
 ## Decision
 
@@ -97,8 +97,8 @@ Failed to publish @mscharley/chronicle@0.2.0 to npm: authentication required
 
 ## Errata
 
-**2026-02-21**: ADR-008 establishes a project-wide invariant that `--dry-run` must never perform remote operations. This supersedes the dry-run approach described in this ADR's "Dry-run support" section: `publish --dry-run` no longer delegates to the underlying package manager (e.g., `cargo publish --dry-run`). Instead, Chronicle skips the publish invocation entirely and prints a summary of what would have been published. See ADR-008 for full details.
+**2026-02-21**: [ADR-008](008-dry-run-local-only-guarantee.md) establishes a project-wide invariant that `--dry-run` must never perform remote operations. This supersedes the dry-run approach described in this ADR's "Dry-run support" section: `publish --dry-run` no longer delegates to the underlying package manager (e.g., `cargo publish --dry-run`). Instead, Chronicle skips the publish invocation entirely and prints a summary of what would have been published. See [ADR-008](008-dry-run-local-only-guarantee.md) for full details.
 
-**2026-03-09**: ADR-015 adds git tag creation and pushing as part of the `chronicle publish` workflow when `[git].enabled = true`. The publish ordering described in this ADR (publish to registries, then summary) is now: publish to registries, create and push tags, create GitHub Releases, then summary. Additionally, ADR-015 extends the `--no-git` flag (originally defined for `release` in ADR-006) to `publish`, allowing users to skip tag creation and pushing for a single invocation. See ADR-015 for the full publish workflow.
+**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) adds git tag creation and pushing as part of the `chronicle publish` workflow when `[git].enabled = true`. The publish ordering described in this ADR (publish to registries, then summary) is now: publish to registries, create and push tags, create GitHub Releases, then summary. Additionally, ADR-015 extends the `--no-git` flag (originally defined for `release` in [ADR-006](006-git-lifecycle-hooks.md)) to `publish`, allowing users to skip tag creation and pushing for a single invocation. See [ADR-015](015-ci-managed-release-workflow.md) for the full publish workflow.
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

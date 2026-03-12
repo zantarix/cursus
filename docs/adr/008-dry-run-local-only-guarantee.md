@@ -8,13 +8,13 @@ Accepted
 
 Chronicle provides a `--dry-run` flag across multiple commands (`release`, `publish`, and future commands) that allows users to preview what an operation would do without performing it. Several existing ADRs describe dry-run behavior for individual commands:
 
-- **ADR-003** (`release --dry-run`): Prints the release summary and changelog entries without writing any changes to disk.
-- **ADR-004** (`publish --dry-run`): Passes the `--dry-run` flag through to the underlying package manager (`cargo publish --dry-run`, `npm publish --dry-run`).
-- **ADR-006** (`release --dry-run` with git hooks): Skips both filesystem modifications and all git operations; only prints what would have happened.
+- **[ADR-003](003-release-command.md)** (`release --dry-run`): Prints the release summary and changelog entries without writing any changes to disk.
+- **[ADR-004](004-publish-command.md)** (`publish --dry-run`): Passes the `--dry-run` flag through to the underlying package manager (`cargo publish --dry-run`, `npm publish --dry-run`).
+- **[ADR-006](006-git-lifecycle-hooks.md)** (`release --dry-run` with git hooks): Skips both filesystem modifications and all git operations; only prints what would have happened.
 
-There is currently no overarching policy that defines what `--dry-run` guarantees across all commands. Each ADR defines dry-run behavior locally, and the approaches differ: ADR-003 and ADR-006 implement dry-run by skipping operations entirely, while ADR-004 delegates to external tools. This inconsistency creates a gap.
+There is currently no overarching policy that defines what `--dry-run` guarantees across all commands. Each ADR defines dry-run behavior locally, and the approaches differ: [ADR-003](003-release-command.md) and [ADR-006](006-git-lifecycle-hooks.md) implement dry-run by skipping operations entirely, while [ADR-004](004-publish-command.md) delegates to external tools. This inconsistency creates a gap.
 
-The delegation approach in ADR-004 is problematic. While `cargo publish --dry-run` and `npm publish --dry-run` are documented as local-only operations today, Chronicle is trusting third-party tools to uphold a safety guarantee that users attribute to Chronicle's own `--dry-run` flag. If a package manager's `--dry-run` implementation were to change, or if a future package manager adapter's dry-run mode performed network operations (e.g., validating credentials against a remote registry, uploading metadata for validation), Chronicle would silently violate the user's expectation that `--dry-run` is safe and non-destructive.
+The delegation approach in [ADR-004](004-publish-command.md) is problematic. While `cargo publish --dry-run` and `npm publish --dry-run` are documented as local-only operations today, Chronicle is trusting third-party tools to uphold a safety guarantee that users attribute to Chronicle's own `--dry-run` flag. If a package manager's `--dry-run` implementation were to change, or if a future package manager adapter's dry-run mode performed network operations (e.g., validating credentials against a remote registry, uploading metadata for validation), Chronicle would silently violate the user's expectation that `--dry-run` is safe and non-destructive.
 
 Users have a strong mental model for `--dry-run`: it means "show me what would happen, but do not do anything." This expectation extends beyond "do not write to disk" -- it includes "do not push to remotes," "do not publish to registries," "do not create GitHub Releases," and "do not make any network requests that have side effects." A `--dry-run` flag that might contact external services undermines user trust in the tool.
 
@@ -38,9 +38,9 @@ A remote operation is any action that communicates with an external service or m
 
 When `--dry-run` is active, Chronicle will skip any operation that would contact a remote service and instead print a description of what would have happened. Chronicle will not delegate dry-run behavior to external tools if those tools might perform network operations.
 
-Concretely, this changes the approach described in ADR-004 for `publish --dry-run`:
+Concretely, this changes the approach described in [ADR-004](004-publish-command.md) for `publish --dry-run`:
 
-- **Before (ADR-004)**: Chronicle passes `--dry-run` through to the package manager (e.g., `cargo publish --dry-run`), trusting the external tool to handle it safely.
+- **Before ([ADR-004](004-publish-command.md))**: Chronicle passes `--dry-run` through to the package manager (e.g., `cargo publish --dry-run`), trusting the external tool to handle it safely.
 - **After (this ADR)**: Chronicle skips the publish invocation entirely and prints a summary of what would have been published. No subprocess is spawned for publish operations during dry-run.
 
 This means `publish --dry-run` loses the local validation that `cargo publish --dry-run` provides (such as checking that the package builds and the manifest is valid). This is an acceptable trade-off: local validation can be performed separately with `cargo build` or `cargo package`, and the safety guarantee of `--dry-run` is more valuable than the convenience of bundled validation.
@@ -49,7 +49,7 @@ This means `publish --dry-run` loses the local validation that `cargo publish --
 
 This invariant applies to:
 
-- `chronicle release --dry-run`: No filesystem writes, no git operations, no remote operations (already compliant via ADR-003 and ADR-006)
+- `chronicle release --dry-run`: No filesystem writes, no git operations, no remote operations (already compliant via [ADR-003](003-release-command.md) and [ADR-006](006-git-lifecycle-hooks.md))
 - `chronicle publish --dry-run`: No registry uploads, no GitHub Release creation, no subprocess invocations that contact remotes
 - Any future command that accepts `--dry-run`: Must follow this invariant
 
@@ -75,14 +75,14 @@ When `--dry-run` is active, Chronicle will print a human-readable summary of all
 ### Neutral
 
 - This ADR does not change the behavior of `release --dry-run` or the git hooks dry-run path, as they already comply with this invariant.
-- An errata note will be added to ADR-004 to document that `publish --dry-run` no longer delegates to the underlying package manager, referencing this ADR.
+- An errata note will be added to [ADR-004](004-publish-command.md) to document that `publish --dry-run` no longer delegates to the underlying package manager, referencing this ADR.
 - Local filesystem reads (e.g., reading manifest files to determine what would be published) are still permitted during dry-run. Only writes and remote operations are prohibited.
 
 ## Alternatives Considered
 
 ### Continue delegating to external tools' dry-run modes
 
-Maintain the ADR-004 approach of passing `--dry-run` through to `cargo publish --dry-run` and `npm publish --dry-run`. This was rejected because it makes Chronicle's safety guarantee dependent on third-party behavior. While these tools' dry-run modes are currently local-only, Chronicle cannot enforce that contract, and a change in behavior would silently violate user expectations. The risk is disproportionate to the benefit.
+Maintain the [ADR-004](004-publish-command.md) approach of passing `--dry-run` through to `cargo publish --dry-run` and `npm publish --dry-run`. This was rejected because it makes Chronicle's safety guarantee dependent on third-party behavior. While these tools' dry-run modes are currently local-only, Chronicle cannot enforce that contract, and a change in behavior would silently violate user expectations. The risk is disproportionate to the benefit.
 
 ### Allow network operations that are read-only
 
@@ -94,6 +94,6 @@ Add a flag like `--dry-run=local` vs `--dry-run=validate` to let users choose be
 
 ## Errata
 
-**2026-03-09**: ADR-015 adds git tag creation and pushing to the `chronicle publish` workflow when `[git].enabled = true`. The Scope section of this ADR lists `chronicle publish --dry-run` as skipping "No registry uploads, no GitHub Release creation, no subprocess invocations that contact remotes." Tag creation and tag pushing must now also be skipped during dry-run. The invariant itself ("no remote operations during dry-run") is unchanged; the set of operations it covers has expanded. See ADR-015.
+**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) adds git tag creation and pushing to the `chronicle publish` workflow when `[git].enabled = true`. The Scope section of this ADR lists `chronicle publish --dry-run` as skipping "No registry uploads, no GitHub Release creation, no subprocess invocations that contact remotes." Tag creation and tag pushing must now also be skipped during dry-run. The invariant itself ("no remote operations during dry-run") is unchanged; the set of operations it covers has expanded. See [ADR-015](015-ci-managed-release-workflow.md).
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior and dry-run guarantees are unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior and dry-run guarantees are unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

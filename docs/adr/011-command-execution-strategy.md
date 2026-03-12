@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-Chronicle has several points in its release and publish workflows where it executes external commands. Some are hardcoded (e.g., `cargo generate-lockfile`, `npm install --package-lock-only`, the git operations from ADR-006), while others are user-configurable (e.g., `[npm].lock_command` from ADR-009, `[github].build_command` from ADR-005). More configurable commands are likely as the tool evolves.
+Chronicle has several points in its release and publish workflows where it executes external commands. Some are hardcoded (e.g., `cargo generate-lockfile`, `npm install --package-lock-only`, the git operations from [ADR-006](006-git-lifecycle-hooks.md)), while others are user-configurable (e.g., `[npm].lock_command` from [ADR-009](009-javascript-package-manager-strategy.md), `[github].build_command` from [ADR-005](005-github-releases.md)). More configurable commands are likely as the tool evolves.
 
-The existing user-configurable command, `[npm].lock_command`, splits the string on whitespace and executes the fragments directly via `std::process::Command`. This means shell features are unavailable: pipes, redirects, environment variable expansion, glob patterns, subshell expressions, and quoting rules all do not work. ADR-009 explicitly calls this out as a limitation and notes that "users needing shell features must wrap their command in a script." ADR-005, by contrast, specifies that `[github].build_command` should be executed via the system shell (`sh -c` on Unix), but this has not yet been implemented.
+The existing user-configurable command, `[npm].lock_command`, splits the string on whitespace and executes the fragments directly via `std::process::Command`. This means shell features are unavailable: pipes, redirects, environment variable expansion, glob patterns, subshell expressions, and quoting rules all do not work. [ADR-009](009-javascript-package-manager-strategy.md) explicitly calls this out as a limitation and notes that "users needing shell features must wrap their command in a script." [ADR-005](005-github-releases.md), by contrast, specifies that `[github].build_command` should be executed via the system shell (`sh -c` on Unix), but this has not yet been implemented.
 
 The inconsistency creates a confusing user experience. Two string-valued command fields in the same configuration file would behave differently depending on which section they appear in. Users cannot predict whether a given command field supports shell features without consulting documentation for that specific field.
 
@@ -64,7 +64,7 @@ lock_command = "cd frontend && bun install --frozen-lockfile"
 
 ### Dry-run interaction
 
-Per ADR-008, `--dry-run` must be strictly local-only: no subprocess invocations that could have side effects. All user-configurable commands are skipped during dry-run. Chronicle prints what command would have been executed, but does not invoke the shell.
+Per [ADR-008](008-dry-run-local-only-guarantee.md), `--dry-run` must be strictly local-only: no subprocess invocations that could have side effects. All user-configurable commands are skipped during dry-run. Chronicle prints what command would have been executed, but does not invoke the shell.
 
 For example, during `chronicle release --dry-run` with a configured `lock_command`, output would include:
 
@@ -81,18 +81,18 @@ Each command field defines its own error handling policy, appropriate to its rol
 - A non-zero exit code from the shell constitutes a failure.
 - Chronicle captures stderr from the failed command and includes it in the error message.
 - Chronicle does not attempt to interpret or parse command output beyond the exit code.
-- Chronicle does not roll back prior filesystem changes on command failure, consistent with the existing error handling philosophy (see ADR-003, ADR-006).
+- Chronicle does not roll back prior filesystem changes on command failure, consistent with the existing error handling philosophy (see [ADR-003](003-release-command.md), [ADR-006](006-git-lifecycle-hooks.md)).
 
-Most command fields will use fail-fast semantics: a failure aborts the current workflow step and Chronicle exits with a non-zero status code. Individual ADRs may override this for specific fields where continuation is appropriate (e.g., ADR-005 specifies that a `build_command` failure skips GitHub Release creation but does not roll back the registry publish).
+Most command fields will use fail-fast semantics: a failure aborts the current workflow step and Chronicle exits with a non-zero status code. Individual ADRs may override this for specific fields where continuation is appropriate (e.g., [ADR-005](005-github-releases.md) specifies that a `build_command` failure skips GitHub Release creation but does not roll back the registry publish).
 
 ### Scope of affected command fields
 
 This ADR applies to all current and future user-configurable command fields in Chronicle's configuration. As of this writing, the affected fields are:
 
-- **`[npm].lock_command`** (ADR-009, implemented): Custom lock file update command. Currently uses whitespace splitting; will be migrated to shell execution.
-- **`[github].build_command`** (ADR-005, not yet implemented): Build artifacts before creating a GitHub Release. ADR-005 already specifies shell execution; this ADR formalizes that choice as part of a broader standard.
+- **`[npm].lock_command`** ([ADR-009](009-javascript-package-manager-strategy.md), implemented): Custom lock file update command. Currently uses whitespace splitting; will be migrated to shell execution.
+- **`[github].build_command`** ([ADR-005](005-github-releases.md), not yet implemented): Build artifacts before creating a GitHub Release. [ADR-005](005-github-releases.md) already specifies shell execution; this ADR formalizes that choice as part of a broader standard.
 
-Future command fields (e.g., a potential `[npm].publish_command` noted in ADR-009, or any new lifecycle commands) will follow the same conventions established here.
+Future command fields (e.g., a potential `[npm].publish_command` noted in [ADR-009](009-javascript-package-manager-strategy.md), or any new lifecycle commands) will follow the same conventions established here.
 
 ### Fields not affected
 
@@ -151,7 +151,7 @@ This was rejected because `$SHELL` is unpredictable. Fish and nushell have incom
 
 Keep the current approach: split the command string on whitespace and pass the fragments to `std::process::Command`. This avoids shell dependencies and security concerns.
 
-This was rejected because it produces surprising behavior for users. A string that looks like a shell command does not behave like one: quoting is ignored, pipes do not work, and environment variables are not expanded. ADR-009 already documents this as a known limitation. Maintaining two different execution models (whitespace splitting for `lock_command`, shell for `build_command`) would be worse than either approach applied consistently.
+This was rejected because it produces surprising behavior for users. A string that looks like a shell command does not behave like one: quoting is ignored, pipes do not work, and environment variables are not expanded. [ADR-009](009-javascript-package-manager-strategy.md) already documents this as a known limitation. Maintaining two different execution models (whitespace splitting for `lock_command`, shell for `build_command`) would be worse than either approach applied consistently.
 
 ### Dual format: string or array
 

@@ -6,7 +6,7 @@ Accepted (2026-03-09)
 
 ## Context
 
-Chronicle's `chronicle publish` command (ADR-004) publishes packages to their respective registries (crates.io, npm, etc.), and `chronicle release` (ADR-003) generates changelog entries for each version. However, the tool does not currently create GitHub Releases, which many projects use to communicate new versions to users, attach release artifacts, and provide a central location for release notes.
+Chronicle's `chronicle publish` command ([ADR-004](004-publish-command.md)) publishes packages to their respective registries (crates.io, npm, etc.), and `chronicle release` ([ADR-003](003-release-command.md)) generates changelog entries for each version. However, the tool does not currently create GitHub Releases, which many projects use to communicate new versions to users, attach release artifacts, and provide a central location for release notes.
 
 Users want the option to automatically create GitHub Releases as part of their publish workflow, with release notes populated from the changelog content that Chronicle has already generated.
 
@@ -57,15 +57,15 @@ GitHub Releases are identified by Git tags. Chronicle expects tags in one of two
 - **Multi-package repos**: `pkg-name@version` (e.g., `chronicle-cli@0.2.0`, `@mscharley/chronicle@0.2.0`)
 - **Single-package repos**: `v{version}` (e.g., `v0.2.0`)
 
-The tag format is determined by the `[git].tag_format` configuration (see ADR-006). Chronicle uses this setting to identify which git tag corresponds to each GitHub Release.
+The tag format is determined by the `[git].tag_format` configuration (see [ADR-006](006-git-lifecycle-hooks.md)). Chronicle uses this setting to identify which git tag corresponds to each GitHub Release.
 
 **Tag creation:**
 
-Chronicle creates git tags automatically when `[git].tag` is enabled (see ADR-006). When git hooks are disabled, tags must be created manually before running `chronicle publish`. If a required tag does not exist, the GitHub Release creation will fail.
+Chronicle creates git tags automatically when `[git].tag` is enabled (see [ADR-006](006-git-lifecycle-hooks.md)). When git hooks are disabled, tags must be created manually before running `chronicle publish`. If a required tag does not exist, the GitHub Release creation will fail.
 
 ### Authentication
 
-GitHub API access requires authentication. Chronicle uses the `GITHUB_TOKEN` environment variable, following the same pattern as registry authentication in ADR-004.
+GitHub API access requires authentication. Chronicle uses the `GITHUB_TOKEN` environment variable, following the same pattern as registry authentication in [ADR-004](004-publish-command.md).
 
 Chronicle does not manage, store, or prompt for GitHub credentials. It expects the environment to be pre-configured:
 
@@ -167,7 +167,7 @@ Chronicle reports GitHub Release failures clearly and exits with a non-zero stat
 
 ### Dry-run support
 
-When `chronicle publish --dry-run` is invoked, GitHub Releases are **not** created. The `build_command` is **not** executed, and no artifacts are uploaded. The dry-run output includes a note about which GitHub Releases would have been created and which artifacts are configured, but no API calls or subprocess invocations are made. This is consistent with the dry-run safety guarantee established in ADR-008.
+When `chronicle publish --dry-run` is invoked, GitHub Releases are **not** created. The `build_command` is **not** executed, and no artifacts are uploaded. The dry-run output includes a note about which GitHub Releases would have been created and which artifacts are configured, but no API calls or subprocess invocations are made. This is consistent with the dry-run safety guarantee established in [ADR-008](008-dry-run-local-only-guarantee.md).
 
 ### Summary output
 
@@ -208,7 +208,7 @@ Failed to create GitHub Release for chronicle-cli@0.2.0: missing GITHUB_TOKEN
 ### Negative
 
 - Chronicle becomes responsible for creating GitHub Releases, coupling it to the GitHub API. This API is stable, well-documented, and versioned, but it is still an external dependency.
-- When git hooks are disabled (the default without `[github].enabled`), Chronicle depends on Git tags already existing in the repository, and the user or CI is responsible for creating and pushing tags. When git hooks are enabled (see ADR-006), Chronicle creates tags automatically as part of `chronicle release`.
+- When git hooks are disabled (the default without `[github].enabled`), Chronicle depends on Git tags already existing in the repository, and the user or CI is responsible for creating and pushing tags. When git hooks are enabled (see [ADR-006](006-git-lifecycle-hooks.md)), Chronicle creates tags automatically as part of `chronicle release`.
 - The `build_command` is executed as a subprocess via the system shell, which introduces a dependency on the build environment having the correct toolchain installed. Build failures are reported but cannot be retried without re-running the entire publish workflow.
 - In monorepos, artifacts are attached to every GitHub Release in the publish run. There is no per-package artifact configuration. Users with per-package artifact needs must manage this through their build scripts.
 - Each artifact requires an explicit map entry. Users who produce many artifacts (e.g., one per platform per package) must list each one individually, which can be verbose compared to glob-based approaches.
@@ -219,8 +219,8 @@ Failed to create GitHub Release for chronicle-cli@0.2.0: missing GITHUB_TOKEN
 
 ## Errata
 
-**2026-03-01**: ADR-011 (Command Execution Strategy) establishes a project-wide standard for how all user-configurable command fields are executed. The `build_command` execution semantics described in this ADR -- "executed via the system shell (`sh -c` on Unix) with the working directory set to the repository root" -- are consistent with ADR-011's conventions and remain correct. ADR-011 is now the authoritative reference for command execution details including shell choice (`/bin/sh`), working directory, dry-run interaction, and error handling conventions. See ADR-011 for the full standard that applies to `build_command` and all other configurable command fields.
+**2026-03-01**: [ADR-011](011-command-execution-strategy.md) (Command Execution Strategy) establishes a project-wide standard for how all user-configurable command fields are executed. The `build_command` execution semantics described in this ADR -- "executed via the system shell (`sh -c` on Unix) with the working directory set to the repository root" -- are consistent with [ADR-011](011-command-execution-strategy.md)'s conventions and remain correct. [ADR-011](011-command-execution-strategy.md) is now the authoritative reference for command execution details including shell choice (`/bin/sh`), working directory, dry-run interaction, and error handling conventions. See [ADR-011](011-command-execution-strategy.md) for the full standard that applies to `build_command` and all other configurable command fields.
 
-**2026-03-09**: ADR-015 moves tag creation from the release step to the publish step. The "Tag creation" section of this ADR states "When `[git].enabled = true` and `run_until` is `"tag"` or `"push"`, Chronicle creates git tags during `chronicle release`." This is no longer accurate: tags are always created during `chronicle publish` (when `[git].enabled = true`), never during `chronicle release`. The `run_until` field has been replaced by `strategy`. Additionally, the statement "When git hooks are disabled, tags must already exist before running `chronicle publish`" is no longer accurate: when `[git].enabled = true`, `publish` creates tags itself. See ADR-015 for the revised tag creation workflow.
+**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) moves tag creation from the release step to the publish step. The "Tag creation" section of this ADR states "When `[git].enabled = true` and `run_until` is `"tag"` or `"push"`, Chronicle creates git tags during `chronicle release`." This is no longer accurate: tags are always created during `chronicle publish` (when `[git].enabled = true`), never during `chronicle release`. The `run_until` field has been replaced by `strategy`. Additionally, the statement "When git hooks are disabled, tags must already exist before running `chronicle publish`" is no longer accurate: when `[git].enabled = true`, `publish` creates tags itself. See [ADR-015](015-ci-managed-release-workflow.md) for the revised tag creation workflow.
 
-**2026-03-09**: ADR-016 renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See ADR-016 for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
