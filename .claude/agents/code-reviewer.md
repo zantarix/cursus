@@ -68,7 +68,8 @@ This is **Chronicle**, a Rust CLI tool for release management (see `CLAUDE.md` f
 
    - **API design**: Misleading function names, leaky abstractions, wrong return types, missing validation
    - **Test coverage**: Missing tests for error paths, edge cases, or new functions
-   - **Documentation**: Missing or incorrect doc comments
+   - **Inline Documentation**: Missing or incorrect doc comments
+   - **Project Documentation**: Ensure that any project level documentation such as the README is updated appropriately
    - **Architectural violations**: Code that contradicts ADRs or established patterns (e.g., adding git logic outside the designated boundary)
 
    ### 🟡 Minor (consider fixing)
