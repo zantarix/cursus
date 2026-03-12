@@ -4,6 +4,10 @@ A release management CLI for software. Chronicle provides a structured workflow
 for recording changes, bumping semantic versions, generating changelogs, and
 publishing packages to registries.
 
+Designed to truly run anywhere, and distributed as static binaries for most major
+platforms. If rust can compile to it, and it's not already available then please
+open a request if you need it to run a new platform.
+
 ## Overview
 
 Chronicle breaks the release process into three distinct steps:
@@ -140,7 +144,6 @@ Detection logic:
 | Cargo | `[workspace].members` | `Cargo.lock` | crates.io |
 | npm | `"workspaces"` in `package.json` | `package-lock.json` | npm |
 | pnpm | `pnpm-workspace.yaml` | `pnpm-lock.yaml` | npm |
-| Yarn | `"workspaces"` in `package.json` | `yarn.lock` | npm |
 
 Chronicle auto-detects the JavaScript package manager from the lock file present
 in the repository.
