@@ -1,105 +1,76 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
-use ratatui::prelude::*;
-
 use crate::model::config::Strategy;
-use crate::tui::widgets::{self, ButtonDef, KeyResult};
+use crate::tui::screens::ButtonScreen;
+use crate::tui::widgets::{ButtonDef, KeyResult};
 
-use super::{HandleResult, Screen, WizardState, edit_github::make_edit_github_screen};
+use super::{InitResult, Screen, WizardState, edit_github::make_edit_github_screen};
 
-const QUESTION: &str =
-	"Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
-
-fn enter_action(mut state: WizardState, strategy: Strategy) -> HandleResult {
-	state.git_strategy = Some(strategy);
-	match strategy {
-		Strategy::Push => Ok(KeyResult::Continue((state, Screen::EnableGitHub(false)))),
-		Strategy::Branch => {
-			// Branch implies GitHub enabled
-			state.github_enabled = true;
-			let screen = make_edit_github_screen(&state);
-			Ok(KeyResult::Continue((state, screen)))
-		}
-	}
+/// Button screen state for the [`Screen::GitStrategy`] screen.
+pub(super) struct GitStrategyButtons {
+	pub(super) strategy: Strategy,
 }
 
-/// Handles events for the [`Screen::GitStrategy`] screen.
-///
-/// Selecting `Branch` auto-enables GitHub integration and jumps directly to
-/// [`Screen::EditGitHub`], skipping the [`Screen::EnableGitHub`] prompt.
-pub(super) fn handle_git_strategy(
-	state: WizardState,
-	strategy: Strategy,
-	event: Event,
-	content_area: Rect,
-) -> HandleResult {
-	match event {
-		Event::Key(KeyEvent { code, .. }) => match code {
-			KeyCode::Left
-			| KeyCode::Right
-			| KeyCode::Tab
-			| KeyCode::Char('h')
-			| KeyCode::Char('l') => {
-				let toggled = match strategy {
-					Strategy::Push => Strategy::Branch,
-					Strategy::Branch => Strategy::Push,
-				};
-				Ok(KeyResult::Continue((state, Screen::GitStrategy(toggled))))
-			}
-			KeyCode::Enter => enter_action(state, strategy),
-			KeyCode::Esc | KeyCode::Char('q') => Ok(KeyResult::Cancelled),
-			_ => Ok(KeyResult::Continue((state, Screen::GitStrategy(strategy)))),
-		},
-		Event::Mouse(me) if matches!(me.kind, MouseEventKind::Down(MouseButton::Left)) => {
-			if let Some(idx) =
-				widgets::button_click_index(content_area, QUESTION, 2, me.column, me.row)
-			{
-				let clicked_strategy = if idx == 0 {
-					Strategy::Push
-				} else {
-					Strategy::Branch
-				};
-				enter_action(state, clicked_strategy)
-			} else {
-				Ok(KeyResult::Continue((state, Screen::GitStrategy(strategy))))
-			}
-		}
-		_ => Ok(KeyResult::Continue((state, Screen::GitStrategy(strategy)))),
-	}
-}
+impl ButtonScreen for GitStrategyButtons {
+	type State = WizardState;
+	type Result = InitResult;
+	type FullScreen = Screen;
 
-/// Renders the [`Screen::GitStrategy`] screen.
-pub(super) fn render_git_strategy(frame: &mut Frame, area: Rect, strategy: Strategy) {
-	let chunks = widgets::wizard_layout(
-		area,
-		&[
-			Constraint::Length(widgets::paragraph_height(QUESTION, area.width, 2)),
-			Constraint::Length(3),
-			Constraint::Length(1),
-			Constraint::Min(1),
-		],
-	);
-	widgets::render_question(frame, chunks[0], QUESTION, Color::Yellow);
-	widgets::render_yes_no_buttons(
-		frame,
-		chunks[1],
-		&[
+	const QUESTION: &'static str =
+		"Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
+
+	fn buttons(&self) -> [ButtonDef<'_>; 2] {
+		[
 			ButtonDef {
 				label: "Push",
-				selected: strategy == Strategy::Push,
+				selected: self.strategy == Strategy::Push,
 				color: None,
 			},
 			ButtonDef {
 				label: "Branch",
-				selected: strategy == Strategy::Branch,
+				selected: self.strategy == Strategy::Branch,
 				color: None,
 			},
-		],
-	);
-	widgets::render_help(
-		frame,
-		chunks[3],
-		"←/→/Tab or click to switch, Enter or click to confirm, Esc to cancel",
-	);
+		]
+	}
+
+	fn toggled(self) -> Self {
+		let strategy = match self.strategy {
+			Strategy::Push => Strategy::Branch,
+			Strategy::Branch => Strategy::Push,
+		};
+		GitStrategyButtons { strategy }
+	}
+
+	fn with_index(self, index: usize) -> Self {
+		let strategy = if index == 0 {
+			Strategy::Push
+		} else {
+			Strategy::Branch
+		};
+		GitStrategyButtons { strategy }
+	}
+
+	fn into_continue(self, state: WizardState) -> (WizardState, Screen) {
+		(state, Screen::GitStrategy(self.strategy))
+	}
+
+	/// Selects the git strategy and advances:
+	/// - `Push` → [`Screen::EnableGitHub`]
+	/// - `Branch` → auto-enables GitHub and skips to [`Screen::EditGitHub`]
+	fn on_confirm(
+		self,
+		mut state: WizardState,
+	) -> anyhow::Result<KeyResult<(WizardState, Screen), InitResult>> {
+		state.git_strategy = Some(self.strategy);
+		match self.strategy {
+			Strategy::Push => Ok(KeyResult::Continue((state, Screen::EnableGitHub(false)))),
+			Strategy::Branch => {
+				// Branch implies GitHub enabled
+				state.github_enabled = true;
+				let screen = make_edit_github_screen(&state);
+				Ok(KeyResult::Continue((state, screen)))
+			}
+		}
+	}
 }
 
 #[cfg(test)]
@@ -167,12 +138,12 @@ mod tests {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let area = test_content_area();
-		let (new_state, s) = unwrap_continue(handle_git_strategy(
-			state,
-			Strategy::Branch,
-			mouse_click(10, area.y + 7),
-			area,
-		));
+		let (new_state, s) = unwrap_continue(
+			GitStrategyButtons {
+				strategy: Strategy::Branch,
+			}
+			.handle_event(state, mouse_click(10, area.y + 7), area),
+		);
 		assert_eq!(new_state.git_strategy, Some(Strategy::Push));
 		assert!(matches!(s, Screen::EnableGitHub(_)));
 	}
@@ -182,12 +153,12 @@ mod tests {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let area = test_content_area();
-		let (new_state, s) = unwrap_continue(handle_git_strategy(
-			state,
-			Strategy::Push,
-			mouse_click(65, area.y + 7),
-			area,
-		));
+		let (new_state, s) = unwrap_continue(
+			GitStrategyButtons {
+				strategy: Strategy::Push,
+			}
+			.handle_event(state, mouse_click(65, area.y + 7), area),
+		);
 		assert_eq!(new_state.git_strategy, Some(Strategy::Branch));
 		assert!(new_state.github_enabled);
 		assert!(matches!(s, Screen::EditGitHub { .. }));
@@ -198,12 +169,12 @@ mod tests {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let area = test_content_area();
-		let (_, s) = unwrap_continue(handle_git_strategy(
-			state,
-			Strategy::Push,
-			mouse_click(10, area.y + 18),
-			area,
-		));
+		let (_, s) = unwrap_continue(
+			GitStrategyButtons {
+				strategy: Strategy::Push,
+			}
+			.handle_event(state, mouse_click(10, area.y + 18), area),
+		);
 		assert!(matches!(s, Screen::GitStrategy(Strategy::Push)));
 	}
 

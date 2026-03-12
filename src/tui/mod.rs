@@ -7,6 +7,7 @@
 
 pub mod change;
 pub mod init;
+mod screens;
 mod widgets;
 
 #[cfg(test)]

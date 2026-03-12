@@ -7,6 +7,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 use ratatui_textarea::TextArea;
 
+use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
 use crate::git::GitWorkdir;
@@ -177,26 +178,29 @@ fn handle_event(
 	content_area: Rect,
 ) -> HandleResult {
 	match screen {
-		Screen::ConfirmOverwrite(yes) => {
-			confirm_overwrite::handle_confirm_overwrite(state, yes, event, content_area)
-		}
+		Screen::ConfirmOverwrite(yes) => confirm_overwrite::ConfirmOverwriteButtons { yes }
+			.handle_event(state, event, content_area),
 		Screen::SelectPackageManagers { cargo, npm, focus } => {
 			select_pms::handle_select_pms(state, cargo, npm, focus, event, content_area)
 		}
 		Screen::ManifestPath { pm, textarea } => {
 			manifest_path::handle_manifest_path(state, pm, textarea, event)
 		}
-		Screen::EnableGit(yes) => enable_git::handle_enable_git(state, yes, event, content_area),
+		Screen::EnableGit(yes) => {
+			enable_git::EnableGitButtons { yes }.handle_event(state, event, content_area)
+		}
 		Screen::GitStrategy(strategy) => {
-			git_strategy::handle_git_strategy(state, strategy, event, content_area)
+			git_strategy::GitStrategyButtons { strategy }.handle_event(state, event, content_area)
 		}
 		Screen::EnableGitHub(yes) => {
-			enable_github::handle_enable_github(state, yes, event, content_area)
+			enable_github::EnableGitHubButtons { yes }.handle_event(state, event, content_area)
 		}
 		Screen::EditGitHub { textarea, error } => {
 			edit_github::handle_edit_github(state, textarea, error, event)
 		}
-		Screen::OpenEditor(yes) => open_editor::handle_open_editor(state, yes, event, content_area),
+		Screen::OpenEditor(yes) => {
+			open_editor::OpenEditorButtons { yes }.handle_event(state, event, content_area)
+		}
 	}
 }
 
@@ -244,7 +248,7 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 
 	match screen {
 		Screen::ConfirmOverwrite(yes) => {
-			confirm_overwrite::render_confirm_overwrite(frame, content_area, *yes)
+			confirm_overwrite::ConfirmOverwriteButtons { yes: *yes }.render(frame, content_area)
 		}
 		Screen::SelectPackageManagers { cargo, npm, focus } => {
 			select_pms::render_select_pms(frame, content_area, *cargo, *npm, *focus)
@@ -252,15 +256,22 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 		Screen::ManifestPath { pm, textarea } => {
 			manifest_path::render_manifest_path(frame, content_area, *pm, textarea)
 		}
-		Screen::EnableGit(yes) => enable_git::render_enable_git(frame, content_area, *yes),
-		Screen::GitStrategy(strategy) => {
-			git_strategy::render_git_strategy(frame, content_area, *strategy)
+		Screen::EnableGit(yes) => {
+			enable_git::EnableGitButtons { yes: *yes }.render(frame, content_area)
 		}
-		Screen::EnableGitHub(yes) => enable_github::render_enable_github(frame, content_area, *yes),
+		Screen::GitStrategy(strategy) => git_strategy::GitStrategyButtons {
+			strategy: *strategy,
+		}
+		.render(frame, content_area),
+		Screen::EnableGitHub(yes) => {
+			enable_github::EnableGitHubButtons { yes: *yes }.render(frame, content_area)
+		}
 		Screen::EditGitHub { textarea, error } => {
 			edit_github::render_edit_github(frame, content_area, textarea, *error)
 		}
-		Screen::OpenEditor(yes) => open_editor::render_open_editor(frame, content_area, *yes),
+		Screen::OpenEditor(yes) => {
+			open_editor::OpenEditorButtons { yes: *yes }.render(frame, content_area)
+		}
 	}
 }
 
