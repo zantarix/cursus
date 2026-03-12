@@ -10,9 +10,10 @@ Key differences from old style:
 - **Decision language**: Imperative ("We will...", "The system shall...")
 - The old ADRs (001-006) are historical records; do not retroactively change them
 
-## ADR Inventory
+## ADR Inventory and Index
 
 - See `inventory.md` for a detailed list of all ADRs.
+- `docs/adr/index.md` is the public-facing ADR index. Both must be updated whenever an ADR is created, updated, or has its status changed.
 
 ## Key Architectural Patterns
 
