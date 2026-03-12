@@ -1,3 +1,7 @@
+---
+source: src/model/config/template.rs
+expression: render(&both_pms_git_github_result())
+---
 # [global]
 # disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
 
@@ -7,7 +11,7 @@ enabled = true
 
 [npm]
 enabled = true
-path = "pkg/"
+# path = "subdir/"              # Subdirectory for package.json (relative to git root)
 # lock_command = "npm install"  # Custom command to update the lock file
 
 [git]
@@ -19,17 +23,8 @@ strategy = "branch"
 
 [github]
 enabled = true
-# owner = "zantarix"
-# repo = "chronicle"
-build_command = "cargo make release"
+owner = "acme"
+repo = "my-app"
+# build_command = ""                # Shell command to build release artifacts
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
-
-[github.artifacts]
-# Map of display name -> file path for release assets
-chronicle-linux-x86_64    = "target/x86_64-unknown-linux-musl/release/chronicle"
-chronicle-linux-aarch64   = "target/aarch64-unknown-linux-musl/release/chronicle"
-chronicle-linux-riscv64gc = "target/riscv64gc-unknown-linux-musl/release/chronicle"
-chronicle-osx-x86_64      = "target/x86_64-apple-darwin/release/chronicle"
-chronicle-osx-aarch64     = "target/aarch64-apple-darwin/release/chronicle"
-chronicle-windows-x86_64  = "target/x86_64-pc-windows-gnullvm/release/chronicle.exe"
-chronicle-windows-aarch64 = "target/aarch64-pc-windows-gnullvm/release/chronicle.exe"
+# [github.artifacts]                # Map of display name -> file path for release assets

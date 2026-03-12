@@ -50,7 +50,7 @@ Key differences from old style:
 
 - ADR-001 to ADR-018: Accepted
 - ADR-013: backend sub-decision superseded by ADR-018 (log facade decision still valid)
-- ADR-019: Proposed (improved init workflow)
+- ADR-019: Accepted (improved init workflow)
 - Next ADR number: 020
 
 ## Project ADR Rules (from CLAUDE.md)

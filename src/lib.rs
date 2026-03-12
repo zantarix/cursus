@@ -95,7 +95,7 @@ pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 	let git = git::GitWorkdir::new(&env, git_workdir.clone());
 
 	match cli.command {
-		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global),
+		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global, &env),
 		command => {
 			let config = model::config::load(&git_workdir, &env)?;
 			match command {

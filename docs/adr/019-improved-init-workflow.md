@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -82,9 +82,9 @@ The wizard proceeds through screens in this order, with conditional branches.
 
 6. **EnableGitHub** -- Yes/No toggle. Default selection: No (matching the opt-in principle from [ADR-005](005-github-releases.md)). Only shown when the Push strategy was selected on screen 5. Asks whether Chronicle should create GitHub Releases. When Branch was selected, this screen is skipped and GitHub is enabled automatically.
 
-7. **EditGitHub** -- Shown when GitHub is enabled (either explicitly via screen 6, or implicitly via Branch strategy on screen 5). Displays the auto-detected `owner/repo` from the git origin remote (using the existing `GitHubRepo::parse_url` logic) in an editable text field powered by `ratatui-textarea` in single-line mode. The field is pre-populated with the detected `owner/repo` string, or left empty if detection fails (no origin remote, non-GitHub remote). The user can edit the value to correct it or fill it in from scratch. Enter confirms the current value; Esc cancels. If the user confirms an empty value, the config is written without `owner`/`repo` fields (the user must add them manually before running `publish`). The entered value is validated: it must either be empty or match the `owner/repo` format (exactly one `/` separating two non-empty segments that pass `GitHubRepo::new` validation).
+7. **EditGitHub** -- Shown when GitHub is enabled (either explicitly via screen 6, or implicitly via Branch strategy on screen 5). Displays the auto-detected `owner/repo` from the git origin remote (using the existing `GitHubRepo::parse_url` logic) in an editable text field powered by `ratatui-textarea` in single-line mode. The field is pre-populated with the detected `owner/repo` string, or left empty if detection fails (no origin remote, non-GitHub remote). The user can edit the value to correct it or fill it in from scratch. Enter confirms the current value; Esc cancels. If the user confirms an empty value, the config is written without `owner`/`repo` fields (the user must add them manually before running `publish`). If the user confirms the field without editing it (i.e., the value still matches the auto-detected `owner/repo`), the config is written without explicit `owner`/`repo` fields -- identical to confirming an empty field -- and the detected values are rendered as commented-out hints in the generated config. This lets users accept the detection as a runtime default while keeping the hint visible for reference. If the user edits the value to something different from the detected one, the entered value is written as explicit active TOML. The entered value is validated: it must either be empty or match the `owner/repo` format (exactly one `/` separating two non-empty segments that pass `GitHubRepo::new` validation).
 
-8. **OpenEditor** -- Shown to all users after the config file has been written. Asks "Would you like to open the configuration file in your editor now?" Yes/No toggle, default No. If Yes, opens the config file using the editor resolved from `VISUAL` / `EDITOR` (the existing `Env.editor()` mechanism). If no editor is configured, the screen displays the config file path and suggests setting `VISUAL` or `EDITOR`. This gives users a seamless way to review or tweak advanced options immediately after init.
+8. **OpenEditor** -- Shown to all users after the config file has been written. Asks "Would you like to open the configuration file in your editor now?" Yes/No toggle, default No. If Yes, opens the config file using the editor resolved from `VISUAL` / `EDITOR` (the existing `Env.editor()` mechanism), falling back to the first available editor found on PATH from `nano`, `vim`, `vi`, or `emacs`. If no editor is configured and none of the fallbacks are found, an error is returned suggesting the user set `VISUAL` or `EDITOR`. This gives users a seamless way to review or tweak advanced options immediately after init.
 
 ### Text input via ratatui-textarea
 
@@ -105,6 +105,9 @@ Because TOML comments are not preserved by `toml::to_string`, the config file wi
 **Example: single package manager with git enabled, no GitHub:**
 
 ```toml
+# [global]
+# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
+
 [cargo]
 enabled = true
 # path = "subdir/"              # Subdirectory for Cargo.toml (relative to git root)
@@ -128,20 +131,21 @@ strategy = "push"
 # build_command = ""                # Shell command to build release artifacts
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 # [github.artifacts]                # Map of display name -> file path for release assets
-
-# [global]
-# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
 ```
 
 **Example: polyglot monorepo with git and GitHub:**
 
 ```toml
-[npm]
-enabled = true
+# [global]
+# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
 
 [cargo]
 enabled = true
 # path = "subdir/"              # Subdirectory for Cargo.toml (relative to git root)
+
+[npm]
+enabled = true
+# path = "subdir/"              # Subdirectory for package.json (relative to git root)
 # lock_command = "npm install"  # Custom command to update the lock file
 
 [git]
@@ -158,9 +162,6 @@ repo = "my-app"
 # build_command = ""                # Shell command to build release artifacts
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 # [github.artifacts]                # Map of display name -> file path for release assets
-
-# [global]
-# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
 ```
 
 ### Options that remain out of scope for init screens

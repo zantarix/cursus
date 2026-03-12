@@ -260,7 +260,7 @@ pub fn run(projects: &[Project], options: &ChangeOptions) -> anyhow::Result<Opti
 	let result = widgets::run_tui(
 		initial_screen,
 		|frame, screen| ui(frame, screen, &project_names),
-		|screen, key| handle_key(&screen, key, projects),
+		|screen, key| handle_key(&screen, key.code, projects),
 	)?;
 
 	Ok(result)

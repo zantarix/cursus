@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use clap::Args;
 
 use crate::git;
-use crate::model::changeset::{self, ChangeType, Changeset};
+use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config::Config;
 use crate::tui::change;
 
@@ -101,7 +101,7 @@ pub(crate) fn cmd_change(
 	let path = changeset.write(git)?;
 
 	if args.message.is_none() {
-		changeset::open_editor(&path, env)?;
+		env.run_editor_on(&path, git.path())?;
 	}
 
 	Ok(ExitCode::SUCCESS)

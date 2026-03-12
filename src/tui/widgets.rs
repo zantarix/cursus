@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use crossterm::{
 	ExecutableCommand,
-	event::{Event, KeyCode, KeyEventKind},
+	event::{Event, KeyEvent, KeyEventKind},
 	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
@@ -159,7 +159,7 @@ pub fn run_tui<S, T, DrawFn, HandleFn>(
 ) -> anyhow::Result<Option<T>>
 where
 	DrawFn: FnMut(&mut Frame, &S),
-	HandleFn: FnMut(S, KeyCode) -> anyhow::Result<KeyResult<S, T>>,
+	HandleFn: FnMut(S, KeyEvent) -> anyhow::Result<KeyResult<S, T>>,
 {
 	enable_raw_mode()?;
 	io::stdout().execute(EnterAlternateScreen)?;
@@ -171,14 +171,12 @@ where
 		}
 		match crossterm::event::read() {
 			Err(e) => break Err(e.into()),
-			Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
-				match handle_fn(state, key.code) {
-					Err(e) => break Err(e),
-					Ok(KeyResult::Continue(new_state)) => state = new_state,
-					Ok(KeyResult::Complete(value)) => break Ok(Some(value)),
-					Ok(KeyResult::Cancelled) => break Ok(None),
-				}
-			}
+			Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => match handle_fn(state, key) {
+				Err(e) => break Err(e),
+				Ok(KeyResult::Continue(new_state)) => state = new_state,
+				Ok(KeyResult::Complete(value)) => break Ok(Some(value)),
+				Ok(KeyResult::Cancelled) => break Ok(None),
+			},
 			Ok(_) => {}
 		}
 	};

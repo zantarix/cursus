@@ -92,6 +92,44 @@ impl Env {
 		self.github_client.as_deref()
 	}
 
+	/// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
+	fn find_default_editor(&self, cwd: &Path) -> Option<String> {
+		["nano", "vim", "vi", "emacs"]
+			.into_iter()
+			.find(|cmd| {
+				self.run("which", &[cmd], cwd)
+					.is_ok_and(|o| o.status.success())
+			})
+			.map(String::from)
+	}
+
+	/// Opens the user's editor on the specified file.
+	///
+	/// Resolves the editor from `self.editor()`, falling back to the first
+	/// available editor from `nano`, `vim`, `vi`, or `emacs`. The working directory for
+	/// the editor process is `cwd`.
+	///
+	/// # Errors
+	///
+	/// Returns an error if no editor is found or the editor process fails.
+	pub fn run_editor_on(&self, path: &Path, cwd: &Path) -> anyhow::Result<()> {
+		use anyhow::Context as _;
+		let editor = self
+			.editor()
+			.filter(|v| !v.is_empty())
+			.map(String::from)
+			.or_else(|| self.find_default_editor(cwd))
+			.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
+		let path_str = path.to_string_lossy();
+		let status = self
+			.run_interactive(&editor, &[path_str.as_ref()], cwd)
+			.with_context(|| format!("Failed to open editor: {editor}"))?;
+		if !status.success() {
+			anyhow::bail!("Editor exited with status: {status}");
+		}
+		Ok(())
+	}
+
 	/// Runs a program with the given arguments in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Read-only.
@@ -268,5 +306,113 @@ mod tests {
 		// Read-only run is forwarded to the inner runner
 		assert_eq!(runner.invocations().len(), 1);
 		assert_eq!(runner.invocations()[0].program, "git");
+	}
+
+	// run_editor_on tests
+
+	#[test]
+	fn run_editor_on_uses_editor_when_set() {
+		let workdir = tempfile::tempdir().unwrap();
+		let path = workdir.path().join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		let (runner, env) = recording_env(0);
+		let env = env.with_editor("vim".to_string());
+		env.run_editor_on(&path, workdir.path()).unwrap();
+
+		let invocations = runner.invocations();
+		assert_eq!(invocations[0].program, "vim");
+		assert!(invocations[0].is_interactive);
+	}
+
+	#[test]
+	fn run_editor_on_ignores_empty_editor_string() {
+		let workdir = tempfile::tempdir().unwrap();
+		let path = workdir.path().join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		// Empty editor → falls back to find_default_editor → runner returns 0 → "nano"
+		let (runner, env) = recording_env(0);
+		let env = env.with_editor(String::new());
+		env.run_editor_on(&path, workdir.path()).unwrap();
+
+		let invocations = runner.invocations();
+		let editor_call = invocations.last().unwrap();
+		assert_eq!(
+			editor_call.program, "nano",
+			"Should fall back to nano when editor is empty"
+		);
+	}
+
+	#[test]
+	fn run_editor_on_nonzero_exit_returns_error() {
+		let workdir = tempfile::tempdir().unwrap();
+		let path = workdir.path().join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		let (_, env) = recording_env(1);
+		let env = env.with_editor("vim".to_string());
+		let result = env.run_editor_on(&path, workdir.path());
+
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("Editor exited with status")
+		);
+	}
+
+	#[test]
+	fn run_editor_on_falls_back_to_default_editor() {
+		let workdir = tempfile::tempdir().unwrap();
+		let path = workdir.path().join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		// No editor set, runner exit_code=0 → which nano succeeds → "nano"
+		let (runner, env) = recording_env(0);
+		env.run_editor_on(&path, workdir.path()).unwrap();
+
+		let invocations = runner.invocations();
+		let editor_call = invocations.last().unwrap();
+		assert_eq!(editor_call.program, "nano");
+	}
+
+	#[test]
+	fn run_editor_on_no_editor_found_returns_error() {
+		let workdir = tempfile::tempdir().unwrap();
+		let path = workdir.path().join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		// Runner exit_code=1 → all which calls fail → no default found
+		let (_, env) = recording_env(1);
+		let result = env.run_editor_on(&path, workdir.path());
+
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("No editor found"));
+	}
+
+	#[test]
+	fn run_editor_on_uses_provided_cwd() {
+		let workdir = tempfile::tempdir().unwrap();
+		let chronicle_dir = workdir.path().join(".chronicle");
+		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		let path = chronicle_dir.join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		let (runner, env) = recording_env(0);
+		let env = env.with_editor("vim".to_string());
+		env.run_editor_on(&path, workdir.path()).unwrap();
+
+		let invocations = runner.invocations();
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive)
+			.expect("Expected an interactive editor invocation");
+		assert_eq!(
+			editor_call.cwd,
+			workdir.path(),
+			"Editor should be invoked with the provided cwd, not the file's parent"
+		);
 	}
 }

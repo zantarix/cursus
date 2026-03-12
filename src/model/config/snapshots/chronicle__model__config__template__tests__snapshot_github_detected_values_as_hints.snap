@@ -1,0 +1,30 @@
+---
+source: src/model/config/template.rs
+expression: render(&result)
+---
+# [global]
+# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
+
+[cargo]
+enabled = true
+# path = "subdir/"              # Subdirectory for Cargo.toml (relative to git root)
+
+# [npm]
+# enabled = false
+# path = "subdir/"              # Subdirectory for package.json (relative to git root)
+# lock_command = "npm install"  # Custom command to update the lock file
+
+# [git]
+# enabled = false
+# strategy = "push"
+# # tag_format = "auto"                            # Tag format: "auto", "prefixed", or "simple"
+# # release_branch_prefix = "chronicle-release/"   # Prefix for release branches (branch strategy)
+# # extra_files = []                               # Additional files to stage before committing
+
+[github]
+enabled = true
+# owner = "acme"
+# repo = "my-app"
+# build_command = ""                # Shell command to build release artifacts
+# pull_request_title = ""           # Custom PR title (default: "Release updates")
+# [github.artifacts]                # Map of display name -> file path for release assets

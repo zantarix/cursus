@@ -11,11 +11,13 @@ mod cargo;
 mod git;
 mod github;
 mod npm;
+mod template;
 
 pub use cargo::CargoConfig;
 pub use git::{GitConfig, Strategy, TagFormat};
 pub use github::GitHubConfig;
 pub use npm::NpmConfig;
+pub(crate) use template::render_init_template;
 
 use crate::package_manager::{self, CargoAdapter, NpmAdapter, PackageManagerAdapter, Project};
 use crate::path::AbsolutePath;
