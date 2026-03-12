@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode};
 use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
 
@@ -7,37 +7,43 @@ use crate::tui::widgets::{self, KeyResult};
 
 use super::{HandleResult, Screen, WizardState, advance_from_manifest_queue};
 
-/// Handles key events for the [`Screen::ManifestPath`] screen.
+/// Handles events for the [`Screen::ManifestPath`] screen.
 pub(super) fn handle_manifest_path(
 	mut state: WizardState,
 	pm: PackageManager,
 	mut textarea: TextArea<'static>,
-	key: KeyEvent,
+	event: Event,
 ) -> HandleResult {
-	match key.code {
-		KeyCode::Enter => {
-			let text = textarea.lines().first().cloned().unwrap_or_default();
-			let trimmed = text.trim().to_string();
-			let path = if trimmed.is_empty() {
-				None
-			} else {
-				Some(trimmed)
-			};
-			match pm {
-				PackageManager::Cargo => state.cargo_path = path,
-				PackageManager::Npm => state.npm_path = path,
+	match event {
+		Event::Key(key) => match key.code {
+			KeyCode::Enter => {
+				let text = textarea.lines().first().cloned().unwrap_or_default();
+				let trimmed = text.trim().to_string();
+				let path = if trimmed.is_empty() {
+					None
+				} else {
+					Some(trimmed)
+				};
+				match pm {
+					PackageManager::Cargo => state.cargo_path = path,
+					PackageManager::Npm => state.npm_path = path,
+				}
+				let (new_state, next_screen) = advance_from_manifest_queue(state);
+				Ok(KeyResult::Continue((new_state, next_screen)))
 			}
-			let (new_state, next_screen) = advance_from_manifest_queue(state);
-			Ok(KeyResult::Continue((new_state, next_screen)))
-		}
-		KeyCode::Esc => Ok(KeyResult::Cancelled),
-		_ => {
-			textarea.input(key);
-			Ok(KeyResult::Continue((
-				state,
-				Screen::ManifestPath { pm, textarea },
-			)))
-		}
+			KeyCode::Esc => Ok(KeyResult::Cancelled),
+			_ => {
+				textarea.input(key);
+				Ok(KeyResult::Continue((
+					state,
+					Screen::ManifestPath { pm, textarea },
+				)))
+			}
+		},
+		_ => Ok(KeyResult::Continue((
+			state,
+			Screen::ManifestPath { pm, textarea },
+		))),
 	}
 }
 
@@ -57,7 +63,7 @@ pub(super) fn render_manifest_path(
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::question_height(&question, area.width)),
+			Constraint::Length(widgets::paragraph_height(&question, area.width, 2)),
 			Constraint::Length(3),
 			Constraint::Min(1),
 		],

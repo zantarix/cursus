@@ -1,54 +1,73 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::prelude::*;
 
 use crate::tui::widgets::{self, ButtonDef, KeyResult};
 
 use super::{HandleResult, PmFocus, Screen, WizardState, detect_package_managers};
 
-/// Handles key events for the [`Screen::ConfirmOverwrite`] screen.
+const QUESTION: &str = "Config already exists. Overwrite?";
+
+fn enter_action(state: WizardState, yes: bool) -> HandleResult {
+	if yes {
+		let (cargo, npm_detected) = detect_package_managers(&state.git_workdir);
+		let npm = npm_detected || !cargo;
+		Ok(KeyResult::Continue((
+			state,
+			Screen::SelectPackageManagers {
+				cargo,
+				npm,
+				focus: PmFocus::Cargo,
+			},
+		)))
+	} else {
+		Ok(KeyResult::Cancelled)
+	}
+}
+
+/// Handles events for the [`Screen::ConfirmOverwrite`] screen.
 pub(super) fn handle_confirm_overwrite(
 	state: WizardState,
 	yes: bool,
-	key: KeyEvent,
+	event: Event,
+	content_area: Rect,
 ) -> HandleResult {
-	match key.code {
-		KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::Char('h') | KeyCode::Char('l') => {
-			Ok(KeyResult::Continue((state, Screen::ConfirmOverwrite(!yes))))
-		}
-		KeyCode::Enter => {
-			if yes {
-				let (cargo, npm_detected) = detect_package_managers(&state.git_workdir);
-				let npm = npm_detected || !cargo;
-				Ok(KeyResult::Continue((
-					state,
-					Screen::SelectPackageManagers {
-						cargo,
-						npm,
-						focus: PmFocus::Cargo,
-					},
-				)))
+	match event {
+		Event::Key(KeyEvent { code, .. }) => match code {
+			KeyCode::Left
+			| KeyCode::Right
+			| KeyCode::Tab
+			| KeyCode::Char('h')
+			| KeyCode::Char('l') => Ok(KeyResult::Continue((state, Screen::ConfirmOverwrite(!yes)))),
+			KeyCode::Enter => enter_action(state, yes),
+			KeyCode::Esc | KeyCode::Char('q') => Ok(KeyResult::Cancelled),
+			_ => Ok(KeyResult::Continue((state, Screen::ConfirmOverwrite(yes)))),
+		},
+		Event::Mouse(me) if matches!(me.kind, MouseEventKind::Down(MouseButton::Left)) => {
+			if let Some(idx) =
+				widgets::button_click_index(content_area, QUESTION, 2, me.column, me.row)
+			{
+				let clicked_yes = idx == 0;
+				enter_action(state, clicked_yes)
 			} else {
-				Ok(KeyResult::Cancelled)
+				Ok(KeyResult::Continue((state, Screen::ConfirmOverwrite(yes))))
 			}
 		}
-		KeyCode::Esc | KeyCode::Char('q') => Ok(KeyResult::Cancelled),
 		_ => Ok(KeyResult::Continue((state, Screen::ConfirmOverwrite(yes)))),
 	}
 }
 
 /// Renders the [`Screen::ConfirmOverwrite`] screen.
 pub(super) fn render_confirm_overwrite(frame: &mut Frame, area: Rect, yes: bool) {
-	let question = "Config already exists. Overwrite?";
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::question_height(question, area.width)),
+			Constraint::Length(widgets::paragraph_height(QUESTION, area.width, 2)),
 			Constraint::Length(3),
 			Constraint::Length(1),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(frame, chunks[0], question, Color::Yellow);
+	widgets::render_question(frame, chunks[0], QUESTION, Color::Yellow);
 	widgets::render_yes_no_buttons(
 		frame,
 		chunks[1],
@@ -68,7 +87,7 @@ pub(super) fn render_confirm_overwrite(frame: &mut Frame, area: Rect, yes: bool)
 	widgets::render_help(
 		frame,
 		chunks[3],
-		"Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel",
+		"←/→/Tab or click to switch, Enter or click to confirm, Esc to cancel",
 	);
 }
 
@@ -78,6 +97,7 @@ mod tests {
 
 	use super::super::test_helpers::*;
 	use super::super::{Screen, handle_key};
+	use super::*;
 
 	#[test]
 	fn confirm_overwrite_toggle() {
@@ -137,6 +157,47 @@ mod tests {
 		let screen = Screen::ConfirmOverwrite(true);
 		let (_, s) = unwrap_continue(handle_key(state, screen, key(KeyCode::Char('x'))));
 		assert!(matches!(s, Screen::ConfirmOverwrite(true)));
+	}
+
+	#[test]
+	fn confirm_overwrite_click_yes_button_advances_to_select_pms() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		let (_, s) = unwrap_continue(handle_confirm_overwrite(
+			state,
+			false,
+			mouse_click(10, area.y + 6),
+			area,
+		));
+		assert!(matches!(s, Screen::SelectPackageManagers { .. }));
+	}
+
+	#[test]
+	fn confirm_overwrite_click_no_button_cancels() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		assert_cancelled(handle_confirm_overwrite(
+			state,
+			true,
+			mouse_click(65, area.y + 6),
+			area,
+		));
+	}
+
+	#[test]
+	fn confirm_overwrite_click_outside_buttons_does_nothing() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		let (_, s) = unwrap_continue(handle_confirm_overwrite(
+			state,
+			false,
+			mouse_click(10, area.y + 15),
+			area,
+		));
+		assert!(matches!(s, Screen::ConfirmOverwrite(false)));
 	}
 
 	#[test]

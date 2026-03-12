@@ -8,7 +8,9 @@ use std::rc::Rc;
 
 use crossterm::{
 	ExecutableCommand,
-	event::{Event, KeyEvent, KeyEventKind},
+	event::{
+		DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
+	},
 	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
@@ -71,17 +73,21 @@ pub fn button_style_colored(selected: bool, color: Color) -> Style {
 	}
 }
 
-/// Computes the height a question block needs to display `text` without clipping.
+/// Computes the height a paragraph needs to display `text` without clipping.
 ///
-/// Accounts for the 2-cell wizard margin and 1-cell border on each side
-/// (`area_width - 6` usable text columns). Returns at least 3 (border + one
-/// line + border).
-pub fn question_height(text: &str, area_width: u16) -> u16 {
-	let inner = area_width.saturating_sub(6);
+/// Accounts for the 2-cell wizard margin on each side. `border` is applied to
+/// **both axes**: it is subtracted from the usable text width
+/// (`area_width - 4 - border`) and added to the returned height. This matches
+/// `Borders::ALL`, which consumes exactly 1 cell per side on both axes (so
+/// `border = 2`). For borderless text pass `border = 0`. Do not pass other
+/// values — a partial border (e.g. top-only) would give an incorrect width.
+/// Returns at least `1 + border`.
+pub fn paragraph_height(text: &str, area_width: u16, border: u16) -> u16 {
+	let inner = area_width.saturating_sub(4 + border);
 	let lines = Paragraph::new(text)
 		.wrap(Wrap { trim: false })
 		.line_count(inner) as u16;
-	(lines + 2).max(3) // top and bottom border; minimum 3 for degenerate widths
+	(lines + border).max(1 + border)
 }
 
 /// Renders a question prompt inside a bordered block.
@@ -227,34 +233,93 @@ pub fn run_tui<S, T, DrawFn, HandleFn>(
 ) -> anyhow::Result<Option<T>>
 where
 	DrawFn: FnMut(&mut Frame, &S),
-	HandleFn: FnMut(S, KeyEvent) -> anyhow::Result<KeyResult<S, T>>,
+	HandleFn: FnMut(S, Event, Rect) -> anyhow::Result<KeyResult<S, T>>,
 {
 	enable_raw_mode()?;
 	io::stdout().execute(EnterAlternateScreen)?;
+	io::stdout().execute(EnableMouseCapture)?;
 	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
 	let result: anyhow::Result<Option<T>> = loop {
-		if let Err(e) = terminal.draw(|frame| draw_fn(frame, &state)) {
-			break Err(e.into());
-		}
-		match crossterm::event::read() {
+		let frame_area = match terminal.draw(|frame| draw_fn(frame, &state)) {
 			Err(e) => break Err(e.into()),
-			Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => match handle_fn(state, key) {
+			Ok(completed) => completed.area,
+		};
+		let event = match crossterm::event::read() {
+			Err(e) => break Err(e.into()),
+			Ok(e) => e,
+		};
+		let forward = match &event {
+			Event::Key(key) if key.kind == KeyEventKind::Press => true,
+			Event::Mouse(me) => matches!(me.kind, MouseEventKind::Down(MouseButton::Left)),
+			_ => false,
+		};
+		if forward {
+			match handle_fn(state, event, frame_area) {
 				Err(e) => break Err(e),
 				Ok(KeyResult::Continue(new_state)) => state = new_state,
 				Ok(KeyResult::Complete(value)) => break Ok(Some(value)),
 				Ok(KeyResult::Cancelled) => break Ok(None),
-			},
-			Ok(_) => {}
+			}
 		}
 	};
 
 	// Always restore the terminal, even if the loop errored.
 	// Cleanup errors are suppressed to preserve the primary error.
 	disable_raw_mode().ok();
+	io::stdout().execute(DisableMouseCapture).ok();
 	io::stdout().execute(LeaveAlternateScreen).ok();
 
 	result
+}
+
+/// Returns the index of the button clicked at `(col, row)`, or `None` for a miss.
+///
+/// Uses the standard wizard layout (2-cell margin, question block, then
+/// a 3-row button row) to locate the button area and splits it into
+/// `n_buttons` equal-width cells with 1-cell spacing, matching
+/// [`render_yes_no_buttons`]. `question` must be the same text passed to
+/// `render_question` on the same screen so that the height computation
+/// matches.
+pub fn button_click_index(
+	content_area: Rect,
+	question: &str,
+	n_buttons: u16,
+	col: u16,
+	row: u16,
+) -> Option<usize> {
+	if n_buttons == 0 {
+		return None;
+	}
+	let q_height = paragraph_height(question, content_area.width, 2);
+	let chunks = wizard_layout(
+		content_area,
+		&[
+			Constraint::Length(q_height),
+			Constraint::Length(3),
+			Constraint::Length(1),
+			Constraint::Min(1),
+		],
+	);
+	let buttons_area = chunks[1];
+	if row < buttons_area.y || row >= buttons_area.y + buttons_area.height {
+		return None;
+	}
+	if col < buttons_area.x || col >= buttons_area.x + buttons_area.width {
+		return None;
+	}
+	let constraints: Vec<Constraint> = (0..n_buttons)
+		.map(|_| Constraint::Percentage(100 / n_buttons))
+		.collect();
+	let cells = Layout::horizontal(constraints)
+		.spacing(1)
+		.split(buttons_area);
+	for (i, cell) in cells.iter().enumerate() {
+		if col >= cell.x && col < cell.x + cell.width {
+			return Some(i);
+		}
+	}
+	None
 }
 
 #[cfg(test)]
@@ -268,23 +333,33 @@ mod tests {
 		Terminal::new(TestBackend::new(80, 5)).unwrap()
 	}
 
-	// question_height tests
+	// paragraph_height tests
 	#[test]
-	fn question_height_short_text_returns_minimum() {
+	fn paragraph_height_short_text_with_border_returns_minimum() {
 		// "Hello" fits on one line at any reasonable width → border+1+border = 3
-		assert_eq!(question_height("Hello", 80), 3);
+		assert_eq!(paragraph_height("Hello", 80, 2), 3);
 	}
 
 	#[test]
-	fn question_height_wrapping_text_grows() {
+	fn paragraph_height_wrapping_text_with_border_grows() {
 		// At width 80, inner = 74 chars. 87-char string wraps to 2 lines → 4
 		let long = "Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
-		assert_eq!(question_height(long, 80), 4);
+		assert_eq!(paragraph_height(long, 80, 2), 4);
 	}
 
 	#[test]
-	fn question_height_zero_width_returns_minimum() {
-		assert_eq!(question_height("anything", 0), 3);
+	fn paragraph_height_zero_width_with_border_returns_minimum() {
+		assert_eq!(paragraph_height("anything", 0, 2), 3);
+	}
+
+	#[test]
+	fn paragraph_height_no_border_short_text_returns_one() {
+		assert_eq!(paragraph_height("help", 80, 0), 1);
+	}
+
+	#[test]
+	fn paragraph_height_no_border_zero_width_returns_one() {
+		assert_eq!(paragraph_height("help", 0, 0), 1);
 	}
 
 	// button_style tests
@@ -437,6 +512,44 @@ mod tests {
 		terminal
 			.draw(|frame| render_tabs(frame, frame.area(), &[]))
 			.unwrap();
+	}
+
+	// button_click_index tests
+	#[test]
+	fn button_click_index_hits_first_button() {
+		let area = Rect::new(0, 0, 80, 24);
+		// question height=3, buttons area: y=5..8, x=2..78
+		// First button occupies roughly x=2..39
+		let idx = button_click_index(area, "test?", 2, 10, 6);
+		assert_eq!(idx, Some(0));
+	}
+
+	#[test]
+	fn button_click_index_hits_second_button() {
+		let area = Rect::new(0, 0, 80, 24);
+		let idx = button_click_index(area, "test?", 2, 65, 6);
+		assert_eq!(idx, Some(1));
+	}
+
+	#[test]
+	fn button_click_index_misses_above_buttons() {
+		let area = Rect::new(0, 0, 80, 24);
+		// Row 2 is inside the question block, not the button area
+		let idx = button_click_index(area, "test?", 2, 10, 2);
+		assert_eq!(idx, None);
+	}
+
+	#[test]
+	fn button_click_index_misses_below_buttons() {
+		let area = Rect::new(0, 0, 80, 24);
+		let idx = button_click_index(area, "test?", 2, 10, 15);
+		assert_eq!(idx, None);
+	}
+
+	#[test]
+	fn button_click_index_zero_buttons_returns_none() {
+		let area = Rect::new(0, 0, 80, 24);
+		assert_eq!(button_click_index(area, "test?", 0, 10, 6), None);
 	}
 
 	// wizard_layout tests

@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode};
 use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
 
@@ -19,67 +19,73 @@ pub(super) fn make_edit_github_screen(state: &WizardState) -> Screen {
 	}
 }
 
-/// Handles key events for the [`Screen::EditGitHub`] screen.
+fn handle_enter(mut state: WizardState, textarea: TextArea<'static>) -> HandleResult {
+	let text = textarea.lines().first().cloned().unwrap_or_default();
+	let trimmed = text.trim().to_string();
+	let matches_detected = state
+		.detected_github
+		.as_ref()
+		.is_some_and(|gh| format!("{}/{}", gh.owner, gh.repo) == trimmed);
+	if trimmed.is_empty() || matches_detected {
+		state.github_owner = None;
+		state.github_repo = None;
+		return Ok(KeyResult::Continue((state, Screen::OpenEditor(false))));
+	}
+	let Some((owner, repo)) = trimmed.split_once('/') else {
+		return Ok(KeyResult::Continue((
+			state,
+			Screen::EditGitHub {
+				textarea,
+				error: true,
+			},
+		)));
+	};
+	match GitHubRepo::new(owner, repo) {
+		Ok(gh) => {
+			state.github_owner = Some(gh.owner);
+			state.github_repo = Some(gh.repo);
+			Ok(KeyResult::Continue((state, Screen::OpenEditor(false))))
+		}
+		Err(_) => Ok(KeyResult::Continue((
+			state,
+			Screen::EditGitHub {
+				textarea,
+				error: true,
+			},
+		))),
+	}
+}
+
+/// Handles events for the [`Screen::EditGitHub`] screen.
 ///
 /// On Enter, accepts empty input (auto-detect at runtime) or `owner/repo` format.
 /// If the text matches the pre-populated detected value it is treated as empty so
 /// the template renders it as a commented-out hint rather than an explicit value.
 pub(super) fn handle_edit_github(
-	mut state: WizardState,
+	state: WizardState,
 	mut textarea: TextArea<'static>,
-	_error: bool,
-	key: KeyEvent,
+	error: bool,
+	event: Event,
 ) -> HandleResult {
-	match key.code {
-		KeyCode::Enter => {
-			let text = textarea.lines().first().cloned().unwrap_or_default();
-			let trimmed = text.trim().to_string();
-			let matches_detected = state
-				.detected_github
-				.as_ref()
-				.is_some_and(|gh| format!("{}/{}", gh.owner, gh.repo) == trimmed);
-			if trimmed.is_empty() || matches_detected {
-				// Empty or unchanged auto-detected value: let Chronicle auto-detect at runtime.
-				state.github_owner = None;
-				state.github_repo = None;
-				Ok(KeyResult::Continue((state, Screen::OpenEditor(false))))
-			} else if let Some((owner, repo)) = trimmed.split_once('/') {
-				match GitHubRepo::new(owner, repo) {
-					Ok(gh) => {
-						state.github_owner = Some(gh.owner);
-						state.github_repo = Some(gh.repo);
-						Ok(KeyResult::Continue((state, Screen::OpenEditor(false))))
-					}
-					Err(_) => Ok(KeyResult::Continue((
-						state,
-						Screen::EditGitHub {
-							textarea,
-							error: true,
-						},
-					))),
-				}
-			} else {
-				// No slash → invalid format
+	match event {
+		Event::Key(key) => match key.code {
+			KeyCode::Enter => handle_enter(state, textarea),
+			KeyCode::Esc => Ok(KeyResult::Cancelled),
+			_ => {
+				textarea.input(key);
 				Ok(KeyResult::Continue((
 					state,
 					Screen::EditGitHub {
 						textarea,
-						error: true,
+						error: false,
 					},
 				)))
 			}
-		}
-		KeyCode::Esc => Ok(KeyResult::Cancelled),
-		_ => {
-			textarea.input(key);
-			Ok(KeyResult::Continue((
-				state,
-				Screen::EditGitHub {
-					textarea,
-					error: false,
-				},
-			)))
-		}
+		},
+		_ => Ok(KeyResult::Continue((
+			state,
+			Screen::EditGitHub { textarea, error },
+		))),
 	}
 }
 
@@ -99,7 +105,7 @@ pub(super) fn render_edit_github(
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::question_height(question, area.width)),
+			Constraint::Length(widgets::paragraph_height(question, area.width, 2)),
 			Constraint::Length(3),
 			Constraint::Min(1),
 		],

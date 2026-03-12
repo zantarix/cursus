@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::Event;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 use ratatui_textarea::TextArea;
@@ -170,24 +170,33 @@ fn detect_package_managers(git_workdir: &Path) -> (bool, bool) {
 	(cargo, npm)
 }
 
-fn handle_key(state: WizardState, screen: Screen, key: KeyEvent) -> HandleResult {
+fn handle_event(
+	state: WizardState,
+	screen: Screen,
+	event: Event,
+	content_area: Rect,
+) -> HandleResult {
 	match screen {
 		Screen::ConfirmOverwrite(yes) => {
-			confirm_overwrite::handle_confirm_overwrite(state, yes, key)
+			confirm_overwrite::handle_confirm_overwrite(state, yes, event, content_area)
 		}
 		Screen::SelectPackageManagers { cargo, npm, focus } => {
-			select_pms::handle_select_pms(state, cargo, npm, focus, key)
+			select_pms::handle_select_pms(state, cargo, npm, focus, event, content_area)
 		}
 		Screen::ManifestPath { pm, textarea } => {
-			manifest_path::handle_manifest_path(state, pm, textarea, key)
+			manifest_path::handle_manifest_path(state, pm, textarea, event)
 		}
-		Screen::EnableGit(yes) => enable_git::handle_enable_git(state, yes, key),
-		Screen::GitStrategy(strategy) => git_strategy::handle_git_strategy(state, strategy, key),
-		Screen::EnableGitHub(yes) => enable_github::handle_enable_github(state, yes, key),
+		Screen::EnableGit(yes) => enable_git::handle_enable_git(state, yes, event, content_area),
+		Screen::GitStrategy(strategy) => {
+			git_strategy::handle_git_strategy(state, strategy, event, content_area)
+		}
+		Screen::EnableGitHub(yes) => {
+			enable_github::handle_enable_github(state, yes, event, content_area)
+		}
 		Screen::EditGitHub { textarea, error } => {
-			edit_github::handle_edit_github(state, textarea, error, key)
+			edit_github::handle_edit_github(state, textarea, error, event)
 		}
-		Screen::OpenEditor(yes) => open_editor::handle_open_editor(state, yes, key),
+		Screen::OpenEditor(yes) => open_editor::handle_open_editor(state, yes, event, content_area),
 	}
 }
 
@@ -305,7 +314,26 @@ pub fn run(git_workdir: &AbsolutePath, env: &Env) -> anyhow::Result<Option<InitR
 	widgets::run_tui(
 		(initial_state, initial_screen),
 		|frame, (state, screen)| ui(frame, state, screen),
-		|(state, screen), key| handle_key(state, screen, key),
+		|(state, screen), event, frame_area| {
+			let content_area = Rect {
+				y: frame_area.y + TAB_HEIGHT,
+				height: frame_area.height.saturating_sub(TAB_HEIGHT),
+				..frame_area
+			};
+			handle_event(state, screen, event, content_area)
+		},
+	)
+}
+
+/// Thin wrapper used by tests so existing test code can call `handle_key(state, screen, key)`
+/// without needing to construct an `Event` or supply a content area.
+#[cfg(test)]
+fn handle_key(state: WizardState, screen: Screen, k: crossterm::event::KeyEvent) -> HandleResult {
+	handle_event(
+		state,
+		screen,
+		Event::Key(k),
+		Rect::new(0, TAB_HEIGHT, 80, 24 - TAB_HEIGHT),
 	)
 }
 
@@ -315,6 +343,13 @@ pub(super) mod test_helpers {
 	use super::*;
 	use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 	use tempfile::TempDir;
+
+	pub(super) use crate::tui::test_utils::mouse_click;
+
+	/// Content area matching an 80×24 terminal with the 3-row tab bar subtracted.
+	pub(super) const fn test_content_area() -> Rect {
+		Rect::new(0, TAB_HEIGHT, 80, 24 - TAB_HEIGHT)
+	}
 
 	pub(super) fn key(code: KeyCode) -> KeyEvent {
 		KeyEvent::new(code, KeyModifiers::NONE)

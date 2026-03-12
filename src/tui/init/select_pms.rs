@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -6,6 +6,10 @@ use crate::model::config::PackageManager;
 use crate::tui::widgets::{self, KeyResult};
 
 use super::{HandleResult, PmFocus, Screen, WizardState, advance_from_manifest_queue};
+
+const QUESTION: &str = "Which package managers does this project use?";
+const HELP: &str =
+	"↑/↓/Tab: move focus | Space/Click: toggle | Enter: confirm (≥1 required) | Esc: cancel";
 
 /// Commits the selected package managers to state and advances to the next screen.
 ///
@@ -39,15 +43,14 @@ fn toggle_pm_selection(cargo: bool, npm: bool, focus: PmFocus) -> (bool, bool) {
 	}
 }
 
-/// Handles key events for the [`Screen::SelectPackageManagers`] screen.
-pub(super) fn handle_select_pms(
+fn handle_key_select_pms(
 	state: WizardState,
 	cargo: bool,
 	npm: bool,
 	focus: PmFocus,
-	key: KeyEvent,
+	code: KeyCode,
 ) -> HandleResult {
-	match key.code {
+	match code {
 		KeyCode::Left
 		| KeyCode::Right
 		| KeyCode::Tab
@@ -94,6 +97,77 @@ pub(super) fn handle_select_pms(
 	}
 }
 
+fn handle_mouse_select_pms(
+	state: WizardState,
+	cargo: bool,
+	npm: bool,
+	focus: PmFocus,
+	col: u16,
+	row: u16,
+	content_area: Rect,
+) -> HandleResult {
+	let q_height = widgets::paragraph_height(QUESTION, content_area.width, 2);
+	let chunks = widgets::wizard_layout(
+		content_area,
+		&[
+			Constraint::Length(q_height),
+			Constraint::Min(1),
+			Constraint::Length(widgets::paragraph_height(HELP, content_area.width, 0)),
+		],
+	);
+	let checkbox_area = chunks[1];
+	let inner_y_start = checkbox_area.y + 1;
+	let inner_y_end = checkbox_area.y + checkbox_area.height.saturating_sub(1);
+	let inner_x_start = checkbox_area.x + 1;
+	let inner_x_end = checkbox_area.x + checkbox_area.width.saturating_sub(1);
+	if row < inner_y_start || row >= inner_y_end || col < inner_x_start || col >= inner_x_end {
+		return Ok(KeyResult::Continue((
+			state,
+			Screen::SelectPackageManagers { cargo, npm, focus },
+		)));
+	}
+	let clicked_focus = match row - inner_y_start {
+		0 => PmFocus::Cargo,
+		1 => PmFocus::Npm,
+		_ => {
+			return Ok(KeyResult::Continue((
+				state,
+				Screen::SelectPackageManagers { cargo, npm, focus },
+			)));
+		}
+	};
+	let (new_cargo, new_npm) = toggle_pm_selection(cargo, npm, clicked_focus);
+	Ok(KeyResult::Continue((
+		state,
+		Screen::SelectPackageManagers {
+			cargo: new_cargo,
+			npm: new_npm,
+			focus: clicked_focus,
+		},
+	)))
+}
+
+/// Handles events for the [`Screen::SelectPackageManagers`] screen.
+pub(super) fn handle_select_pms(
+	state: WizardState,
+	cargo: bool,
+	npm: bool,
+	focus: PmFocus,
+	event: Event,
+	content_area: Rect,
+) -> HandleResult {
+	match event {
+		Event::Key(KeyEvent { code, .. }) => handle_key_select_pms(state, cargo, npm, focus, code),
+		Event::Mouse(me) if matches!(me.kind, MouseEventKind::Down(MouseButton::Left)) => {
+			handle_mouse_select_pms(state, cargo, npm, focus, me.column, me.row, content_area)
+		}
+		_ => Ok(KeyResult::Continue((
+			state,
+			Screen::SelectPackageManagers { cargo, npm, focus },
+		))),
+	}
+}
+
 /// Renders the [`Screen::SelectPackageManagers`] screen.
 pub(super) fn render_select_pms(
 	frame: &mut Frame,
@@ -102,16 +176,16 @@ pub(super) fn render_select_pms(
 	npm: bool,
 	focus: PmFocus,
 ) {
-	let question = "Which package managers does this project use?";
+	let help_h = widgets::paragraph_height(HELP, area.width, 0);
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::question_height(question, area.width)),
-			Constraint::Length(6),
+			Constraint::Length(widgets::paragraph_height(QUESTION, area.width, 2)),
 			Constraint::Min(1),
+			Constraint::Length(help_h),
 		],
 	);
-	widgets::render_question(frame, chunks[0], question, Color::Yellow);
+	widgets::render_question(frame, chunks[0], QUESTION, Color::Yellow);
 
 	let cargo_style = if focus == PmFocus::Cargo {
 		Style::default()
@@ -140,11 +214,7 @@ pub(super) fn render_select_pms(
 	);
 	frame.render_widget(list, chunks[1]);
 
-	widgets::render_help(
-		frame,
-		chunks[2],
-		"↑/↓/Tab: move focus | Space: toggle | Enter: confirm (≥1 required) | Esc: cancel",
-	);
+	widgets::render_help(frame, chunks[2], HELP);
 }
 
 #[cfg(test)]
@@ -155,6 +225,7 @@ mod tests {
 
 	use super::super::test_helpers::*;
 	use super::super::{PmFocus, Screen, handle_key};
+	use super::*;
 
 	#[test]
 	fn select_pms_tab_moves_focus() {
@@ -260,6 +331,109 @@ mod tests {
 			focus: PmFocus::Cargo,
 		};
 		assert_cancelled(handle_key(state, screen, key(KeyCode::Esc)));
+	}
+
+	#[test]
+	fn select_pms_click_cargo_row_toggles_cargo() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		// wizard_layout margin=2: inner starts at y=area.y+2=5
+		// question block: y=5, height=3
+		// checkbox block: y=8, fills remaining → inner y_start=9
+		// Cargo row (relative 0): absolute row = 9
+		let (_, s) = unwrap_continue(handle_select_pms(
+			state,
+			false,
+			false,
+			PmFocus::Npm,
+			mouse_click(10, area.y + 6),
+			area,
+		));
+		assert!(matches!(
+			s,
+			Screen::SelectPackageManagers {
+				cargo: true,
+				focus: PmFocus::Cargo,
+				..
+			}
+		));
+	}
+
+	#[test]
+	fn select_pms_click_npm_row_toggles_npm() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		// NPM row (relative 1): absolute row = 10 = area.y + 7
+		let (_, s) = unwrap_continue(handle_select_pms(
+			state,
+			false,
+			false,
+			PmFocus::Cargo,
+			mouse_click(10, area.y + 7),
+			area,
+		));
+		assert!(matches!(
+			s,
+			Screen::SelectPackageManagers {
+				npm: true,
+				focus: PmFocus::Npm,
+				..
+			}
+		));
+	}
+
+	#[test]
+	fn select_pms_click_outside_checkboxes_does_nothing() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		let (_, s) = unwrap_continue(handle_select_pms(
+			state,
+			false,
+			true,
+			PmFocus::Cargo,
+			mouse_click(10, area.y + 20),
+			area,
+		));
+		assert!(matches!(
+			s,
+			Screen::SelectPackageManagers {
+				cargo: false,
+				npm: true,
+				focus: PmFocus::Cargo,
+				..
+			}
+		));
+	}
+
+	#[test]
+	fn select_pms_click_empty_row_in_checkbox_block_does_nothing() {
+		// The checkbox block fills remaining space with borders → many inner rows.
+		// Only rows 0 (Cargo) and 1 (NPM) have content; the rest are blank.
+		// Clicking a blank row must not toggle anything.
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let area = test_content_area();
+		// Blank row 2 inside the checkbox inner area (area.y+2+3+1+2 = area.y+8)
+		let (_, s) = unwrap_continue(handle_select_pms(
+			state,
+			false,
+			true,
+			PmFocus::Cargo,
+			mouse_click(10, area.y + 8),
+			area,
+		));
+		assert!(matches!(
+			s,
+			Screen::SelectPackageManagers {
+				cargo: false,
+				npm: true,
+				focus: PmFocus::Cargo,
+				..
+			}
+		));
 	}
 
 	#[test]

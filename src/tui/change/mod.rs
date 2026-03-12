@@ -1,6 +1,6 @@
 //! TUI for selecting projects and the type of change (major, minor, patch).
 
-use crossterm::event::KeyCode;
+use crossterm::event::{Event, KeyCode};
 use ratatui::prelude::*;
 
 use super::widgets::{self, KeyResult};
@@ -150,7 +150,10 @@ pub fn run(projects: &[Project], options: &ChangeOptions) -> anyhow::Result<Opti
 	let result = widgets::run_tui(
 		initial_screen,
 		|frame, screen| ui(frame, screen, &project_names),
-		|screen, key| handle_key(&screen, key.code, projects),
+		|screen, event, _area| match event {
+			Event::Key(key) => handle_key(&screen, key.code, projects),
+			_ => Ok(KeyResult::Continue(screen)),
+		},
 	)?;
 
 	Ok(result)

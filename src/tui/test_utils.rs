@@ -1,5 +1,6 @@
 //! Shared test utilities for TUI unit tests.
 
+use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{Frame, Terminal, backend::TestBackend};
 
 /// Creates a test terminal with an 80×24 display area.
@@ -21,6 +22,16 @@ pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
 		.collect::<Vec<_>>()
 		.join("\n")
 		+ "\n"
+}
+
+/// Constructs a left mouse button down event at `(col, row)`.
+pub fn mouse_click(col: u16, row: u16) -> Event {
+	Event::Mouse(MouseEvent {
+		kind: MouseEventKind::Down(MouseButton::Left),
+		column: col,
+		row,
+		modifiers: KeyModifiers::NONE,
+	})
 }
 
 /// Draws a single frame using `draw_fn` and returns the rendered buffer as a string.
