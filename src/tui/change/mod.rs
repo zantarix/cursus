@@ -65,7 +65,7 @@ fn handle_key(screen: &Screen, key: KeyCode, projects: &[Project]) -> anyhow::Re
 
 fn ui(frame: &mut Frame, screen: &Screen, project_names: &[&str]) {
 	let chunks = widgets::wizard_layout(
-		frame,
+		frame.area(),
 		&[
 			Constraint::Length(3),
 			Constraint::Min(5),

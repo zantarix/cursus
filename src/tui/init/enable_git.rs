@@ -29,25 +29,21 @@ pub(super) fn handle_enable_git(mut state: WizardState, yes: bool, key: KeyEvent
 }
 
 /// Renders the [`Screen::EnableGit`] screen.
-pub(super) fn render_enable_git(frame: &mut Frame, yes: bool) {
+pub(super) fn render_enable_git(frame: &mut Frame, area: Rect, yes: bool) {
+	let question = "Enable git automation? (commits, tags, push/branch on prepare and publish)";
 	let chunks = widgets::wizard_layout(
-		frame,
+		area,
 		&[
+			Constraint::Length(widgets::question_height(question, area.width)),
 			Constraint::Length(3),
-			Constraint::Length(3),
+			Constraint::Length(1),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(
-		frame,
-		chunks[0],
-		"Enable git automation? (commits, tags, push/branch on prepare and publish)",
-		Color::Yellow,
-	);
-	widgets::render_button_row(
+	widgets::render_question(frame, chunks[0], question, Color::Yellow);
+	widgets::render_yes_no_buttons(
 		frame,
 		chunks[1],
-		"Git Automation",
 		&[
 			ButtonDef {
 				label: "Yes",
@@ -63,7 +59,7 @@ pub(super) fn render_enable_git(frame: &mut Frame, yes: bool) {
 	);
 	widgets::render_help(
 		frame,
-		chunks[2],
+		chunks[3],
 		"Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel",
 	);
 }
@@ -136,7 +132,6 @@ mod tests {
 			.draw(|frame| super::super::ui(frame, &state, &Screen::EnableGit(true)))
 			.unwrap();
 		let content = buffer_to_string(terminal.backend().buffer());
-		assert!(content.contains("Git Automation"));
 		assert!(content.contains("Yes"));
 		assert!(content.contains("No"));
 	}

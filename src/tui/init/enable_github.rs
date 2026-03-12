@@ -30,25 +30,21 @@ pub(super) fn handle_enable_github(
 }
 
 /// Renders the [`Screen::EnableGitHub`] screen.
-pub(super) fn render_enable_github(frame: &mut Frame, yes: bool) {
+pub(super) fn render_enable_github(frame: &mut Frame, area: Rect, yes: bool) {
+	let question = "Enable GitHub Releases? (creates a release on GitHub after publish)";
 	let chunks = widgets::wizard_layout(
-		frame,
+		area,
 		&[
+			Constraint::Length(widgets::question_height(question, area.width)),
 			Constraint::Length(3),
-			Constraint::Length(3),
+			Constraint::Length(1),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(
-		frame,
-		chunks[0],
-		"Enable GitHub Releases? (creates a release on GitHub after publish)",
-		Color::Yellow,
-	);
-	widgets::render_button_row(
+	widgets::render_question(frame, chunks[0], question, Color::Yellow);
+	widgets::render_yes_no_buttons(
 		frame,
 		chunks[1],
-		"GitHub Releases",
 		&[
 			ButtonDef {
 				label: "Yes",
@@ -64,7 +60,7 @@ pub(super) fn render_enable_github(frame: &mut Frame, yes: bool) {
 	);
 	widgets::render_help(
 		frame,
-		chunks[2],
+		chunks[3],
 		"Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel",
 	);
 }

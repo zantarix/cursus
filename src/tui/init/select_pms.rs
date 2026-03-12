@@ -95,21 +95,23 @@ pub(super) fn handle_select_pms(
 }
 
 /// Renders the [`Screen::SelectPackageManagers`] screen.
-pub(super) fn render_select_pms(frame: &mut Frame, cargo: bool, npm: bool, focus: PmFocus) {
+pub(super) fn render_select_pms(
+	frame: &mut Frame,
+	area: Rect,
+	cargo: bool,
+	npm: bool,
+	focus: PmFocus,
+) {
+	let question = "Which package managers does this project use?";
 	let chunks = widgets::wizard_layout(
-		frame,
+		area,
 		&[
-			Constraint::Length(3),
+			Constraint::Length(widgets::question_height(question, area.width)),
 			Constraint::Length(6),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(
-		frame,
-		chunks[0],
-		"Which package managers does this project use?",
-		Color::Yellow,
-	);
+	widgets::render_question(frame, chunks[0], question, Color::Yellow);
 
 	let cargo_style = if focus == PmFocus::Cargo {
 		Style::default()

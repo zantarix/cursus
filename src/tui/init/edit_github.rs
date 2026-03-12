@@ -84,21 +84,26 @@ pub(super) fn handle_edit_github(
 }
 
 /// Renders the [`Screen::EditGitHub`] screen.
-pub(super) fn render_edit_github(frame: &mut Frame, textarea: &TextArea<'static>, error: bool) {
-	let chunks = widgets::wizard_layout(
-		frame,
-		&[
-			Constraint::Length(3),
-			Constraint::Length(3),
-			Constraint::Min(1),
-		],
-	);
+pub(super) fn render_edit_github(
+	frame: &mut Frame,
+	area: Rect,
+	textarea: &TextArea<'static>,
+	error: bool,
+) {
 	let question = if error {
 		"Invalid format. Enter owner/repo (e.g. acme/my-app), or leave empty:"
 	} else {
 		"GitHub repository (owner/repo, e.g. acme/my-app, or leave empty):"
 	};
 	let color = if error { Color::Red } else { Color::Yellow };
+	let chunks = widgets::wizard_layout(
+		area,
+		&[
+			Constraint::Length(widgets::question_height(question, area.width)),
+			Constraint::Length(3),
+			Constraint::Min(1),
+		],
+	);
 	widgets::render_question(frame, chunks[0], question, color);
 	frame.render_widget(textarea, chunks[1]);
 	widgets::render_help(frame, chunks[2], "Enter: confirm | Esc: cancel");

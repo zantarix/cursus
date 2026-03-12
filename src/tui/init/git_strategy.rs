@@ -41,25 +41,22 @@ pub(super) fn handle_git_strategy(
 }
 
 /// Renders the [`Screen::GitStrategy`] screen.
-pub(super) fn render_git_strategy(frame: &mut Frame, strategy: Strategy) {
+pub(super) fn render_git_strategy(frame: &mut Frame, area: Rect, strategy: Strategy) {
+	let question =
+		"Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
 	let chunks = widgets::wizard_layout(
-		frame,
+		area,
 		&[
+			Constraint::Length(widgets::question_height(question, area.width)),
 			Constraint::Length(3),
-			Constraint::Length(3),
+			Constraint::Length(1),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(
-		frame,
-		chunks[0],
-		"Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).",
-		Color::Yellow,
-	);
-	widgets::render_button_row(
+	widgets::render_question(frame, chunks[0], question, Color::Yellow);
+	widgets::render_yes_no_buttons(
 		frame,
 		chunks[1],
-		"Git Strategy",
 		&[
 			ButtonDef {
 				label: "Push",
@@ -75,7 +72,7 @@ pub(super) fn render_git_strategy(frame: &mut Frame, strategy: Strategy) {
 	);
 	widgets::render_help(
 		frame,
-		chunks[2],
+		chunks[3],
 		"Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel",
 	);
 }
@@ -149,7 +146,6 @@ mod tests {
 			.draw(|frame| super::super::ui(frame, &state, &Screen::GitStrategy(Strategy::Push)))
 			.unwrap();
 		let content = buffer_to_string(terminal.backend().buffer());
-		assert!(content.contains("Git Strategy"));
 		assert!(content.contains("Push"));
 		assert!(content.contains("Branch"));
 	}

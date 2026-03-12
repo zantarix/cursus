@@ -13,8 +13,19 @@ use crossterm::{
 };
 use ratatui::{
 	prelude::*,
-	widgets::{Block, Borders, Paragraph},
+	widgets::{Block, Borders, Paragraph, Wrap},
 };
+
+/// Display state of a single tab in a progress tab bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabStatus {
+	/// This step has been completed.
+	Completed,
+	/// This is the current active step.
+	Current,
+	/// This step has not been reached yet.
+	Future,
+}
 
 /// Result of processing a key press in a TUI wizard.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +71,19 @@ pub fn button_style_colored(selected: bool, color: Color) -> Style {
 	}
 }
 
+/// Computes the height a question block needs to display `text` without clipping.
+///
+/// Accounts for the 2-cell wizard margin and 1-cell border on each side
+/// (`area_width - 6` usable text columns). Returns at least 3 (border + one
+/// line + border).
+pub fn question_height(text: &str, area_width: u16) -> u16 {
+	let inner = area_width.saturating_sub(6);
+	let lines = Paragraph::new(text)
+		.wrap(Wrap { trim: false })
+		.line_count(inner) as u16;
+	(lines + 2).max(3) // top and bottom border; minimum 3 for degenerate widths
+}
+
 /// Renders a question prompt inside a bordered block.
 ///
 /// Displays `text` in the given `color` inside a bordered block (no title)
@@ -67,6 +91,7 @@ pub fn button_style_colored(selected: bool, color: Color) -> Style {
 pub fn render_question(frame: &mut Frame, area: Rect, text: &str, color: Color) {
 	let question = Paragraph::new(text)
 		.style(Style::default().fg(color))
+		.wrap(Wrap { trim: false })
 		.block(Block::default().borders(Borders::ALL));
 	frame.render_widget(question, area);
 }
@@ -75,31 +100,73 @@ pub fn render_question(frame: &mut Frame, area: Rect, text: &str, color: Color) 
 ///
 /// Displays `text` in `Color::DarkGray` without a border.
 pub fn render_help(frame: &mut Frame, area: Rect, text: &str) {
-	let help = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
+	let help = Paragraph::new(text)
+		.style(Style::default().fg(Color::DarkGray))
+		.wrap(Wrap { trim: false });
 	frame.render_widget(help, area);
 }
 
-/// Renders a horizontal row of styled buttons inside a bordered block.
+/// Renders a horizontal progress tab bar spanning the full width of `area`.
 ///
-/// Buttons are separated by three spaces and styled according to their
-/// `selected` state and optional `color` override. The block is given the
-/// provided `title`.
-pub fn render_button_row(frame: &mut Frame, area: Rect, title: &str, buttons: &[ButtonDef<'_>]) {
-	let mut spans = vec![Span::raw("  ")];
-	for (i, btn) in buttons.iter().enumerate() {
-		if i > 0 {
-			spans.push(Span::raw("   "));
-		}
-		let style = match btn.color {
-			Some(color) => button_style_colored(btn.selected, color),
-			None => button_style(btn.selected),
-		};
-		spans.push(Span::styled(format!(" {} ", btn.label), style));
+/// Tabs are split equally. Each tab label is centred and styled according to
+/// its [`TabStatus`]: green for completed, bold blue for current, dark grey
+/// for future.
+pub fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
+	if tabs.is_empty() {
+		return;
 	}
-	spans.push(Span::raw("  "));
-	let line = Line::from(spans);
-	let para = Paragraph::new(line).block(Block::default().borders(Borders::ALL).title(title));
-	frame.render_widget(para, area);
+	let n = tabs.len() as u16;
+	let constraints: Vec<Constraint> = (0..n).map(|_| Constraint::Fill(1)).collect();
+	let cells = Layout::horizontal(constraints).split(area);
+	for ((label, status), &cell) in tabs.iter().zip(cells.iter()) {
+		let style = match status {
+			TabStatus::Completed => Style::default().fg(Color::White).bg(Color::Green),
+			TabStatus::Current => Style::default()
+				.fg(Color::White)
+				.bg(Color::Blue)
+				.add_modifier(Modifier::BOLD),
+			TabStatus::Future => Style::default().fg(Color::White).bg(Color::DarkGray),
+		};
+		frame.render_widget(
+			Paragraph::new(Text::from(vec![
+				Line::from(""),
+				Line::from(*label),
+				Line::from(""),
+			]))
+			.alignment(Alignment::Center)
+			.style(style),
+			cell,
+		);
+	}
+}
+
+/// Renders either/or buttons as equal-width blocks with one blank line of
+/// padding above and below each label.
+///
+/// Each button occupies an equal share of `area`. The selected button's style
+/// fills the entire button area. Unselected buttons have a dark grey background.
+pub fn render_yes_no_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef<'_>]) {
+	if buttons.is_empty() {
+		return;
+	}
+	let n = buttons.len() as u16;
+	let constraints: Vec<Constraint> = (0..n).map(|_| Constraint::Percentage(100 / n)).collect();
+	let cells = Layout::horizontal(constraints).spacing(1).split(area);
+	for (btn, &cell) in buttons.iter().zip(cells.iter()) {
+		let style = if btn.selected {
+			match btn.color {
+				Some(color) => button_style_colored(true, color),
+				None => button_style(true),
+			}
+		} else {
+			Style::default().fg(Color::Gray).bg(Color::DarkGray)
+		};
+		let content = Text::from(vec![Line::from(""), Line::from(btn.label), Line::from("")]);
+		let para = Paragraph::new(content)
+			.alignment(Alignment::Center)
+			.style(style);
+		frame.render_widget(para, cell);
+	}
 }
 
 /// Returns an iterator of styled spans for a button with an underlined shortcut key.
@@ -124,14 +191,15 @@ pub fn button_spans<'a>(
 
 /// Creates the standard vertical wizard layout with a 2-cell margin.
 ///
-/// Returns layout areas corresponding to `constraints`, split over
-/// `frame.area()`.
-pub fn wizard_layout(frame: &Frame, constraints: &[Constraint]) -> Rc<[Rect]> {
+/// Returns layout areas corresponding to `constraints`, split over `area`.
+///
+/// Applies a 2-cell margin on all sides.
+pub fn wizard_layout(area: Rect, constraints: &[Constraint]) -> Rc<[Rect]> {
 	Layout::default()
 		.direction(Direction::Vertical)
 		.margin(2)
 		.constraints(constraints.iter().copied())
-		.split(frame.area())
+		.split(area)
 }
 
 /// Runs the interactive TUI event loop with the given state and callbacks.
@@ -198,6 +266,25 @@ mod tests {
 
 	fn make_terminal() -> Terminal<TestBackend> {
 		Terminal::new(TestBackend::new(80, 5)).unwrap()
+	}
+
+	// question_height tests
+	#[test]
+	fn question_height_short_text_returns_minimum() {
+		// "Hello" fits on one line at any reasonable width → border+1+border = 3
+		assert_eq!(question_height("Hello", 80), 3);
+	}
+
+	#[test]
+	fn question_height_wrapping_text_grows() {
+		// At width 80, inner = 74 chars. 87-char string wraps to 2 lines → 4
+		let long = "Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
+		assert_eq!(question_height(long, 80), 4);
+	}
+
+	#[test]
+	fn question_height_zero_width_returns_minimum() {
+		assert_eq!(question_height("anything", 0), 3);
 	}
 
 	// button_style tests
@@ -289,15 +376,15 @@ mod tests {
 		assert!(content.contains("Press Esc to cancel"));
 	}
 
-	// render_button_row tests
+	// render_yes_no_buttons tests
 	#[test]
-	fn render_button_row_shows_title_and_labels() {
-		let mut terminal = make_terminal();
+	fn render_yes_no_buttons_shows_labels() {
+		let backend = TestBackend::new(80, 5);
+		let mut terminal = Terminal::new(backend).unwrap();
 		let content = render_to_string(&mut terminal, |frame| {
-			render_button_row(
+			render_yes_no_buttons(
 				frame,
 				frame.area(),
-				"Choose",
 				&[
 					ButtonDef {
 						label: "Yes",
@@ -312,61 +399,67 @@ mod tests {
 				],
 			);
 		});
-		assert!(content.contains("Choose"));
 		assert!(content.contains("Yes"));
 		assert!(content.contains("No"));
 	}
 
 	#[test]
-	fn render_button_row_single_button() {
+	fn render_yes_no_buttons_empty_does_not_panic() {
+		let mut terminal = make_terminal();
+		terminal
+			.draw(|frame| render_yes_no_buttons(frame, frame.area(), &[]))
+			.unwrap();
+	}
+
+	// render_tabs tests
+	#[test]
+	fn render_tabs_shows_all_labels() {
 		let mut terminal = make_terminal();
 		let content = render_to_string(&mut terminal, |frame| {
-			render_button_row(
+			render_tabs(
 				frame,
 				frame.area(),
-				"Title",
-				&[ButtonDef {
-					label: "OK",
-					selected: true,
-					color: None,
-				}],
+				&[
+					("Managers", TabStatus::Current),
+					("Git", TabStatus::Future),
+					("GitHub", TabStatus::Future),
+				],
 			);
 		});
-		assert!(content.contains("OK"));
+		assert!(content.contains("Managers"));
+		assert!(content.contains("Git"));
+		assert!(content.contains("GitHub"));
+	}
+
+	#[test]
+	fn render_tabs_empty_does_not_panic() {
+		let mut terminal = make_terminal();
+		terminal
+			.draw(|frame| render_tabs(frame, frame.area(), &[]))
+			.unwrap();
 	}
 
 	// wizard_layout tests
 	#[test]
 	fn wizard_layout_returns_correct_chunk_count() {
-		let backend = TestBackend::new(80, 24);
-		let mut terminal = Terminal::new(backend).unwrap();
-		terminal
-			.draw(|frame| {
-				let chunks = wizard_layout(
-					frame,
-					&[
-						Constraint::Length(3),
-						Constraint::Length(3),
-						Constraint::Min(1),
-					],
-				);
-				assert_eq!(chunks.len(), 3);
-			})
-			.unwrap();
+		let area = Rect::new(0, 0, 80, 24);
+		let chunks = wizard_layout(
+			area,
+			&[
+				Constraint::Length(3),
+				Constraint::Length(3),
+				Constraint::Min(1),
+			],
+		);
+		assert_eq!(chunks.len(), 3);
 	}
 
 	#[test]
 	fn wizard_layout_applies_margin() {
-		let backend = TestBackend::new(80, 24);
-		let mut terminal = Terminal::new(backend).unwrap();
-		terminal
-			.draw(|frame| {
-				let full_area = frame.area();
-				let chunks = wizard_layout(frame, &[Constraint::Min(0)]);
-				// The single chunk should be inset by the 2-cell margin on each side
-				assert!(chunks[0].x >= full_area.x + 2);
-				assert!(chunks[0].y >= full_area.y + 2);
-			})
-			.unwrap();
+		let area = Rect::new(0, 0, 80, 24);
+		let chunks = wizard_layout(area, &[Constraint::Min(0)]);
+		// The single chunk should be inset by the 2-cell margin on each side
+		assert!(chunks[0].x >= area.x + 2);
+		assert!(chunks[0].y >= area.y + 2);
 	}
 }

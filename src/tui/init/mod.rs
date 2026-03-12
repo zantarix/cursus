@@ -7,7 +7,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 use ratatui_textarea::TextArea;
 
-use super::widgets::{self, KeyResult};
+use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
 use crate::git::GitWorkdir;
 use crate::github::GitHubRepo;
@@ -191,22 +191,67 @@ fn handle_key(state: WizardState, screen: Screen, key: KeyEvent) -> HandleResult
 	}
 }
 
-fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
+/// Maps a screen to the `[Managers, Git, GitHub]` tab statuses.
+fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 	match screen {
-		Screen::ConfirmOverwrite(yes) => confirm_overwrite::render_confirm_overwrite(frame, *yes),
+		Screen::ConfirmOverwrite(_)
+		| Screen::SelectPackageManagers { .. }
+		| Screen::ManifestPath { .. } => [TabStatus::Current, TabStatus::Future, TabStatus::Future],
+		Screen::EnableGit(_) | Screen::GitStrategy(_) => {
+			[TabStatus::Completed, TabStatus::Current, TabStatus::Future]
+		}
+		Screen::EnableGitHub(_) | Screen::EditGitHub { .. } | Screen::OpenEditor(_) => [
+			TabStatus::Completed,
+			TabStatus::Completed,
+			TabStatus::Current,
+		],
+	}
+}
+
+const TAB_HEIGHT: u16 = 3;
+
+fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
+	let [managers, git, github] = tab_states(screen);
+	let full = frame.area();
+	let tab_area = Rect {
+		height: TAB_HEIGHT,
+		..full
+	};
+	let managers_label = if full.width >= 72 {
+		"Package Managers"
+	} else {
+		"Managers"
+	};
+	widgets::render_tabs(
+		frame,
+		tab_area,
+		&[(managers_label, managers), ("Git", git), ("GitHub", github)],
+	);
+	let content_area = Rect {
+		y: full.y + TAB_HEIGHT,
+		height: full.height.saturating_sub(TAB_HEIGHT),
+		..full
+	};
+
+	match screen {
+		Screen::ConfirmOverwrite(yes) => {
+			confirm_overwrite::render_confirm_overwrite(frame, content_area, *yes)
+		}
 		Screen::SelectPackageManagers { cargo, npm, focus } => {
-			select_pms::render_select_pms(frame, *cargo, *npm, *focus)
+			select_pms::render_select_pms(frame, content_area, *cargo, *npm, *focus)
 		}
 		Screen::ManifestPath { pm, textarea } => {
-			manifest_path::render_manifest_path(frame, *pm, textarea)
+			manifest_path::render_manifest_path(frame, content_area, *pm, textarea)
 		}
-		Screen::EnableGit(yes) => enable_git::render_enable_git(frame, *yes),
-		Screen::GitStrategy(strategy) => git_strategy::render_git_strategy(frame, *strategy),
-		Screen::EnableGitHub(yes) => enable_github::render_enable_github(frame, *yes),
+		Screen::EnableGit(yes) => enable_git::render_enable_git(frame, content_area, *yes),
+		Screen::GitStrategy(strategy) => {
+			git_strategy::render_git_strategy(frame, content_area, *strategy)
+		}
+		Screen::EnableGitHub(yes) => enable_github::render_enable_github(frame, content_area, *yes),
 		Screen::EditGitHub { textarea, error } => {
-			edit_github::render_edit_github(frame, textarea, *error)
+			edit_github::render_edit_github(frame, content_area, textarea, *error)
 		}
-		Screen::OpenEditor(yes) => open_editor::render_open_editor(frame, *yes),
+		Screen::OpenEditor(yes) => open_editor::render_open_editor(frame, content_area, *yes),
 	}
 }
 
@@ -324,6 +369,36 @@ mod tests {
 
 	use super::test_helpers::*;
 	use super::*;
+
+	// --- tab_states ---
+
+	#[test]
+	fn tab_states_managers_screens_show_current_managers() {
+		let [m, g, gh] = tab_states(&Screen::SelectPackageManagers {
+			cargo: true,
+			npm: false,
+			focus: PmFocus::Cargo,
+		});
+		assert_eq!(m, TabStatus::Current);
+		assert_eq!(g, TabStatus::Future);
+		assert_eq!(gh, TabStatus::Future);
+	}
+
+	#[test]
+	fn tab_states_git_screens_show_completed_managers() {
+		let [m, g, gh] = tab_states(&Screen::EnableGit(true));
+		assert_eq!(m, TabStatus::Completed);
+		assert_eq!(g, TabStatus::Current);
+		assert_eq!(gh, TabStatus::Future);
+	}
+
+	#[test]
+	fn tab_states_github_screens_show_completed_git() {
+		let [m, g, gh] = tab_states(&Screen::OpenEditor(false));
+		assert_eq!(m, TabStatus::Completed);
+		assert_eq!(g, TabStatus::Completed);
+		assert_eq!(gh, TabStatus::Current);
+	}
 
 	// --- detect_package_managers ---
 

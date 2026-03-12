@@ -44,27 +44,25 @@ pub(super) fn handle_manifest_path(
 /// Renders the [`Screen::ManifestPath`] screen.
 pub(super) fn render_manifest_path(
 	frame: &mut Frame,
+	area: Rect,
 	pm: PackageManager,
 	textarea: &TextArea<'static>,
 ) {
-	let chunks = widgets::wizard_layout(
-		frame,
-		&[
-			Constraint::Length(3),
-			Constraint::Length(3),
-			Constraint::Min(1),
-		],
-	);
 	let pm_name = match pm {
 		PackageManager::Cargo => "Cargo.toml",
 		PackageManager::Npm => "package.json",
 	};
-	widgets::render_question(
-		frame,
-		chunks[0],
-		&format!("{pm_name} not found at repo root. Enter subdirectory path (or leave empty):"),
-		Color::Yellow,
+	let question =
+		format!("{pm_name} not found at repo root. Enter subdirectory path (or leave empty):");
+	let chunks = widgets::wizard_layout(
+		area,
+		&[
+			Constraint::Length(widgets::question_height(&question, area.width)),
+			Constraint::Length(3),
+			Constraint::Min(1),
+		],
 	);
+	widgets::render_question(frame, chunks[0], &question, Color::Yellow);
 	frame.render_widget(textarea, chunks[1]);
 	widgets::render_help(frame, chunks[2], "Enter: confirm | Esc: cancel");
 }

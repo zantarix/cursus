@@ -18,25 +18,21 @@ pub(super) fn handle_open_editor(state: WizardState, yes: bool, key: KeyEvent) -
 }
 
 /// Renders the [`Screen::OpenEditor`] screen.
-pub(super) fn render_open_editor(frame: &mut Frame, yes: bool) {
+pub(super) fn render_open_editor(frame: &mut Frame, area: Rect, yes: bool) {
+	let question = "Open the config file in your editor after saving?";
 	let chunks = widgets::wizard_layout(
-		frame,
+		area,
 		&[
+			Constraint::Length(widgets::question_height(question, area.width)),
 			Constraint::Length(3),
-			Constraint::Length(3),
+			Constraint::Length(1),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(
-		frame,
-		chunks[0],
-		"Open the config file in your editor after saving?",
-		Color::Yellow,
-	);
-	widgets::render_button_row(
+	widgets::render_question(frame, chunks[0], question, Color::Yellow);
+	widgets::render_yes_no_buttons(
 		frame,
 		chunks[1],
-		"Open Editor",
 		&[
 			ButtonDef {
 				label: "Yes",
@@ -52,7 +48,7 @@ pub(super) fn render_open_editor(frame: &mut Frame, yes: bool) {
 	);
 	widgets::render_help(
 		frame,
-		chunks[2],
+		chunks[3],
 		"Use ←/→ or Tab to switch, Enter to confirm, Esc to cancel",
 	);
 }
@@ -121,6 +117,7 @@ mod tests {
 			.draw(|frame| super::super::ui(frame, &state, &Screen::OpenEditor(false)))
 			.unwrap();
 		let content = buffer_to_string(terminal.backend().buffer());
-		assert!(content.contains("Open Editor"));
+		assert!(content.contains("Yes"));
+		assert!(content.contains("No"));
 	}
 }
