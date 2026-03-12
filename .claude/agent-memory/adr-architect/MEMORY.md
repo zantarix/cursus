@@ -51,7 +51,8 @@ Key differences from old style:
 - ADR-001 to ADR-018: Accepted
 - ADR-013: backend sub-decision superseded by ADR-018 (log facade decision still valid)
 - ADR-019: Accepted (improved init workflow)
-- Next ADR number: 020
+- ADR-020: Accepted (TUI screen submodule structure)
+- Next ADR number: 021
 
 ## Project ADR Rules (from CLAUDE.md)
 

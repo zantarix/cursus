@@ -85,3 +85,11 @@ ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step
 - npm `"private": true` and Cargo `publish = false` honored during publish (ADR-007)
 - This avoids config duplication and divergence risk
 - New adapters should follow the same pattern: check native "do not publish" markers
+
+## TUI Wizard File Organization (ADR-020)
+
+- Each wizard is a submodule directory: `src/tui/<wizard>/`
+- `mod.rs` holds: Screen enum, shared types, dispatchers (`handle_key`, `ui`), `run()`, `pub(super) mod test_helpers`, cross-screen workflow tests
+- One file per screen: handler + renderer + `#[cfg(test)] mod tests`
+- Screen functions use `pub(super)` visibility (not `pub`) to avoid `private_interfaces` lint
+- Submodule tests access parent via `super::super::` paths
