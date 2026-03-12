@@ -355,6 +355,29 @@ impl TarjanState {
 			sccs: Vec::new(),
 		}
 	}
+
+	/// Returns true if `v` is the root of a strongly connected component.
+	fn is_scc_root(&self, v: &str) -> bool {
+		match (self.indices.get(v), self.lowlinks.get(v)) {
+			(Some(&v_index), Some(&v_lowlink)) => v_index == v_lowlink,
+			_ => false,
+		}
+	}
+
+	/// Pops the SCC rooted at `v` from the stack and returns it sorted.
+	fn extract_scc(&mut self, v: &str) -> Vec<String> {
+		let mut scc = Vec::new();
+		while let Some(w) = self.stack.pop() {
+			self.on_stack.remove(&w);
+			let is_root = w == v;
+			scc.push(w);
+			if is_root {
+				break;
+			}
+		}
+		scc.sort();
+		scc
+	}
 }
 
 /// A directed graph for dependency ordering.
@@ -409,6 +432,11 @@ impl DependencyGraph {
 	/// Iterative helper for Tarjan's algorithm to avoid stack overflow.
 	///
 	/// This uses an explicit work stack to simulate the recursive call stack.
+	/// The iterative simulation requires tracking two phases per node (first-visit
+	/// and post-children), which creates inherent nesting that cannot be meaningfully
+	/// reduced without fragmenting the algorithm's logic.
+	#[allow(clippy::excessive_nesting)]
+	#[allow(clippy::too_many_lines)]
 	fn strongconnect(
 		adjacency: &std::collections::HashMap<String, Vec<String>>,
 		start: &str,
@@ -492,28 +520,9 @@ impl DependencyGraph {
 						}
 					}
 
-					// Check if v is a root of an SCC
-					let is_scc_root = if let (Some(&v_index), Some(&v_lowlink)) =
-						(state.indices.get(&v), state.lowlinks.get(&v))
-					{
-						v_index == v_lowlink
-					} else {
-						false
-					};
-
-					if is_scc_root {
-						// Pop the SCC from the stack
-						let mut scc = Vec::new();
-						while let Some(w) = state.stack.pop() {
-							state.on_stack.remove(&w);
-							let is_root = w == v;
-							scc.push(w);
-							if is_root {
-								break;
-							}
-						}
-						// Sort SCC members alphabetically for determinism
-						scc.sort();
+					// Check if v is a root of an SCC and extract if so
+					if state.is_scc_root(&v) {
+						let scc = state.extract_scc(&v);
 						state.sccs.push(scc);
 					}
 				}

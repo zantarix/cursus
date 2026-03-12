@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use glob::glob;
 use jsonc_parser::ParseOptions;
-use jsonc_parser::cst::{CstInputValue, CstRootNode};
+use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use log::warn;
 use semver::Version;
 use serde::Deserialize;
@@ -234,6 +234,153 @@ fn expand_workspace_pattern(pm_root: &Path, pattern: &str) -> anyhow::Result<Vec
 		.collect()
 }
 
+/// Builds a `ProjectInfo` for an npm root package.
+///
+/// Used for both the single-package case and the root package in a monorepo workspace.
+fn build_npm_root_project_info(
+	package: &PackageJson,
+	path: AbsolutePath,
+	manifest_path: &Path,
+) -> anyhow::Result<ProjectInfo> {
+	let name = package
+		.name
+		.clone()
+		.with_context(|| format!("Missing name in {}", manifest_path.display()))?;
+	let (version, publishable, dependency_names) =
+		extract_project_metadata(package).with_context(|| {
+			format!(
+				"Failed to extract metadata from {}",
+				manifest_path.display()
+			)
+		})?;
+	Ok(ProjectInfo {
+		name,
+		path,
+		version,
+		publishable,
+		dependency_names,
+	})
+}
+
+/// Runs a lock-file update command for a specific package manager tool.
+///
+/// Returns `Ok(None)` when `lock_filename` does not exist in `workspace_root`
+/// (meaning this tool is not in use). Returns `Ok(Some(path))` on success.
+///
+/// # Errors
+///
+/// Returns an error if the command fails.
+fn run_lock_update(
+	env: &crate::Env,
+	program: &str,
+	args: &[&str],
+	workspace_root: &AbsolutePath,
+	lock_filename: &str,
+) -> anyhow::Result<Option<PathBuf>> {
+	let lock_path = workspace_root.join(lock_filename);
+	if !lock_path.exists() {
+		return Ok(None);
+	}
+	let output = env
+		.run_mut(program, args, workspace_root)
+		.with_context(|| {
+			format!(
+				"Failed to execute {} {} in {}",
+				program,
+				args.join(" "),
+				workspace_root.display()
+			)
+		})?;
+	if !output.status.success() {
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		anyhow::bail!(
+			"{} {} failed in {}: {}",
+			program,
+			args.join(" "),
+			workspace_root.display(),
+			stderr
+		);
+	}
+	Ok(Some(lock_path))
+}
+
+/// Executes a custom lock file command via the shell.
+///
+/// Returns an error if the command fails. Used when `lock_command` is set in config.
+fn run_custom_lock_command(
+	env: &crate::Env,
+	lock_command: &str,
+	workspace_root: &AbsolutePath,
+) -> anyhow::Result<()> {
+	if lock_command.trim().is_empty() {
+		anyhow::bail!("lock_command is empty");
+	}
+	let output = env
+		.run_shell_mut(lock_command, workspace_root)
+		.with_context(|| {
+			format!(
+				"Failed to execute lock command '{}' in {}",
+				lock_command,
+				workspace_root.display()
+			)
+		})?;
+	if !output.status.success() {
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		anyhow::bail!(
+			"Lock command '{}' failed in {}: {}",
+			lock_command,
+			workspace_root.display(),
+			stderr
+		);
+	}
+	Ok(())
+}
+
+/// Attempts to update `dependency_name` in `section` of `obj` to `new_version`.
+///
+/// Returns `true` if the dependency was found and updated.
+fn update_dep_in_section(
+	obj: &CstObject,
+	section: &str,
+	dependency_name: &str,
+	new_version: &Version,
+	manifest_path: &Path,
+) -> bool {
+	let Some(section_obj) = obj
+		.get(section)
+		.and_then(|p| p.value())
+		.and_then(|v| v.as_object())
+	else {
+		return false;
+	};
+	let Some(dep_prop) = section_obj.get(dependency_name) else {
+		return false;
+	};
+	let Some(current_value) = dep_prop
+		.value()
+		.and_then(|v| v.as_string_lit())
+		.and_then(|s| s.decoded_value().ok())
+	else {
+		warn!(
+			"non-string value for dependency '{}' in {}, skipping",
+			dependency_name,
+			manifest_path.display()
+		);
+		return false;
+	};
+	if current_value.starts_with("workspace:") {
+		warn!(
+			"skipping workspace: protocol dependency '{}' in {}",
+			dependency_name,
+			manifest_path.display()
+		);
+		return false;
+	}
+	let prefix = super::semver_range_prefix(&current_value).to_string();
+	dep_prop.set_value(CstInputValue::String(format!("{prefix}{new_version}")));
+	true
+}
+
 impl PackageManagerAdapter for NpmAdapter {
 	fn write_version(
 		&self,
@@ -275,45 +422,14 @@ impl PackageManagerAdapter for NpmAdapter {
 			get_workspace_patterns(pnpm_workspace.as_ref(), &root_package)
 		else {
 			// Single package repository
-			let name = root_package
-				.name
-				.clone()
-				.with_context(|| format!("Missing name in {}", root_manifest_path.display()))?;
-			let (version, publishable, dependency_names) = extract_project_metadata(&root_package)
-				.with_context(|| {
-					format!(
-						"Failed to extract metadata from {}",
-						root_manifest_path.display()
-					)
-				})?;
-			return Ok(vec![ProjectInfo {
-				name,
-				path: pm_root.clone(),
-				version,
-				publishable,
-				dependency_names,
-			}]);
+			let info =
+				build_npm_root_project_info(&root_package, pm_root.clone(), &root_manifest_path)?;
+			return Ok(vec![info]);
 		};
 
 		// Monorepo with workspaces - include root project first
-		let root_name = root_package
-			.name
-			.clone()
-			.with_context(|| format!("Missing name in {}", root_manifest_path.display()))?;
-		let (version, publishable, dependency_names) = extract_project_metadata(&root_package)
-			.with_context(|| {
-				format!(
-					"Failed to extract metadata from {}",
-					root_manifest_path.display()
-				)
-			})?;
-		let root_project = ProjectInfo {
-			name: root_name,
-			path: pm_root.clone(),
-			version,
-			publishable,
-			dependency_names,
-		};
+		let root_project =
+			build_npm_root_project_info(&root_package, pm_root.clone(), &root_manifest_path)?;
 
 		let mut projects: Vec<ProjectInfo> = std::iter::once(root_project)
 			.chain(
@@ -334,115 +450,38 @@ impl PackageManagerAdapter for NpmAdapter {
 
 	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		let workspace_root = self.resolve_root()?;
-
 		// If a custom lock command is configured, execute it via the shell (ADR-011).
 		// We can't know which file the custom command writes, so return None.
 		if let Some(ref lock_command) = self.config.lock_command {
-			if lock_command.trim().is_empty() {
-				anyhow::bail!("lock_command is empty");
-			}
-
-			// run_shell_mut is a no-op when DryRunCommandRunner is active.
-			let output = self
-				.env
-				.run_shell_mut(lock_command, &workspace_root)
-				.with_context(|| {
-					format!(
-						"Failed to execute lock command '{}' in {}",
-						lock_command,
-						workspace_root.display()
-					)
-				})?;
-
-			if !output.status.success() {
-				let stderr = String::from_utf8_lossy(&output.stderr);
-				anyhow::bail!(
-					"Lock command '{}' failed in {}: {}",
-					lock_command,
-					workspace_root.display(),
-					stderr
-				);
-			}
-
+			run_custom_lock_command(&self.env, lock_command, &workspace_root)?;
 			return Ok(None);
 		}
-
 		// Auto-detect lock file and run appropriate command.
-		// Resolve the path before the run_mut call so it is always available.
-		if workspace_root.join("package-lock.json").exists() {
-			let lock_path = workspace_root.join("package-lock.json");
-			let output = self
-				.env
-				.run_mut("npm", &["install", "--package-lock-only"], &workspace_root)
-				.with_context(|| {
-					format!(
-						"Failed to execute npm install --package-lock-only in {}",
-						workspace_root.display()
-					)
-				})?;
-
-			if !output.status.success() {
-				let stderr = String::from_utf8_lossy(&output.stderr);
-				anyhow::bail!(
-					"npm install --package-lock-only failed in {}: {}",
-					workspace_root.display(),
-					stderr
-				);
-			}
-
-			Ok(Some(lock_path))
-		} else if workspace_root.join("pnpm-lock.yaml").exists() {
-			let lock_path = workspace_root.join("pnpm-lock.yaml");
-			let output = self
-				.env
-				.run_mut("pnpm", &["install", "--lockfile-only"], &workspace_root)
-				.with_context(|| {
-					format!(
-						"Failed to execute pnpm install --lockfile-only in {}",
-						workspace_root.display()
-					)
-				})?;
-
-			if !output.status.success() {
-				let stderr = String::from_utf8_lossy(&output.stderr);
-				anyhow::bail!(
-					"pnpm install --lockfile-only failed in {}: {}",
-					workspace_root.display(),
-					stderr
-				);
-			}
-
-			Ok(Some(lock_path))
-		} else if workspace_root.join("yarn.lock").exists() {
-			let lock_path = workspace_root.join("yarn.lock");
-			let output = self
-				.env
-				.run_mut(
-					"yarn",
-					&["install", "--mode", "update-lockfile"],
-					&workspace_root,
-				)
-				.with_context(|| {
-					format!(
-						"Failed to execute yarn install --mode update-lockfile in {}",
-						workspace_root.display()
-					)
-				})?;
-
-			if !output.status.success() {
-				let stderr = String::from_utf8_lossy(&output.stderr);
-				anyhow::bail!(
-					"yarn install --mode update-lockfile failed in {}: {}",
-					workspace_root.display(),
-					stderr
-				);
-			}
-
-			Ok(Some(lock_path))
-		} else {
-			// No lock file found - no-op
-			Ok(None)
+		if let Some(path) = run_lock_update(
+			&self.env,
+			"npm",
+			&["install", "--package-lock-only"],
+			&workspace_root,
+			"package-lock.json",
+		)? {
+			return Ok(Some(path));
 		}
+		if let Some(path) = run_lock_update(
+			&self.env,
+			"pnpm",
+			&["install", "--lockfile-only"],
+			&workspace_root,
+			"pnpm-lock.yaml",
+		)? {
+			return Ok(Some(path));
+		}
+		run_lock_update(
+			&self.env,
+			"yarn",
+			&["install", "--mode", "update-lockfile"],
+			&workspace_root,
+			"yarn.lock",
+		)
 	}
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
@@ -515,44 +554,9 @@ impl PackageManagerAdapter for NpmAdapter {
 			"optionalDependencies",
 		];
 		let mut modified = false;
-
-		for section in &sections {
-			let Some(section_obj) = obj
-				.get(section)
-				.and_then(|p| p.value())
-				.and_then(|v| v.as_object())
-			else {
-				continue;
-			};
-			let Some(dep_prop) = section_obj.get(dependency_name) else {
-				continue;
-			};
-			let Some(current_value) = dep_prop
-				.value()
-				.and_then(|v| v.as_string_lit())
-				.and_then(|s| s.decoded_value().ok())
-			else {
-				warn!(
-					"non-string value for dependency '{}' in {}, skipping",
-					dependency_name,
-					manifest_path.display()
-				);
-				continue;
-			};
-
-			if current_value.starts_with("workspace:") {
-				warn!(
-					"skipping workspace: protocol dependency '{}' in {}",
-					dependency_name,
-					manifest_path.display()
-				);
-				continue;
-			}
-
-			let prefix = super::semver_range_prefix(&current_value).to_string();
-			let new_dep_value = format!("{prefix}{new_version}");
-			dep_prop.set_value(CstInputValue::String(new_dep_value));
-			modified = true;
+		for s in &sections {
+			modified |=
+				update_dep_in_section(&obj, s, dependency_name, new_version, &manifest_path);
 		}
 
 		if modified {

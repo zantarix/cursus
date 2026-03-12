@@ -45,26 +45,16 @@ pub struct PublishArgs {
 	pub no_git: bool,
 }
 
-/// Execute the publish command.
-pub(crate) fn cmd_publish(
-	git: &git::GitWorkdir,
-	args: &PublishArgs,
-	dry_run: bool,
-	config: Config,
-) -> anyhow::Result<ExitCode> {
-	let env = config.env().context("env not set")?;
-	// Enumerate projects
-	let projects = config.load_projects()?;
-
-	// Filter projects by --package flags if specified
-	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
-
-	// Build dependency graph from all projects (not just selected ones)
-	// We need the full graph to correctly order the selected subset
-	let graph = package_manager::build_dependency_graph(&projects)?;
-
-	// Emit cycle warnings if cycles exist and warnings are not disabled
-	if !config.global.disable_dependency_cycle_warnings {
+/// Sorts selected projects into dependency-first order using the full project graph.
+///
+/// Emits cycle warnings for circular dependencies unless disabled in config.
+fn sort_projects_by_dependency(
+	projects: &[crate::package_manager::Project],
+	selected_projects: Vec<crate::package_manager::Project>,
+	disable_cycle_warnings: bool,
+) -> anyhow::Result<Vec<crate::package_manager::Project>> {
+	let graph = package_manager::build_dependency_graph(projects)?;
+	if !disable_cycle_warnings {
 		let cycle_groups = graph.cycle_groups();
 		if !cycle_groups.is_empty() {
 			for group in &cycle_groups {
@@ -74,150 +64,173 @@ pub(crate) fn cmd_publish(
 				);
 			}
 			warn!(
-				"To disable this warning, set `disable_dependency_cycle_warnings = true` in the [global] section of .chronicle/config.toml"
+				"To disable this warning, set `disable_dependency_cycle_warnings = true` \
+				 in the [global] section of .chronicle/config.toml"
 			);
 		}
 	}
-
-	// Sort all projects in leaves-first order (dependencies before dependents)
 	let all_sorted_names = graph.sort_leaves_first();
-
-	// Filter to only include selected projects, maintaining sorted order
 	let selected_names_set: std::collections::HashSet<_> =
 		selected_projects.iter().map(|p| p.name()).collect();
 	let sorted_names: Vec<_> = all_sorted_names
 		.into_iter()
 		.filter(|name| selected_names_set.contains(name.as_str()))
 		.collect();
+	let sorted = sorted_names
+		.iter()
+		.filter_map(|name| selected_projects.iter().find(|p| p.name() == name).cloned())
+		.collect();
+	Ok(sorted)
+}
 
-	// Reorder selected_projects to match sorted_names
-	let mut sorted_projects = Vec::new();
-	for name in &sorted_names {
-		if let Some(project) = selected_projects.iter().find(|p| p.name() == name) {
-			sorted_projects.push(project.clone());
-		}
+/// Creates git tags and GitHub Releases for all published packages.
+///
+/// Returns `(tags_created, tags_skipped, github_created, github_failed)`.
+#[allow(clippy::too_many_arguments)]
+fn run_git_release_operations(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	published_packages: &[PublishedPackage],
+	dry_run: bool,
+	git_enabled: bool,
+	no_git: bool,
+	is_multi_package: bool,
+) -> anyhow::Result<(usize, usize, usize, bool)> {
+	let (tags_created, tags_skipped) = maybe_create_tags(
+		published_packages,
+		config,
+		git,
+		dry_run,
+		git_enabled,
+		is_multi_package,
+	)?;
+	let (github_created, github_failed) = maybe_orchestrate_github_releases(
+		git,
+		config,
+		env,
+		published_packages,
+		dry_run,
+		no_git,
+		is_multi_package,
+	)?;
+	Ok((tags_created, tags_skipped, github_created, github_failed))
+}
+
+/// Creates git tags for published packages (or logs dry-run intent) and returns counts.
+///
+/// Returns `(tags_created, tags_skipped)`.
+fn maybe_create_tags(
+	published_packages: &[PublishedPackage],
+	config: &Config,
+	git: &git::GitWorkdir,
+	dry_run: bool,
+	git_enabled: bool,
+	is_multi_package: bool,
+) -> anyhow::Result<(usize, usize)> {
+	if !git_enabled {
+		return Ok((0, 0));
 	}
+	if dry_run {
+		for pkg in published_packages {
+			let tag = config
+				.git
+				.tag_format
+				.tag(&pkg.name, &pkg.version, is_multi_package);
+			info!("Would create tag {tag}");
+		}
+		return Ok((0, 0));
+	}
+	create_and_push_tags(published_packages, config, git, is_multi_package)
+}
 
-	// Fail fast: validate GitHub token before publishing anything
+/// Orchestrates GitHub Releases when enabled, or logs dry-run intent.
+///
+/// Returns `(releases_created, any_failed)`.
+fn maybe_orchestrate_github_releases(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	published_packages: &[PublishedPackage],
+	dry_run: bool,
+	no_git: bool,
+	is_multi_package: bool,
+) -> anyhow::Result<(usize, bool)> {
+	if !config.github.enabled || no_git {
+		return Ok((0, false));
+	}
+	if dry_run {
+		log_dry_run_github_releases(published_packages, config, is_multi_package);
+		return Ok((0, false));
+	}
+	let client = match env.github_client() {
+		Some(c) => c,
+		None => bail!("GitHub client not available despite token being set"),
+	};
+	orchestrate_github_releases(
+		git,
+		config,
+		env,
+		client,
+		published_packages,
+		is_multi_package,
+	)
+}
+
+/// Execute the publish command.
+pub(crate) fn cmd_publish(
+	git: &git::GitWorkdir,
+	args: &PublishArgs,
+	dry_run: bool,
+	config: Config,
+) -> anyhow::Result<ExitCode> {
+	let env = config.env().context("env not set")?;
+	let projects = config.load_projects()?;
+	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
+	let sorted_projects = sort_projects_by_dependency(
+		&projects,
+		selected_projects,
+		config.global.disable_dependency_cycle_warnings,
+	)?;
 	if config.github.enabled && !args.no_git && !dry_run && env.github_client().is_none() {
 		bail!(
 			"GitHub Releases is enabled but no GitHub token found. \
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
 		);
 	}
-
 	let is_multi_package = projects.len() > 1;
-
 	let (published_packages, skipped_count, publish_failed) =
 		publish_projects(&sorted_projects, dry_run)?;
-
-	// Git tag creation
 	let git_enabled = config.git.enabled() && !args.no_git;
-	let (tags_created, tags_skipped) = if git_enabled {
-		if dry_run {
-			for pkg in &published_packages {
-				let tag = config
-					.git
-					.tag_format
-					.tag(&pkg.name, &pkg.version, is_multi_package);
-				info!("Would create tag {tag}");
-			}
-			(0usize, 0usize)
-		} else {
-			create_and_push_tags(&published_packages, &config, git, is_multi_package)?
-		}
+	let (tags_created, tags_skipped, github_created, github_failed) = run_git_release_operations(
+		git,
+		&config,
+		env,
+		&published_packages,
+		dry_run,
+		git_enabled,
+		args.no_git,
+		is_multi_package,
+	)?;
+	log_publish_summary(
+		&published_packages,
+		skipped_count,
+		dry_run,
+		git_enabled,
+		tags_created,
+		tags_skipped,
+		config.github.enabled,
+		args.no_git,
+		github_created,
+		github_failed,
+	);
+
+	let code = if publish_failed || github_failed {
+		ExitCode::FAILURE
 	} else {
-		(0, 0)
+		ExitCode::SUCCESS
 	};
-
-	// GitHub Release orchestration — skipped when --no-git is set
-	let (github_created, github_failed) = if config.github.enabled && !args.no_git {
-		if dry_run {
-			// Dry-run: print what would happen without making API calls
-			for pkg in &published_packages {
-				let tag = config
-					.git
-					.tag_format
-					.tag(&pkg.name, &pkg.version, is_multi_package);
-				info!("Would create GitHub Release for {tag}");
-				for display_name in config.github.artifacts.keys() {
-					info!("  Would attach: {display_name}");
-				}
-			}
-			(0usize, false)
-		} else {
-			// The early token check above guarantees github_client is Some here.
-			// If it is somehow None, bail rather than panic.
-			let client = match env.github_client() {
-				Some(c) => c,
-				None => bail!("GitHub client not available despite token being set"),
-			};
-			orchestrate_github_releases(
-				git,
-				&config,
-				env,
-				client,
-				&published_packages,
-				is_multi_package,
-			)?
-		}
-	} else {
-		(0usize, false)
-	};
-
-	// Summary
-	info!("");
-	if dry_run {
-		let tag_note = if git_enabled && !published_packages.is_empty() {
-			format!(", {} would be tagged", published_packages.len())
-		} else {
-			String::new()
-		};
-		info!(
-			"Summary: {} would be published, {} would be skipped{tag_note}",
-			published_packages.len(),
-			skipped_count
-		);
-	} else if config.github.enabled && !args.no_git {
-		match (github_created, github_failed) {
-			(created, false) => info!(
-				"Summary: {} published, {} skipped, {} GitHub Releases created",
-				published_packages.len(),
-				skipped_count,
-				created
-			),
-			(created, true) => {
-				let failed_count = published_packages.len().saturating_sub(created);
-				info!(
-					"Summary: {} published, {} skipped, {} GitHub Release{} created, {} GitHub Release{} failed",
-					published_packages.len(),
-					skipped_count,
-					created,
-					if created == 1 { "" } else { "s" },
-					failed_count,
-					if failed_count == 1 { "" } else { "s" },
-				);
-			}
-		}
-	} else {
-		info!(
-			"Summary: {} published, {} skipped",
-			published_packages.len(),
-			skipped_count
-		);
-	}
-	if !dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
-		info!(
-			"{tags_created} tag{} created, {tags_skipped} skipped",
-			if tags_created == 1 { "" } else { "s" }
-		);
-	}
-
-	if publish_failed || github_failed {
-		Ok(ExitCode::FAILURE)
-	} else {
-		Ok(ExitCode::SUCCESS)
-	}
+	Ok(code)
 }
 
 /// Creates an annotated git tag for each published package and pushes all new tags.
@@ -332,6 +345,113 @@ fn publish_projects(
 	Ok((published, skipped_count, failed))
 }
 
+/// Logs what GitHub Releases and artifacts would be created in a dry run.
+fn log_dry_run_github_releases(
+	published_packages: &[PublishedPackage],
+	config: &crate::model::config::Config,
+	is_multi_package: bool,
+) {
+	for pkg in published_packages {
+		let tag = config
+			.git
+			.tag_format
+			.tag(&pkg.name, &pkg.version, is_multi_package);
+		info!("Would create GitHub Release for {tag}");
+		for display_name in config.github.artifacts.keys() {
+			info!("  Would attach: {display_name}");
+		}
+	}
+}
+
+/// Logs the publish summary after all publish operations have completed.
+#[allow(clippy::too_many_arguments)]
+fn log_publish_summary(
+	published_packages: &[PublishedPackage],
+	skipped_count: usize,
+	dry_run: bool,
+	git_enabled: bool,
+	tags_created: usize,
+	tags_skipped: usize,
+	github_enabled: bool,
+	no_git: bool,
+	github_created: usize,
+	github_failed: bool,
+) {
+	info!("");
+	if dry_run {
+		let tag_note = if git_enabled && !published_packages.is_empty() {
+			format!(", {} would be tagged", published_packages.len())
+		} else {
+			String::new()
+		};
+		info!(
+			"Summary: {} would be published, {} would be skipped{tag_note}",
+			published_packages.len(),
+			skipped_count
+		);
+	} else if github_enabled && !no_git {
+		match (github_created, github_failed) {
+			(created, false) => info!(
+				"Summary: {} published, {} skipped, {} GitHub Releases created",
+				published_packages.len(),
+				skipped_count,
+				created
+			),
+			(created, true) => {
+				let failed_count = published_packages.len().saturating_sub(created);
+				info!(
+					"Summary: {} published, {} skipped, {} GitHub Release{} created, {} GitHub Release{} failed",
+					published_packages.len(),
+					skipped_count,
+					created,
+					if created == 1 { "" } else { "s" },
+					failed_count,
+					if failed_count == 1 { "" } else { "s" },
+				);
+			}
+		}
+	} else {
+		info!(
+			"Summary: {} published, {} skipped",
+			published_packages.len(),
+			skipped_count
+		);
+	}
+	if !dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
+		info!(
+			"{tags_created} tag{} created, {tags_skipped} skipped",
+			if tags_created == 1 { "" } else { "s" }
+		);
+	}
+}
+
+/// Runs the configured GitHub pre-release build command, if any.
+///
+/// Returns `true` if the build command failed, `false` if it succeeded or was not configured.
+fn run_github_build_command(
+	env: &crate::Env,
+	config: &Config,
+	git: &git::GitWorkdir,
+) -> anyhow::Result<bool> {
+	if config.github.build_command.is_empty() {
+		return Ok(false);
+	}
+	info!("Running build command: {}", config.github.build_command);
+	let output = env
+		.run_shell(&config.github.build_command, git.path())
+		.with_context(|| {
+			format!(
+				"Failed to execute build command: {}",
+				config.github.build_command
+			)
+		})?;
+	if !output.status.success() {
+		error!("Build command failed with status {}", output.status);
+		return Ok(true);
+	}
+	Ok(false)
+}
+
 /// Orchestrates GitHub Release creation for all successfully published packages.
 ///
 /// The caller must ensure that a GitHub token is available and that `github_client`
@@ -350,25 +470,10 @@ fn orchestrate_github_releases(
 		return Ok((0, false));
 	}
 
-	// Resolve owner/repo from config or git remote
 	let gh_repo = GitHubRepo::resolve(&config.github, git)?;
-
-	// Run build command if configured
-	let mut github_failed = false;
-	if !config.github.build_command.is_empty() {
-		info!("Running build command: {}", config.github.build_command);
-		let output = env
-			.run_shell(&config.github.build_command, git.path())
-			.with_context(|| {
-				format!(
-					"Failed to execute build command: {}",
-					config.github.build_command
-				)
-			})?;
-		if !output.status.success() {
-			error!("Build command failed with status {}", output.status);
-			return Ok((0, true));
-		}
+	let mut github_failed = run_github_build_command(env, config, git)?;
+	if github_failed {
+		return Ok((0, true));
 	}
 
 	let mut created_count = 0;
@@ -393,27 +498,19 @@ fn orchestrate_github_releases(
 			String::new()
 		};
 
-		// Create the release
+		// Create the release and upload artifacts
 		match github_client.create_release(&gh_repo, &tag, &tag, &body) {
 			Ok(release_id) => {
 				info!("Created GitHub Release for {tag}");
 				created_count += 1;
-
-				// Upload artifacts
-				for (display_name, artifact_path) in &config.github.artifacts {
-					let full_path = git.path().join(artifact_path);
-					match github_client.upload_asset(
-						&gh_repo,
-						&release_id,
-						display_name,
-						&full_path,
-					) {
-						Ok(()) => info!("  Attached: {display_name}"),
-						Err(e) => {
-							warn!("  Failed to attach '{display_name}': {e:#}");
-							github_failed = true;
-						}
-					}
+				if upload_release_artifacts(
+					github_client,
+					&gh_repo,
+					&release_id,
+					&config.github.artifacts,
+					git.path(),
+				) {
+					github_failed = true;
 				}
 			}
 			Err(e) => {
@@ -424,6 +521,30 @@ fn orchestrate_github_releases(
 	}
 
 	Ok((created_count, github_failed))
+}
+
+/// Uploads all configured artifacts to a GitHub release.
+///
+/// Returns `true` if any upload failed, `false` if all succeeded.
+fn upload_release_artifacts(
+	github_client: &dyn GitHubClient,
+	gh_repo: &GitHubRepo,
+	release_id: &str,
+	artifacts: &std::collections::BTreeMap<String, String>,
+	git_root: &crate::path::AbsolutePath,
+) -> bool {
+	let mut any_failed = false;
+	for (display_name, artifact_path) in artifacts {
+		let full_path = git_root.join(artifact_path);
+		match github_client.upload_asset(gh_repo, release_id, display_name, &full_path) {
+			Ok(()) => info!("  Attached: {display_name}"),
+			Err(e) => {
+				warn!("  Failed to attach '{display_name}': {e:#}");
+				any_failed = true;
+			}
+		}
+	}
+	any_failed
 }
 
 /// Counts publish outcomes for each project, printing per-project results.

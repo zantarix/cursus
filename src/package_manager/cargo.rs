@@ -306,6 +306,31 @@ fn update_member_dep(
 	Ok(changed)
 }
 
+/// Builds a `ProjectInfo` for the root Cargo package.
+///
+/// Used for both the single-crate case and the root package in a workspace.
+fn build_cargo_root_project_info(
+	root_cargo: &CargoToml,
+	package: &Package,
+	pm_root: &AbsolutePath,
+	root_manifest_path: &Path,
+) -> anyhow::Result<ProjectInfo> {
+	let (version, publishable, dependency_names) = extract_project_metadata(root_cargo, package)
+		.with_context(|| {
+			format!(
+				"Failed to extract metadata from {}",
+				root_manifest_path.display()
+			)
+		})?;
+	Ok(ProjectInfo {
+		name: package.name.clone(),
+		path: pm_root.clone(),
+		version,
+		publishable,
+		dependency_names,
+	})
+}
+
 impl PackageManagerAdapter for CargoAdapter {
 	fn write_version(
 		&self,
@@ -352,20 +377,9 @@ impl PackageManagerAdapter for CargoAdapter {
 				// Virtual manifest with no members - nothing to enumerate
 				return Ok(Vec::new());
 			};
-			let (version, publishable, dependency_names) =
-				extract_project_metadata(&root_cargo, package).with_context(|| {
-					format!(
-						"Failed to extract metadata from {}",
-						root_manifest_path.display()
-					)
-				})?;
-			return Ok(vec![ProjectInfo {
-				name: package.name.clone(),
-				path: pm_root.clone(),
-				version,
-				publishable,
-				dependency_names,
-			}]);
+			let info =
+				build_cargo_root_project_info(&root_cargo, package, &pm_root, &root_manifest_path)?;
+			return Ok(vec![info]);
 		};
 
 		// Workspace with members
@@ -379,23 +393,9 @@ impl PackageManagerAdapter for CargoAdapter {
 
 		// Include root package if it exists (some workspaces have a root crate too)
 		if let Some(ref package) = root_cargo.package {
-			let (version, publishable, dependency_names) =
-				extract_project_metadata(&root_cargo, package).with_context(|| {
-					format!(
-						"Failed to extract metadata from {}",
-						root_manifest_path.display()
-					)
-				})?;
-			projects.insert(
-				0,
-				ProjectInfo {
-					name: package.name.clone(),
-					path: pm_root.clone(),
-					version,
-					publishable,
-					dependency_names,
-				},
-			);
+			let info =
+				build_cargo_root_project_info(&root_cargo, package, &pm_root, &root_manifest_path)?;
+			projects.insert(0, info);
 		}
 
 		// Sort by path for consistent ordering

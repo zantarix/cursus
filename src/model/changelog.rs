@@ -55,13 +55,11 @@ impl Changelog {
 					ChangeType::Minor => "Features",
 					ChangeType::Patch => "Bug Fixes",
 				};
-				if !output.is_empty() {
-					output.push('\n');
-				}
-				let _ = writeln!(output, "### {heading}\n");
-				for msg in messages {
-					let _ = writeln!(output, "- {}", indent_continuation_lines(msg));
-				}
+				output.push_str(&format_change_section(
+					heading,
+					messages,
+					!output.is_empty(),
+				));
 			}
 		}
 
@@ -165,6 +163,22 @@ pub fn extract_version_body(
 		.map_or(start, |i| i + 1);
 
 	Ok(body_lines[start..end].join("\n"))
+}
+
+/// Formats a single change-type section with a heading and bullet items.
+///
+/// Returns a string containing the `### heading` line followed by bullet items.
+/// Prepends a blank separator line when `needs_separator` is true.
+fn format_change_section(heading: &str, messages: &[&str], needs_separator: bool) -> String {
+	let mut section = String::new();
+	if needs_separator {
+		section.push('\n');
+	}
+	let _ = writeln!(section, "### {heading}\n");
+	for msg in messages {
+		let _ = writeln!(section, "- {}", indent_continuation_lines(msg));
+	}
+	section
 }
 
 /// Indents continuation lines of a multiline string for use in a Markdown list item.

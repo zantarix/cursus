@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Args;
@@ -17,7 +18,7 @@ use crate::github::client::GitHubClient;
 use crate::model::changelog::Changelog;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config::{Config, Strategy};
-use crate::package_manager::filter_projects_by_name;
+use crate::package_manager::{PackageManagerAdapter, filter_projects_by_name};
 use crate::utils::today_iso_date;
 
 /// Arguments for the `prepare` subcommand.
@@ -242,27 +243,24 @@ fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
 	body
 }
 
-/// Runs the `prepare` subcommand.
-pub(crate) fn cmd_prepare(
-	git: &git::GitWorkdir,
-	args: &PrepareArgs,
-	dry_run: bool,
-	config: Config,
-) -> anyhow::Result<ExitCode> {
-	let env = config.env().context("env not set")?;
-	let adapters = config.create_adapters()?;
-	let projects = config.load_projects_for_adapters(&adapters)?;
+/// Per-package changelog entries: `(ChangeType, Option<message>)` pairs.
+type PackageChanges = Vec<(ChangeType, Option<String>)>;
 
-	// Read all pending changesets
-	let changesets = Changeset::read_all(git)?;
-	if changesets.is_empty() {
-		info!("No pending changesets found. Nothing to prepare.");
-		return Ok(ExitCode::SUCCESS);
-	}
-
-	// Aggregate: find the maximum change type per package
+/// Aggregates changeset data into per-package maps, applying optional package filters.
+///
+/// Returns a tuple of:
+/// - `aggregated`: the maximum `ChangeType` per package name
+/// - `changes_per_package`: all `(ChangeType, message)` pairs per package name, for changelog
+fn aggregate_changesets(
+	changesets: &[(PathBuf, Changeset)],
+	package_filter: &[String],
+	projects: &[crate::package_manager::Project],
+) -> anyhow::Result<(
+	BTreeMap<String, ChangeType>,
+	BTreeMap<String, PackageChanges>,
+)> {
 	let mut aggregated: BTreeMap<String, ChangeType> = BTreeMap::new();
-	for (_, cs) in &changesets {
+	for (_, cs) in changesets {
 		for (pkg, ct) in &cs.packages {
 			aggregated
 				.entry(pkg.clone())
@@ -270,11 +268,9 @@ pub(crate) fn cmd_prepare(
 				.or_insert(*ct);
 		}
 	}
-
-	// Collect changes per package for changelog: (ChangeType, Option<message>)
 	let mut changes_per_package: BTreeMap<String, Vec<(ChangeType, Option<String>)>> =
 		BTreeMap::new();
-	for (_, cs) in &changesets {
+	for (_, cs) in changesets {
 		for (pkg, ct) in &cs.packages {
 			changes_per_package
 				.entry(pkg.clone())
@@ -282,25 +278,28 @@ pub(crate) fn cmd_prepare(
 				.push((*ct, cs.message.clone()));
 		}
 	}
-
-	// Filter by --package flags if specified
-	if !args.packages.is_empty() {
-		// Validate all requested packages exist
-		filter_projects_by_name(&projects, &args.packages)?;
-
-		// Filter aggregated and changes_per_package to only include requested packages
-		aggregated.retain(|name, _| args.packages.contains(name));
-		changes_per_package.retain(|name, _| args.packages.contains(name));
+	if !package_filter.is_empty() {
+		filter_projects_by_name(projects, package_filter)?;
+		aggregated.retain(|name, _| package_filter.contains(name));
+		changes_per_package.retain(|name, _| package_filter.contains(name));
 	}
+	Ok((aggregated, changes_per_package))
+}
 
-	let git_enabled = config.git.enabled() && !args.no_git;
-	let strategy = config.git.strategy();
-
-	if args.branch.is_some() && strategy == Strategy::Push {
-		log::warn!("--branch has no effect with the push strategy; ignoring");
-	}
-
-	// Pre-flight: fail early if GitHub integration requires a client that was not supplied.
+/// Runs pre-release checks and sets up the git branch if needed.
+///
+/// Validates GitHub token availability when required, checks for a dirty working
+/// tree, and checks out the release branch for the branch strategy.
+/// Returns `(original_branch, release_branch)`.
+fn preflight_checks(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	args: &PrepareArgs,
+	git_enabled: bool,
+	strategy: Strategy,
+	dry_run: bool,
+) -> anyhow::Result<(Option<String>, Option<String>)> {
 	if git_enabled
 		&& strategy == Strategy::Branch
 		&& config.github.enabled
@@ -312,52 +311,53 @@ pub(crate) fn cmd_prepare(
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
 		);
 	}
-
-	// Pre-flight dirty-tree check and branch strategy setup (before filesystem changes).
-	let (original_branch, release_branch) = if git_enabled {
-		if !dry_run {
-			check_dirty_tree(git)?;
-		}
-		if strategy == Strategy::Branch {
-			let current = if dry_run {
-				git.current_branch().ok().flatten()
-			} else {
-				git.current_branch()?
-			};
-			let branch = compute_release_branch(
-				args.branch.as_deref(),
-				config.git.release_branch_prefix(),
-				current.as_deref(),
-			);
-			git.checkout_or_reset_branch(&branch)?;
-			(current, Some(branch))
+	if !git_enabled {
+		return Ok((None, None));
+	}
+	if !dry_run {
+		check_dirty_tree(git)?;
+	}
+	if strategy == Strategy::Branch {
+		let current = if dry_run {
+			git.current_branch().ok().flatten()
 		} else {
-			(None, None)
-		}
+			git.current_branch()?
+		};
+		let branch = compute_release_branch(
+			args.branch.as_deref(),
+			config.git.release_branch_prefix(),
+			current.as_deref(),
+		);
+		git.checkout_or_reset_branch(&branch)?;
+		Ok((current, Some(branch)))
 	} else {
-		(None, None)
-	};
+		Ok((None, None))
+	}
+}
 
+/// Bumps versions and generates changelog entries for all affected packages.
+///
+/// Returns a tuple of `(release_infos, modified_files)` where `release_infos` describes
+/// each package prepared for release and `modified_files` is the list of paths modified.
+fn bump_versions_and_generate_changelogs(
+	aggregated: &BTreeMap<String, ChangeType>,
+	changes_per_package: &BTreeMap<String, PackageChanges>,
+	projects: &[crate::package_manager::Project],
+	dry_run: bool,
+) -> anyhow::Result<(Vec<ReleaseInfo>, Vec<PathBuf>)> {
 	let mut release_infos: Vec<ReleaseInfo> = Vec::new();
 	let mut modified_files: Vec<PathBuf> = Vec::new();
-
-	// Process each affected package
-	for (pkg_name, change_type) in &aggregated {
+	for (pkg_name, change_type) in aggregated {
 		let project = projects
 			.iter()
 			.find(|p| p.name() == pkg_name)
 			.with_context(|| {
 				format!("Package '{pkg_name}' from changeset not found in projects")
 			})?;
-
 		let current_version = project.version();
 		let new_version = bump_version(current_version, *change_type);
-
-		// Always track which files would be staged (used for git lifecycle and dry-run display).
 		modified_files.push(project.manifest_path());
 		modified_files.push(project.path().join("CHANGELOG.md"));
-
-		// Build Changelog now (shared between dry-run and real paths for changelog_entry)
 		let changes = changes_per_package
 			.get(pkg_name)
 			.cloned()
@@ -369,60 +369,81 @@ pub(crate) fn cmd_prepare(
 			project.path().clone(),
 		);
 		let changelog_entry = changelog.format_sections();
-
 		project.write_version(&new_version, dry_run)?;
 		changelog.update(dry_run)?;
 		info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
-
 		release_infos.push(ReleaseInfo {
 			package_name: pkg_name.clone(),
 			new_version,
 			changelog_entry,
 		});
 	}
+	Ok((release_infos, modified_files))
+}
 
-	// Build map of bumped package names → new versions for dependency propagation.
+/// Updates intra-workspace dependency references for all projects.
+///
+/// For each project that depends on a bumped package, calls `update_dependency_version`
+/// and returns the list of modified manifest paths.
+fn propagate_dependency_updates(
+	projects: &[crate::package_manager::Project],
+	release_infos: &[ReleaseInfo],
+	dry_run: bool,
+) -> anyhow::Result<Vec<PathBuf>> {
 	let bumped_versions: BTreeMap<String, semver::Version> = release_infos
 		.iter()
 		.map(|info| (info.package_name.clone(), info.new_version.clone()))
 		.collect();
-
-	// Update intra-workspace dependency references for all projects.
-	for project in &projects {
+	let update_verb = if dry_run { "would update" } else { "update" };
+	let mut additional_files: Vec<PathBuf> = Vec::new();
+	for project in projects {
 		for dep_name in project.dependency_names() {
-			if let Some(new_version) = bumped_versions.get(dep_name.as_str()) {
-				let paths = project.update_dependency_version(dep_name, new_version, dry_run)?;
-				if !paths.is_empty() {
-					let verb = if dry_run { "would update" } else { "update" };
-					info!(
-						"  {}: {verb} dependency {} to {}",
-						project.name(),
-						dep_name,
-						new_version
-					);
-					modified_files.extend(paths);
-				}
+			let Some(new_version) = bumped_versions.get(dep_name.as_str()) else {
+				continue;
+			};
+			let paths = project.update_dependency_version(dep_name, new_version, dry_run)?;
+			if !paths.is_empty() {
+				info!(
+					"  {}: {update_verb} dependency {} to {}",
+					project.name(),
+					dep_name,
+					new_version
+				);
+				additional_files.extend(paths);
 			}
 		}
 	}
+	Ok(additional_files)
+}
 
-	// Collect lock file paths. run_mut is a no-op in dry-run so this is always safe to call.
-	for adapter in &adapters {
-		if let Some(lock_path) = adapter.update_lock_file()? {
-			modified_files.push(lock_path);
+/// Runs `update_lock_file` on all adapters and collects the resulting paths.
+fn update_lock_files(adapters: &[Arc<dyn PackageManagerAdapter>]) -> anyhow::Result<Vec<PathBuf>> {
+	let mut files: Vec<PathBuf> = Vec::new();
+	for adapter in adapters {
+		if let Some(path) = adapter.update_lock_file()? {
+			files.push(path);
 		}
 	}
+	Ok(files)
+}
 
-	// Consume changesets: delete fully consumed, rewrite partially consumed.
-	let released: BTreeSet<String> = aggregated.keys().cloned().collect();
-	for (path, cs) in &changesets {
+/// Consumes or dry-runs the given changeset files for the released packages.
+///
+/// Returns the list of changeset paths that would be (or were) modified or deleted.
+fn consume_changesets(
+	changesets: &[(PathBuf, Changeset)],
+	released: &BTreeSet<String>,
+	dry_run: bool,
+) -> anyhow::Result<Vec<PathBuf>> {
+	let mut additional_files: Vec<PathBuf> = Vec::new();
+	for (path, cs) in changesets {
 		let released_pkgs: Vec<&String> = cs
 			.packages
 			.keys()
 			.filter(|name| released.contains(*name))
 			.collect();
 		if !released_pkgs.is_empty() {
-			modified_files.push(path.clone());
+			additional_files.push(path.clone());
 		}
 		if dry_run {
 			if !released_pkgs.is_empty() {
@@ -434,76 +455,162 @@ pub(crate) fn cmd_prepare(
 				info!("Would consume changeset {}: {pkg_list}", path.display());
 			}
 		} else {
-			cs.consume(path, &released)?;
+			cs.consume(path, released)?;
 		}
 	}
+	Ok(additional_files)
+}
 
-	// Deduplicate modified files (e.g. workspace root Cargo.toml updated by multiple projects)
+/// Creates or updates the GitHub pull request for the release branch.
+///
+/// No-ops in dry-run mode or when no GitHub client is available. The dry-run
+/// short-circuit is intentional per ADR-017: the PR upsert is the side-effecting
+/// operation being guarded, so the check lives here rather than at the call site.
+fn upsert_release_pull_request(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	release_infos: &[ReleaseInfo],
+	branch: &str,
+	original_branch: Option<&str>,
+	dry_run: bool,
+) -> anyhow::Result<()> {
+	if dry_run {
+		info!("Would attempt to create or update a PR in GitHub.");
+		return Ok(());
+	}
+	let Some(client) = env.github_client() else {
+		return Ok(());
+	};
+	let base = original_branch.unwrap_or_else(|| {
+		log::warn!("HEAD is detached; using \"main\" as the PR base branch.");
+		"main"
+	});
+	match GitHubRepo::resolve(&config.github, git) {
+		Ok(gh_repo) => {
+			let title = config.github.pull_request_title();
+			let pr_body = build_pr_body(release_infos, base);
+			if let Err(e) = upsert_pull_request(client, &gh_repo, title, &pr_body, branch, base) {
+				log::warn!("Failed to create or update pull request: {e:#}");
+			}
+		}
+		Err(e) => {
+			log::warn!("Could not resolve GitHub repository for PR creation: {e:#}");
+		}
+	}
+	Ok(())
+}
+
+/// Stages, commits, and pushes release changes according to the configured git strategy.
+#[allow(clippy::too_many_arguments)]
+fn finalize_git_lifecycle(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	release_infos: &[ReleaseInfo],
+	modified_files: &[PathBuf],
+	original_branch: Option<&str>,
+	release_branch: Option<&str>,
+	git_enabled: bool,
+	strategy: Strategy,
+	dry_run: bool,
+) -> anyhow::Result<()> {
+	if !git_enabled {
+		return Ok(());
+	}
+	stage_and_commit(git, &config.git.extra_files, release_infos, modified_files)?;
+	match strategy {
+		Strategy::Push => {
+			git.push()?;
+		}
+		Strategy::Branch => {
+			if let Some(branch) = release_branch {
+				info!("Pushing branch '{branch}' to origin");
+				git.force_push_branch(branch).with_context(|| {
+					format!(
+						"Failed to push release branch '{branch}'. \
+						 You are still on the release branch; run \
+						 `git checkout <your-branch>` to return."
+					)
+				})?;
+				if config.github.enabled {
+					upsert_release_pull_request(
+						git,
+						config,
+						env,
+						release_infos,
+						branch,
+						original_branch,
+						dry_run,
+					)?;
+				}
+			}
+			if let Some(orig) = original_branch {
+				git.checkout(orig)?;
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Runs the `prepare` subcommand.
+pub(crate) fn cmd_prepare(
+	git: &git::GitWorkdir,
+	args: &PrepareArgs,
+	dry_run: bool,
+	config: Config,
+) -> anyhow::Result<ExitCode> {
+	let env = config.env().context("env not set")?;
+	let adapters = config.create_adapters()?;
+	let projects = config.load_projects_for_adapters(&adapters)?;
+
+	let changesets = Changeset::read_all(git)?;
+	if changesets.is_empty() {
+		info!("No pending changesets found. Nothing to prepare.");
+		return Ok(ExitCode::SUCCESS);
+	}
+
+	let (aggregated, changes_per_package) =
+		aggregate_changesets(&changesets, &args.packages, &projects)?;
+
+	let git_enabled = config.git.enabled() && !args.no_git;
+	let strategy = config.git.strategy();
+	if args.branch.is_some() && strategy == Strategy::Push {
+		log::warn!("--branch has no effect with the push strategy; ignoring");
+	}
+
+	let (original_branch, release_branch) =
+		preflight_checks(git, &config, env, args, git_enabled, strategy, dry_run)?;
+
+	let (release_infos, mut modified_files) = bump_versions_and_generate_changelogs(
+		&aggregated,
+		&changes_per_package,
+		&projects,
+		dry_run,
+	)?;
+	modified_files.extend(propagate_dependency_updates(
+		&projects,
+		&release_infos,
+		dry_run,
+	)?);
+	modified_files.extend(update_lock_files(&adapters)?);
+	let released: BTreeSet<String> = aggregated.keys().cloned().collect();
+	modified_files.extend(consume_changesets(&changesets, &released, dry_run)?);
 	modified_files.sort();
 	modified_files.dedup();
 
-	// Stage and commit
-	if git_enabled {
-		stage_and_commit(
-			git,
-			&config.git.extra_files,
-			&release_infos,
-			&modified_files,
-		)?;
-
-		// Strategy push dispatch
-		match strategy {
-			Strategy::Push => {
-				git.push()?;
-			}
-			Strategy::Branch => {
-				if let Some(ref branch) = release_branch {
-					info!("Pushing branch '{branch}' to origin");
-					git.force_push_branch(branch).with_context(|| {
-						format!(
-							"Failed to push release branch '{branch}'. \
-								 You are still on the release branch; run \
-								 `git checkout <your-branch>` to return."
-						)
-					})?;
-
-					// PR upsert: intentional exception per ADR-017 — outcome of the GitHub API
-					// call is unpredictable without making it, so the call itself remains gated.
-					if config.github.enabled {
-						if dry_run {
-							info!("Would attempt to create or update a PR in GitHub.");
-						} else if let Some(client) = env.github_client() {
-							let base = original_branch.as_deref().unwrap_or_else(|| {
-								log::warn!(
-									"HEAD is detached; using \"main\" as the PR base branch."
-								);
-								"main"
-							});
-							match GitHubRepo::resolve(&config.github, git) {
-								Ok(gh_repo) => {
-									let title = config.github.pull_request_title();
-									let pr_body = build_pr_body(&release_infos, base);
-									if let Err(e) = upsert_pull_request(
-										client, &gh_repo, title, &pr_body, branch, base,
-									) {
-										log::warn!(
-											"Failed to create or update pull request: {e:#}"
-										);
-									}
-								}
-								Err(e) => log::warn!(
-									"Could not resolve GitHub repository for PR creation: {e:#}"
-								),
-							}
-						}
-					}
-				}
-				if let Some(ref orig) = original_branch {
-					git.checkout(orig)?;
-				}
-			}
-		}
-	}
+	finalize_git_lifecycle(
+		git,
+		&config,
+		env,
+		&release_infos,
+		&modified_files,
+		original_branch.as_deref(),
+		release_branch.as_deref(),
+		git_enabled,
+		strategy,
+		dry_run,
+	)?;
 
 	Ok(ExitCode::SUCCESS)
 }

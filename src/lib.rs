@@ -1,7 +1,6 @@
 //! Chronicle is a CLI tool that manages project configuration via an interactive TUI setup wizard.
 
 #![feature(coverage_attribute)]
-
 #![deny(clippy::too_many_lines)]
 
 pub mod cli;

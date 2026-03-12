@@ -78,6 +78,43 @@ fn handle_key(screen: &Screen, key: KeyCode, projects: &[Project]) -> anyhow::Re
 	}
 }
 
+fn move_project_cursor(selected: &[bool], cursor: usize, up: bool) -> HandleResult {
+	let len = selected.len();
+	let new_cursor = if up {
+		if cursor == 0 { len - 1 } else { cursor - 1 }
+	} else if cursor + 1 >= len {
+		0
+	} else {
+		cursor + 1
+	};
+	KeyResult::Continue(Screen::SelectProjects {
+		selected: selected.to_vec(),
+		cursor: new_cursor,
+		error: false,
+	})
+}
+
+fn advance_to_change_type(selected: &[bool], cursor: usize) -> HandleResult {
+	if selected.iter().any(|&s| s) {
+		let selected_indices = selected
+			.iter()
+			.enumerate()
+			.filter(|&(_, &s)| s)
+			.map(|(i, _)| i)
+			.collect();
+		KeyResult::Continue(Screen::SelectChangeType {
+			change_type: ChangeType::Patch,
+			selected_indices,
+		})
+	} else {
+		KeyResult::Continue(Screen::SelectProjects {
+			selected: selected.to_vec(),
+			cursor,
+			error: true,
+		})
+	}
+}
+
 fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) -> HandleResult {
 	let len = selected.len();
 	if len == 0 {
@@ -91,22 +128,8 @@ fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) ->
 		};
 	}
 	match key {
-		KeyCode::Up | KeyCode::Char('k') => {
-			let new_cursor = if cursor == 0 { len - 1 } else { cursor - 1 };
-			KeyResult::Continue(Screen::SelectProjects {
-				selected: selected.to_vec(),
-				cursor: new_cursor,
-				error: false,
-			})
-		}
-		KeyCode::Down | KeyCode::Char('j') => {
-			let new_cursor = if cursor + 1 >= len { 0 } else { cursor + 1 };
-			KeyResult::Continue(Screen::SelectProjects {
-				selected: selected.to_vec(),
-				cursor: new_cursor,
-				error: false,
-			})
-		}
+		KeyCode::Up | KeyCode::Char('k') => move_project_cursor(selected, cursor, true),
+		KeyCode::Down | KeyCode::Char('j') => move_project_cursor(selected, cursor, false),
 		KeyCode::Char(' ') => {
 			let mut new_selected = selected.to_vec();
 			new_selected[cursor] = !new_selected[cursor];
@@ -125,26 +148,7 @@ fn handle_key_select_projects(selected: &[bool], cursor: usize, key: KeyCode) ->
 				error: false,
 			})
 		}
-		KeyCode::Enter => {
-			if selected.iter().any(|&s| s) {
-				let selected_indices = selected
-					.iter()
-					.enumerate()
-					.filter(|&(_, &s)| s)
-					.map(|(i, _)| i)
-					.collect();
-				KeyResult::Continue(Screen::SelectChangeType {
-					change_type: ChangeType::Patch,
-					selected_indices,
-				})
-			} else {
-				KeyResult::Continue(Screen::SelectProjects {
-					selected: selected.to_vec(),
-					cursor,
-					error: true,
-				})
-			}
-		}
+		KeyCode::Enter => advance_to_change_type(selected, cursor),
 		KeyCode::Esc | KeyCode::Char('q') => KeyResult::Cancelled,
 		_ => KeyResult::Continue(Screen::SelectProjects {
 			selected: selected.to_vec(),

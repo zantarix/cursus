@@ -29,6 +29,29 @@ pub struct ChangeArgs {
 	pub message: Option<String>,
 }
 
+/// Maps `--project` names to indices into the project list.
+///
+/// Returns `Ok(None)` when `names` is empty (meaning all projects).
+/// Returns an error if any name is not found in `projects`.
+fn resolve_project_indices(
+	projects: &[crate::package_manager::Project],
+	names: &[String],
+) -> anyhow::Result<Option<Vec<usize>>> {
+	if names.is_empty() {
+		return Ok(None);
+	}
+	let indices = names
+		.iter()
+		.map(|name| {
+			projects
+				.iter()
+				.position(|p| p.name() == name)
+				.ok_or_else(|| anyhow::anyhow!("Unknown project: {name}"))
+		})
+		.collect::<anyhow::Result<Vec<_>>>()?;
+	Ok(Some(indices))
+}
+
 /// Runs the `change` subcommand.
 pub(crate) fn cmd_change(
 	git: &git::GitWorkdir,
@@ -39,21 +62,7 @@ pub(crate) fn cmd_change(
 	let env = config.env().context("env not set")?;
 	let projects = config.load_projects()?;
 
-	let project_indices = if !args.projects.is_empty() {
-		let indices: Vec<usize> = args
-			.projects
-			.iter()
-			.map(|name| {
-				projects
-					.iter()
-					.position(|p| p.name() == name)
-					.ok_or_else(|| anyhow::anyhow!("Unknown project: {name}"))
-			})
-			.collect::<anyhow::Result<Vec<_>>>()?;
-		Some(indices)
-	} else {
-		None
-	};
+	let project_indices = resolve_project_indices(&projects, &args.projects)?;
 
 	let result = if global.no_interactive {
 		let Some(ct) = args.change_type else {
