@@ -2,6 +2,8 @@
 
 #![feature(coverage_attribute)]
 
+#![deny(clippy::too_many_lines)]
+
 pub mod cli;
 pub mod command;
 pub(crate) mod env;

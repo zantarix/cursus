@@ -1,0 +1,5 @@
+# https://rust-lang.github.io/rust-clippy/master/index.html
+
+# Things like impl {} count here - the actual goal should be 3 nesting levels.
+excessive-nesting-threshold = 4
+too-many-lines-threshold = 50
