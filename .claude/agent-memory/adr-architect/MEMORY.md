@@ -53,7 +53,8 @@ Key differences from old style:
 - ADR-013: backend sub-decision superseded by ADR-018 (log facade decision still valid)
 - ADR-019: Accepted (improved init workflow)
 - ADR-020: Accepted (TUI screen submodule structure)
-- Next ADR number: 021
+- ADR-021: Proposed (commit references in changelog entries)
+- Next ADR number: 022
 
 ## Project ADR Rules (from CLAUDE.md)
 
