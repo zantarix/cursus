@@ -1,0 +1,67 @@
+name: Add Changeset for Dependency PRs
+
+# Runs on PRs labelled `dependencies` (added automatically by Renovate,
+# Dependabot, and similar bots).  Uses `chronicle change --auto` to derive
+# a changeset from the single Conventional Commit on the branch.
+#
+# The bot must be configured to emit commits with semver-significant types
+# for this to produce a changeset.  For Renovate, set `semanticCommitType`
+# in renovate.json:
+#
+#   "semanticCommitType": "fix"   → patch changeset (regular updates)
+#   "semanticCommitType": "feat"  → minor changeset
+#
+# Commits typed `chore:` (the Renovate default) have no semver significance
+# and chronicle will exit 0 without writing a changeset.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+jobs:
+  changeset:
+    name: Add changeset
+    if: contains(github.event.pull_request.labels.*.name, 'dependencies')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ vars.ZANTARIX_APP_ID }}
+          private-key: ${{ secrets.ZANTARIX_APP_PRIVATE_KEY }}
+
+      # Checkout the PR branch with full history so that
+      # `git rev-list origin/HEAD..HEAD` works correctly.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      # Point origin/HEAD at the repository default branch so that
+      # `chronicle change --auto` can count commits ahead of it.
+      - name: Resolve origin/HEAD
+        run: git remote set-head origin ${{ github.event.repository.default_branch }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ vars.ZANTARIX_APP_ID }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+        with:
+          use-flakehub: false
+
+      - name: Build chronicle
+        shell: nix develop -c bash -e {0}
+        run: cargo build --release
+
+      # Derive a changeset from the single Renovate commit and push it back
+      # to the PR branch.  Chronicle exits 0 without writing anything if the
+      # commit type carries no semver significance (e.g. `chore:`).
+      - name: Add changeset
+        shell: nix develop -c bash -e {0}
+        run: ./target/release/chronicle change --auto
