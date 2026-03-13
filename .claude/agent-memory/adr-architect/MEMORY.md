@@ -13,7 +13,7 @@ Key differences from old style:
 ## ADR Inventory and Index
 
 - See `inventory.md` for a detailed list of all ADRs.
-- `docs/adr/index.md` is the public-facing ADR index. Both must be updated whenever an ADR is created, updated, or has its status changed.
+- `docs/adr/README.md` is the public-facing ADR index. Both must be updated whenever an ADR is created, updated, or has its status changed.
 
 ## Key Architectural Patterns
 

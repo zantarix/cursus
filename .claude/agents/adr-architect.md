@@ -108,7 +108,7 @@ Follow this precise format for all ADRs:
 7. **Create the File**: Write the ADR to `docs/adr/NNN-kebab-case-title.md`.
 
 8. **Keep the Index and Inventory in Sync**: After creating, updating, or changing the status of any ADR, you **must** update both:
-   - `docs/adr/index.md` -- Add, update, or amend the entry in the markdown table so it reflects the current title, status, and summary.
+   - `docs/adr/README.md` -- Add, update, or amend the entry in the markdown table so it reflects the current title, status, and summary.
    - `.claude/agent-memory/adr-architect/inventory.md` -- Update the internal ADR inventory with the new or changed entry.
 
    These updates are mandatory and must happen in the same operation as the ADR change. Never leave the index or inventory out of date.
