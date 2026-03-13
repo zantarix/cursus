@@ -5,10 +5,14 @@ use std::process::ExitCode;
 
 use anyhow::{Context, bail};
 use clap::Args;
+use log::info;
 
+use crate::conventional_commit;
 use crate::git;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config::Config;
+use crate::package_manager::Project;
+use crate::path::AbsolutePath;
 use crate::tui::change;
 
 use super::GlobalArgs;
@@ -17,7 +21,7 @@ use super::GlobalArgs;
 #[derive(Args, Default)]
 pub struct ChangeArgs {
 	/// Type of change: major, minor, or patch (required in non-interactive mode)
-	#[arg(short = 't', long)]
+	#[arg(short = 't', long, conflicts_with = "auto")]
 	pub change_type: Option<ChangeType>,
 
 	/// Project name(s) to include (repeatable; defaults to all in non-interactive mode)
@@ -25,8 +29,49 @@ pub struct ChangeArgs {
 	pub projects: Vec<String>,
 
 	/// Description message for the changeset (required in non-interactive mode)
-	#[arg(short = 'm', long)]
+	#[arg(short = 'm', long, conflicts_with = "auto")]
 	pub message: Option<String>,
+
+	/// Derive changeset from the single Conventional Commit on this branch
+	#[arg(long, conflicts_with_all = ["change_type", "message"])]
+	pub auto: bool,
+
+	/// Skip committing and pushing the changeset to git (only with --auto)
+	#[arg(long, requires = "auto")]
+	pub no_git: bool,
+}
+
+/// Returns `true` if any of the given changed files fall within the project's directory.
+///
+/// Computes the project's path relative to the git root. A file matches if its
+/// relative path starts with the project's relative path (with a `/` separator
+/// guard to avoid false prefix matches like `packages/a` matching `packages/a-extra`).
+///
+/// If the project path is not under the git root, this returns `true`
+/// conservatively to avoid silently hiding it.
+fn project_has_changed_files(
+	project: &Project,
+	git_path: &AbsolutePath,
+	changed_files: &HashSet<String>,
+) -> bool {
+	let project_path = project.path();
+	let rel = match project_path.strip_prefix(git_path.as_path()) {
+		Ok(r) => r,
+		// Project path is not under the git root — treat as changed to avoid
+		// silently hiding it from the "Changed" group.
+		Err(_) => return true,
+	};
+	let rel_str = rel.to_string_lossy();
+	if rel_str.is_empty() {
+		// Root project: any changed file counts
+		!changed_files.is_empty()
+	} else {
+		changed_files.iter().any(|file| {
+			file.starts_with(rel_str.as_ref())
+				&& (file.len() == rel_str.len()
+					|| file.as_bytes().get(rel_str.len()) == Some(&b'/'))
+		})
+	}
 }
 
 /// Classifies each project as changed (`true`) or unchanged (`false`).
@@ -62,27 +107,7 @@ fn classify_changed_projects(
 
 	projects
 		.iter()
-		.map(|project| {
-			let project_path = project.path();
-			let git_path = git.path();
-			let rel = match project_path.strip_prefix(git_path.as_path()) {
-				Ok(r) => r,
-				// Project path is not under the git root — treat as changed to avoid
-				// silently hiding it from the "Changed" group.
-				Err(_) => return true,
-			};
-			let rel_str = rel.to_string_lossy();
-			if rel_str.is_empty() {
-				// Root project: any changed file counts
-				!changed_files.is_empty()
-			} else {
-				changed_files.iter().any(|file| {
-					file.starts_with(rel_str.as_ref())
-						&& (file.len() == rel_str.len()
-							|| file.as_bytes().get(rel_str.len()) == Some(&b'/'))
-				})
-			}
-		})
+		.map(|project| project_has_changed_files(project, git.path(), &changed_files))
 		.collect()
 }
 
@@ -109,6 +134,127 @@ fn resolve_project_indices(
 	Ok(Some(indices))
 }
 
+/// Validates that there is exactly one commit ahead of `origin/HEAD`.
+///
+/// Returns `Ok(Some(message))` when exactly one commit is ahead.
+/// Returns `Ok(None)` when more than one commit is ahead (caller should skip).
+/// Returns an error when zero commits are ahead.
+fn validate_single_commit(git: &git::GitWorkdir) -> anyhow::Result<Option<String>> {
+	let count = git.rev_list_count("origin/HEAD..HEAD")?;
+	if count == 0 {
+		bail!("No commits ahead of origin/HEAD — nothing to derive a changeset from");
+	}
+	if count > 1 {
+		info!(
+			"Branch has {count} commits ahead of origin/HEAD; \
+			 skipping --auto (expected exactly 1)"
+		);
+		return Ok(None);
+	}
+	Ok(Some(git.log_message("HEAD")?))
+}
+
+/// Writes the auto-derived changeset and optionally commits and pushes it.
+///
+/// When `dry_run` is true the filesystem write is skipped and an info message
+/// is logged instead. Git operations (`commit`, `push`) still execute but are
+/// suppressed by the [`DryRunCommandRunner`](crate::command::DryRunCommandRunner).
+fn write_auto_changeset(
+	git: &git::GitWorkdir,
+	dry_run: bool,
+	commit_to_git: bool,
+	matched: &[&Project],
+	change_type: ChangeType,
+	changeset_message: &str,
+	description: &str,
+) -> anyhow::Result<()> {
+	let packages: BTreeMap<String, ChangeType> = matched
+		.iter()
+		.map(|p| (p.name().to_string(), change_type))
+		.collect();
+	let changeset = Changeset::new(packages, Some(changeset_message.to_string()));
+	if dry_run {
+		let names: Vec<_> = matched.iter().map(|p| p.name()).collect();
+		info!(
+			"[dry-run] Would create {} changeset for: {}",
+			change_type,
+			names.join(", ")
+		);
+		if commit_to_git {
+			git.add(&[git.path().join(".chronicle/changeset-dry-run.md")])?;
+		}
+	} else {
+		let path = changeset.write(git)?;
+		if commit_to_git {
+			git.add(&[path])?;
+		}
+	}
+	if commit_to_git {
+		git.commit(&format!("chore: add changeset for {description}"))?;
+		git.push()?;
+	}
+	Ok(())
+}
+
+/// Runs `chronicle change --auto`: derives a changeset from the single
+/// Conventional Commit on the current branch.
+///
+/// Returns `ExitCode::SUCCESS` without creating a changeset when:
+/// - There is more than one commit ahead of `origin/HEAD` (recursion guard).
+/// - The commit type has no semver significance (e.g., `chore:`, `docs:`).
+/// - No project paths overlap with the files changed by the commit.
+///
+/// # Errors
+///
+/// Returns an error when zero commits are ahead or the message is invalid.
+fn cmd_change_auto(
+	git: &git::GitWorkdir,
+	args: &ChangeArgs,
+	global: &GlobalArgs,
+	config: Config,
+) -> anyhow::Result<ExitCode> {
+	let Some(message) = validate_single_commit(git)? else {
+		return Ok(ExitCode::SUCCESS);
+	};
+
+	let commit = conventional_commit::parse(&message)?;
+	let Some(change_type) = commit.change_type() else {
+		info!(
+			"Commit '{}' has no semver significance — skipping changeset",
+			commit.commit_type
+		);
+		return Ok(ExitCode::SUCCESS);
+	};
+
+	let projects = config.load_projects()?;
+	let changed_files: HashSet<String> = git.diff_tree_names("HEAD")?.into_iter().collect();
+	let matched: Vec<_> = projects
+		.iter()
+		.filter(|p| project_has_changed_files(p, git.path(), &changed_files))
+		.collect();
+
+	if matched.is_empty() {
+		info!("No projects matched the changed files — skipping changeset");
+		return Ok(ExitCode::SUCCESS);
+	}
+
+	let changeset_message = match &commit.body {
+		Some(body) => format!("{}\n\n{body}", commit.description),
+		None => commit.description.clone(),
+	};
+
+	write_auto_changeset(
+		git,
+		global.dry_run,
+		config.git.enabled() && !args.no_git,
+		&matched,
+		change_type,
+		&changeset_message,
+		&commit.description,
+	)?;
+	Ok(ExitCode::SUCCESS)
+}
+
 /// Runs the `change` subcommand.
 pub(crate) fn cmd_change(
 	git: &git::GitWorkdir,
@@ -116,6 +262,10 @@ pub(crate) fn cmd_change(
 	global: &GlobalArgs,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
+	if args.auto {
+		return cmd_change_auto(git, args, global, config);
+	}
+
 	let env = config.env().context("env not set")?;
 	let projects = config.load_projects()?;
 
@@ -276,6 +426,8 @@ mod tests {
 		assert!(args.change_type.is_none());
 		assert!(args.projects.is_empty());
 		assert!(args.message.is_none());
+		assert!(!args.auto);
+		assert!(!args.no_git);
 	}
 
 	#[test]
@@ -399,5 +551,51 @@ mod tests {
 		];
 		let result = classify_changed_projects(&git, &projects);
 		assert_eq!(result, vec![true, true]);
+	}
+
+	// --- project_has_changed_files ---
+
+	#[test]
+	fn project_has_changed_files_matches_file_in_project() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let project = Project::new_test("a", "/repo/packages/a");
+		let mut files = HashSet::new();
+		files.insert("packages/a/src/lib.rs".to_string());
+		assert!(project_has_changed_files(&project, &path, &files));
+	}
+
+	#[test]
+	fn project_has_changed_files_no_match_for_different_project() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let project = Project::new_test("a", "/repo/packages/a");
+		let mut files = HashSet::new();
+		files.insert("packages/b/src/lib.rs".to_string());
+		assert!(!project_has_changed_files(&project, &path, &files));
+	}
+
+	#[test]
+	fn project_has_changed_files_no_prefix_match_without_separator() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let project = Project::new_test("a", "/repo/packages/a");
+		let mut files = HashSet::new();
+		files.insert("packages/a-extra/lib.rs".to_string());
+		assert!(!project_has_changed_files(&project, &path, &files));
+	}
+
+	#[test]
+	fn project_has_changed_files_root_project_matches_any_file() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let project = Project::new_test("root", "/repo");
+		let mut files = HashSet::new();
+		files.insert("src/main.rs".to_string());
+		assert!(project_has_changed_files(&project, &path, &files));
+	}
+
+	#[test]
+	fn project_has_changed_files_root_project_no_match_empty() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let project = Project::new_test("root", "/repo");
+		let files = HashSet::new();
+		assert!(!project_has_changed_files(&project, &path, &files));
 	}
 }

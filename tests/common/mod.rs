@@ -31,7 +31,7 @@ pub fn run_chronicle(
 ///
 /// Stdout is suppressed to keep test output clean. Stderr is captured and
 /// included in the panic message so failures are diagnosable.
-fn git_cmd(dir: &std::path::Path, args: &[&str]) {
+pub fn git_cmd(dir: &std::path::Path, args: &[&str]) {
 	let output = Command::new("git")
 		.args(args)
 		.current_dir(dir)
@@ -389,4 +389,51 @@ pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 /// Returns a [`GitConfig`] with git lifecycle enabled and all other fields at their defaults.
 pub fn git_enabled_config() -> GitConfig {
 	GitConfig::enabled_config()
+}
+
+/// Sets `origin/HEAD` to point at the given branch for the remote `origin`.
+///
+/// Runs `git remote set-head origin <branch>`. Must be called after the remote
+/// has been added and the initial push has been made.
+pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
+	git_cmd(working_repo, &["remote", "set-head", "origin", branch]);
+}
+
+/// Creates a real git repository with a Chronicle config and committed project files.
+///
+/// Unlike [`temp_git_repo_with_project`] (which uses a fake `.git` folder),
+/// this creates a proper git repo with commits so that git operations like
+/// `rev-list` and `diff-tree` work correctly.
+pub fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
+	let dir = temp_real_git_repo();
+	let config = match pm {
+		PackageManager::Npm => {
+			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled())
+		}
+		PackageManager::Cargo => {
+			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
+		}
+	};
+	config.save().unwrap();
+	match pm {
+		PackageManager::Npm => {
+			std::fs::write(
+				dir.path().join("package.json"),
+				r#"{"name": "test-project", "version": "0.1.0"}"#,
+			)
+			.unwrap();
+		}
+		PackageManager::Cargo => {
+			std::fs::write(
+				dir.path().join("Cargo.toml"),
+				"[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+			)
+			.unwrap();
+			std::fs::create_dir_all(dir.path().join("src")).unwrap();
+			std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+		}
+	}
+	git_cmd(dir.path(), &["add", "."]);
+	git_cmd(dir.path(), &["commit", "-m", "chore: add project files"]);
+	dir
 }

@@ -309,6 +309,82 @@ impl GitWorkdir {
 		Ok(())
 	}
 
+	/// Returns the number of commits in the given revision range.
+	///
+	/// Runs `git rev-list --count <range>` and parses the output as a `usize`.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git rev-list` exits with a non-zero status or the
+	/// output cannot be parsed as an integer.
+	pub(crate) fn rev_list_count(&self, range: &str) -> anyhow::Result<usize> {
+		let output = self
+			.env
+			.run("git", &["rev-list", "--count", range], &self.path)
+			.context("Failed to run git rev-list --count")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git rev-list --count failed: {stderr}");
+		}
+
+		let count_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+		count_str
+			.parse::<usize>()
+			.with_context(|| format!("Failed to parse git rev-list count: '{count_str}'"))
+	}
+
+	/// Returns the full commit message for the given revision.
+	///
+	/// Runs `git log -1 --format=%B <rev>` and returns the trimmed message.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git log` exits with a non-zero status.
+	pub(crate) fn log_message(&self, rev: &str) -> anyhow::Result<String> {
+		let output = self
+			.env
+			.run("git", &["log", "-1", "--format=%B", rev], &self.path)
+			.context("Failed to run git log")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git log failed: {stderr}");
+		}
+
+		Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+	}
+
+	/// Returns the list of files changed by the given commit.
+	///
+	/// Runs `git diff-tree --no-commit-id -r --name-only <commit>` and returns
+	/// one relative path per line, filtering empty lines.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git diff-tree` exits with a non-zero status.
+	pub(crate) fn diff_tree_names(&self, commit: &str) -> anyhow::Result<Vec<String>> {
+		let output = self
+			.env
+			.run(
+				"git",
+				&["diff-tree", "--no-commit-id", "-r", "--name-only", commit],
+				&self.path,
+			)
+			.context("Failed to run git diff-tree")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git diff-tree failed: {stderr}");
+		}
+
+		Ok(String::from_utf8_lossy(&output.stdout)
+			.lines()
+			.filter(|l| !l.is_empty())
+			.map(|l| l.to_string())
+			.collect())
+	}
+
 	/// Returns the list of files reported by `git diff --name-only <extra_args>`.
 	///
 	/// `extra_args` is appended after `--name-only`. Pass `&["origin/HEAD..HEAD"]`
@@ -895,6 +971,168 @@ mod tests {
 		assert!(
 			msg.contains("git diff --name-only failed"),
 			"Expected 'git diff --name-only failed', got: {msg}"
+		);
+	}
+
+	// --- rev_list_count ---
+
+	#[test]
+	fn rev_list_count_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"3\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.rev_list_count("origin/HEAD..HEAD").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			["rev-list", "--count", "origin/HEAD..HEAD"]
+		);
+	}
+
+	#[test]
+	fn rev_list_count_parses_output() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"5\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		assert_eq!(git.rev_list_count("origin/HEAD..HEAD").unwrap(), 5);
+	}
+
+	#[test]
+	fn rev_list_count_parses_zero() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"0\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		assert_eq!(git.rev_list_count("origin/HEAD..HEAD").unwrap(), 0);
+	}
+
+	#[test]
+	fn rev_list_count_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: bad revision");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.rev_list_count("origin/HEAD..HEAD");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git rev-list --count failed"),
+			"Expected 'git rev-list --count failed', got: {msg}"
+		);
+	}
+
+	#[test]
+	fn rev_list_count_invalid_output_propagates_error() {
+		let dir = temp_dir();
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0).with_stdout(b"not-a-number\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.rev_list_count("origin/HEAD..HEAD");
+		assert!(result.is_err());
+	}
+
+	// --- log_message ---
+
+	#[test]
+	fn log_message_passes_correct_args() {
+		let dir = temp_dir();
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0).with_stdout(b"feat: add thing\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.log_message("HEAD").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args, ["log", "-1", "--format=%B", "HEAD"]);
+	}
+
+	#[test]
+	fn log_message_returns_trimmed_message() {
+		let dir = temp_dir();
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0).with_stdout(b"feat: add thing\n\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.log_message("HEAD").unwrap();
+		assert_eq!(result, "feat: add thing");
+	}
+
+	#[test]
+	fn log_message_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: bad revision 'HEAD'");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.log_message("HEAD");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git log failed"),
+			"Expected 'git log failed', got: {msg}"
+		);
+	}
+
+	// --- diff_tree_names ---
+
+	#[test]
+	fn diff_tree_names_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.diff_tree_names("HEAD").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			["diff-tree", "--no-commit-id", "-r", "--name-only", "HEAD"]
+		);
+	}
+
+	#[test]
+	fn diff_tree_names_returns_parsed_lines() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0).with_stdout(b"src/main.rs\nCargo.toml\n".to_vec()),
+		);
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.diff_tree_names("HEAD").unwrap();
+		assert_eq!(
+			result,
+			vec!["src/main.rs".to_string(), "Cargo.toml".to_string()]
+		);
+	}
+
+	#[test]
+	fn diff_tree_names_returns_empty_on_no_files() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.diff_tree_names("HEAD").unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn diff_tree_names_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: bad object HEAD");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.diff_tree_names("HEAD");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git diff-tree failed"),
+			"Expected 'git diff-tree failed', got: {msg}"
 		);
 	}
 
