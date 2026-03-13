@@ -22,7 +22,7 @@ serde_json = "=1.0.149"
 serde-saphyr = "=0.0.21"
 toml = "=1.0.6"
 toml_edit = "=0.25.4"
-ureq = { version = "=3.1.4", features = ["json"] }
+ureq = { version = "=3.2.0", features = ["json"] }
 
 [features]
 test-support = []
@@ -36,4 +36,4 @@ proptest = "=1.10.0"
 tempfile = "=3.26.0"
 
 [build-dependencies]
-ureq = "=3.1.4"
+ureq = "=3.2.0"
