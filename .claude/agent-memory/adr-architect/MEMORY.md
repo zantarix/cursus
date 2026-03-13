@@ -55,7 +55,9 @@ Key differences from old style:
 - ADR-020: Accepted (TUI screen submodule structure)
 - ADR-021: Proposed (commit references in changelog entries)
 - ADR-022: Proposed (distribution strategy)
-- Next ADR number: 023
+- ADR-023: Proposed (dependency propagation bumps)
+- ADR-024: Proposed (linked package versions)
+- Next ADR number: 025
 
 ## Project ADR Rules (from CLAUDE.md)
 
