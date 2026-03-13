@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::github::client::GitHubClient;
 
-/// Environment variables and runtime dependencies used by Chronicle.
+/// Environment variables and runtime dependencies used by Cursus.
 ///
 /// Populated from the process environment at the binary boundary and threaded
 /// into the library so that internal functions never read `std::env` directly.
@@ -395,9 +395,9 @@ mod tests {
 	#[test]
 	fn run_editor_on_uses_provided_cwd() {
 		let workdir = tempfile::tempdir().unwrap();
-		let chronicle_dir = workdir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
-		let path = chronicle_dir.join("config.toml");
+		let cursus_dir = workdir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		let path = cursus_dir.join("config.toml");
 		std::fs::write(&path, "").unwrap();
 
 		let (runner, env) = recording_env(0);

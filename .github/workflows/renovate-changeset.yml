@@ -1,7 +1,7 @@
 name: Add Changeset for Dependency PRs
 
 # Runs on PRs labelled `dependencies` (added automatically by Renovate,
-# Dependabot, and similar bots).  Uses `chronicle change --auto` to derive
+# Dependabot, and similar bots).  Uses `cursus change --auto` to derive
 # a changeset from the single Conventional Commit on the branch.
 #
 # The bot must be configured to emit commits with semver-significant types
@@ -12,7 +12,7 @@ name: Add Changeset for Dependency PRs
 #   "semanticCommitType": "feat"  → minor changeset
 #
 # Commits typed `chore:` (the Renovate default) have no semver significance
-# and chronicle will exit 0 without writing a changeset.
+# and cursus will exit 0 without writing a changeset.
 
 on:
   pull_request:
@@ -41,7 +41,7 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       # Point origin/HEAD at the repository default branch so that
-      # `chronicle change --auto` can count commits ahead of it.
+      # `cursus change --auto` can count commits ahead of it.
       - name: Resolve origin/HEAD
         run: git remote set-head origin ${{ github.event.repository.default_branch }}
 
@@ -55,13 +55,13 @@ jobs:
         with:
           use-flakehub: false
 
-      - name: Build chronicle
+      - name: Build cursus
         shell: nix develop .#ci -c bash -e {0}
         run: cargo build --release
 
       # Derive a changeset from the single Renovate commit and push it back
-      # to the PR branch.  Chronicle exits 0 without writing anything if the
+      # to the PR branch.  Cursus exits 0 without writing anything if the
       # commit type carries no semver significance (e.g. `chore:`).
       - name: Add changeset
         shell: nix develop .#ci -c bash -e {0}
-        run: ./target/release/chronicle change --auto
+        run: ./target/release/cursus change --auto

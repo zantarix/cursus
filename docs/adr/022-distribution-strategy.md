@@ -1,4 +1,4 @@
-# ADR-022: Distribution Strategy for Chronicle Binaries
+# ADR-022: Distribution Strategy for Cursus Binaries
 
 ## Status
 
@@ -6,57 +6,57 @@ Proposed
 
 ## Context
 
-Chronicle is a Rust CLI tool that builds static binaries for seven OS/architecture targets: x86_64-linux, aarch64-linux, riscv64-linux, x86_64-macos, aarch64-macos, x86_64-windows, and aarch64-windows. All binaries are produced via cargo-zigbuild and are fully statically linked (musl on Linux, GNULLVM on Windows).
+Cursus is a Rust CLI tool that builds static binaries for seven OS/architecture targets: x86_64-linux, aarch64-linux, riscv64-linux, x86_64-macos, aarch64-macos, x86_64-windows, and aarch64-windows. All binaries are produced via cargo-zigbuild and are fully statically linked (musl on Linux, GNULLVM on Windows).
 
-Chronicle already manages its own releases through its own `publish` workflow. The `[github]` configuration ([ADR-005](005-github-releases.md)) builds all seven targets via `cargo make release` and attaches them as artifacts to each GitHub release. This means the binaries are already being produced and uploaded -- the question is how users discover and install them.
+Cursus already manages its own releases through its own `publish` workflow. The `[github]` configuration ([ADR-005](005-github-releases.md)) builds all seven targets via `cargo make release` and attaches them as artifacts to each GitHub release. This means the binaries are already being produced and uploaded -- the question is how users discover and install them.
 
-The primary audience for Chronicle is developers working in repositories that use it for release management. These developers need a way to install Chronicle that is fast, requires no build toolchain, and works across platforms. Two distinct user populations exist:
+The primary audience for Cursus is developers working in repositories that use it for release management. These developers need a way to install Cursus that is fast, requires no build toolchain, and works across platforms. Two distinct user populations exist:
 
 1. **Rust developers** who already have `cargo` and could use `cargo install`, but would prefer a faster option that does not require compilation.
-2. **Node.js developers** who work in repositories that use Chronicle for npm package releases but do not have a Rust toolchain installed.
+2. **Node.js developers** who work in repositories that use Cursus for npm package releases but do not have a Rust toolchain installed.
 
-The Node.js ecosystem is a particularly important distribution target because Chronicle supports npm/yarn/pnpm workspaces as a first-class package manager ([ADR-009](009-javascript-package-manager-strategy.md)). Developers in these projects expect to install tools via `npm install` or `npx`.
+The Node.js ecosystem is a particularly important distribution target because Cursus supports npm/yarn/pnpm workspaces as a first-class package manager ([ADR-009](009-javascript-package-manager-strategy.md)). Developers in these projects expect to install tools via `npm install` or `npx`.
 
 The challenge is choosing distribution channels that maximize reach without taking on excessive packaging and maintenance burden. Each channel has different trade-offs around discoverability, installation speed, platform coverage, maintenance cost, and user expectations.
 
 ## Decision
 
-We will distribute Chronicle through two channels: GitHub Releases as the primary channel, and an npm package as a secondary channel optimized for Node.js ecosystem discoverability.
+We will distribute Cursus through two channels: GitHub Releases as the primary channel, and an npm package as a secondary channel optimized for Node.js ecosystem discoverability.
 
 **GitHub Releases (primary channel).** Static binaries for all seven supported targets are attached to each GitHub release. This is already implemented via [ADR-005](005-github-releases.md) and requires no additional work. GitHub Releases serve as the canonical source of binaries for all distribution channels and for direct download by users who prefer manual installation.
 
-**npm package (secondary channel).** Chronicle will be published to the npmjs registry as `@zantarix/chronicle`, a scoped package under the Zantarix organization. The npm package will not bundle any binaries. Instead, it will use a postinstall script that downloads the correct platform-specific binary from the corresponding GitHub release at install time.
+**npm package (secondary channel).** Cursus will be published to the npmjs registry as `@zantarix/cursus`, a scoped package under the Zantarix organization. The npm package will not bundle any binaries. Instead, it will use a postinstall script that downloads the correct platform-specific binary from the corresponding GitHub release at install time.
 
 The postinstall script will:
 
 1. Detect the user's operating system and CPU architecture using Node.js `os.platform()` and `os.arch()`.
-2. Map the detected platform to the corresponding GitHub release artifact name (e.g., `darwin` + `arm64` maps to `chronicle-osx-aarch64`).
+2. Map the detected platform to the corresponding GitHub release artifact name (e.g., `darwin` + `arm64` maps to `cursus-osx-aarch64`).
 3. Download the binary from the GitHub release whose version tag matches the npm package version.
 4. Place the binary at a known path within the package directory.
 5. Fail the install with a clear error message if the platform is unsupported or the download fails.
 
-**The npm package version will always match the Rust crate version exactly.** Chronicle's own `publish` command handles both the Cargo and npm publishes in a single invocation, ensuring version synchronization.
+**The npm package version will always match the Rust crate version exactly.** Cursus's own `publish` command handles both the Cargo and npm publishes in a single invocation, ensuring version synchronization.
 
 **Publish ordering.** The intended publish order is: Cargo crate to crates.io, then npm package to npmjs, then GitHub release creation with binary uploads. This ordering means the GitHub release (and therefore the binaries) does not exist yet when the npm package is published. The postinstall script runs when a user later installs the package, not at publish time, so the binaries will be available by then. This ordering is subject to change in future ADRs.
 
-**Hard failure on postinstall.** If the postinstall binary download fails for any reason (network error, unsupported platform, missing GitHub release), `npm install` will fail. A missing binary would make the package non-functional, and a silent degradation would produce confusing errors when the user later tries to run `chronicle`. A clear, immediate failure is preferable.
+**Hard failure on postinstall.** If the postinstall binary download fails for any reason (network error, unsupported platform, missing GitHub release), `npm install` will fail. A missing binary would make the package non-functional, and a silent degradation would produce confusing errors when the user later tries to run `cursus`. A clear, immediate failure is preferable.
 
 **No Node.js wrapper.** The npm `bin` entry will point directly to the downloaded native binary, not to a Node.js script that spawns the binary as a child process. A wrapper would interfere with signal handling (SIGINT, SIGTERM), add startup latency, and introduce unnecessary complexity. The binary is the executable.
 
-**All supported targets are handled uniformly.** The postinstall script will include mappings for all seven targets that Chronicle builds. There is no tiered support -- riscv64-linux and aarch64-windows are handled identically to x86_64-linux. If a user's platform does not match any supported target, the script will fail with an error message listing the supported platforms and directing the user to the GitHub release page for manual download.
+**All supported targets are handled uniformly.** The postinstall script will include mappings for all seven targets that Cursus builds. There is no tiered support -- riscv64-linux and aarch64-windows are handled identically to x86_64-linux. If a user's platform does not match any supported target, the script will fail with an error message listing the supported platforms and directing the user to the GitHub release page for manual download.
 
 **Registry scope.** Day-one target is the main npmjs registry only. The `@zantarix` scope leaves the door open for publishing to other registries (GitHub Packages, private registries) in the future without name conflicts.
 
-**The npm package is marked `private: true` during development.** Chronicle's own `publish` command and the npm `PackageManagerAdapter` already understand the `private` field and will handle the transition to publishable status as part of the implementation work.
+**The npm package is marked `private: true` during development.** Cursus's own `publish` command and the npm `PackageManagerAdapter` already understand the `private` field and will handle the transition to publishable status as part of the implementation work.
 
 ## Consequences
 
 ### Positive
 
 - GitHub Releases provide a universal, registry-agnostic download mechanism that works for any user on any platform, regardless of their language ecosystem. No toolchain or package manager is required.
-- The npm package makes Chronicle discoverable and installable for the large Node.js developer population that Chronicle directly serves through its npm workspace support. `npx @zantarix/chronicle` works without any global installation.
+- The npm package makes Cursus discoverable and installable for the large Node.js developer population that Cursus directly serves through its npm workspace support. `npx @zantarix/cursus` works without any global installation.
 - The postinstall-download pattern keeps the npm package tiny (a few kilobytes of JavaScript) regardless of how many platform targets are supported. This avoids the npm registry size limits and download overhead that come with bundling binaries.
-- Version synchronization is guaranteed by Chronicle's own publish workflow -- the same tool that manages other projects' releases also manages its own, ensuring the Cargo crate, npm package, and GitHub release always have matching versions.
+- Version synchronization is guaranteed by Cursus's own publish workflow -- the same tool that manages other projects' releases also manages its own, ensuring the Cargo crate, npm package, and GitHub release always have matching versions.
 - Hard failure on postinstall prevents users from ending up in a broken state where the package is installed but non-functional.
 - Pointing the npm `bin` entry directly at the native binary avoids signal handling issues, startup overhead, and the maintenance burden of a Node.js wrapper process.
 
@@ -71,8 +71,8 @@ The postinstall script will:
 ### Neutral
 
 - The postinstall-download approach is a well-established pattern in the npm ecosystem, used by tools like esbuild, Playwright, and Puppeteer. Users and CI systems are accustomed to postinstall scripts that download platform-specific binaries.
-- `cargo install chronicle` remains available as an installation method for Rust developers who prefer it, though it requires compilation. This ADR does not add or remove that option -- it exists by virtue of Chronicle being published to crates.io.
-- The npm package scaffolding already exists at `pkg/` with the `@zantarix/chronicle` name, `bin` entry, and postinstall hook configured. The download script is currently a placeholder.
+- `cargo install cursus` remains available as an installation method for Rust developers who prefer it, though it requires compilation. This ADR does not add or remove that option -- it exists by virtue of Cursus being published to crates.io.
+- The npm package scaffolding already exists at `pkg/` with the `@zantarix/cursus` name, `bin` entry, and postinstall hook configured. The download script is currently a placeholder.
 
 ## Alternatives Considered
 
@@ -82,15 +82,15 @@ Instead of downloading at install time, include all seven platform binaries dire
 
 ### Per-platform npm optional dependencies
 
-Publish separate platform-specific npm packages (e.g., `@zantarix/chronicle-linux-x64`, `@zantarix/chronicle-darwin-arm64`) and declare them as optional dependencies with `os` and `cpu` fields in their `package.json`. The main `@zantarix/chronicle` package would then resolve the correct binary from whichever optional dependency was installed. This is the approach used by esbuild and SWC. It was rejected because it requires publishing and versioning eight packages (one per platform plus the umbrella package) for every release, significantly increasing the publishing complexity and the surface area for version drift. The simpler postinstall-download approach achieves the same user experience with a single package and no multi-package coordination.
+Publish separate platform-specific npm packages (e.g., `@zantarix/cursus-linux-x64`, `@zantarix/cursus-darwin-arm64`) and declare them as optional dependencies with `os` and `cpu` fields in their `package.json`. The main `@zantarix/cursus` package would then resolve the correct binary from whichever optional dependency was installed. This is the approach used by esbuild and SWC. It was rejected because it requires publishing and versioning eight packages (one per platform plus the umbrella package) for every release, significantly increasing the publishing complexity and the surface area for version drift. The simpler postinstall-download approach achieves the same user experience with a single package and no multi-package coordination.
 
 ### Homebrew formula
 
-Distribute Chronicle via a Homebrew tap for macOS and Linux users. This was rejected as a day-one channel because Homebrew taps require maintaining a separate repository with formula definitions, and the audience overlap with GitHub Releases is high (Homebrew users are comfortable downloading binaries). Homebrew may be added as a third channel in the future if there is sufficient demand, but it does not justify the maintenance cost at this stage.
+Distribute Cursus via a Homebrew tap for macOS and Linux users. This was rejected as a day-one channel because Homebrew taps require maintaining a separate repository with formula definitions, and the audience overlap with GitHub Releases is high (Homebrew users are comfortable downloading binaries). Homebrew may be added as a third channel in the future if there is sufficient demand, but it does not justify the maintenance cost at this stage.
 
 ### cargo-binstall support
 
-Add metadata to `Cargo.toml` so that `cargo binstall chronicle` can download pre-built binaries from GitHub Releases instead of compiling from source. This was not rejected -- it is complementary to this ADR and may be added later. However, it serves only the Rust ecosystem and does not address the Node.js discoverability goal that motivates the npm package. It is out of scope for this decision.
+Add metadata to `Cargo.toml` so that `cargo binstall cursus` can download pre-built binaries from GitHub Releases instead of compiling from source. This was not rejected -- it is complementary to this ADR and may be added later. However, it serves only the Rust ecosystem and does not address the Node.js discoverability goal that motivates the npm package. It is out of scope for this decision.
 
 ### Shell installer script (curl | sh)
 

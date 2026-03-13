@@ -227,7 +227,7 @@ fn upsert_pull_request(
 /// Builds the pull request body with an introduction and per-package changelog sections.
 fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
 	let mut body = format!(
-		"This PR was opened by Chronicle. When ready to release, you should merge this PR \
+		"This PR was opened by Cursus. When ready to release, you should merge this PR \
 		 which will trigger a release. If you're not ready to do a release then simply leave \
 		 this PR and it will be updated as you merge more changesets into `{base_branch}`.\n\
 		 \n\
@@ -827,16 +827,16 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_default_prefix() {
 		assert_eq!(
-			compute_release_branch(None, "chronicle-release/", Some("main")),
-			"chronicle-release/main"
+			compute_release_branch(None, "cursus-release/", Some("main")),
+			"cursus-release/main"
 		);
 	}
 
 	#[test]
 	fn compute_release_branch_detached_fallback() {
 		assert_eq!(
-			compute_release_branch(None, "chronicle-release/", None),
-			"chronicle-release/detached"
+			compute_release_branch(None, "cursus-release/", None),
+			"cursus-release/detached"
 		);
 	}
 
@@ -913,9 +913,9 @@ mod tests {
 		)
 		.unwrap();
 		// Changeset references a package that doesn't exist
-		let chronicle_dir = dir.path().join(".chronicle");
+		let cursus_dir = dir.path().join(".cursus");
 		std::fs::write(
-			chronicle_dir.join("test.md"),
+			cursus_dir.join("test.md"),
 			"+++\nnonexistent-package = \"minor\"\n+++\n\nSome change\n",
 		)
 		.unwrap();
@@ -974,9 +974,9 @@ mod tests {
 	fn cmd_prepare_package_flag_filters_packages() {
 		let dir = setup_two_package_workspace();
 
-		let chronicle_dir = dir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
-		let changeset_path = chronicle_dir.join("test.md");
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		let changeset_path = cursus_dir.join("test.md");
 		std::fs::write(
 			&changeset_path,
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n",
@@ -1020,9 +1020,9 @@ mod tests {
 	fn cmd_prepare_package_flag_with_dry_run_leaves_changeset_untouched() {
 		let dir = setup_two_package_workspace();
 
-		let chronicle_dir = dir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
-		let changeset_path = chronicle_dir.join("test.md");
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		let changeset_path = cursus_dir.join("test.md");
 		let original = "+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n";
 		std::fs::write(&changeset_path, original).unwrap();
 
@@ -1065,9 +1065,9 @@ mod tests {
 		)
 		.unwrap();
 
-		let chronicle_dir = dir.path().join(".chronicle");
+		let cursus_dir = dir.path().join(".cursus");
 		std::fs::write(
-			chronicle_dir.join("test.md"),
+			cursus_dir.join("test.md"),
 			"+++\nreal-project = \"minor\"\n+++\n\nSome change\n",
 		)
 		.unwrap();
@@ -1101,7 +1101,7 @@ mod tests {
 		let body = build_pr_body(&[], "main");
 		assert!(body.contains("# Releases"));
 		assert!(body.contains("`main`"));
-		assert!(body.contains("Chronicle"));
+		assert!(body.contains("Cursus"));
 	}
 
 	#[test]
@@ -1198,9 +1198,9 @@ mod tests {
 		.unwrap();
 		std::fs::create_dir_all(dir.path().join("src")).unwrap();
 		std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
-		let chronicle_dir = dir.path().join(".chronicle");
+		let cursus_dir = dir.path().join(".cursus");
 		std::fs::write(
-			chronicle_dir.join("change.md"),
+			cursus_dir.join("change.md"),
 			"+++\ntest-pkg = \"patch\"\n+++\n\nFix\n",
 		)
 		.unwrap();
@@ -1272,7 +1272,7 @@ mod tests {
 			&gh_repo,
 			"Release PR",
 			"body",
-			"chronicle-release/main",
+			"cursus-release/main",
 			"main",
 		);
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -1307,7 +1307,7 @@ mod tests {
 			&gh_repo,
 			"Release PR",
 			"updated body",
-			"chronicle-release/main",
+			"cursus-release/main",
 			"main",
 		);
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");

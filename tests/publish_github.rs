@@ -2,31 +2,30 @@ mod common;
 
 use std::sync::Arc;
 
-use chronicle::command::RealCommandRunner;
-use chronicle::test_logging::{init_test_logger, take_logs};
-use common::{run_chronicle, temp_git_repo};
+use common::{run_cursus, temp_git_repo};
+use cursus::command::RealCommandRunner;
+use cursus::test_logging::{init_test_logger, take_logs};
 
-/// Runs chronicle in-process with a fake GitHub token configured.
+/// Runs cursus in-process with a fake GitHub token configured.
 ///
-/// Equivalent to `run_chronicle` but with a `RestGitHubClient` set up
+/// Equivalent to `run_cursus` but with a `RestGitHubClient` set up
 /// using the provided token string, matching what `main.rs` does at runtime.
-fn run_chronicle_with_token(
+fn run_cursus_with_token(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 	token: &str,
 ) -> anyhow::Result<std::process::ExitCode> {
-	let github_client = Arc::new(chronicle::github::RestGitHubClient::new(token.to_string()))
-		as Arc<dyn chronicle::github::client::GitHubClient>;
-	let env = chronicle::Env::new(
-		Arc::new(RealCommandRunner) as Arc<dyn chronicle::command::CommandRunner>
-	)
-	.with_github_client(github_client);
-	chronicle::run(args, cwd, env)
+	let github_client = Arc::new(cursus::github::RestGitHubClient::new(token.to_string()))
+		as Arc<dyn cursus::github::client::GitHubClient>;
+	let env =
+		cursus::Env::new(Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>)
+			.with_github_client(github_client);
+	cursus::run(args, cwd, env)
 }
 
-/// Helper: write a config file with the given TOML content under `.chronicle/`.
+/// Helper: write a config file with the given TOML content under `.cursus/`.
 fn write_config(dir: &std::path::Path, toml: &str) {
-	let config_dir = dir.join(".chronicle");
+	let config_dir = dir.join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
 	std::fs::write(config_dir.join("config.toml"), toml).unwrap();
 }
@@ -44,11 +43,11 @@ fn github_config_section_loads_correctly() {
 	)
 	.unwrap();
 
-	// If the config fails to parse, chronicle would error before reaching the
+	// If the config fails to parse, cursus would error before reaching the
 	// publish step. A non-interactive publish --dry-run exercises the full
 	// config load path without hitting a registry.
-	let result = run_chronicle(
-		["chronicle", "publish", "--dry-run", "--no-interactive"],
+	let result = run_cursus(
+		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -62,8 +61,8 @@ fn github_unknown_field_causes_parse_error() {
 		"[cargo]\nenabled = true\n[github]\nunknown_field = true\n",
 	);
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--dry-run", "--no-interactive"],
+	let result = run_cursus(
+		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 	);
 	let err = result.unwrap_err();
@@ -87,8 +86,8 @@ fn github_enabled_implies_git_enabled_integration() {
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--dry-run", "--no-interactive"],
+	let result = run_cursus(
+		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 	);
 	// The command should succeed (dry-run, no network). The key assertion is
@@ -112,8 +111,8 @@ fn publish_dry_run_with_github_shows_would_create() {
 	)
 	.unwrap();
 
-	let result = run_chronicle_with_token(
-		["chronicle", "publish", "--dry-run", "--no-interactive"],
+	let result = run_cursus_with_token(
+		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 		"test-token",
 	);
@@ -142,8 +141,8 @@ fn publish_dry_run_with_github_no_build_command_executed() {
 	)
 	.unwrap();
 
-	let result = run_chronicle_with_token(
-		["chronicle", "publish", "--dry-run", "--no-interactive"],
+	let result = run_cursus_with_token(
+		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 		"test-token",
 	);
@@ -161,8 +160,8 @@ fn publish_dry_run_with_github_no_build_command_executed() {
 /// the build command runs before any registry publish, and a failure halts the whole operation.
 #[test]
 fn publish_build_command_failure_aborts_before_publishing() {
-	chronicle::test_logging::init_test_logger();
-	let _ = chronicle::test_logging::take_logs();
+	cursus::test_logging::init_test_logger();
+	let _ = cursus::test_logging::take_logs();
 
 	let dir = temp_git_repo();
 	write_config(
@@ -175,8 +174,8 @@ fn publish_build_command_failure_aborts_before_publishing() {
 	)
 	.unwrap();
 
-	let result = run_chronicle_with_token(
-		["chronicle", "publish", "--no-interactive"],
+	let result = run_cursus_with_token(
+		["cursus", "publish", "--no-interactive"],
 		dir.path(),
 		"test-token",
 	);
@@ -187,7 +186,7 @@ fn publish_build_command_failure_aborts_before_publishing() {
 		"Expected ExitCode::FAILURE when build command fails"
 	);
 
-	let logs = chronicle::test_logging::take_logs();
+	let logs = cursus::test_logging::take_logs();
 	assert!(
 		logs.iter().any(|(_, m)| m.contains("Build command failed")),
 		"Expected 'Build command failed' in logs, got: {logs:?}"
@@ -216,7 +215,7 @@ fn publish_github_missing_token_fails() {
 	.unwrap();
 
 	// Run without a token — Env has no github client, so it should fail before publishing.
-	let result = run_chronicle(["chronicle", "publish", "--no-interactive"], dir.path());
+	let result = run_cursus(["cursus", "publish", "--no-interactive"], dir.path());
 	let err = result.unwrap_err();
 	let msg = format!("{err:#}");
 	assert!(
@@ -241,8 +240,8 @@ fn publish_dry_run_with_artifacts_shows_would_attach() {
 	)
 	.unwrap();
 
-	let result = run_chronicle_with_token(
-		["chronicle", "publish", "--dry-run", "--no-interactive"],
+	let result = run_cursus_with_token(
+		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 		"test-token",
 	);

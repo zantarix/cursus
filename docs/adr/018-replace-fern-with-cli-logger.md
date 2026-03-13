@@ -8,7 +8,7 @@ Accepted
 
 Renovate flagged the `fern` crate (pinned at 0.7.1) as unmaintained. Fern served as the logging backend initialised in `src/main.rs`, providing per-level formatting and stdout/stderr stream splitting as described in [ADR-013](013-logging-infrastructure.md). In practice, the fern configuration amounted to roughly 25 lines of trivial dispatch setup: a format callback with five match arms (one per log level), and two child dispatches to split output between stdout and stderr based on severity.
 
-The `log` facade crate remains the correct choice for Chronicle's logging API. Only the backend -- the concrete `log::Log` implementation -- needs to change. The question is whether to adopt another third-party backend or hand-roll a minimal implementation.
+The `log` facade crate remains the correct choice for Cursus's logging API. Only the backend -- the concrete `log::Log` implementation -- needs to change. The question is whether to adopt another third-party backend or hand-roll a minimal implementation.
 
 ## Decision
 
@@ -27,14 +27,14 @@ The `log` facade decision from [ADR-013](013-logging-infrastructure.md) is uncha
 
 ### Positive
 
-- Zero additional dependencies beyond the `log` facade that Chronicle already uses
+- Zero additional dependencies beyond the `log` facade that Cursus already uses
 - Eliminates the maintenance liability of depending on an unmaintained crate
-- The implementation is trivially simple and fully under Chronicle's control
+- The implementation is trivially simple and fully under Cursus's control
 - Formatting and stream routing behaviour is preserved exactly, so no user-visible change occurs
 
 ### Negative
 
-- Chronicle now owns the logging backend code, which means any future enhancements (e.g., colour support, per-module filtering) must be implemented manually rather than configured through a library
+- Cursus now owns the logging backend code, which means any future enhancements (e.g., colour support, per-module filtering) must be implemented manually rather than configured through a library
 
 ### Neutral
 
@@ -49,11 +49,11 @@ The most widely used `log` backend. Rejected because its `Builder::target()` met
 
 ### tracing
 
-A structured, span-based instrumentation framework. Rejected as overkill for a short-lived CLI tool. Chronicle does not need spans, async instrumentation, or structured event fields. The `tracing` ecosystem (`tracing-subscriber`, `tracing-fmt`) would be significantly heavier dependencies than the 30 lines being replaced.
+A structured, span-based instrumentation framework. Rejected as overkill for a short-lived CLI tool. Cursus does not need spans, async instrumentation, or structured event fields. The `tracing` ecosystem (`tracing-subscriber`, `tracing-fmt`) would be significantly heavier dependencies than the 30 lines being replaced.
 
 ### structured-logger
 
-A JSON-oriented logging backend. Rejected because it pulls in `serde`, `serde_json`, `parking_lot`, and `tokio` as dependencies, and routes log records by target rather than by level. Chronicle needs level-based stream splitting, not JSON output.
+A JSON-oriented logging backend. Rejected because it pulls in `serde`, `serde_json`, `parking_lot`, and `tokio` as dependencies, and routes log records by target rather than by level. Cursus needs level-based stream splitting, not JSON output.
 
 ### flexi_logger
 

@@ -2,17 +2,17 @@
 
 ## Ecosystem-Neutrality Principle (ADR-000)
 
-Chronicle must not favour any single package ecosystem. The static binary distribution constraint exists not just for portability but to ensure ecosystem-neutrality: users should never need to install an unrelated toolchain to run Chronicle. Distribution channels that depend on a specific ecosystem (npm package, Cargo crate) are secondary and must not be the only way to obtain the tool. This principle should inform any future distribution, packaging, or dependency decisions.
+Cursus must not favour any single package ecosystem. The static binary distribution constraint exists not just for portability but to ensure ecosystem-neutrality: users should never need to install an unrelated toolchain to run Cursus. Distribution channels that depend on a specific ecosystem (npm package, Cargo crate) are secondary and must not be the only way to obtain the tool. This principle should inform any future distribution, packaging, or dependency decisions.
 
 ## Three-Step Release Workflow
 
-1. `chronicle prepare` (formerly `release`, renamed ADR-016) — filesystem changes + optional git branch management
+1. `cursus prepare` (formerly `release`, renamed ADR-016) — filesystem changes + optional git branch management
 2. Git operations — manual by default, opt-in automation via ADR-006/ADR-015
-3. `chronicle publish` — registry publishing, tag creation/push, GitHub Releases
+3. `cursus publish` — registry publishing, tag creation/push, GitHub Releases
 
-This separation is a core principle. Chronicle defaults to filesystem-only changes.
+This separation is a core principle. Cursus defaults to filesystem-only changes.
 
-ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step to run based on repo state (changesets present = prepare, untagged/unpublished manifest versions = publish). `[git].strategy` field (`push` | `branch`, default derived from `[github].enabled`) controls how release changes are delivered. `branch` strategy: checkout release branch, commit there, push, auto-create PR if GitHub enabled, checkout back. Tags always created during `publish` after registry publishing -- never during prepare. Publish ordering: registry -> tags -> GitHub Releases (prevents state detection inconsistency on retry).
+ADR-015 extends this with a CI-managed variant: `cursus ci` infers which step to run based on repo state (changesets present = prepare, untagged/unpublished manifest versions = publish). `[git].strategy` field (`push` | `branch`, default derived from `[github].enabled`) controls how release changes are delivered. `branch` strategy: checkout release branch, commit there, push, auto-create PR if GitHub enabled, checkout back. Tags always created during `publish` after registry publishing -- never during prepare. Publish ordering: registry -> tags -> GitHub Releases (prevents state detection inconsistency on retry).
 
 ## Adapter Trait Pattern
 
@@ -24,7 +24,7 @@ ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step
 
 ## Configuration Philosophy
 
-- All config in `.chronicle/config.toml` (TOML format)
+- All config in `.cursus/config.toml` (TOML format)
 - Features are opt-in with sensible defaults
 - `deny_unknown_fields` on config structs
 - Config sections per concern: `[npm]`, `[cargo]`, `[github]`, `[git]`
@@ -38,7 +38,7 @@ ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step
 
 ## Authentication Strategy
 
-- Chronicle NEVER manages credentials
+- Cursus NEVER manages credentials
 - Delegates to environment: env vars (CARGO_REGISTRY_TOKEN, NPM_TOKEN, GITHUB_TOKEN) or tool config (.npmrc, cargo login)
 - Auth failures produce clear error messages and non-zero exit codes
 
@@ -52,7 +52,7 @@ ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step
 ## File Format Conventions
 
 - Changeset files: Hugo-style `+++` TOML frontmatter + markdown body
-- Stored as `.chronicle/*.md` with random petname filenames
+- Stored as `.cursus/*.md` with random petname filenames
 - Changelogs: Standard `## version` / `### Category` markdown format
 - Categories ordered: Breaking Changes, Features, Bug Fixes
 
@@ -67,7 +67,7 @@ ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step
 
 - `--dry-run` is strictly local-only: no remote operations, no network calls, no subprocess invocations that contact external services
 - Prints what would happen without modifying anything
-- Chronicle does NOT delegate dry-run to external tools (e.g., `cargo publish --dry-run`) — it skips the operation entirely and prints a summary
+- Cursus does NOT delegate dry-run to external tools (e.g., `cargo publish --dry-run`) — it skips the operation entirely and prints a summary
 - This is a safety/security invariant: users must be able to trust that `--dry-run` is completely non-destructive
 - Trade-off: loses local validation that external tools' dry-run modes provide (e.g., build checks from `cargo publish --dry-run`)
 - **Late guard pattern (ADR-017):** Run all logic unconditionally; guard only the final mutation at the lowest abstraction boundary. Three levels: `DryRunCommandRunner` decorator for subprocesses, `dry_run: bool` parameter for direct filesystem writes, orchestration-level gating for `GitHubClient` API calls
@@ -85,7 +85,7 @@ ADR-015 extends this with a CI-managed variant: `chronicle ci` infers which step
 
 ## Upstream Convention Reuse
 
-- Prefer reading existing ecosystem fields over inventing Chronicle-specific config
+- Prefer reading existing ecosystem fields over inventing Cursus-specific config
 - npm `"private": true` and Cargo `publish = false` honored during publish (ADR-007)
 - This avoids config duplication and divergence risk
 - New adapters should follow the same pattern: check native "do not publish" markers

@@ -4,16 +4,16 @@ mod common;
 
 use std::process::ExitCode;
 
-use chronicle::model::config::PackageManager;
-use chronicle::test_logging::{init_test_logger, take_logs};
 use common::{
 	temp_git_repo, temp_git_repo_with_cargo_workspace, temp_git_repo_with_project, write_changeset,
 };
+use cursus::model::config::PackageManager;
+use cursus::test_logging::{init_test_logger, take_logs};
 
 #[test]
 fn prepare_fails_when_no_config() {
 	let dir = temp_git_repo();
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -28,7 +28,7 @@ fn prepare_with_no_changesets_is_noop() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -53,7 +53,7 @@ fn prepare_with_single_changeset_cargo() {
 		"+++\ntest-project = \"minor\"\n+++\n\nAdded a feature\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -73,12 +73,12 @@ fn prepare_with_single_changeset_cargo() {
 
 	// Verify changeset was deleted
 	assert!(
-		!dir.path().join(".chronicle/test-change.md").exists(),
+		!dir.path().join(".cursus/test-change.md").exists(),
 		"Changeset file should be deleted"
 	);
 
 	// Verify changelog was created
-	let today = chronicle::utils::today_iso_date();
+	let today = cursus::utils::today_iso_date();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	assert!(
 		changelog.contains(&format!("## 0.2.0 - {today}")),
@@ -99,7 +99,7 @@ fn prepare_with_single_changeset_npm() {
 		"+++\ntest-project = \"patch\"\n+++\n\nFixed a bug\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -111,7 +111,7 @@ fn prepare_with_single_changeset_npm() {
 	);
 
 	// Verify changeset was deleted
-	assert!(!dir.path().join(".chronicle/test-change.md").exists());
+	assert!(!dir.path().join(".cursus/test-change.md").exists());
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn prepare_aggregates_to_highest_change_type() {
 		"+++\ntest-project = \"minor\"\n+++\n\nNew feature\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -140,8 +140,8 @@ fn prepare_aggregates_to_highest_change_type() {
 	);
 
 	// Both changesets should be deleted
-	assert!(!dir.path().join(".chronicle/change-1.md").exists());
-	assert!(!dir.path().join(".chronicle/change-2.md").exists());
+	assert!(!dir.path().join(".cursus/change-1.md").exists());
+	assert!(!dir.path().join(".cursus/change-2.md").exists());
 }
 
 #[test]
@@ -157,8 +157,8 @@ fn prepare_dry_run_does_not_modify_files() {
 
 	let original_cargo = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -180,7 +180,7 @@ fn prepare_dry_run_does_not_modify_files() {
 
 	// Changeset should still exist
 	assert!(
-		dir.path().join(".chronicle/test-change.md").exists(),
+		dir.path().join(".cursus/test-change.md").exists(),
 		"Changeset should not be deleted in dry-run"
 	);
 
@@ -206,7 +206,7 @@ fn prepare_major_bump_resets_minor_and_patch() {
 		"+++\ntest-project = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -226,11 +226,11 @@ fn prepare_idempotent_no_changesets_after_release() {
 	);
 
 	// First release
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	// Second release (no changesets)
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
@@ -254,10 +254,10 @@ fn prepare_changelog_has_proper_sections() {
 		"+++\ntest-project = \"patch\"\n+++\n\nBug fix\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
-	let today = chronicle::utils::today_iso_date();
+	let today = cursus::utils::today_iso_date();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 
 	// Major bump aggregates all, version should be 1.0.0
@@ -289,7 +289,7 @@ fn prepare_successive_releases_prepend_to_changelog() {
 		"change-1.md",
 		"+++\ntest-project = \"minor\"\n+++\n\nFirst feature\n",
 	);
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	// Second release: patch bump 0.2.0 -> 0.2.1
@@ -298,10 +298,10 @@ fn prepare_successive_releases_prepend_to_changelog() {
 		"change-2.md",
 		"+++\ntest-project = \"patch\"\n+++\n\nA bug fix\n",
 	);
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
-	let today = chronicle::utils::today_iso_date();
+	let today = cursus::utils::today_iso_date();
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 
 	// Both versions should be present
@@ -332,7 +332,7 @@ fn prepare_unknown_package_in_changeset_fails() {
 		"+++\nnonexistent-package = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err());
 	let err = result.unwrap_err();
 	assert!(
@@ -351,9 +351,9 @@ fn prepare_package_flag_filters_packages() {
 		"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--package",
@@ -380,10 +380,10 @@ fn prepare_package_flag_filters_packages() {
 
 	// Changeset should be partially consumed — rewritten with only pkg-b remaining
 	assert!(
-		dir.path().join(".chronicle/test-change.md").exists(),
+		dir.path().join(".cursus/test-change.md").exists(),
 		"Changeset should still exist (partially consumed)"
 	);
-	let rewritten = std::fs::read_to_string(dir.path().join(".chronicle/test-change.md")).unwrap();
+	let rewritten = std::fs::read_to_string(dir.path().join(".cursus/test-change.md")).unwrap();
 	insta::assert_snapshot!(rewritten);
 }
 
@@ -398,9 +398,9 @@ fn prepare_scoped_fully_consumed_changeset_is_deleted() {
 		"+++\npkg-a = \"patch\"\n+++\n\nFix in pkg-a\n",
 	);
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--package",
@@ -412,7 +412,7 @@ fn prepare_scoped_fully_consumed_changeset_is_deleted() {
 
 	// Fully consumed changeset must be deleted
 	assert!(
-		!dir.path().join(".chronicle/only-a.md").exists(),
+		!dir.path().join(".cursus/only-a.md").exists(),
 		"Fully consumed changeset should be deleted"
 	);
 }
@@ -429,9 +429,9 @@ fn prepare_scoped_sequential_releases() {
 	);
 
 	// First release: only pkg-a
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--package",
@@ -443,10 +443,10 @@ fn prepare_scoped_sequential_releases() {
 
 	// Changeset should be rewritten with only pkg-b
 	assert!(
-		dir.path().join(".chronicle/shared.md").exists(),
+		dir.path().join(".cursus/shared.md").exists(),
 		"Changeset should still exist after first release"
 	);
-	let intermediate = std::fs::read_to_string(dir.path().join(".chronicle/shared.md")).unwrap();
+	let intermediate = std::fs::read_to_string(dir.path().join(".cursus/shared.md")).unwrap();
 	insta::assert_snapshot!(intermediate);
 
 	let pkg_a_toml = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
@@ -456,9 +456,9 @@ fn prepare_scoped_sequential_releases() {
 	);
 
 	// Second release: only pkg-b
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--package",
@@ -470,7 +470,7 @@ fn prepare_scoped_sequential_releases() {
 
 	// Changeset now fully consumed — should be deleted
 	assert!(
-		!dir.path().join(".chronicle/shared.md").exists(),
+		!dir.path().join(".cursus/shared.md").exists(),
 		"Changeset should be deleted after second release"
 	);
 	let pkg_b_toml = std::fs::read_to_string(dir.path().join("pkg-b/Cargo.toml")).unwrap();
@@ -494,9 +494,9 @@ fn prepare_scoped_unrelated_changeset_untouched() {
 	write_changeset(dir.path(), "only-b.md", pkg_b_content);
 
 	// Release only pkg-a
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--package",
@@ -508,16 +508,16 @@ fn prepare_scoped_unrelated_changeset_untouched() {
 
 	// pkg-a changeset deleted
 	assert!(
-		!dir.path().join(".chronicle/only-a.md").exists(),
+		!dir.path().join(".cursus/only-a.md").exists(),
 		"pkg-a changeset should be deleted"
 	);
 
 	// pkg-b changeset untouched
 	assert!(
-		dir.path().join(".chronicle/only-b.md").exists(),
+		dir.path().join(".cursus/only-b.md").exists(),
 		"pkg-b changeset should be untouched"
 	);
-	let b_content = std::fs::read_to_string(dir.path().join(".chronicle/only-b.md")).unwrap();
+	let b_content = std::fs::read_to_string(dir.path().join(".cursus/only-b.md")).unwrap();
 	assert_eq!(
 		b_content, pkg_b_content,
 		"pkg-b changeset should be unchanged"
@@ -533,9 +533,9 @@ fn prepare_unknown_package_flag_fails() {
 		"+++\ntest-project = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--package",
@@ -566,7 +566,7 @@ fn prepare_updates_cargo_lock_file() {
 		std::fs::remove_file(&lock_file).unwrap();
 	}
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	if let Err(ref err) = result {
 		eprintln!("Release failed: {:#}", err);
 	}
@@ -605,7 +605,7 @@ fn prepare_updates_cargo_intra_workspace_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	// Verify pkg-b version was bumped
@@ -653,7 +653,7 @@ fn prepare_updates_cargo_workspace_dep_in_root() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -685,8 +685,8 @@ fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
 
 	let original_a = std::fs::read_to_string(dir.path().join("pkg-a/Cargo.toml")).unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -709,9 +709,9 @@ fn prepare_branch_arg_with_push_strategy_warns() {
 	);
 
 	// Push strategy is the default (no [git] section). Passing --branch should warn.
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--branch",
@@ -745,7 +745,7 @@ fn prepare_no_branch_arg_with_push_strategy_no_warning() {
 	);
 
 	// No --branch arg, push strategy (default) → warning must NOT appear.
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -761,10 +761,9 @@ fn prepare_no_branch_arg_with_push_strategy_no_warning() {
 fn prepare_updates_npm_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
 	let dir = temp_git_repo();
-	let config = chronicle::model::config::Config::new(
-		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
-	)
-	.with_npm(chronicle::model::config::NpmConfig::enabled());
+	let config =
+		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_npm(cursus::model::config::NpmConfig::enabled());
 	config.save().unwrap();
 
 	// Root package.json with workspace config
@@ -794,7 +793,7 @@ fn prepare_updates_npm_intra_workspace_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	// Verify pkg-b version was bumped

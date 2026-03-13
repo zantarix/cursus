@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Chronicle is a release management CLI tool that interacts with code repositories. This ADR is a retrospective capture of the founding constraints and initial choices that shaped the project before it became public. These decisions were not made at a single point in time but rather represent the ground-truth assumptions that every subsequent architectural decision builds upon.
+Cursus is a release management CLI tool that interacts with code repositories. This ADR is a retrospective capture of the founding constraints and initial choices that shaped the project before it became public. These decisions were not made at a single point in time but rather represent the ground-truth assumptions that every subsequent architectural decision builds upon.
 
 The project needed to solve a specific problem: managing releases across monorepo and single-package repositories with support for multiple package managers. The solution had to be portable across Linux, and macOS, integrate naturally into developer workflows and CI pipelines, and impose minimal runtime dependencies on users.
 
@@ -29,7 +29,7 @@ I will document elsewhere, probably in a discussion thread on GitHub, some of th
 
 The primary distribution goal is a single static binary that users can download and run without any runtime dependencies. This was a hard constraint from day one and the single most influential decision on the project's technical direction. Every tooling and language choice flows downstream from this requirement.
 
-Beyond portability, a static binary is essential for ecosystem-neutrality. Chronicle is designed to support multiple package ecosystems impartially. If it were distributed as an npm package, a pip package, or a Cargo crate, it would create an implicit dependency on that ecosystem's toolchain being installed -- a JavaScript developer managing a pure JavaScript project should not need Rust installed, and a Rust developer should not need Node.js. A self-contained static binary avoids this problem entirely: it can manage any supported ecosystem without requiring any of them to be present on the machine beyond what the project itself needs. This neutrality is what makes it possible to credibly support any package ecosystem without favouring the one Chronicle happens to be distributed through.
+Beyond portability, a static binary is essential for ecosystem-neutrality. Cursus is designed to support multiple package ecosystems impartially. If it were distributed as an npm package, a pip package, or a Cargo crate, it would create an implicit dependency on that ecosystem's toolchain being installed -- a JavaScript developer managing a pure JavaScript project should not need Rust installed, and a Rust developer should not need Node.js. A self-contained static binary avoids this problem entirely: it can manage any supported ecosystem without requiring any of them to be present on the machine beyond what the project itself needs. This neutrality is what makes it possible to credibly support any package ecosystem without favouring the one Cursus happens to be distributed through.
 
 ### Rust as the implementation language
 
@@ -41,11 +41,11 @@ A CLI tool is the required user-facing interface for two reasons. First, it is t
 
 ### Dual artifact: CLI tool and Rust library
 
-Chronicle is designed as both a standalone CLI binary and a reusable Rust library (crate). The library interface allows other tooling to integrate Chronicle's release management logic programmatically. There are future plans to offer prepackaged GitHub Actions or other CI workflow integrations that may leverage this library interface.
+Cursus is designed as both a standalone CLI binary and a reusable Rust library (crate). The library interface allows other tooling to integrate Cursus's release management logic programmatically. There are future plans to offer prepackaged GitHub Actions or other CI workflow integrations that may leverage this library interface.
 
 ### Initial supported package managers: JavaScript and Cargo
 
-The first two supported package managers are JavaScript (npm/yarn/pnpm workspaces) and Cargo (Rust). JavaScript was chosen first because it is the author's primary day-to-day language, making it a natural and well-understood starting point. Cargo was chosen because Chronicle is itself a Rust project, which means it can use Chronicle to manage its own releases -- dogfooding the tool before it is released publicly. This allows the team to validate the implementation against a real-world use case before anyone else depends on it.
+The first two supported package managers are JavaScript (npm/yarn/pnpm workspaces) and Cargo (Rust). JavaScript was chosen first because it is the author's primary day-to-day language, making it a natural and well-understood starting point. Cargo was chosen because Cursus is itself a Rust project, which means it can use Cursus to manage its own releases -- dogfooding the tool before it is released publicly. This allows the team to validate the implementation against a real-world use case before anyone else depends on it.
 
 These two are the founding supported package managers. The architecture (the `PackageManagerAdapter` trait) is designed to make adding further package managers straightforward. Additional package managers will be added over time as community interest and contributions emerge.
 
@@ -62,12 +62,12 @@ Nix flakes were chosen as the development environment manager. The developer use
 ### Positive
 
 - Static binary distribution eliminates "works on my machine" problems for end users and simplifies CI integration.
-- Ecosystem-neutral distribution means users never need to install an unrelated toolchain just to run Chronicle. A JavaScript team does not need Rust; a Rust team does not need Node.js. This is a prerequisite for impartially supporting multiple ecosystems.
+- Ecosystem-neutral distribution means users never need to install an unrelated toolchain just to run Cursus. A JavaScript team does not need Rust; a Rust team does not need Node.js. This is a prerequisite for impartially supporting multiple ecosystems.
 - Rust provides memory safety, strong type system, and excellent performance without a garbage collector or runtime.
 - The dual CLI/library design keeps the door open for higher-level integrations without duplicating logic.
 - Nix flakes make onboarding deterministic: `nix develop` provides the complete toolchain regardless of host OS.
 - Cross-compilation to seven targets (three Linux architectures, two macOS, two Windows) is handled uniformly through cargo-zigbuild within the Nix-provided environment.
-- Dogfooding via Cargo support means Chronicle's own release process exercises the tool, catching bugs before they reach external users.
+- Dogfooding via Cargo support means Cursus's own release process exercises the tool, catching bugs before they reach external users.
 - Starting with JavaScript covers the largest package ecosystem by volume, maximising early utility.
 
 ### Negative
@@ -79,7 +79,7 @@ Nix flakes were chosen as the development environment manager. The developer use
 
 ### Neutral
 
-- Starting with only two package managers means early adopters using other ecosystems (Python, Go, Java) cannot use Chronicle yet, but the `PackageManagerAdapter` trait provides a clear extension point.
+- Starting with only two package managers means early adopters using other ecosystems (Python, Go, Java) cannot use Cursus yet, but the `PackageManagerAdapter` trait provides a clear extension point.
 - The CLI-first design means TUI features (interactive wizards) are additive, not foundational. The tool must always be fully operable in non-interactive mode for CI use.
 - Claude Code integration is a development workflow choice, not an architectural one. It does not affect the shipped artifact or user experience.
 - The Nix flake currently targets three host systems (x86_64-linux, aarch64-linux, aarch64-darwin) but cross-compiles to seven binary targets from any of them.

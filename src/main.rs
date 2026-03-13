@@ -3,8 +3,8 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use chronicle::command::{RealCommandRunner, VerboseCommandRunner};
 use clap::Parser as _;
+use cursus::command::{RealCommandRunner, VerboseCommandRunner};
 
 /// A minimal `log::Log` implementation that splits output by level.
 ///
@@ -67,7 +67,7 @@ fn init_logging(level: log::LevelFilter) {
 /// `-s` / `--silent` → `Error`, default → `Info`, `-v` → `Debug`, `-vv+` → `Trace`.
 #[coverage(off)]
 #[mutants::skip]
-fn determine_log_level(global: &chronicle::cli::GlobalArgs) -> log::LevelFilter {
+fn determine_log_level(global: &cursus::cli::GlobalArgs) -> log::LevelFilter {
 	if global.silent {
 		log::LevelFilter::Error
 	} else {
@@ -84,7 +84,7 @@ fn determine_log_level(global: &chronicle::cli::GlobalArgs) -> log::LevelFilter 
 fn main() -> ExitCode {
 	// Parse args exactly once. Logging is initialised immediately after so
 	// that every subsequent operation benefits from the user-requested level.
-	let cli = match chronicle::cli::Cli::try_parse() {
+	let cli = match cursus::cli::Cli::try_parse() {
 		Ok(cli) => cli,
 		Err(e) => {
 			// Help / version requests also come through here; initialise
@@ -111,7 +111,7 @@ fn main() -> ExitCode {
 		}
 	};
 
-	let runner: Arc<dyn chronicle::command::CommandRunner> =
+	let runner: Arc<dyn cursus::command::CommandRunner> =
 		Arc::new(VerboseCommandRunner::new(RealCommandRunner));
 	let editor = std::env::var("VISUAL")
 		.ok()
@@ -121,13 +121,13 @@ fn main() -> ExitCode {
 		.ok()
 		.or_else(|| std::env::var("GITHUB_TOKEN").ok())
 		.map(|token| {
-			Arc::new(chronicle::github::RestGitHubClient::new(token))
-				as Arc<dyn chronicle::github::client::GitHubClient>
+			Arc::new(cursus::github::RestGitHubClient::new(token))
+				as Arc<dyn cursus::github::client::GitHubClient>
 		});
-	let env = chronicle::Env::new(runner)
+	let env = cursus::Env::new(runner)
 		.with_editor_opt(editor)
 		.with_github_client_opt(github_client);
-	match chronicle::run_with(cli, &cwd, env) {
+	match cursus::run_with(cli, &cwd, env) {
 		Ok(code) => code,
 		Err(e) => {
 			log::error!("{e:#}");

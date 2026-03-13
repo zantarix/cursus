@@ -133,28 +133,28 @@ impl Changeset {
 		Ok(Self { packages, message })
 	}
 
-	/// Writes this changeset to `.chronicle/{name}.md` in the git working directory.
+	/// Writes this changeset to `.cursus/{name}.md` in the git working directory.
 	///
-	/// Creates the `.chronicle` directory if it doesn't exist. Returns the
+	/// Creates the `.cursus` directory if it doesn't exist. Returns the
 	/// path to the written file.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
 	pub(crate) fn write(&self, git: &GitWorkdir) -> anyhow::Result<PathBuf> {
-		let chronicle_dir = git.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir)
-			.with_context(|| format!("Failed to create directory: {}", chronicle_dir.display()))?;
+		let cursus_dir = git.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir)
+			.with_context(|| format!("Failed to create directory: {}", cursus_dir.display()))?;
 
 		let filename = Self::generate_filename();
-		let path = chronicle_dir.join(filename);
+		let path = cursus_dir.join(filename);
 		let content = self.format()?;
 		std::fs::write(&path, &content)
 			.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
 		Ok(path)
 	}
 
-	/// Reads all changeset files from the `.chronicle/` directory.
+	/// Reads all changeset files from the `.cursus/` directory.
 	///
 	/// Returns a list of `(path, changeset)` pairs for each `.md` file found.
 	/// Returns an empty vec if no changesets exist.
@@ -163,15 +163,15 @@ impl Changeset {
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
 	pub(crate) fn read_all(git: &GitWorkdir) -> anyhow::Result<Vec<(PathBuf, Self)>> {
-		let chronicle_dir = git.path().join(".chronicle");
-		if !chronicle_dir.is_dir() {
+		let cursus_dir = git.path().join(".cursus");
+		if !cursus_dir.is_dir() {
 			return Ok(Vec::new());
 		}
 
-		let pattern = chronicle_dir
+		let pattern = cursus_dir
 			.join("*.md")
 			.to_str()
-			.context("Invalid UTF-8 in .chronicle path")?
+			.context("Invalid UTF-8 in .cursus path")?
 			.to_string();
 
 		glob::glob(&pattern)
@@ -347,7 +347,7 @@ mod tests {
 		let changeset = single_package_changeset();
 		let path = changeset.write(&git).unwrap();
 		assert!(path.exists(), "Changeset file should exist");
-		assert!(path.starts_with(dir.path().join(".chronicle")));
+		assert!(path.starts_with(dir.path().join(".cursus")));
 		assert!(path.extension().is_some_and(|ext| ext == "md"));
 	}
 
@@ -360,8 +360,8 @@ mod tests {
 		let changeset = single_package_changeset();
 		changeset.write(&git).unwrap();
 		assert!(
-			dir.path().join(".chronicle").is_dir(),
-			".chronicle directory should exist"
+			dir.path().join(".cursus").is_dir(),
+			".cursus directory should exist"
 		);
 	}
 
@@ -484,9 +484,9 @@ mod tests {
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let git = GitWorkdir::new(&env, abs.clone());
-		let chronicle_dir = dir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
-		std::fs::write(chronicle_dir.join("config.toml"), "").unwrap();
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		std::fs::write(cursus_dir.join("config.toml"), "").unwrap();
 		let result = Changeset::read_all(&git).unwrap();
 		assert!(result.is_empty());
 	}
@@ -497,10 +497,10 @@ mod tests {
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let git = GitWorkdir::new(&env, abs.clone());
-		let chronicle_dir = dir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(
-			chronicle_dir.join("test.md"),
+			cursus_dir.join("test.md"),
 			"+++\nmy-app = \"minor\"\n+++\n\nA change\n",
 		)
 		.unwrap();
@@ -517,10 +517,10 @@ mod tests {
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let git = GitWorkdir::new(&env, abs.clone());
-		let chronicle_dir = dir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
-		std::fs::write(chronicle_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
-		std::fs::write(chronicle_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		std::fs::write(cursus_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
+		std::fs::write(cursus_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
 
 		let result = Changeset::read_all(&git).unwrap();
 		assert_eq!(result.len(), 2);
@@ -532,9 +532,9 @@ mod tests {
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 		let git = GitWorkdir::new(&env, abs.clone());
-		let chronicle_dir = dir.path().join(".chronicle");
-		std::fs::create_dir_all(&chronicle_dir).unwrap();
-		std::fs::write(chronicle_dir.join("bad.md"), "not a valid changeset").unwrap();
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		std::fs::write(cursus_dir.join("bad.md"), "not a valid changeset").unwrap();
 
 		let result = Changeset::read_all(&git);
 		assert!(result.is_err());

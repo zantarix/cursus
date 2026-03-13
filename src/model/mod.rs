@@ -1,7 +1,7 @@
 //! Core domain types for configuration, changesets, and changelog generation.
 //!
 //! This module contains the fundamental data structures and I/O operations
-//! for Chronicle's version management workflow.
+//! for Cursus's version management workflow.
 
 pub mod changelog;
 pub mod changeset;

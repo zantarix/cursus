@@ -59,7 +59,7 @@ pub enum Strategy {
 
 /// Configuration for the optional git lifecycle automation.
 ///
-/// When `enabled` is `true`, Chronicle will automatically create a commit
+/// When `enabled` is `true`, Cursus will automatically create a commit
 /// and optionally push after a successful `release`, and create tags after `publish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -79,8 +79,8 @@ pub struct GitConfig {
 	strategy: Option<Strategy>,
 	/// Prefix used to name release branches in the `branch` strategy.
 	///
-	/// The release branch name is `{prefix}{current_branch}`, defaulting to `chronicle-release/`
-	/// (e.g., if on `main`, the release branch is `chronicle-release/main`).
+	/// The release branch name is `{prefix}{current_branch}`, defaulting to `cursus-release/`
+	/// (e.g., if on `main`, the release branch is `cursus-release/main`).
 	/// When the current branch cannot be determined (detached HEAD), `detached` is used.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	release_branch_prefix: Option<String>,
@@ -92,7 +92,7 @@ pub struct GitConfig {
 	/// the git root. Staging an unmodified file is a no-op in git, so it is safe
 	/// to list files here even when they may not have changed.
 	///
-	/// This is useful when a custom `lock_command` is configured and Chronicle
+	/// This is useful when a custom `lock_command` is configured and Cursus
 	/// cannot determine which lock file the command writes.
 	///
 	/// Defaults to an empty list.
@@ -118,11 +118,11 @@ impl GitConfig {
 
 	/// Returns the release branch prefix.
 	///
-	/// Returns `"chronicle-release/"` when not set in config.
+	/// Returns `"cursus-release/"` when not set in config.
 	pub fn release_branch_prefix(&self) -> &str {
 		self.release_branch_prefix
 			.as_deref()
-			.unwrap_or("chronicle-release/")
+			.unwrap_or("cursus-release/")
 	}
 
 	/// Applies cross-config derived defaults after deserialization.
@@ -376,7 +376,7 @@ mod tests {
 	#[test]
 	fn git_config_release_branch_prefix_defaults_to_constant() {
 		let config = GitConfig::default();
-		assert_eq!(config.release_branch_prefix(), "chronicle-release/");
+		assert_eq!(config.release_branch_prefix(), "cursus-release/");
 	}
 
 	#[test]

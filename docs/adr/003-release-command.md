@@ -1,4 +1,4 @@
-# ADR-003: `chronicle release` Command
+# ADR-003: `cursus release` Command
 
 ## Status
 
@@ -6,25 +6,25 @@ Accepted
 
 ## Context
 
-Chronicle collects changesets describing what has changed across packages in a repository. Each changeset is a `.chronicle/*.md` file with TOML frontmatter mapping package names to a semver bump level (`major`, `minor`, or `patch`), plus an optional freeform description.
+Cursus collects changesets describing what has changed across packages in a repository. Each changeset is a `.cursus/*.md` file with TOML frontmatter mapping package names to a semver bump level (`major`, `minor`, or `patch`), plus an optional freeform description.
 
 There is currently no mechanism to consume these changesets and apply the accumulated changes to the repository. A release workflow needs to translate pending changesets into concrete version bumps, changelog entries, and cleanup of the consumed changesets.
 
 The release workflow is a three-step process:
 
 1. **Update the filesystem** — bump versions, generate changelogs, consume changesets (this ADR)
-2. **Commit to source control** — managed by the user or CI, not by Chronicle
-3. **Publish to registries** — handled by a separate `chronicle publish` command (see [ADR-004](004-publish-command.md))
+2. **Commit to source control** — managed by the user or CI, not by Cursus
+3. **Publish to registries** — handled by a separate `cursus publish` command (see [ADR-004](004-publish-command.md))
 
-Chronicle intentionally does not handle the commit step. Users run different CI systems, may want different commit strategies (single commit vs. per-package), and may require GPG signing or other policies that Chronicle should not assume.
+Cursus intentionally does not handle the commit step. Users run different CI systems, may want different commit strategies (single commit vs. per-package), and may require GPG signing or other policies that Cursus should not assume.
 
 ## Decision
 
-Implement a `chronicle release` subcommand that performs the following steps:
+Implement a `cursus release` subcommand that performs the following steps:
 
 ### 1. Gather pending changesets
 
-Read all `.chronicle/*.md` files (excluding `config.toml`), parsing each with the existing `parse_changeset()` function.
+Read all `.cursus/*.md` files (excluding `config.toml`), parsing each with the existing `parse_changeset()` function.
 
 If no changesets are found, exit early with a message: "No pending changesets. Nothing to release."
 
@@ -55,7 +55,7 @@ Pre-release and build metadata are stripped on bump (standard semver behaviour).
 
 Write the new version back to the package's manifest file (`Cargo.toml` or `package.json`). Only the version field is modified; all other content is preserved.
 
-After updating the version, Chronicle automatically updates the lock file:
+After updating the version, Cursus automatically updates the lock file:
 
 - **Cargo**: Runs `cargo generate-lockfile` in the workspace root to regenerate `Cargo.lock`
 - **npm**: Auto-detects the lock file type and runs the appropriate command:
@@ -64,7 +64,7 @@ After updating the version, Chronicle automatically updates the lock file:
   - `yarn.lock` → `yarn install --mode update-lockfile`
   - No lock file → no-op
 
-Users can override the npm lock file update command by setting `lock_command` in `.chronicle/config.toml`:
+Users can override the npm lock file update command by setting `lock_command` in `.cursus/config.toml`:
 
 ```toml
 [npm]
@@ -100,15 +100,15 @@ Changelog location:
 
 ### 7. Consume changesets
 
-Delete all processed `.chronicle/*.md` files. The `.chronicle/` directory and `config.toml` are preserved.
+Delete all processed `.cursus/*.md` files. The `.cursus/` directory and `config.toml` are preserved.
 
 ### 8. Print summary
 
 Output a summary of what was released:
 
 ```text
-chronicle-cli: 0.1.0 -> 0.2.0 (minor)
-@mscharley/chronicle: 0.1.0 -> 0.2.0 (minor)
+cursus-cli: 0.1.0 -> 0.2.0 (minor)
+@mscharley/cursus: 0.1.0 -> 0.2.0 (minor)
 ```
 
 ### Dry-run support
@@ -128,8 +128,8 @@ The release command does not require a TUI. It is a batch operation suitable for
 
 ## Errata
 
-**2026-02-20**: [ADR-006](006-git-lifecycle-hooks.md) introduces opt-in git lifecycle hooks that allow Chronicle to optionally handle commit, tag, and push operations after the filesystem modifications described in this ADR. When `[git].enabled = false` (the default), ADR-003's original behaviour applies: Chronicle only modifies the filesystem, and users manage source control manually. When git hooks are enabled, Chronicle automates the commit step described in line 16 as part of the `chronicle release` workflow. See [ADR-006](006-git-lifecycle-hooks.md) for details.
+**2026-02-20**: [ADR-006](006-git-lifecycle-hooks.md) introduces opt-in git lifecycle hooks that allow Cursus to optionally handle commit, tag, and push operations after the filesystem modifications described in this ADR. When `[git].enabled = false` (the default), ADR-003's original behaviour applies: Cursus only modifies the filesystem, and users manage source control manually. When git hooks are enabled, Cursus automates the commit step described in line 16 as part of the `cursus release` workflow. See [ADR-006](006-git-lifecycle-hooks.md) for details.
 
-**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) further extends git integration beyond what [ADR-006](006-git-lifecycle-hooks.md) introduced. The three-step workflow described in this ADR's Context section listed step 2 as "Commit to source control -- managed by the user or CI, not by Chronicle." When `[git].strategy = "branch"` ([ADR-015](015-ci-managed-release-workflow.md)), Chronicle also creates a release branch, pushes it to origin, and optionally opens a pull request. The statement that Chronicle "intentionally does not handle the commit step" is now only accurate when `[git].enabled = false`. See [ADR-015](015-ci-managed-release-workflow.md) for the full CI-managed release workflow.
+**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) further extends git integration beyond what [ADR-006](006-git-lifecycle-hooks.md) introduced. The three-step workflow described in this ADR's Context section listed step 2 as "Commit to source control -- managed by the user or CI, not by Cursus." When `[git].strategy = "branch"` ([ADR-015](015-ci-managed-release-workflow.md)), Cursus also creates a release branch, pushes it to origin, and optionally opens a pull request. The statement that Cursus "intentionally does not handle the commit step" is now only accurate when `[git].enabled = false`. See [ADR-015](015-ci-managed-release-workflow.md) for the full CI-managed release workflow.
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. All references to `chronicle release` in this ADR now refer to `chronicle prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. All references to `cursus release` in this ADR now refer to `cursus prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

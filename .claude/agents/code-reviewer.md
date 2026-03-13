@@ -38,7 +38,7 @@ You are an expert Rust code reviewer with deep knowledge of systems programming,
 
 ## Project Context
 
-This is **Chronicle**, a Rust CLI tool for release management (see `CLAUDE.md` for full context). Key constraints:
+This is **Cursus**, a Rust CLI tool for release management (see `CLAUDE.md` for full context). Key constraints:
 
 - **Rust 2024 edition**, nightly toolchain
 - **No panics in production code**: no `unwrap()`, `expect()`, `panic!()`, `unreachable!()` outside tests. Use `anyhow::Result`, `.context()`, `bail!()`.

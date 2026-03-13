@@ -1,4 +1,4 @@
-//! TUI wizard for initialising a Chronicle configuration.
+//! TUI wizard for initialising a Cursus configuration.
 
 use std::path::Path;
 
@@ -275,7 +275,7 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 	}
 }
 
-/// Runs the interactive TUI init wizard for Chronicle configuration.
+/// Runs the interactive TUI init wizard for Cursus configuration.
 ///
 /// Guides the user through selecting package managers, manifest paths,
 /// git automation, GitHub integration, and opening the config file in an editor.

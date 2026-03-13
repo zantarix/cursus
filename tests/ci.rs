@@ -4,13 +4,13 @@ mod common;
 
 use std::process::Command;
 
-use chronicle::model::config::PackageManager;
-use chronicle::test_logging::{init_test_logger, take_logs};
 use common::{
-	git_enabled_config, git_tag_exists, git_tags, run_chronicle, temp_git_repo,
+	git_enabled_config, git_tag_exists, git_tags, run_cursus, temp_git_repo,
 	temp_git_repo_with_project, temp_real_git_repo_with_cargo_workspace,
 	temp_real_git_repo_with_config, write_changeset,
 };
+use cursus::model::config::PackageManager;
+use cursus::test_logging::{init_test_logger, take_logs};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,14 +44,8 @@ fn ci_with_changesets_runs_release() {
 	);
 
 	// --dry-run avoids filesystem changes; --no-git avoids git operations.
-	let result = run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"ci",
-			"--dry-run",
-			"--no-git",
-		],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -82,8 +76,8 @@ fn ci_when_all_tags_present_nothing_to_do() {
 	// No changesets created; tag the current version manually.
 	git_tag(dir.path(), "v1.0.0");
 
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -108,8 +102,8 @@ fn ci_git_disabled_no_changesets_nothing_to_do() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	// No changesets. Git is not enabled in config (no [git] section).
 
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -133,8 +127,8 @@ fn ci_tags_missing_triggers_publish_dry_run() {
 	assert!(!git_tag_exists(dir.path(), "v1.0.0"));
 
 	// With --dry-run, publish does not create real tags or push to a registry.
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -164,10 +158,7 @@ fn ci_no_git_skips_tag_detection() {
 	// No changesets, tag missing — but --no-git should prevent tag detection.
 	assert!(!git_tag_exists(dir.path(), "v1.0.0"));
 
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--no-git"],
-		dir.path(),
-	);
+	let result = run_cursus(["cursus", "--no-interactive", "ci", "--no-git"], dir.path());
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	// No tags should have been created.
@@ -185,7 +176,7 @@ fn ci_is_always_non_interactive() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 
 	// No changesets, no git. Should succeed without --no-interactive.
-	let result = run_chronicle(["chronicle", "ci", "--dry-run"], dir.path());
+	let result = run_cursus(["cursus", "ci", "--dry-run"], dir.path());
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
@@ -199,19 +190,13 @@ fn ci_dry_run_does_not_consume_changesets() {
 		"+++\ntest-project = \"minor\"\n+++\n\nA feature\n",
 	);
 
-	let result = run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"ci",
-			"--dry-run",
-			"--no-git",
-		],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
-	let changeset_exists = dir.path().join(".chronicle").join("change.md").exists();
+	let changeset_exists = dir.path().join(".cursus").join("change.md").exists();
 	assert!(changeset_exists, "Dry-run should not consume changesets");
 }
 
@@ -220,14 +205,8 @@ fn ci_dry_run_does_not_consume_changesets() {
 fn ci_parses_from_cli() {
 	let dir = temp_git_repo_with_project(PackageManager::Cargo);
 	// Just verify the CLI parses `ci` as a valid subcommand with its flags.
-	let result = run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"ci",
-			"--dry-run",
-			"--no-git",
-		],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -245,8 +224,8 @@ fn ci_multi_package_partial_tags_triggers_publish() {
 	git_tag(dir.path(), "pkg-a@1.0.0");
 	assert!(!git_tag_exists(dir.path(), "pkg-b@2.0.0"));
 
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -263,8 +242,8 @@ fn ci_multi_package_all_tags_present_nothing_to_do() {
 	git_tag(dir.path(), "pkg-a@1.0.0");
 	git_tag(dir.path(), "pkg-b@2.0.0");
 
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -286,9 +265,9 @@ fn ci_package_filter_only_checks_selected_packages() {
 	git_tag(dir.path(), "pkg-a@1.0.0");
 	assert!(!git_tag_exists(dir.path(), "pkg-b@2.0.0"));
 
-	let result = run_chronicle(
+	let result = run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"ci",
 			"--dry-run",
@@ -321,14 +300,8 @@ fn ci_no_git_with_changesets_runs_release_no_git() {
 		"+++\nmy-pkg = \"patch\"\n+++\n\nFix\n",
 	);
 
-	let result = run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"ci",
-			"--dry-run",
-			"--no-git",
-		],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -338,8 +311,8 @@ fn ci_no_git_with_changesets_runs_release_no_git() {
 #[test]
 fn ci_fails_when_no_config() {
 	let dir = temp_git_repo();
-	// No .chronicle/config.toml present.
-	let result = run_chronicle(["chronicle", "--no-interactive", "ci"], dir.path());
+	// No .cursus/config.toml present.
+	let result = run_cursus(["cursus", "--no-interactive", "ci"], dir.path());
 	assert!(result.is_err(), "Expected Err when config is missing");
 }
 
@@ -361,8 +334,8 @@ fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
 	git_tag(dir.path(), "pkg-a@1.0.0");
 	git_tag(dir.path(), "pkg-b@2.0.0");
 
-	let result = run_chronicle(
-		["chronicle", "--no-interactive", "ci", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -385,9 +358,9 @@ fn ci_fails_when_package_filter_names_unknown_package() {
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 
 	// No changesets; git enabled; tag missing → would try to publish, but -p nonexistent fails.
-	let result = run_chronicle(
+	let result = run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"ci",
 			"--dry-run",
@@ -420,9 +393,9 @@ fn ci_changesets_present_but_package_filter_matches_no_changeset() {
 
 	// ci detects changesets and dispatches to prepare with -p pkg-b.
 	// Release finds nothing to do for pkg-b → succeeds with no changes.
-	let result = run_chronicle(
+	let result = run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"ci",
 			"--dry-run",

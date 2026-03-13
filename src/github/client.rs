@@ -445,7 +445,7 @@ pub mod test_support {
 					&GitHubRepo::new("acme", "app").unwrap(),
 					"Release updates",
 					"Release:\n\n- my-pkg@1.0.0",
-					"chronicle-release/main",
+					"cursus-release/main",
 					"main",
 				)
 				.unwrap();
@@ -458,7 +458,7 @@ pub mod test_support {
 			assert!(matches!(
 				&invocations[0],
 				GitHubInvocation::CreatePullRequest { title, head, base, .. }
-					if title == "Release updates" && head == "chronicle-release/main" && base == "main"
+					if title == "Release updates" && head == "cursus-release/main" && base == "main"
 			));
 		}
 
@@ -483,7 +483,7 @@ pub mod test_support {
 			let result = client
 				.find_open_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
-					"chronicle-release/main",
+					"cursus-release/main",
 				)
 				.unwrap();
 			assert!(result.is_none());
@@ -492,7 +492,7 @@ pub mod test_support {
 			assert!(matches!(
 				&invocations[0],
 				GitHubInvocation::FindOpenPullRequest { head, .. }
-					if head == "chronicle-release/main"
+					if head == "cursus-release/main"
 			));
 		}
 
@@ -506,7 +506,7 @@ pub mod test_support {
 			let result = client
 				.find_open_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
-					"chronicle-release/main",
+					"cursus-release/main",
 				)
 				.unwrap();
 			assert!(result.is_some());

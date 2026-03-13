@@ -1,4 +1,4 @@
-# Contributing to Chronicle
+# Contributing to Cursus
 
 ## Development environment
 
@@ -36,7 +36,7 @@ cargo make coverage            # Check coverage thresholds
 ## Testing
 
 Integration tests live in `tests/` and must always use `--no-interactive` to
-prevent the TUI from running. They call `chronicle::run()` as the entry point
+prevent the TUI from running. They call `cursus::run()` as the entry point
 and set up a temporary git repository to give the test a playground to operate
 in.
 

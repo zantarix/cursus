@@ -65,7 +65,7 @@ fn sort_projects_by_dependency(
 			}
 			warn!(
 				"To disable this warning, set `disable_dependency_cycle_warnings = true` \
-				 in the [global] section of .chronicle/config.toml"
+				 in the [global] section of .cursus/config.toml"
 			);
 		}
 	}

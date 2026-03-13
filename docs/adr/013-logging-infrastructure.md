@@ -6,7 +6,7 @@ Accepted (backend sub-decision superseded by [ADR-018](018-replace-fern-with-cli
 
 ## Context
 
-Chronicle currently writes all user-facing output via raw `println!()` and `eprintln!()` calls scattered across the codebase. There are roughly three categories of output today:
+Cursus currently writes all user-facing output via raw `println!()` and `eprintln!()` calls scattered across the codebase. There are roughly three categories of output today:
 
 1. **Operational progress and results** -- messages like "Published foo@1.2.3 to npm", version bump summaries, and dry-run previews. These are written with `println!()` to stdout.
 
@@ -14,25 +14,25 @@ Chronicle currently writes all user-facing output via raw `println!()` and `epri
 
 3. **Errors** -- fatal failures surfaced by `main()` via `eprintln!("Error: {e:#}")`.
 
-This approach has several problems. There is no way to control verbosity -- users see everything or nothing. There is no consistent formatting. There is no mechanism for future diagnostic output to flow through the same channel. And because output is written directly to stdout/stderr, it is difficult to test what Chronicle actually prints.
+This approach has several problems. There is no way to control verbosity -- users see everything or nothing. There is no consistent formatting. There is no mechanism for future diagnostic output to flow through the same channel. And because output is written directly to stdout/stderr, it is difficult to test what Cursus actually prints.
 
-Rust's `log` crate is the de-facto logging facade. It provides macros (`error!`, `warn!`, `info!`, `debug!`, `trace!`) that are decoupled from any specific logger implementation. Code emits log records; a pluggable backend decides what to do with them. This separation is what Chronicle needs: a stable API for emitting messages with a backend that can evolve independently.
+Rust's `log` crate is the de-facto logging facade. It provides macros (`error!`, `warn!`, `info!`, `debug!`, `trace!`) that are decoupled from any specific logger implementation. Code emits log records; a pluggable backend decides what to do with them. This separation is what Cursus needs: a stable API for emitting messages with a backend that can evolve independently.
 
 ## Decision
 
-We will add the `log` crate as a dependency for the logging facade and `fern` as the logger backend. All Chronicle output will flow through `log` macros.
+We will add the `log` crate as a dependency for the logging facade and `fern` as the logger backend. All Cursus output will flow through `log` macros.
 
 **Facade vs. backend separation:**
 
-The `log` crate (facade) will be a dependency of the library crate. The library -- including `run()` and all modules beneath it -- will only use `log` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`). It will never initialise a logger or depend on any concrete backend. This is a deliberate design decision: if another program embeds the chronicle library, it is free to install its own `log` backend (or none at all) without conflicting with a logger that chronicle initialised.
+The `log` crate (facade) will be a dependency of the library crate. The library -- including `run()` and all modules beneath it -- will only use `log` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`). It will never initialise a logger or depend on any concrete backend. This is a deliberate design decision: if another program embeds the cursus library, it is free to install its own `log` backend (or none at all) without conflicting with a logger that cursus initialised.
 
-The concrete backend (`fern`) will be a dependency of the binary crate only and will be initialised in `main()` in `src/main.rs`, before calling `run()`. The level filter will default to `Info`, which preserves Chronicle's current behaviour: operational messages, warnings, and errors are all visible.
+The concrete backend (`fern`) will be a dependency of the binary crate only and will be initialised in `main()` in `src/main.rs`, before calling `run()`. The level filter will default to `Info`, which preserves Cursus's current behaviour: operational messages, warnings, and errors are all visible.
 
 [ADR-014](014-verbose-mode.md) will later replace this hardcoded default with dynamic control via the `--verbose` / `-v` and `--silent` / `-s` flags, allowing users to raise the level filter to `Debug` or `Trace`, or lower it to `Error`. Because initialisation already lives in `main()`, this extension only requires changing the level filter value passed to the fern dispatch.
 
 **Stream routing:**
 
-Log output will be split across stdout and stderr based on severity, preserving Chronicle's current stream conventions:
+Log output will be split across stdout and stderr based on severity, preserving Cursus's current stream conventions:
 
 | Level               | Stream |
 |---------------------|--------|
@@ -59,7 +59,7 @@ Existing `println!()` and `eprintln!()` calls will be migrated to `log` macros a
 - `eprintln!("Warning: ...")` calls become `log::warn!()`
 - `eprintln!("Error: ...")` / `eprintln!("Failed to ...")` calls become `log::error!()`
 
-This migration is a necessary part of establishing the logging infrastructure so that the level filter actually controls all output. However, the migration is mechanical and does not change Chronicle's behaviour at the default `Info` level -- the same messages appear on the same streams, just routed through `log`.
+This migration is a necessary part of establishing the logging infrastructure so that the level filter actually controls all output. However, the migration is mechanical and does not change Cursus's behaviour at the default `Info` level -- the same messages appear on the same streams, just routed through `log`.
 
 **Format:**
 
@@ -73,10 +73,10 @@ Fern is a lightweight, composable logging backend whose only mandatory dependenc
 
 ### Positive
 
-- All Chronicle output flows through a single, level-filtered channel with consistent formatting
+- All Cursus output flows through a single, level-filtered channel with consistent formatting
 - The stdout/stderr split is preserved: operational output stays on stdout, warnings and errors stay on stderr
 - Call sites use stable `log` macros that are decoupled from the backend, so the logger implementation can be swapped later without changing library code
-- The library crate has no opinion on the logging backend, so consumers that embed chronicle as a library can install their own `log` implementation
+- The library crate has no opinion on the logging backend, so consumers that embed cursus as a library can install their own `log` implementation
 - The infrastructure is ready for [ADR-014](014-verbose-mode.md)'s `--verbose` and `--silent` flags to plug in -- only the level filter value in `main()` needs to change
 - Fern's only mandatory dependency is `log`, keeping the transitive dependency footprint minimal
 
@@ -102,7 +102,7 @@ Writing a minimal struct that implements the `log::Log` trait with split-stream 
 
 ### tracing crate
 
-Using `tracing` instead of `log` for structured, span-based instrumentation. This was rejected as over-engineered for Chronicle's needs. Chronicle is a short-lived CLI tool, not a long-running service. It does not need spans, async instrumentation, or structured event fields. The `tracing` crate and its ecosystem (`tracing-subscriber`, `tracing-fmt`) are significantly heavier dependencies. If Chronicle eventually needs structured logging, `tracing` is compatible with `log` (via `tracing-log`), so this decision does not close that door.
+Using `tracing` instead of `log` for structured, span-based instrumentation. This was rejected as over-engineered for Cursus's needs. Cursus is a short-lived CLI tool, not a long-running service. It does not need spans, async instrumentation, or structured event fields. The `tracing` crate and its ecosystem (`tracing-subscriber`, `tracing-fmt`) are significantly heavier dependencies. If Cursus eventually needs structured logging, `tracing` is compatible with `log` (via `tracing-log`), so this decision does not close that door.
 
 ### simplelog crate
 

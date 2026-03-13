@@ -1,7 +1,7 @@
 //! Package manager adapters for project enumeration and management.
 //!
 //! This module provides a trait-based abstraction over different package managers,
-//! allowing Chronicle to work with various ecosystems (npm, Cargo, etc.) through
+//! allowing Cursus to work with various ecosystems (npm, Cargo, etc.) through
 //! a unified interface.
 
 mod cargo;

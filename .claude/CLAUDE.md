@@ -46,7 +46,7 @@ Any changes to the `docs/adr/` folder should be handled by delegating to the `@a
 
 ## Testing
 
-Integration tests live in `tests/` and should always use the `--no-interactive` flag to ensure the TUI never runs during tests. They should be full end-to-end tests calling `chronicle::run()` as the entrypoint.
+Integration tests live in `tests/` and should always use the `--no-interactive` flag to ensure the TUI never runs during tests. They should be full end-to-end tests calling `cursus::run()` as the entrypoint.
 
 **Non-interactive CLI flags for tests:**
 
@@ -60,15 +60,15 @@ Integration tests live in `tests/` and should always use the `--no-interactive` 
 
 ## Architecture
 
-Chronicle is a Rust CLI tool for release management. It uses an interactive TUI for setup and change recording.
+Cursus is a Rust CLI tool for release management. It uses an interactive TUI for setup and change recording.
 
 **Key modules:**
 
 - `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`, `-v`/`-s`, `--dry-run`) and subcommands (`init`, `change`, `prepare`, `publish`, `ci`). `change` is the default when no subcommand is given. `ci` auto-detects repo state and dispatches to `prepare` or `publish`.
 - `src/tui/` - ratatui/crossterm terminal UI wizards
 - `src/model/` - Core domain types:
-  - `config.rs` - `Config` and `PackageManager` types, TOML persistence in `.chronicle/config.toml`
-  - `changeset.rs` - Changeset file I/O: Hugo-style `+++` TOML frontmatter format, parsing, writing to `.chronicle/`, and editor integration
+  - `config.rs` - `Config` and `PackageManager` types, TOML persistence in `.cursus/config.toml`
+  - `changeset.rs` - Changeset file I/O: Hugo-style `+++` TOML frontmatter format, parsing, writing to `.cursus/`, and editor integration
   - `changelog.rs` - Changelog generation and formatting for releases
 - `src/package_manager/` - Adapter pattern (`PackageManagerAdapter` trait: `enumerate_projects`, `write_version`, `update_lock_file`, `publish`, `registry_name`) for Cargo and npm/yarn/pnpm workspace enumeration. Versions are returned via `ProjectInfo` from `enumerate_projects()`.
 - `src/git/` - Git lifecycle management (config and operations)

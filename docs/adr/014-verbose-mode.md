@@ -6,13 +6,13 @@ Accepted
 
 ## Context
 
-Chronicle is a release management CLI that orchestrates external commands (git operations via `CommandRunner`) and HTTP requests (GitHub Releases via `GitHubClient`). When something goes wrong, users currently see only the high-level `anyhow` error chain, which may not contain enough detail to diagnose the root cause. Two pain points stand out:
+Cursus is a release management CLI that orchestrates external commands (git operations via `CommandRunner`) and HTTP requests (GitHub Releases via `GitHubClient`). When something goes wrong, users currently see only the high-level `anyhow` error chain, which may not contain enough detail to diagnose the root cause. Two pain points stand out:
 
 1. **Failed HTTP requests**: The `RestGitHubClient` wraps ureq errors with `anyhow::Context`, but the request URL, request body, response status, and response body are lost. A 422 from the GitHub API might mean a duplicate tag, a permissions issue, or a malformed payload, but the user only sees "Failed to create GitHub Release for tag 'v1.2.3'".
 
 2. **Shell command execution**: The `CommandRunner` trait runs git commands, lock-file updates, and user-configurable `build_command`/`lock_command` strings. When a command fails, users may not know exactly what was invoked, in which directory, or what stderr contained. This is especially opaque for shell commands passed through `/bin/sh -c`.
 
-Chronicle already has a `GlobalArgs` struct that carries cross-cutting CLI concerns (`--interactive`/`--no-interactive`). Verbosity flags fit naturally alongside these. Beyond increasing verbosity for diagnostics, there is also a need to suppress output entirely -- for example, when running Chronicle in CI pipelines or scripts where only the exit code matters and any non-error output is noise. The question is how these flags map to the logging infrastructure ([ADR-013](013-logging-infrastructure.md)) and what the initial scope of verbose output covers.
+Cursus already has a `GlobalArgs` struct that carries cross-cutting CLI concerns (`--interactive`/`--no-interactive`). Verbosity flags fit naturally alongside these. Beyond increasing verbosity for diagnostics, there is also a need to suppress output entirely -- for example, when running Cursus in CI pipelines or scripts where only the exit code matters and any non-error output is noise. The question is how these flags map to the logging infrastructure ([ADR-013](013-logging-infrastructure.md)) and what the initial scope of verbose output covers.
 
 ## Decision
 
@@ -73,9 +73,9 @@ For the `GitHubClient`, verbose logging will be added within the `RestGitHubClie
 
 ## Alternatives Considered
 
-### Environment variable (e.g., CHRONICLE_VERBOSE or RUST_LOG)
+### Environment variable (e.g., CURSUS_VERBOSE or RUST_LOG)
 
-Using an environment variable instead of a CLI flag. This was rejected because Chronicle's existing UX pattern is flag-driven (`--interactive`, `--no-interactive`, `--dry-run`), and a flag is more discoverable via `--help`. An environment variable could be added later as a complement, but the flag should be the primary interface.
+Using an environment variable instead of a CLI flag. This was rejected because Cursus's existing UX pattern is flag-driven (`--interactive`, `--no-interactive`, `--dry-run`), and a flag is more discoverable via `--help`. An environment variable could be added later as a complement, but the flag should be the primary interface.
 
 ### Binary --verbose flag (no stacking)
 
@@ -87,7 +87,7 @@ Using `--quiet` / `-q` as the flag name, which is the more common convention in 
 
 ### Stackable --silent (e.g., -s suppresses Info, -ss suppresses Warn)
 
-Making `--silent` stackable like `--verbose`, where each `-s` suppresses one additional level. This was rejected because the only useful quiet level below `Info` is `Error` -- suppressing `Warn` but not `Info` is not a meaningful distinction for Chronicle's output. A single boolean flag is simpler and sufficient.
+Making `--silent` stackable like `--verbose`, where each `-s` suppresses one additional level. This was rejected because the only useful quiet level below `Info` is `Error` -- suppressing `Warn` but not `Info` is not a meaningful distinction for Cursus's output. A single boolean flag is simpler and sufficient.
 
 ### Modify CommandRunner trait to accept a verbose parameter
 

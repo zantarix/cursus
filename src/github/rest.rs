@@ -134,7 +134,7 @@ impl RestGitHubClient {
 			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
 			.header(
 				"User-Agent",
-				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
+				&format!("cursus/{}", env!("CARGO_PKG_VERSION")),
 			)
 	}
 
@@ -148,7 +148,7 @@ impl RestGitHubClient {
 			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
 			.header(
 				"User-Agent",
-				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
+				&format!("cursus/{}", env!("CARGO_PKG_VERSION")),
 			)
 	}
 
@@ -162,7 +162,7 @@ impl RestGitHubClient {
 			.header("X-GitHub-Api-Version", GITHUB_API_VERSION)
 			.header(
 				"User-Agent",
-				&format!("chronicle/{}", env!("CARGO_PKG_VERSION")),
+				&format!("cursus/{}", env!("CARGO_PKG_VERSION")),
 			)
 	}
 
@@ -653,12 +653,12 @@ mod tests {
 		let req = CreatePullRequestRequest {
 			title: "Release updates",
 			body: "Release:\n\n- my-pkg@1.0.0",
-			head: "chronicle-release/main",
+			head: "cursus-release/main",
 			base: "main",
 		};
 		let json = serde_json::to_value(&req).unwrap();
 		assert_eq!(json["title"], "Release updates");
-		assert_eq!(json["head"], "chronicle-release/main");
+		assert_eq!(json["head"], "cursus-release/main");
 		assert_eq!(json["base"], "main");
 	}
 

@@ -1,4 +1,4 @@
-//! Git primitives for Chronicle.
+//! Git primitives for Cursus.
 
 mod operations;
 

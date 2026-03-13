@@ -2,15 +2,15 @@
 
 mod common;
 
-use chronicle::test_logging::{init_test_logger, take_logs};
-use common::{run_chronicle, run_chronicle_subprocess, temp_git_repo};
+use common::{run_cursus, run_cursus_subprocess, temp_git_repo};
+use cursus::test_logging::{init_test_logger, take_logs};
 
 #[test]
 fn publish_with_no_config_fails() {
 	let dir = temp_git_repo();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -27,9 +27,9 @@ fn publish_with_no_config_fails() {
 fn publish_dry_run_with_unknown_package_fails() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -40,9 +40,9 @@ fn publish_dry_run_with_unknown_package_fails() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -65,9 +65,9 @@ fn publish_dry_run_with_unknown_package_fails() {
 fn publish_dry_run_basic() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -78,8 +78,8 @@ fn publish_dry_run_basic() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -91,9 +91,9 @@ fn publish_dry_run_basic() {
 fn publish_with_package_filter() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -118,9 +118,9 @@ fn publish_with_package_filter() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -138,9 +138,9 @@ fn publish_with_package_filter() {
 fn publish_dry_run_with_workspace_dependencies() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -154,19 +154,19 @@ fn publish_dry_run_with_workspace_dependencies() {
 	std::fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/lib/package.json"),
-		r#"{"name": "@chronicle-test/lib", "version": "1.0.0"}"#,
+		r#"{"name": "@cursus-test/lib", "version": "1.0.0"}"#,
 	)
 	.unwrap();
 
 	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/app/package.json"),
-		r#"{"name": "@chronicle-test/app", "version": "1.0.0", "dependencies": {"@chronicle-test/lib": "1.0.0"}}"#,
+		r#"{"name": "@cursus-test/app", "version": "1.0.0", "dependencies": {"@cursus-test/lib": "1.0.0"}}"#,
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -178,9 +178,9 @@ fn publish_dry_run_with_workspace_dependencies() {
 fn publish_dry_run_with_workspace_dependencies_filtered() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -195,35 +195,35 @@ fn publish_dry_run_with_workspace_dependencies_filtered() {
 	std::fs::create_dir_all(dir.path().join("packages/utils")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/utils/package.json"),
-		r#"{"name": "@chronicle-test/utils", "version": "1.0.0"}"#,
+		r#"{"name": "@cursus-test/utils", "version": "1.0.0"}"#,
 	)
 	.unwrap();
 
 	std::fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/lib/package.json"),
-		r#"{"name": "@chronicle-test/lib", "version": "1.0.0", "dependencies": {"@chronicle-test/utils": "1.0.0"}}"#,
+		r#"{"name": "@cursus-test/lib", "version": "1.0.0", "dependencies": {"@cursus-test/utils": "1.0.0"}}"#,
 	)
 	.unwrap();
 
 	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/app/package.json"),
-		r#"{"name": "@chronicle-test/app", "version": "1.0.0", "dependencies": {"@chronicle-test/lib": "1.0.0"}}"#,
+		r#"{"name": "@cursus-test/app", "version": "1.0.0", "dependencies": {"@cursus-test/lib": "1.0.0"}}"#,
 	)
 	.unwrap();
 
 	// Publish only app and lib (not utils) — graph should still order lib before app
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
 			"--package",
-			"@chronicle-test/lib",
+			"@cursus-test/lib",
 			"--package",
-			"@chronicle-test/app",
+			"@cursus-test/app",
 		],
 		dir.path(),
 	);
@@ -236,9 +236,9 @@ fn publish_dry_run_with_workspace_dependencies_filtered() {
 fn publish_cargo_dry_run() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[cargo]\nenabled = true\n",
 	)
 	.unwrap();
@@ -252,8 +252,8 @@ fn publish_cargo_dry_run() {
 	std::fs::create_dir(dir.path().join("src")).unwrap();
 	std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -265,9 +265,9 @@ fn publish_cargo_dry_run() {
 fn publish_dry_run_npm_private_package_excluded() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -278,8 +278,8 @@ fn publish_dry_run_npm_private_package_excluded() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -292,9 +292,9 @@ fn publish_dry_run_npm_private_package_excluded() {
 fn publish_dry_run_npm_mixed_workspace() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -319,8 +319,8 @@ fn publish_dry_run_npm_mixed_workspace() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -333,9 +333,9 @@ fn publish_dry_run_npm_mixed_workspace() {
 fn publish_dry_run_cargo_publish_false_excluded() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[cargo]\nenabled = true\n",
 	)
 	.unwrap();
@@ -349,8 +349,8 @@ fn publish_dry_run_cargo_publish_false_excluded() {
 	std::fs::create_dir(dir.path().join("src")).unwrap();
 	std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 
@@ -363,9 +363,9 @@ fn publish_dry_run_cargo_publish_false_excluded() {
 fn publish_dry_run_explicitly_naming_private_package() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -376,9 +376,9 @@ fn publish_dry_run_explicitly_naming_private_package() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -399,9 +399,9 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	let _ = take_logs();
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -433,8 +433,8 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
@@ -482,9 +482,9 @@ fn publish_dry_run_cyclic_npm_workspace() {
 fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n\n[global]\ndisable_dependency_cycle_warnings = true\n",
 	)
 	.unwrap();
@@ -510,7 +510,7 @@ fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 	.unwrap();
 
 	let (success, _stdout, stderr) =
-		run_chronicle_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
+		run_cursus_subprocess(&["publish", "--no-interactive", "--dry-run"], dir.path());
 
 	// Should succeed
 	assert!(success, "Expected success, stderr: {stderr}");
@@ -528,9 +528,9 @@ fn publish_dry_run_summary_single_public_package() {
 	let _ = take_logs();
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -541,8 +541,8 @@ fn publish_dry_run_summary_single_public_package() {
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
@@ -566,9 +566,9 @@ fn publish_dry_run_summary_multiple_public_packages() {
 	let _ = take_logs();
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -593,8 +593,8 @@ fn publish_dry_run_summary_multiple_public_packages() {
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
@@ -613,9 +613,9 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	let _ = take_logs();
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -640,8 +640,8 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
@@ -661,9 +661,9 @@ fn publish_dry_run_summary_all_private_packages() {
 	let _ = take_logs();
 	let dir = temp_git_repo();
 
-	std::fs::create_dir(dir.path().join(".chronicle")).unwrap();
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
 	std::fs::write(
-		dir.path().join(".chronicle/config.toml"),
+		dir.path().join(".cursus/config.toml"),
 		"[npm]\nenabled = true\n",
 	)
 	.unwrap();
@@ -674,8 +674,8 @@ fn publish_dry_run_summary_all_private_packages() {
 	)
 	.unwrap();
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected success, got: {result:?}");

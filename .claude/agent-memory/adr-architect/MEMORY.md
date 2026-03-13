@@ -1,4 +1,4 @@
-# ADR Architect Memory - Chronicle Project
+# ADR Architect Memory - Cursus Project
 
 ## ADR Style Directive
 

@@ -1,14 +1,14 @@
-//! Integration tests for `chronicle change --auto`.
+//! Integration tests for `cursus change --auto`.
 
 mod common;
 
 use std::process::ExitCode;
 
-use chronicle::model::config::{CargoConfig, GitConfig, PackageManager};
 use common::{
 	add_local_remote, git_cmd, git_current_branch, git_log, git_push_to_remote,
 	git_set_remote_head, temp_real_git_repo_with_cargo_workspace, temp_real_git_repo_with_project,
 };
+use cursus::model::config::{CargoConfig, GitConfig, PackageManager};
 
 /// Sets up a real git repo with a remote and origin/HEAD configured, ready for --auto tests.
 ///
@@ -29,13 +29,13 @@ fn make_conventional_commit(dir: &std::path::Path, file: &str, msg: &str) {
 	git_cmd(dir, &["commit", "-m", msg]);
 }
 
-/// Finds the changeset `.md` files in the `.chronicle` directory.
+/// Finds the changeset `.md` files in the `.cursus` directory.
 fn find_changesets(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-	let chronicle_dir = dir.join(".chronicle");
-	if !chronicle_dir.is_dir() {
+	let cursus_dir = dir.join(".cursus");
+	if !cursus_dir.is_dir() {
 		return vec![];
 	}
-	std::fs::read_dir(&chronicle_dir)
+	std::fs::read_dir(&cursus_dir)
 		.unwrap()
 		.filter_map(|e| e.ok())
 		.filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
@@ -48,14 +48,8 @@ fn change_auto_fix_commit_creates_patch_changeset() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: resolve null pointer");
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -80,14 +74,8 @@ fn change_auto_feat_commit_creates_minor_changeset() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "feat: add new feature");
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -106,14 +94,8 @@ fn change_auto_breaking_bang_creates_major_changeset() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "feat!: redesign public API");
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -132,14 +114,8 @@ fn change_auto_chore_commit_skips_changeset() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "chore: update dependencies");
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -158,14 +134,8 @@ fn change_auto_multiple_commits_skips() {
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: first fix");
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: second fix");
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -182,14 +152,8 @@ fn change_auto_multiple_commits_skips() {
 fn change_auto_zero_commits_ahead_fails() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -206,14 +170,8 @@ fn change_auto_invalid_commit_message_fails() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "not a conventional commit");
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -225,9 +183,9 @@ fn change_auto_dry_run_writes_nothing() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: fix a bug");
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"--dry-run",
 			"change",
@@ -260,14 +218,8 @@ fn change_auto_changeset_includes_body() {
 		],
 	);
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -299,14 +251,8 @@ fn change_auto_no_matching_projects_skips() {
 	git_cmd(dir.path(), &["add", "."]);
 	git_cmd(dir.path(), &["commit", "-m", "fix: update ci config"]);
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -334,14 +280,8 @@ fn change_auto_monorepo_only_affected_project_in_changeset() {
 	git_cmd(dir.path(), &["add", "."]);
 	git_cmd(dir.path(), &["commit", "-m", "fix: fix pkg-a only"]);
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -365,14 +305,8 @@ fn change_auto_no_git_skips_commit() {
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: a small bugfix");
 	let commits_before = git_log(dir.path()).len();
 
-	let result = common::run_chronicle(
-		[
-			"chronicle",
-			"--no-interactive",
-			"change",
-			"--auto",
-			"--no-git",
-		],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
 	);
 
@@ -392,15 +326,14 @@ fn change_auto_with_git_commits_and_pushes() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: another fix");
 
-	let config = chronicle::model::config::Config::new(
-		&chronicle::path::AbsolutePath::new(dir.path()).unwrap(),
-	)
-	.with_cargo(CargoConfig::enabled())
-	.with_git(GitConfig::enabled_config());
+	let config =
+		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_cargo(CargoConfig::enabled())
+			.with_git(GitConfig::enabled_config());
 	config.save().unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "change", "--auto"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto"],
 		dir.path(),
 	);
 
@@ -417,7 +350,7 @@ fn change_auto_with_git_commits_and_pushes() {
 
 #[test]
 fn change_auto_conflicts_with_change_type() {
-	let (success, _stdout, stderr) = common::run_chronicle_subprocess(
+	let (success, _stdout, stderr) = common::run_cursus_subprocess(
 		&["--no-interactive", "change", "--auto", "-t", "minor"],
 		std::env::temp_dir().as_path(),
 	);
@@ -430,7 +363,7 @@ fn change_auto_conflicts_with_change_type() {
 
 #[test]
 fn change_auto_conflicts_with_message() {
-	let (success, _stdout, stderr) = common::run_chronicle_subprocess(
+	let (success, _stdout, stderr) = common::run_cursus_subprocess(
 		&["--no-interactive", "change", "--auto", "-m", "hello"],
 		std::env::temp_dir().as_path(),
 	);

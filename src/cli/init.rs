@@ -25,9 +25,7 @@ pub(crate) fn cmd_init(
 	env: &Env,
 ) -> anyhow::Result<ExitCode> {
 	if global.no_interactive {
-		bail!(
-			"chronicle init is interactive-only. Scripts can write .chronicle/config.toml directly."
-		);
+		bail!("cursus init is interactive-only. Scripts can write .cursus/config.toml directly.");
 	}
 
 	let result = match init::run(git_workdir, env)? {
@@ -37,10 +35,10 @@ pub(crate) fn cmd_init(
 
 	let config_toml = render_init_template(&result)?;
 
-	let chronicle_dir = git_workdir.as_ref().join(".chronicle");
-	std::fs::create_dir_all(&chronicle_dir)?;
+	let cursus_dir = git_workdir.as_ref().join(".cursus");
+	std::fs::create_dir_all(&cursus_dir)?;
 
-	let config_path = chronicle_dir.join("config.toml");
+	let config_path = cursus_dir.join("config.toml");
 	std::fs::write(&config_path, &config_toml)?;
 	info!("Created {}", config_path.display());
 

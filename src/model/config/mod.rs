@@ -1,4 +1,4 @@
-//! Chronicle configuration types and persistence.
+//! Cursus configuration types and persistence.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -52,7 +52,7 @@ pub enum PackageManager {
 	Cargo,
 }
 
-/// Chronicle configuration for a repository.
+/// Cursus configuration for a repository.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -236,9 +236,9 @@ impl Config {
 		self.load_projects_for_adapters(&adapters)
 	}
 
-	/// Saves the configuration to `.chronicle/config.toml`.
+	/// Saves the configuration to `.cursus/config.toml`.
 	///
-	/// Creates the `.chronicle` directory if it doesn't exist.
+	/// Creates the `.cursus` directory if it doesn't exist.
 	///
 	/// # Errors
 	///
@@ -260,19 +260,19 @@ impl Config {
 }
 
 fn path(git_workdir: &Path) -> PathBuf {
-	git_workdir.join(".chronicle/config.toml")
+	git_workdir.join(".cursus/config.toml")
 }
 
-/// Checks if a Chronicle configuration file exists in the repository.
+/// Checks if a Cursus configuration file exists in the repository.
 ///
-/// Returns `true` if `.chronicle/config.toml` exists at the given git root.
+/// Returns `true` if `.cursus/config.toml` exists at the given git root.
 pub fn exists(git_workdir: &Path) -> bool {
 	path(git_workdir).exists()
 }
 
 fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
 	if !exists(git_workdir) {
-		bail!("No configuration found. Run 'chronicle init' to create one.");
+		bail!("No configuration found. Run 'cursus init' to create one.");
 	}
 
 	let path = path(git_workdir);
@@ -296,9 +296,9 @@ fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Con
 	Ok(config)
 }
 
-/// Loads the Chronicle configuration from the repository.
+/// Loads the Cursus configuration from the repository.
 ///
-/// Reads and parses `.chronicle/config.toml` from the given git root.
+/// Reads and parses `.cursus/config.toml` from the given git root.
 ///
 /// # Errors
 ///
@@ -308,9 +308,9 @@ pub fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Conf
 	load_impl(git_workdir, env)
 }
 
-/// Loads the Chronicle configuration from the repository.
+/// Loads the Cursus configuration from the repository.
 ///
-/// Reads and parses `.chronicle/config.toml` from the given git root.
+/// Reads and parses `.cursus/config.toml` from the given git root.
 ///
 /// # Errors
 ///
@@ -360,7 +360,7 @@ mod tests {
 			.with_npm(NpmConfig::enabled());
 		let path = config.save().unwrap();
 		assert!(path.exists());
-		assert_eq!(path, dir.path().join(".chronicle/config.toml"));
+		assert_eq!(path, dir.path().join(".cursus/config.toml"));
 	}
 
 	#[test]
@@ -369,7 +369,7 @@ mod tests {
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_cargo(CargoConfig::enabled());
 		config.save().unwrap();
-		assert!(dir.path().join(".chronicle").is_dir());
+		assert!(dir.path().join(".cursus").is_dir());
 	}
 
 	#[test]
@@ -409,7 +409,7 @@ mod tests {
 	#[test]
 	fn load_fails_on_invalid_toml() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "invalid toml {{{").unwrap();
 
@@ -423,7 +423,7 @@ mod tests {
 	#[test]
 	fn load_fails_with_empty_config() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "").unwrap();
 
@@ -582,7 +582,7 @@ mod tests {
 	#[test]
 	fn load_fails_on_unknown_top_level_field() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(config_dir.join("config.toml"), "[rust]\nenabled = true").unwrap();
 
@@ -601,7 +601,7 @@ mod tests {
 	#[test]
 	fn load_fails_on_unknown_package_manager_field() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -843,7 +843,7 @@ enabled = true
 	#[test]
 	fn global_config_unknown_field_fails() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -889,7 +889,7 @@ enabled = true
 	#[test]
 	fn load_github_enabled_derives_git_enabled() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -912,7 +912,7 @@ enabled = true
 	#[test]
 	fn load_explicit_git_disabled_overrides_derived_default() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -935,7 +935,7 @@ enabled = true
 	#[test]
 	fn load_derives_branch_strategy_when_github_enabled() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -958,7 +958,7 @@ enabled = true
 	#[test]
 	fn load_derives_push_strategy_when_github_disabled() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -981,7 +981,7 @@ enabled = true
 	#[test]
 	fn load_explicit_strategy_overrides_derived_default() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),
@@ -1035,7 +1035,7 @@ enabled = true
 	#[test]
 	fn load_fails_on_old_run_until_field() {
 		let dir = temp_dir();
-		let config_dir = dir.path().join(".chronicle");
+		let config_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&config_dir).unwrap();
 		std::fs::write(
 			config_dir.join("config.toml"),

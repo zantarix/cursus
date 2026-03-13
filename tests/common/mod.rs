@@ -6,24 +6,24 @@
 
 use std::process::Command;
 
-use chronicle::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageManager};
-use chronicle::path::AbsolutePath;
+use cursus::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageManager};
+use cursus::path::AbsolutePath;
 use tempfile::TempDir;
 
-/// Runs chronicle with a default (empty) environment and real command runner, returning the result.
+/// Runs cursus with a default (empty) environment and real command runner, returning the result.
 ///
-/// This is the standard way to invoke `chronicle::run` from integration tests.
+/// This is the standard way to invoke `cursus::run` from integration tests.
 /// It passes `Env::default()` so that no real environment variables are read,
 /// and uses `RealCommandRunner` so that actual shell commands (git, cargo, npm) execute.
-pub fn run_chronicle(
+pub fn run_cursus(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
-	chronicle::run(
+	cursus::run(
 		args,
 		cwd,
-		chronicle::Env::new(std::sync::Arc::new(chronicle::command::RealCommandRunner)
-			as std::sync::Arc<dyn chronicle::command::CommandRunner>),
+		cursus::Env::new(std::sync::Arc::new(cursus::command::RealCommandRunner)
+			as std::sync::Arc<dyn cursus::command::CommandRunner>),
 	)
 }
 
@@ -54,11 +54,8 @@ pub fn git_cmd(dir: &std::path::Path, args: &[&str]) {
 fn temp_real_git_repo() -> TempDir {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
 	git_cmd(dir.path(), &["init"]);
-	git_cmd(dir.path(), &["config", "user.name", "Chronicle Test"]);
-	git_cmd(
-		dir.path(),
-		&["config", "user.email", "test@chronicle.local"],
-	);
+	git_cmd(dir.path(), &["config", "user.name", "Cursus Test"]);
+	git_cmd(dir.path(), &["config", "user.email", "test@cursus.local"]);
 	git_cmd(dir.path(), &["config", "commit.gpgsign", "false"]);
 	git_cmd(dir.path(), &["config", "tag.gpgsign", "false"]);
 	// Create an initial empty commit so the repo has a HEAD
@@ -69,7 +66,7 @@ fn temp_real_git_repo() -> TempDir {
 	dir
 }
 
-/// Creates a real git repository with a Chronicle config that has git lifecycle enabled.
+/// Creates a real git repository with a Cursus config that has git lifecycle enabled.
 pub fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig) -> TempDir {
 	let dir = temp_real_git_repo();
 	let config = match pm {
@@ -84,7 +81,7 @@ pub fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig)
 	dir
 }
 
-/// Creates a real git repository with a Cargo workspace and Chronicle config.
+/// Creates a real git repository with a Cargo workspace and Cursus config.
 ///
 /// All files are staged and committed in the initial state.
 pub fn temp_real_git_repo_with_cargo_workspace(
@@ -229,19 +226,19 @@ pub fn git_current_branch(dir: &std::path::Path) -> String {
 	branch
 }
 
-/// Runs chronicle as a real subprocess, capturing stdout and stderr.
+/// Runs cursus as a real subprocess, capturing stdout and stderr.
 ///
-/// Returns `(success, stdout, stderr)`. Use this instead of [`run_chronicle`] when
+/// Returns `(success, stdout, stderr)`. Use this instead of [`run_cursus`] when
 /// the command is expected to produce clap-generated output (e.g. `--help`, `--version`,
 /// or invalid flags/subcommands) so that the output is captured rather than leaked to the
 /// test runner's terminal.
-pub fn run_chronicle_subprocess(args: &[&str], cwd: &std::path::Path) -> (bool, String, String) {
-	let bin = env!("CARGO_BIN_EXE_chronicle");
+pub fn run_cursus_subprocess(args: &[&str], cwd: &std::path::Path) -> (bool, String, String) {
+	let bin = env!("CARGO_BIN_EXE_cursus");
 	let output = Command::new(bin)
 		.args(args)
 		.current_dir(cwd)
 		.output()
-		.expect("Failed to spawn chronicle subprocess");
+		.expect("Failed to spawn cursus subprocess");
 	let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
 	let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 	(output.status.success(), stdout, stderr)
@@ -254,7 +251,7 @@ pub fn temp_git_repo() -> TempDir {
 	dir
 }
 
-/// Creates a temporary git repository with a Chronicle config file.
+/// Creates a temporary git repository with a Cursus config file.
 pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
@@ -376,14 +373,14 @@ pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &s
 	dir
 }
 
-/// Creates a changeset file in the `.chronicle` directory.
+/// Creates a changeset file in the `.cursus` directory.
 ///
 /// The `content` should be a valid changeset with TOML frontmatter, e.g.:
 /// `"+++\npkg-name = \"minor\"\n+++\n\nDescription\n"`.
 pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
-	let chronicle_dir = dir.join(".chronicle");
-	std::fs::create_dir_all(&chronicle_dir).unwrap();
-	std::fs::write(chronicle_dir.join(filename), content).unwrap();
+	let cursus_dir = dir.join(".cursus");
+	std::fs::create_dir_all(&cursus_dir).unwrap();
+	std::fs::write(cursus_dir.join(filename), content).unwrap();
 }
 
 /// Returns a [`GitConfig`] with git lifecycle enabled and all other fields at their defaults.
@@ -399,7 +396,7 @@ pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
 	git_cmd(working_repo, &["remote", "set-head", "origin", branch]);
 }
 
-/// Creates a real git repository with a Chronicle config and committed project files.
+/// Creates a real git repository with a Cursus config and committed project files.
 ///
 /// Unlike [`temp_git_repo_with_project`] (which uses a fake `.git` folder),
 /// this creates a proper git repo with commits so that git operations like

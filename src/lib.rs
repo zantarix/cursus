@@ -1,4 +1,4 @@
-//! Chronicle is a CLI tool that manages project configuration via an interactive TUI setup wizard.
+//! Cursus is a CLI tool that manages project configuration via an interactive TUI setup wizard.
 
 #![feature(coverage_attribute)]
 #![deny(clippy::too_many_lines)]
@@ -43,7 +43,7 @@ fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
 	.and_then(|p| AbsolutePath::new(p).ok())
 }
 
-/// Main entry point for the chronicle application.
+/// Main entry point for the cursus application.
 ///
 /// Parses CLI arguments from the provided iterator, then delegates to
 /// [`run_with`]. Use [`run_with`] directly when the arguments have already

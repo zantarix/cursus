@@ -18,7 +18,7 @@ jobs:
           app-id: ${{ vars.ZANTARIX_APP_ID }}
           private-key: ${{ secrets.ZANTARIX_APP_PRIVATE_KEY }}
 
-      # Fetch full history so that `chronicle ci` can detect existing git tags.
+      # Fetch full history so that `cursus ci` can detect existing git tags.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           token: ${{ steps.app-token.outputs.token }}
@@ -36,15 +36,15 @@ jobs:
         with:
           use-flakehub: false
 
-      - name: Build chronicle
+      - name: Build cursus
         shell: nix develop .#ci -c bash -e {0}
         run: cargo build --release
 
-      - name: Run chronicle ci
+      - name: Run cursus ci
         shell: nix develop .#ci -c bash -e {0}
         env:
-          # Override the default GITHUB_TOKEN so chronicle uses the App token
+          # Override the default GITHUB_TOKEN so cursus uses the App token
           # for all GitHub API calls (PRs, releases).
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           # TODO: Cargo and NPM credentials will be needed eventually.
-        run: ./target/release/chronicle ci --no-interactive
+        run: ./target/release/cursus ci --no-interactive

@@ -6,19 +6,19 @@ Accepted
 
 ## Context
 
-Chronicle supports `--dry-run` across `prepare`, `publish`, and `ci` commands, governed by [ADR-008](008-dry-run-local-only-guarantee.md)'s strict local-only invariant. Dry-run must preview what an operation would do without performing any mutations or remote operations.
+Cursus supports `--dry-run` across `prepare`, `publish`, and `ci` commands, governed by [ADR-008](008-dry-run-local-only-guarantee.md)'s strict local-only invariant. Dry-run must preview what an operation would do without performing any mutations or remote operations.
 
 There are two broad approaches to implementing dry-run in a multi-step command pipeline. The first -- "early branching" -- places `if dry_run { log } else { do_it }` checks at each point where a side effect occurs, creating parallel code paths that must independently compute the same values, track the same files, and produce equivalent log output. The second -- "late guarding" -- runs all computation, logging, and decision-making unconditionally, and only guards the final mutation itself.
 
 The early branching approach has three structural weaknesses. It duplicates logic: both the dry-run and real branches often need to compute the same values (version bumps, file paths, log messages) but do so independently, leading to repeated code. It creates prediction methods: when a function performs side effects and returns results (e.g., a lock file updater that returns the path it modified), the dry-run branch needs a separate prediction method that returns the same path without performing the side effect, duplicating knowledge that must be kept in sync. It enables silent drift: because the two branches are structurally independent, a change to the real path can silently omit the corresponding dry-run update, and no compiler or type-system mechanism enforces alignment.
 
-Chronicle already has well-defined abstraction boundaries around its side effects. `CommandRunner` is the lowest-level abstraction: all subprocess execution (git commands, `cargo publish`, `npm install`, custom lock commands) flows through it, and it already supports a decorator pattern (`VerboseCommandRunner` wraps an inner runner to add debug logging). Above that, `GitWorkdir` encapsulates git operations, `GitHubClient` (a trait) encapsulates GitHub API calls, and `PackageManagerAdapter` (a trait) encapsulates package registry and filesystem operations.
+Cursus already has well-defined abstraction boundaries around its side effects. `CommandRunner` is the lowest-level abstraction: all subprocess execution (git commands, `cargo publish`, `npm install`, custom lock commands) flows through it, and it already supports a decorator pattern (`VerboseCommandRunner` wraps an inner runner to add debug logging). Above that, `GitWorkdir` encapsulates git operations, `GitHubClient` (a trait) encapsulates GitHub API calls, and `PackageManagerAdapter` (a trait) encapsulates package registry and filesystem operations.
 
-Crucially, Chronicle's mutations fall into three categories: subprocess-based mutations that go through `CommandRunner` (git commands, lock file updates, registry publishes), direct filesystem writes that do not (version bumps via `write_version`, dependency propagation via `update_dependency_version`, changelog generation, changeset consumption), and HTTP API calls via `GitHubClient` (release creation, asset uploads, pull request management). A dry-run strategy must address all three categories.
+Crucially, Cursus's mutations fall into three categories: subprocess-based mutations that go through `CommandRunner` (git commands, lock file updates, registry publishes), direct filesystem writes that do not (version bumps via `write_version`, dependency propagation via `update_dependency_version`, changelog generation, changeset consumption), and HTTP API calls via `GitHubClient` (release creation, asset uploads, pull request management). A dry-run strategy must address all three categories.
 
 ## Decision
 
-We will adopt the "late guard" pattern as the standard approach for implementing dry-run across all Chronicle commands. The core principle is: **run all logic unconditionally; guard only the mutation, and guard it at the lowest abstraction boundary that owns the side effect.**
+We will adopt the "late guard" pattern as the standard approach for implementing dry-run across all Cursus commands. The core principle is: **run all logic unconditionally; guard only the mutation, and guard it at the lowest abstraction boundary that owns the side effect.**
 
 ### The pattern
 
@@ -28,7 +28,7 @@ Where log wording must differ between modes (e.g., "Would push" vs "Pushed"), us
 
 ### Layered implementation
 
-Dry-run awareness will be pushed into Chronicle's existing abstractions at two levels:
+Dry-run awareness will be pushed into Cursus's existing abstractions at two levels:
 
 **Level 1: `CommandRunner` decorator.** A `DryRunCommandRunner` decorator, following the same pattern as `VerboseCommandRunner`, will wrap any inner runner and skip execution of mutating subprocesses. This single decorator automatically covers all subprocess-based mutations: git commands (via `GitWorkdir`), lock file updates (via `update_lock_file`), registry publishes (via `publish`), and custom shell commands. `GitWorkdir` itself needs no changes -- it remains unaware of dry-run because the runner it delegates to handles suppression transparently. This also means `PackageManagerAdapter` methods that work purely through `CommandRunner` (`update_lock_file`, `publish`) gain dry-run support without signature changes.
 

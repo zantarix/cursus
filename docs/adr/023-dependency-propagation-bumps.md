@@ -6,24 +6,24 @@ Proposed
 
 ## Context
 
-Chronicle's `prepare` command ([ADR-003](003-release-command.md)) bumps package versions based on pending changesets. In a monorepo, packages frequently depend on one another. When package `A` is bumped, any package `B` that declares a dependency on `A` may need a corresponding version bump to ensure that `B`'s published version reflects the updated dependency.
+Cursus's `prepare` command ([ADR-003](003-release-command.md)) bumps package versions based on pending changesets. In a monorepo, packages frequently depend on one another. When package `A` is bumped, any package `B` that declares a dependency on `A` may need a corresponding version bump to ensure that `B`'s published version reflects the updated dependency.
 
-Currently, Chronicle already performs intra-workspace dependency version propagation: when a package's version is bumped, Chronicle updates the version specifiers in other packages' manifest files that reference the bumped package ([ADR-012](012-workspace-protocol-dependency-updates.md) documents the `workspace:` protocol exception to this). However, updating a dependency specifier in `B`'s manifest without also bumping `B`'s own version creates a problem: the dependency change is invisible to consumers of `B`. If `B` remains at `1.0.0` but now depends on `A@2.0.0` instead of `A@1.0.0`, consumers who have `B@1.0.0` cached or pinned will not know they need to update.
+Currently, Cursus already performs intra-workspace dependency version propagation: when a package's version is bumped, Cursus updates the version specifiers in other packages' manifest files that reference the bumped package ([ADR-012](012-workspace-protocol-dependency-updates.md) documents the `workspace:` protocol exception to this). However, updating a dependency specifier in `B`'s manifest without also bumping `B`'s own version creates a problem: the dependency change is invisible to consumers of `B`. If `B` remains at `1.0.0` but now depends on `A@2.0.0` instead of `A@1.0.0`, consumers who have `B@1.0.0` cached or pinned will not know they need to update.
 
 This gap is particularly consequential in two scenarios:
 
-- **Registry publishing.** Most registries (crates.io, npmjs) treat each published version as immutable. If `B@1.0.0` was already published with `A@1.0.0` as a dependency, Chronicle cannot re-publish `B@1.0.0` with an updated dependency on `A@2.0.0`. The version must change.
+- **Registry publishing.** Most registries (crates.io, npmjs) treat each published version as immutable. If `B@1.0.0` was already published with `A@1.0.0` as a dependency, Cursus cannot re-publish `B@1.0.0` with an updated dependency on `A@2.0.0`. The version must change.
 - **Semantic correctness.** A dependency change is itself a change to the package's contract. Consumers relying on `B`'s transitive dependency tree need to know that `B`'s dependency set has changed, even if `B`'s own source code has not.
 
 The appropriate semver level for a dependency-propagated bump is context-dependent. In some projects, any dependency change warrants a `patch` bump. In others, a major dependency bump (which may introduce breaking transitive changes) should trigger a `minor` or even `major` bump in the dependent. A one-size-fits-all default would not serve all use cases.
 
 ## Decision
 
-We will add automatic dependency propagation bumps to the `prepare` pipeline. When a package is bumped during `prepare`, Chronicle will identify all packages within the workspace that declare a dependency on the bumped package and ensure those dependent packages also receive a version bump.
+We will add automatic dependency propagation bumps to the `prepare` pipeline. When a package is bumped during `prepare`, Cursus will identify all packages within the workspace that declare a dependency on the bumped package and ensure those dependent packages also receive a version bump.
 
 ### Propagation mechanism
 
-After the initial per-package version bumps have been computed from changesets (step 4 of [ADR-003](003-release-command.md)), and after any linked-version reconciliation ([ADR-024](024-linked-package-versions.md)), Chronicle will walk the intra-workspace dependency graph and mark additional packages for propagation bumps using a two-phase approach.
+After the initial per-package version bumps have been computed from changesets (step 4 of [ADR-003](003-release-command.md)), and after any linked-version reconciliation ([ADR-024](024-linked-package-versions.md)), Cursus will walk the intra-workspace dependency graph and mark additional packages for propagation bumps using a two-phase approach.
 
 **Phase 1: Mark.** Starting from the set of packages that received a version bump (whether from a changeset or linked-version synchronization), traverse the dependency graph and mark all transitive dependents as needing a propagation bump:
 
@@ -37,7 +37,7 @@ The intra-workspace dependency graph is directed but not necessarily acyclic. Ci
 
 ### Configurable bump level
 
-The semver level used for propagated bumps will be configurable in `.chronicle/config.toml`:
+The semver level used for propagated bumps will be configurable in `.cursus/config.toml`:
 
 ```toml
 [prepare]
@@ -70,11 +70,11 @@ If the effective propagation level is higher than the changeset-driven bump (e.g
 
 ### Interaction with scoped prepare
 
-When `prepare --package` restricts the release scope ([ADR-010](010-scoped-release-changeset-consumption.md)), dependency propagation may identify packages that need a bump but are outside the requested scope. Rather than silently skipping these packages or pulling them into the current release, Chronicle will create a new changeset file in `.chronicle/` recording the pending propagation bump for each out-of-scope dependent package.
+When `prepare --package` restricts the release scope ([ADR-010](010-scoped-release-changeset-consumption.md)), dependency propagation may identify packages that need a bump but are outside the requested scope. Rather than silently skipping these packages or pulling them into the current release, Cursus will create a new changeset file in `.cursus/` recording the pending propagation bump for each out-of-scope dependent package.
 
 The generated changeset will use the effective propagation bump level as the change type (accounting for `auto` and `match` semantics where the level depends on the upstream bump) and include a description indicating the reason (e.g., "Dependency update: `package-a` bumped to 2.0.0"). This ensures the bump is not lost and will be picked up by the next `prepare` run that includes those packages in its scope.
 
-This approach maintains the contract of `--package`: only the specified packages are modified in the current run. The generated changesets integrate cleanly with Chronicle's existing changeset consumption pipeline, requiring no special handling.
+This approach maintains the contract of `--package`: only the specified packages are modified in the current run. The generated changesets integrate cleanly with Cursus's existing changeset consumption pipeline, requiring no special handling.
 
 ### Changelog entries for propagated bumps
 
@@ -96,7 +96,7 @@ When multiple mechanisms contribute to a single package's version bump in the sa
 ### Negative
 
 - Dependency propagation can cause cascading version bumps across the workspace. In a densely connected monorepo, a single package change can trigger bumps in many or all packages. This is correct behavior, but may surprise users who expect only the directly changed package to be bumped.
-- The generated changesets for out-of-scope packages during scoped prepare accumulate in `.chronicle/` and must be consumed by a subsequent `prepare` run. If scoped releases are used frequently, this can lead to a buildup of auto-generated changeset files that clutter the directory.
+- The generated changesets for out-of-scope packages during scoped prepare accumulate in `.cursus/` and must be consumed by a subsequent `prepare` run. If scoped releases are used frequently, this can lead to a buildup of auto-generated changeset files that clutter the directory.
 - A single global `dependency_bump` level may be too coarse for complex monorepos where different dependency relationships warrant different bump levels. Per-dependency configuration is deferred to a future ADR.
 - The `auto` and `match` modes require tracking which bump level each upstream dependency received, adding bookkeeping compared to the simpler fixed-level modes. This is a modest implementation cost but increases the surface area for edge-case behavior that users must understand.
 
@@ -105,7 +105,7 @@ When multiple mechanisms contribute to a single package's version bump in the sa
 - Dependency propagation runs after changeset aggregation and linked-version reconciliation, and before changelog generation. It is an additive step in the `prepare` pipeline.
 - The `dependency_bump` config field uses `serde(default)` and defaults to `"auto"`, so existing configurations without this field continue to work. The `deny_unknown_fields` constraint on config structs is satisfied because the field is added to the struct definition.
 - Circular dependencies in the workspace graph do not cause problems. The two-phase mark-then-sweep approach handles cycles through idempotent marking, with no risk of infinite traversal.
-- This feature operates on the same intra-workspace dependency information that Chronicle already uses for dependency version specifier updates. No new dependency discovery mechanism is needed.
+- This feature operates on the same intra-workspace dependency information that Cursus already uses for dependency version specifier updates. No new dependency discovery mechanism is needed.
 - The `workspace:` protocol exception ([ADR-012](012-workspace-protocol-dependency-updates.md)) applies to dependency specifier updates, not to propagation bump detection. A package using `workspace:*` to depend on another package will still be identified as a dependent and receive a propagation bump; only the specifier rewrite is skipped.
 
 ## Alternatives Considered
@@ -128,4 +128,4 @@ Use `patch` as the default propagation level, applying the smallest possible bum
 
 ### Reject circular dependencies as an error
 
-Treat cycles in the intra-workspace dependency graph as a configuration or project error and refuse to run propagation. This was rejected because circular dependencies are valid in some ecosystems, particularly JavaScript where two packages may legitimately depend on each other (e.g., a plugin and its host). Rejecting cycles would make Chronicle unusable for these projects. The mark-then-sweep algorithm handles cycles naturally through idempotent marking, so there is no correctness reason to prohibit them.
+Treat cycles in the intra-workspace dependency graph as a configuration or project error and refuse to run propagation. This was rejected because circular dependencies are valid in some ecosystems, particularly JavaScript where two packages may legitimately depend on each other (e.g., a plugin and its host). Rejecting cycles would make Cursus unusable for these projects. The mark-then-sweep algorithm handles cycles naturally through idempotent marking, so there is no correctness reason to prohibit them.

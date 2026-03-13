@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Configuration for opt-in GitHub Releases creation after publish.
 ///
-/// When `enabled` is `true`, Chronicle will create a GitHub Release for each
+/// When `enabled` is `true`, Cursus will create a GitHub Release for each
 /// published package after the publish step completes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -18,12 +18,12 @@ pub struct GitHubConfig {
 	pub enabled: bool,
 	/// GitHub repository owner (user or organisation name).
 	///
-	/// If not set, Chronicle will attempt to detect it from the git remote URL.
+	/// If not set, Cursus will attempt to detect it from the git remote URL.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	owner: Option<String>,
 	/// GitHub repository name.
 	///
-	/// If not set, Chronicle will attempt to detect it from the git remote URL.
+	/// If not set, Cursus will attempt to detect it from the git remote URL.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	repo: Option<String>,
 	/// Optional shell command to build release artifacts before uploading.

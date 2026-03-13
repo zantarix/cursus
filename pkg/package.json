@@ -1,20 +1,20 @@
 {
-	"name": "@zantarix/chronicle",
+	"name": "@zantarix/cursus",
 	"version": "0.0.1",
 	"private": true,
 	"description": "Release management with style",
-	"homepage": "https://github.com/zantarix/chronicle#readme",
+	"homepage": "https://github.com/zantarix/cursus#readme",
 	"bugs": {
-		"url": "https://github.com/zantarix/chronicle/issues"
+		"url": "https://github.com/zantarix/cursus/issues"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/zantarix/chronicle.git"
+		"url": "git+https://github.com/zantarix/cursus.git"
 	},
 	"license": "MPL-2.0",
 	"author": "Matthew Scharley <github@zantarix.com>",
 	"type": "module",
-	"bin": "bin/chronicle",
+	"bin": "bin/cursus",
 	"scripts": {
 		"postinstall": "node bin/download-binary.js",
 		"test": "echo \"Error: no test specified\" && exit 1"

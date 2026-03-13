@@ -1,6 +1,6 @@
-# Chronicle
+# Cursus
 
-A release management CLI for software. Chronicle provides a structured workflow
+A release management CLI for software. Cursus provides a structured workflow
 for recording changes, bumping semantic versions, generating changelogs, and
 publishing packages to registries.
 
@@ -10,11 +10,11 @@ open a request if you need it to run a new platform.
 
 ## Overview
 
-Chronicle breaks the release process into three distinct steps:
+Cursus breaks the release process into three distinct steps:
 
 1. **Record changes** — developers describe what changed and how it affects the
    version (`major`, `minor`, or `patch`)
-2. **Prepare** — Chronicle aggregates pending changes, bumps versions, generates
+2. **Prepare** — Cursus aggregates pending changes, bumps versions, generates
    changelogs, and updates lock files
 3. **Publish** — packages are published to registries in dependency order
 
@@ -46,20 +46,20 @@ Supported targets: `linux-x86_64`, `linux-aarch64`, `linux-riscv64`,
 ## Quick start
 
 ```bash
-# Initialise Chronicle in your repository
-chronicle init
+# Initialise Cursus in your repository
+cursus init
 
 # Record a change
-chronicle
+cursus
 
 # Or non-interactively
-chronicle change -t minor -m "Add user authentication"
+cursus change -t minor -m "Add user authentication"
 
 # When ready to release
-chronicle prepare
+cursus prepare
 
 # Publish to registries
-chronicle publish
+cursus publish
 ```
 
 ## Commands
@@ -77,9 +77,9 @@ subcommand name.
 | `-s, --silent` | Suppress all output except errors |
 | `-n, --dry-run` | Preview changes without modifying any files or running registry commands |
 
-### `chronicle init`
+### `cursus init`
 
-Creates a `.chronicle/config.toml` at the repository root. In interactive mode a
+Creates a `.cursus/config.toml` at the repository root. In interactive mode a
 TUI wizard guides you through setup; in non-interactive mode pass
 `--no-interactive`. You can check which options are available with `--help`.
 
@@ -87,9 +87,9 @@ TUI wizard guides you through setup; in non-interactive mode pass
 |------|-------------|
 | `-p, --package-manager <pm>` | Package manager to configure: `cargo` or `npm` (required in non-interactive mode) |
 
-### `chronicle change`
+### `cursus change`
 
-Records a semantic version change as a changeset file in `.chronicle/`. This is
+Records a semantic version change as a changeset file in `.cursus/`. This is
 the default command when no subcommand is given.
 
 | Flag | Description |
@@ -98,7 +98,7 @@ the default command when no subcommand is given.
 | `-m, --message <text>` | Change description (opens editor if omitted; required in non-interactive mode) |
 | `-p, --project <name>` | Target project(s); repeatable, defaults to all |
 
-### `chronicle prepare`
+### `cursus prepare`
 
 Consumes pending changesets and applies the highest change type per package to
 bump versions, generate changelog entries, and update lock files.
@@ -109,7 +109,7 @@ bump versions, generate changelog entries, and update lock files.
 | `--no-git` | Skip git lifecycle automation even if enabled in config |
 | `--branch <name>` | Override the release branch name (branch strategy only) |
 
-### `chronicle publish`
+### `cursus publish`
 
 Publishes packages to their respective registries in dependency order.
 "Version already exists" errors are treated as success for idempotency.
@@ -119,7 +119,7 @@ Publishes packages to their respective registries in dependency order.
 | `-p, --package <name>` | Publish specific package(s); repeatable |
 | `--no-git` | Skip git tag creation, tag pushing, and GitHub Releases even if enabled in config |
 
-### `chronicle ci`
+### `cursus ci`
 
 Auto-detects the current repository state and dispatches to `prepare` or
 `publish` as needed. Intended for use in CI/CD pipelines. Always runs
@@ -145,12 +145,12 @@ Detection logic:
 | npm | `"workspaces"` in `package.json` | `package-lock.json` | npm |
 | pnpm | `pnpm-workspace.yaml` | `pnpm-lock.yaml` | npm |
 
-Chronicle auto-detects the JavaScript package manager from the lock file present
+Cursus auto-detects the JavaScript package manager from the lock file present
 in the repository.
 
 ## Changeset format
 
-Changesets are stored as Markdown files with TOML frontmatter in `.chronicle/`:
+Changesets are stored as Markdown files with TOML frontmatter in `.cursus/`:
 
 ```markdown
 +++
@@ -166,7 +166,7 @@ pending changesets determines the version bump for each package.
 
 ## Configuration
 
-Chronicle stores its configuration in `.chronicle/config.toml`:
+Cursus stores its configuration in `.cursus/config.toml`:
 
 ```toml
 [global]
@@ -196,12 +196,12 @@ enabled = true
 # "branch": create a release branch and push it (default when [github] enabled).
 strategy = "branch"
 # Prefix for release branch names in the "branch" strategy.
-release_branch_prefix = "chronicle-release/"
+release_branch_prefix = "cursus-release/"
 # Tag format: "auto" (v{ver} for single-package, {pkg}@{ver} for monorepos),
 # "simple" (always v{ver}), or "prefixed" (always {pkg}@{ver}).
 tag_format = "auto"
 # Extra files to stage before committing, relative to the git root.
-# Useful when a custom lock_command writes files Chronicle doesn't know about.
+# Useful when a custom lock_command writes files Cursus doesn't know about.
 extra_files = ["custom.lock"]
 
 [github]

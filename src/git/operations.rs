@@ -745,14 +745,13 @@ mod tests {
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
 		let (git, runner) = make_git(runner, dir_abs);
-		git.checkout_or_reset_branch("chronicle-release/main")
-			.unwrap();
+		git.checkout_or_reset_branch("cursus-release/main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
 		assert_eq!(
 			invocations[0].args,
-			["checkout", "-B", "chronicle-release/main"]
+			["checkout", "-B", "cursus-release/main"]
 		);
 		assert_eq!(invocations[0].cwd, dir.path());
 	}
@@ -778,7 +777,7 @@ mod tests {
 		let runner = recording(0);
 		let dir_abs = abs(&dir);
 		let (git, runner) = make_git(runner, dir_abs);
-		git.force_push_branch("chronicle-release/main").unwrap();
+		git.force_push_branch("cursus-release/main").unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
@@ -788,7 +787,7 @@ mod tests {
 				"push",
 				"--force-with-lease",
 				"origin",
-				"chronicle-release/main"
+				"cursus-release/main"
 			]
 		);
 		assert_eq!(invocations[0].cwd, dir.path());

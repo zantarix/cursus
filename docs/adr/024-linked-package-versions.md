@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-Chronicle's `prepare` command ([ADR-003](003-release-command.md)) bumps each package independently based on its pending changesets. In a monorepo with packages `A`, `B`, and `C`, a changeset touching only `A` results in only `A` receiving a version bump. Packages `B` and `C` remain at their prior versions.
+Cursus's `prepare` command ([ADR-003](003-release-command.md)) bumps each package independently based on its pending changesets. In a monorepo with packages `A`, `B`, and `C`, a changeset touching only `A` results in only `A` receiving a version bump. Packages `B` and `C` remain at their prior versions.
 
 This independent versioning model is correct for many monorepos, but a significant class of projects requires that some or all packages move in lockstep. Common scenarios include:
 
@@ -14,13 +14,13 @@ This independent versioning model is correct for many monorepos, but a significa
 - **Platform libraries** where packages are always installed together and version mismatches are either unsupported or a source of subtle bugs.
 - **Gradual adoption** where a monorepo contains both tightly coupled packages (which should be linked) and loosely coupled utilities (which should version independently). A global "all packages share one version" policy is too coarse; the user needs to define groups.
 
-Tools like Changesets and Lerna support version linking, and users migrating from those tools expect comparable functionality. Without linked versioning, Chronicle cannot serve the lockstep-versioning use case at all -- there is no workaround short of manually editing versions after every `prepare` run.
+Tools like Changesets and Lerna support version linking, and users migrating from those tools expect comparable functionality. Without linked versioning, Cursus cannot serve the lockstep-versioning use case at all -- there is no workaround short of manually editing versions after every `prepare` run.
 
 A further practical concern is recovery from desync. When a project first enables linked versions, or when manual edits or merge conflicts cause versions to diverge within a linked group, the linking algorithm needs to converge the group to a single version without requiring manual intervention.
 
 ## Decision
 
-We will add a `[linked-versions]` configuration section to `.chronicle/config.toml` that allows users to declare groups of packages whose versions must stay in sync.
+We will add a `[linked-versions]` configuration section to `.cursus/config.toml` that allows users to declare groups of packages whose versions must stay in sync.
 
 ### Configuration
 
@@ -68,7 +68,7 @@ Packages raised to the group maximum without having their own changesets will st
 
 ### Interaction with scoped prepare
 
-When `prepare --package` is used to scope a release ([ADR-010](010-scoped-release-changeset-consumption.md)), Chronicle will refuse to run if the `--package` scope partially overlaps with a linked group. If any package in a linked group is included in the scope but other packages in the same group are excluded, `prepare` will exit with an error identifying the linked group and the missing packages. The user must either include all packages in the linked group in their `--package` scope, or exclude all of them.
+When `prepare --package` is used to scope a release ([ADR-010](010-scoped-release-changeset-consumption.md)), Cursus will refuse to run if the `--package` scope partially overlaps with a linked group. If any package in a linked group is included in the scope but other packages in the same group are excluded, `prepare` will exit with an error identifying the linked group and the missing packages. The user must either include all packages in the linked group in their `--package` scope, or exclude all of them.
 
 This strict enforcement prevents a scoped prepare from producing a desynced linked group, which would violate the invariant that linked packages always share the same version. Allowing partial overlap would silently break the linking guarantee and confuse users who configured linked versions precisely to avoid version divergence.
 
@@ -76,19 +76,19 @@ Packages in a linked group that have no pending changesets but are included in t
 
 ### Validation
 
-Chronicle will validate the linked-versions configuration during `prepare` and `ci` commands. Validation does not run during `chronicle change`, which is a lightweight command unaffected by linked-version semantics.
+Cursus will validate the linked-versions configuration during `prepare` and `ci` commands. Validation does not run during `cursus change`, which is a lightweight command unaffected by linked-version semantics.
 
 - A package matching more than one group pattern is a configuration error.
 - A pattern that matches no enumerated packages produces a warning (not an error), since packages may be added later.
 - An empty `packages` array in a group is a configuration error.
 
-Running validation during `ci` ensures that users on the branch strategy ([ADR-015](015-ci-managed-release-workflow.md)) receive fast feedback on every push to main, since `chronicle ci` runs automatically in their CI pipeline. Users on the push strategy who run `prepare` directly receive the error immediately before their next release.
+Running validation during `ci` ensures that users on the branch strategy ([ADR-015](015-ci-managed-release-workflow.md)) receive fast feedback on every push to main, since `cursus ci` runs automatically in their CI pipeline. Users on the push strategy who run `prepare` directly receive the error immediately before their next release.
 
 ## Consequences
 
 ### Positive
 
-- Monorepos that require lockstep versioning can use Chronicle without post-hoc version manipulation. This closes a significant functionality gap compared to Changesets and Lerna.
+- Monorepos that require lockstep versioning can use Cursus without post-hoc version manipulation. This closes a significant functionality gap compared to Changesets and Lerna.
 - The glob pattern support allows groups to be defined by naming convention (e.g., `@org/sdk-*`), which scales naturally as packages are added or removed without requiring config updates.
 - The max-version-wins algorithm is self-healing: it converges diverged versions in a single run, making migration to linked versions and recovery from desync straightforward.
 - Global linking provides a zero-configuration experience for the common case where all packages should share one version.
@@ -99,14 +99,14 @@ Running validation during `ci` ensures that users on the branch strategy ([ADR-0
 - Packages without pending changesets can receive version bumps purely due to linking. This may be surprising to users who expect a version bump to always correspond to a code change.
 - The strict scoped-prepare validation means users cannot release a subset of a linked group independently. A `--package` scope that partially overlaps a linked group is rejected outright. Users who need to release individual packages from a linked group must either remove the linking configuration or include the full group in their scope.
 - Glob pattern matching adds a dependency on pattern-matching logic that must be consistent across platforms. Edge cases in glob semantics (e.g., whether `*` matches path separators in scoped npm package names) require careful specification and testing.
-- The `deny_unknown_fields` constraint on config structs means that adding `[linked-versions]` is backward-compatible (old configs without it work fine via `serde(default)`), but users on older Chronicle versions who encounter a config with this section will get a parse error.
+- The `deny_unknown_fields` constraint on config structs means that adding `[linked-versions]` is backward-compatible (old configs without it work fine via `serde(default)`), but users on older Cursus versions who encounter a config with this section will get a parse error.
 
 ### Neutral
 
 - The linked-version reconciliation step runs after the existing per-package bump logic and before changelog generation. It is an additive step in the `prepare` pipeline, not a replacement for existing logic.
 - Changeset files themselves are unaffected by this feature. Changesets continue to record per-package change types. The linking is applied at `prepare` time, not at `change` time.
 - This decision does not affect `publish` ordering or behavior. Publishing remains per-package and respects dependency order as before.
-- `chronicle change` does not validate linked-version configuration. Invalid group patterns or overlapping memberships are only surfaced when `prepare` or `ci` runs. This keeps `change` lightweight and avoids requiring package enumeration during changeset recording.
+- `cursus change` does not validate linked-version configuration. Invalid group patterns or overlapping memberships are only surfaced when `prepare` or `ci` runs. This keeps `change` lightweight and avoids requiring package enumeration during changeset recording.
 
 ## Alternatives Considered
 
@@ -118,9 +118,9 @@ This was rejected because it does not converge diverged versions. If `A` is at `
 
 ### Lockfile-style fixed versions
 
-Maintain a separate file (e.g., `.chronicle/linked-versions.toml`) that records the current canonical version for each group. The `prepare` command would read this file, bump the canonical version, and apply it to all packages in the group.
+Maintain a separate file (e.g., `.cursus/linked-versions.toml`) that records the current canonical version for each group. The `prepare` command would read this file, bump the canonical version, and apply it to all packages in the group.
 
-This was rejected because it introduces a new source of truth for versions that can conflict with the actual versions in manifest files. Chronicle's philosophy is to read versions from their native locations (`Cargo.toml`, `package.json`) rather than maintaining shadow state. A canonical version file would need reconciliation logic for cases where manifest versions and the canonical version disagree, adding complexity without clear benefit over the max-version approach.
+This was rejected because it introduces a new source of truth for versions that can conflict with the actual versions in manifest files. Cursus's philosophy is to read versions from their native locations (`Cargo.toml`, `package.json`) rather than maintaining shadow state. A canonical version file would need reconciliation logic for cases where manifest versions and the canonical version disagree, adding complexity without clear benefit over the max-version approach.
 
 ### Implicit linking via workspace dependencies
 

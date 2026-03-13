@@ -15,26 +15,26 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             artifact: linux-x86_64
-            binary: chronicle
+            binary: cursus
           - target: aarch64-unknown-linux-musl
             artifact: linux-aarch64
-            binary: chronicle
+            binary: cursus
           - target: riscv64gc-unknown-linux-musl
             artifact: linux-riscv64
-            binary: chronicle
+            binary: cursus
             # No GitHub-hosted RISC-V runner exists; artifact is built but not smoke-tested
           - target: x86_64-apple-darwin
             artifact: macos-x86_64
-            binary: chronicle
+            binary: cursus
           - target: aarch64-apple-darwin
             artifact: macos-aarch64
-            binary: chronicle
+            binary: cursus
           - target: x86_64-pc-windows-gnullvm
             artifact: windows-x86_64
-            binary: chronicle.exe
+            binary: cursus.exe
           - target: aarch64-pc-windows-gnullvm
             artifact: windows-aarch64
-            binary: chronicle.exe
+            binary: cursus.exe
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -62,22 +62,22 @@ jobs:
         include:
           - runner: ubuntu-latest
             artifact: linux-x86_64
-            binary: chronicle
+            binary: cursus
           - runner: ubuntu-24.04-arm
             artifact: linux-aarch64
-            binary: chronicle
+            binary: cursus
           - runner: macos-26-intel
             artifact: macos-x86_64
-            binary: chronicle
+            binary: cursus
           - runner: macos-latest
             artifact: macos-aarch64
-            binary: chronicle
+            binary: cursus
           - runner: windows-latest
             artifact: windows-x86_64
-            binary: chronicle.exe
+            binary: cursus.exe
           - runner: windows-11-arm
             artifact: windows-aarch64
-            binary: chronicle.exe
+            binary: cursus.exe
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Download artifact

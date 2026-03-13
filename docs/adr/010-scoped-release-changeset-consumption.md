@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-Chronicle's `release` command supports a `--package` flag that scopes a release to specific packages. This was added to support monorepo workflows where packages are released independently -- for example, releasing `pkg-a` without releasing `pkg-b`.
+Cursus's `release` command supports a `--package` flag that scopes a release to specific packages. This was added to support monorepo workflows where packages are released independently -- for example, releasing `pkg-a` without releasing `pkg-b`.
 
-Changesets are small Markdown files in `.chronicle/` with TOML frontmatter mapping package names to change types. A single changeset can reference multiple packages:
+Changesets are small Markdown files in `.cursus/` with TOML frontmatter mapping package names to change types. A single changeset can reference multiple packages:
 
 ```
 +++
@@ -21,7 +21,7 @@ Shared infrastructure change affecting both packages
 
 The current implementation has a correctness bug: when `release --package pkg-a` runs, version bumping and changelog generation are correctly scoped to `pkg-a`, but **all** changeset files are unconditionally deleted afterwards -- including changesets that contain entries for packages not part of this release. This silently discards pending changes for unreleased packages.
 
-[ADR-003](003-release-command.md) defined changeset consumption as "delete all processed `.chronicle/*.md` files" but did not anticipate scoped releases. The `--package` flag was added to the implementation without updating the consumption semantics.
+[ADR-003](003-release-command.md) defined changeset consumption as "delete all processed `.cursus/*.md` files" but did not anticipate scoped releases. The `--package` flag was added to the implementation without updating the consumption semantics.
 
 ## Decision
 
@@ -50,7 +50,7 @@ When `release` runs with a `--package` scope, changeset consumption will follow 
 
 ### Negative
 
-- Changeset files are now mutable artifacts. A file that originally described changes to `pkg-a` and `pkg-b` may be rewritten to only reference `pkg-b`. The on-disk file no longer matches what the developer originally wrote. Users who inspect `.chronicle/` between releases may find this surprising.
+- Changeset files are now mutable artifacts. A file that originally described changes to `pkg-a` and `pkg-b` may be rewritten to only reference `pkg-b`. The on-disk file no longer matches what the developer originally wrote. Users who inspect `.cursus/` between releases may find this surprising.
 - The description message may reference packages no longer listed in the frontmatter, which could be mildly confusing on inspection. However, changesets are transient artifacts meant to be consumed, and the authoritative record of changes lives in the changelog and git history.
 
 ### Neutral
@@ -67,8 +67,8 @@ Leave a changeset on disk entirely if it references any package outside the rele
 
 ### Track consumed entries in a separate manifest
 
-Maintain a `.chronicle/released.toml` recording which package entries have been consumed from which changeset files. This preserves changeset files as immutable records but introduces a new file format, a new consistency concern (manifest and changesets can drift out of sync), and additional cleanup logic. The complexity is disproportionate to the problem, especially given that changesets are transient artifacts designed to be consumed and deleted.
+Maintain a `.cursus/released.toml` recording which package entries have been consumed from which changeset files. This preserves changeset files as immutable records but introduces a new file format, a new consistency concern (manifest and changesets can drift out of sync), and additional cleanup logic. The complexity is disproportionate to the problem, especially given that changesets are transient artifacts designed to be consumed and deleted.
 
 ## Errata
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `chronicle release` subcommand to `chronicle prepare`. References to `release` as a subcommand name in this ADR now refer to `chronicle prepare`. The scoped changeset consumption behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. References to `release` as a subcommand name in this ADR now refer to `cursus prepare`. The scoped changeset consumption behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.

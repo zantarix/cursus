@@ -18,7 +18,7 @@ enabled = true
 enabled = true
 strategy = "branch"
 # tag_format = "auto"                            # Tag format: "auto", "prefixed", or "simple"
-# release_branch_prefix = "chronicle-release/"   # Prefix for release branches (branch strategy)
+# release_branch_prefix = "cursus-release/"      # Prefix for release branches (branch strategy)
 # extra_files = []                               # Additional files to stage before committing
 
 [github]

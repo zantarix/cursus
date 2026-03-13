@@ -1,6 +1,6 @@
-//! Template-based config file generation for `chronicle init`.
+//! Template-based config file generation for `cursus init`.
 //!
-//! Generates a `.chronicle/config.toml` string from an [`InitResult`], emitting
+//! Generates a `.cursus/config.toml` string from an [`InitResult`], emitting
 //! active values as normal TOML and advanced/disabled options as commented-out
 //! blocks with inline documentation.
 
@@ -84,7 +84,7 @@ fn write_git_section(out: &mut String, enabled: bool, strategy: Option<Strategy>
 	)?;
 	writeln!(
 		out,
-		"{prefix}# release_branch_prefix = \"chronicle-release/\"   # Prefix for release branches (branch strategy)"
+		"{prefix}# release_branch_prefix = \"cursus-release/\"      # Prefix for release branches (branch strategy)"
 	)?;
 	writeln!(
 		out,
@@ -160,7 +160,7 @@ fn write_github_section(
 	writeln!(out)
 }
 
-/// Renders a `.chronicle/config.toml` string from the given [`InitResult`].
+/// Renders a `.cursus/config.toml` string from the given [`InitResult`].
 ///
 /// Enabled sections are emitted as active TOML. Disabled or advanced options
 /// are included as commented-out blocks so users can discover and uncomment them

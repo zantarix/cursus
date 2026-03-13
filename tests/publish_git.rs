@@ -3,16 +3,16 @@
 mod common;
 
 use common::{
-	git_enabled_config, git_tags, run_chronicle, temp_real_git_repo_with_cargo_workspace,
+	git_enabled_config, git_tags, run_cursus, temp_real_git_repo_with_cargo_workspace,
 	temp_real_git_repo_with_config,
 };
 
-use chronicle::model::config::PackageManager;
-use chronicle::test_logging::{init_test_logger, take_logs};
+use cursus::model::config::PackageManager;
+use cursus::test_logging::{init_test_logger, take_logs};
 
-/// Helper: write a config TOML directly to `.chronicle/config.toml`.
+/// Helper: write a config TOML directly to `.cursus/config.toml`.
 fn write_config(dir: &std::path::Path, toml: &str) {
-	let config_dir = dir.join(".chronicle");
+	let config_dir = dir.join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
 	std::fs::write(config_dir.join("config.toml"), toml).unwrap();
 }
@@ -30,9 +30,9 @@ fn publish_no_git_flag_parses_without_error() {
 
 	// --no-git just skips git operations; --dry-run avoids hitting a registry.
 	// The command should succeed (no changesets → exit success is fine too).
-	let result = run_chronicle(
+	let result = run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -49,8 +49,8 @@ fn publish_no_git_flag_parses_without_error() {
 fn publish_git_enabled_dry_run_does_not_create_tags() {
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 	// Dry-run should report what would happen but not touch the git repository.
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -63,9 +63,9 @@ fn publish_git_enabled_dry_run_does_not_create_tags() {
 #[test]
 fn publish_no_git_dry_run_does_not_create_tags() {
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
-	let result = run_chronicle(
+	let result = run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -99,9 +99,9 @@ fn publish_no_git_skips_github_token_check() {
 
 	// Without --no-git and no token, this would fail due to missing GitHub token.
 	// With --no-git, it should succeed (dry-run so no actual publish either).
-	let result = run_chronicle(
+	let result = run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"publish",
 			"--no-interactive",
 			"--dry-run",
@@ -128,8 +128,8 @@ fn publish_multi_package_dry_run_logs_prefixed_tag_format() {
 		git_enabled_config(),
 	);
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -158,8 +158,8 @@ fn publish_git_enabled_dry_run_logs_would_create_tag_and_summary_tag_note() {
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -190,8 +190,8 @@ fn publish_git_disabled_dry_run_no_would_create_tag_in_logs_or_summary() {
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 	write_config(dir.path(), "[cargo]\nenabled = true\n");
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
@@ -218,8 +218,8 @@ fn publish_github_disabled_dry_run_no_would_create_github_release() {
 	// git enabled but github not configured → github.enabled = false
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 
-	let result = run_chronicle(
-		["chronicle", "publish", "--no-interactive", "--dry-run"],
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");

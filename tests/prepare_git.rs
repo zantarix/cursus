@@ -4,13 +4,13 @@ mod common;
 
 use std::process::{Command, Stdio};
 
-use chronicle::model::config::PackageManager;
-use chronicle::model::config::{GitConfig, Strategy, TagFormat};
 use common::{
 	add_local_remote, git_current_branch, git_enabled_config, git_local_branch_exists, git_log,
 	git_push_to_remote, git_tags, temp_git_repo_with_project,
 	temp_real_git_repo_with_cargo_workspace, temp_real_git_repo_with_config, write_changeset,
 };
+use cursus::model::config::PackageManager;
+use cursus::model::config::{GitConfig, Strategy, TagFormat};
 
 /// Stages all files and creates a commit with the given message.
 fn git_commit_all(dir: &std::path::Path, message: &str) {
@@ -65,7 +65,7 @@ fn prepare_git_disabled_by_default() {
 	);
 
 	// Uses a fake .git dir, not a real repo — verifies nothing panics when enabled=false.
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 }
 
@@ -82,7 +82,7 @@ fn prepare_git_creates_commit() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -111,7 +111,7 @@ fn prepare_git_does_not_create_tags() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Release no longer creates tags — publish does.
@@ -137,7 +137,7 @@ fn prepare_git_tag_format_config_no_tags_at_release() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	assert!(
@@ -163,7 +163,7 @@ fn prepare_git_multi_package_creates_single_commit() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -191,8 +191,8 @@ fn prepare_no_git_flag_skips_git() {
 	);
 	git_commit_all(dir.path(), "chore: add changeset");
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--no-git"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -210,8 +210,8 @@ fn prepare_no_git_flag_skips_git() {
 }
 
 #[test]
-fn prepare_git_stages_only_chronicle_files() {
-	// Chronicle uses `git add -- <files>` for selective staging, so tracked
+fn prepare_git_stages_only_cursus_files() {
+	// Cursus uses `git add -- <files>` for selective staging, so tracked
 	// but unmodified files are never included in the release commit.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
@@ -229,7 +229,7 @@ fn prepare_git_stages_only_chronicle_files() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	// The release commit should not contain the unrelated file (it was not modified)
@@ -260,7 +260,7 @@ fn prepare_git_filesystem_changes_persist_after_lifecycle() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -281,8 +281,8 @@ fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 	);
 	git_commit_all(dir.path(), "chore: add changeset");
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok());
@@ -303,13 +303,13 @@ fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 fn prepare_git_extra_files_are_staged() {
 	// An extra file produced by a custom lock_command should be staged in the release
 	// commit. We use an npm project with a lock_command that writes custom.lock so the
-	// file is created WITHIN chronicle's execution (after the dirty-tree check).
+	// file is created WITHIN cursus's execution (after the dirty-tree check).
 	let git_config = GitConfig::enabled_config().with_extra_files(vec!["custom.lock".to_string()]);
 	let dir = temp_real_git_repo_with_config(PackageManager::Npm, git_config);
 
 	// Write config with a lock_command that produces custom.lock during the release.
 	std::fs::write(
-		dir.path().join(".chronicle").join("config.toml"),
+		dir.path().join(".cursus").join("config.toml"),
 		"[npm]\nenabled = true\nlock_command = \"echo updated > custom.lock\"\n\
 		 [git]\nenabled = true\nextra_files = [\"custom.lock\"]\n",
 	)
@@ -333,8 +333,8 @@ fn prepare_git_extra_files_are_staged() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	// Tree is clean; lock_command will write custom.lock during chronicle's execution.
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	// Tree is clean; lock_command will write custom.lock during cursus's execution.
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Verify custom.lock was included in the release commit
@@ -372,7 +372,7 @@ fn prepare_dirty_tree_fails_when_git_enabled() {
 	// Make the tree dirty with an untracked file
 	std::fs::write(dir.path().join("dirty.txt"), "untracked change").unwrap();
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err());
 	assert!(
 		result.unwrap_err().to_string().contains("dirty"),
@@ -395,8 +395,8 @@ fn prepare_dirty_tree_ignored_when_no_git() {
 	// Dirty tree
 	std::fs::write(dir.path().join("dirty.txt"), "untracked change").unwrap();
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--no-git"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
 	);
 	assert!(
@@ -423,7 +423,7 @@ fn prepare_push_strategy_commits_and_pushes() {
 
 	let initial_branch = git_current_branch(dir.path());
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Verify the release commit was pushed to origin
@@ -452,8 +452,8 @@ fn prepare_push_strategy_dry_run_does_not_push() {
 	git_commit_all(dir.path(), "chore: add changeset");
 	// No remote — push would fail; this verifies dry-run doesn't push.
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "dry-run should succeed: {result:?}");
@@ -482,9 +482,9 @@ fn prepare_branch_strategy_creates_branch_and_returns() {
 	git_push_to_remote(dir.path());
 
 	let initial_branch = git_current_branch(dir.path());
-	let expected_release_branch = format!("chronicle-release/{initial_branch}");
+	let expected_release_branch = format!("cursus-release/{initial_branch}");
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Current branch is back to original
@@ -527,8 +527,8 @@ fn prepare_branch_strategy_dry_run_does_not_checkout() {
 
 	let initial_branch = git_current_branch(dir.path());
 
-	let result = common::run_chronicle(
-		["chronicle", "--no-interactive", "prepare", "--dry-run"],
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
 	);
 	assert!(result.is_ok(), "dry-run should succeed: {result:?}");
@@ -565,9 +565,9 @@ fn prepare_branch_flag_overrides_prefix() {
 
 	let initial_branch = git_current_branch(dir.path());
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--branch",
@@ -586,7 +586,7 @@ fn prepare_branch_flag_overrides_prefix() {
 		"Custom branch should exist"
 	);
 	assert!(
-		!git_local_branch_exists(dir.path(), &format!("chronicle-release/{initial_branch}")),
+		!git_local_branch_exists(dir.path(), &format!("cursus-release/{initial_branch}")),
 		"Default release branch should not exist when --branch is used"
 	);
 }
@@ -597,7 +597,7 @@ fn prepare_branch_flag_overrides_prefix() {
 /// `!= Push`), which would incorrectly warn whenever `--branch` is used with branch strategy.
 #[test]
 fn prepare_branch_arg_with_branch_strategy_no_warning() {
-	use chronicle::test_logging::{init_test_logger, take_logs};
+	use cursus::test_logging::{init_test_logger, take_logs};
 	init_test_logger();
 	let _ = take_logs();
 
@@ -613,9 +613,9 @@ fn prepare_branch_arg_with_branch_strategy_no_warning() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_chronicle(
+	let result = common::run_cursus(
 		[
-			"chronicle",
+			"cursus",
 			"--no-interactive",
 			"prepare",
 			"--branch",
@@ -639,7 +639,7 @@ fn prepare_git_config_old_run_until_field_fails_to_load() {
 	// Old configs with run_until must produce a clear parse error.
 	let dir = tempfile::tempdir().unwrap();
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
-	let config_dir = dir.path().join(".chronicle");
+	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
 	std::fs::write(
 		config_dir.join("config.toml"),
@@ -652,7 +652,7 @@ fn prepare_git_config_old_run_until_field_fails_to_load() {
 	)
 	.unwrap();
 
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_err(), "Expected error for old run_until field");
 }
 
@@ -673,10 +673,10 @@ fn prepare_branch_strategy_rerun_is_idempotent() {
 	git_push_to_remote(dir.path());
 
 	let initial_branch = git_current_branch(dir.path());
-	let expected_release_branch = format!("chronicle-release/{initial_branch}");
+	let expected_release_branch = format!("cursus-release/{initial_branch}");
 
 	// First run
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "first prepare failed: {result:?}");
 
 	// Back on original branch after first run
@@ -687,7 +687,7 @@ fn prepare_branch_strategy_rerun_is_idempotent() {
 	);
 
 	// Second run — should succeed even though the release branch already exists
-	let result = common::run_chronicle(["chronicle", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok(), "second prepare failed: {result:?}");
 
 	// Still on original branch after second run
@@ -734,12 +734,12 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	// Uses httpmock to intercept the GitHub REST API calls made by RestGitHubClient.
 	use std::sync::Arc;
 
-	use chronicle::command::RealCommandRunner;
-	use chronicle::github::RestGitHubClient;
-	use chronicle::github::client::GitHubClient;
-	use chronicle::model::config::CargoConfig;
-	use chronicle::model::config::{Config, GitHubConfig};
-	use chronicle::path::AbsolutePath;
+	use cursus::command::RealCommandRunner;
+	use cursus::github::RestGitHubClient;
+	use cursus::github::client::GitHubClient;
+	use cursus::model::config::CargoConfig;
+	use cursus::model::config::{Config, GitHubConfig};
+	use cursus::path::AbsolutePath;
 	use httpmock::prelude::*;
 
 	let server = MockServer::start();
@@ -771,20 +771,18 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	git_push_to_remote(dir.path());
 
 	let initial_branch = git_current_branch(dir.path());
-	let release_branch = format!("chronicle-release/{initial_branch}");
+	let release_branch = format!("cursus-release/{initial_branch}");
 	let head_param = format!("acme:{release_branch}");
 
 	// Build a fresh Env with a RestGitHubClient pointing at the mock server.
-	// A new client is created for each run because Env is consumed by chronicle::run.
+	// A new client is created for each run because Env is consumed by cursus::run.
 	let make_env = || {
 		let client = Arc::new(
 			RestGitHubClient::new("test-token".to_string())
 				.with_base_urls(api_url.clone(), api_url.clone()),
 		) as Arc<dyn GitHubClient>;
-		chronicle::Env::new(
-			Arc::new(RealCommandRunner) as Arc<dyn chronicle::command::CommandRunner>
-		)
-		.with_github_client(client)
+		cursus::Env::new(Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>)
+			.with_github_client(client)
 	};
 
 	// ── First run: no existing PR → find returns empty → create PR ───────────
@@ -804,8 +802,8 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
 	});
 
-	let result = chronicle::run(
-		["chronicle", "--no-interactive", "prepare"],
+	let result = cursus::run(
+		["cursus", "--no-interactive", "prepare"],
 		dir.path(),
 		make_env(),
 	);
@@ -834,8 +832,8 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
 	});
 
-	let result = chronicle::run(
-		["chronicle", "--no-interactive", "prepare"],
+	let result = cursus::run(
+		["cursus", "--no-interactive", "prepare"],
 		dir.path(),
 		make_env(),
 	);

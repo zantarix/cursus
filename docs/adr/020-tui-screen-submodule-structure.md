@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Chronicle's TUI wizards use ratatui and crossterm to present multi-screen interactive flows. Each wizard follows a pattern of a `Screen` enum for state, pure `handle_key()` functions for state transitions, and `render_*()` functions for drawing. Tests use `ratatui::backend::TestBackend` and assert on both state transitions and rendered output.
+Cursus's TUI wizards use ratatui and crossterm to present multi-screen interactive flows. Each wizard follows a pattern of a `Screen` enum for state, pure `handle_key()` functions for state transitions, and `render_*()` functions for drawing. Tests use `ratatui::backend::TestBackend` and assert on both state transitions and rendered output.
 
 As the project matured, wizard modules grew substantially. The `tui::init` module reached approximately 2000 lines after [ADR-019](019-improve-init-workflow.md) expanded it to eight screens, and `tui::change` reached approximately 950 lines with two screens. Each screen carries its own handler logic, rendering logic, and a full test suite covering both handlers and rendering -- all colocated in a single file. Navigating, reviewing, and testing individual screens became increasingly difficult as unrelated screen code competed for attention in the same file.
 

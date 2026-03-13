@@ -12,9 +12,9 @@
 use std::io::Write as _;
 use std::sync::{Arc, Mutex};
 
-use chronicle::github::GitHubRepo;
-use chronicle::github::RestGitHubClient;
-use chronicle::github::client::GitHubClient as _;
+use cursus::github::GitHubRepo;
+use cursus::github::RestGitHubClient;
+use cursus::github::client::GitHubClient as _;
 use httpmock::prelude::*;
 use proptest::prelude::*;
 use serde_json::Value;
@@ -320,7 +320,7 @@ fn create_pull_request_sends_spec_compliant_request() {
 			&GitHubRepo::new("acme", "app").unwrap(),
 			"Release updates",
 			"Changelog body",
-			"chronicle-release/main",
+			"cursus-release/main",
 			"main",
 		)
 		.expect("create_pull_request should succeed against mock server");

@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-Chronicle's `prepare` command reads changeset files from `.chronicle/`, aggregates them per-package, bumps versions, generates changelog entries, and deletes the consumed changeset files. The generated changelog entries currently contain only the change type category and the user-authored description message, for example:
+Cursus's `prepare` command reads changeset files from `.cursus/`, aggregates them per-package, bumps versions, generates changelog entries, and deletes the consumed changeset files. The generated changelog entries currently contain only the change type category and the user-authored description message, for example:
 
 ```markdown
 ### Features
@@ -17,7 +17,7 @@ Chronicle's `prepare` command reads changeset files from `.chronicle/`, aggregat
 
 This provides no traceability back to the code change that introduced each entry. Users reviewing a changelog -- whether in a CHANGELOG.md file, a GitHub Release, or a release PR body -- cannot easily navigate from a changelog bullet to the commit or pull request that produced it. This is a common need during incident investigation, release auditing, and code archaeology.
 
-Changeset files arrive in `.chronicle/` via normal git workflow: a contributor creates a changeset on a branch, and it lands on the trunk branch through one of three merge strategies: rebase merge, squash merge, or regular merge commit. The commit on the trunk branch that *introduced* a changeset file is the natural anchor point for traceability, since it represents the moment the change was accepted into the mainline. Depending on the merge strategy, this may be a rebased commit, a squash commit, or a merge commit -- but in all cases it is the first-parent commit on the trunk that introduced the file.
+Changeset files arrive in `.cursus/` via normal git workflow: a contributor creates a changeset on a branch, and it lands on the trunk branch through one of three merge strategies: rebase merge, squash merge, or regular merge commit. The commit on the trunk branch that *introduced* a changeset file is the natural anchor point for traceability, since it represents the moment the change was accepted into the mainline. Depending on the merge strategy, this may be a rebased commit, a squash commit, or a merge commit -- but in all cases it is the first-parent commit on the trunk that introduced the file.
 
 GitHub and other forges automatically link short commit hashes (e.g., `abc1234`) and PR references (e.g., `#123`) when rendering Markdown. This means changelog entries can include lightweight plain-text references that become clickable links with zero URL construction, removing any dependency on knowing the forge URL or having `[github].enabled` configured.
 
@@ -55,7 +55,7 @@ The commit resolution will occur during the aggregation phase in `prepare`, afte
 
 **Graceful degradation.** Commit reference resolution is best-effort and never fatal. The log level when a reference cannot be resolved depends on whether the user has opted into git:
 
-- **Git not enabled or not available** (`[git].enabled = false`, or no git repository): The commit reference is `None` and a `debug!`-level message notes the skip. This is silent by default, consistent with Chronicle's opt-in git philosophy.
+- **Git not enabled or not available** (`[git].enabled = false`, or no git repository): The commit reference is `None` and a `debug!`-level message notes the skip. This is silent by default, consistent with Cursus's opt-in git philosophy.
 - **Git enabled but commit lookup fails** (`[git].enabled = true` and the `git log` command fails or returns no result): The commit reference is `None` and a `warn!`-level message alerts the user. Since the user has explicitly opted into git integration, a failure in an expected git operation warrants visible feedback.
 - **PR number not found in commit message**: Always `debug!`-level regardless of git configuration. This is the normal case for rebase merges and is not worth warning about.
 
@@ -102,4 +102,4 @@ Instead of relying on forge autolinking, we could construct full URLs like `[abc
 
 ### Make PR extraction patterns user-configurable
 
-Exposing the regex patterns in `.chronicle/config.toml` would allow users to support arbitrary forge conventions. This was rejected as premature: the two GitHub patterns cover the dominant use case, the pattern list is trivially extensible in code, and adding configuration would increase the surface area of the config schema (which uses `deny_unknown_fields`) for a feature most users will never need to customize. A future ADR can add configurability if demand arises.
+Exposing the regex patterns in `.cursus/config.toml` would allow users to support arbitrary forge conventions. This was rejected as premature: the two GitHub patterns cover the dominant use case, the pattern list is trivially extensible in code, and adding configuration would increase the surface area of the config schema (which uses `deny_unknown_fields`) for a feature most users will never need to customize. A future ADR can add configurability if demand arises.

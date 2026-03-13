@@ -181,7 +181,7 @@ fn write_auto_changeset(
 			names.join(", ")
 		);
 		if commit_to_git {
-			git.add(&[git.path().join(".chronicle/changeset-dry-run.md")])?;
+			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
 		}
 	} else {
 		let path = changeset.write(git)?;
@@ -196,7 +196,7 @@ fn write_auto_changeset(
 	Ok(())
 }
 
-/// Runs `chronicle change --auto`: derives a changeset from the single
+/// Runs `cursus change --auto`: derives a changeset from the single
 /// Conventional Commit on the current branch.
 ///
 /// Returns `ExitCode::SUCCESS` without creating a changeset when:
