@@ -14,6 +14,17 @@ The project needed to solve a specific problem: managing releases across monorep
 
 We will document the following founding constraints and choices as the baseline for all future architectural decisions.
 
+### Claude Code for development
+
+>![INFO]
+> As with the most of the rest of this repo, the other sections of this document were AI written, with guidance. This section is 100% human. To anyone who interacts with this repo, I have one promise. If something says it's from me, then it is from me and hasn't gone through a bot. That is just common decency.
+
+One of the leading reasons for me starting this project was to stress test AI coding agents and see how good, or bad, they really were. From day one, there has been an explicit goal to be hands off with the precise code that is written and only provide feedback in the form of reviews and design work.
+
+This isn't a vibe coded project - at time of writing, I am five weeks deep on this project. I have put a lot of effort into guiding both the design of the system in general and in code review of the specifics. 5 weeks sounds like a lot of time, but in that time this project has grown into the 22,000 line piece of software that it is now, and it's still growing. There are also thousands of lines of text documentation in these ADR's.
+
+I will document elsewhere, probably in a discussion thread on GitHub, some of the learnings and pitfalls I've run into, but also some of the successes I've had. It has definitely been a mixed bag, but a good experience overall. I never could have gotten as far as I have with this project in the time that I have alone. My first instructions to Claude were in a completely empty repository and it bootstrapped everything, including the development environment. 99% of the code in this repository, including all the system prompts and Claude configuration, is all AI generated with oversight. Commits in this repo attributed solely to me are my own work, so you can judge exactly how much is not AI generated if you really wish to.
+
 ### Static binary distribution as a first-class goal
 
 The primary distribution goal is a single static binary that users can download and run without any runtime dependencies. This was a hard constraint from day one and the single most influential decision on the project's technical direction. Every tooling and language choice flows downstream from this requirement.
