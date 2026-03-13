@@ -54,7 +54,8 @@ Key differences from old style:
 - ADR-019: Accepted (improved init workflow)
 - ADR-020: Accepted (TUI screen submodule structure)
 - ADR-021: Proposed (commit references in changelog entries)
-- Next ADR number: 022
+- ADR-022: Proposed (distribution strategy)
+- Next ADR number: 023
 
 ## Project ADR Rules (from CLAUDE.md)
 
