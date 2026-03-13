@@ -33,7 +33,7 @@ httpmock = "=0.8.3"
 insta = "=1.46.3"
 jsonschema = "=0.45.0"
 proptest = "=1.10.0"
-tempfile = "=3.26.0"
+tempfile = "=3.27.0"
 
 [build-dependencies]
 ureq = "=3.2.0"
