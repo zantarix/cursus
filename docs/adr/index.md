@@ -2,6 +2,7 @@
 
 | ADR | Title | Status | Summary |
 |-----|-------|--------|---------|
+| [ADR-000](000-founding-constraints.md) | Founding Constraints and Initial Choices | Accepted | Retrospective capture of day-zero constraints: static binary distribution as a hard requirement, Rust chosen to enable that goal, CLI as the user-facing interface, dual CLI/library artifact, JavaScript and Cargo as founding package managers, Nix flakes for development, and Claude Code for AI-assisted development. |
 | [ADR-001](001-project-initialisation.md) | Project Initialisation | Accepted | `chronicle init` creates `.chronicle/config.toml` via TUI wizard with package manager detection for both interactive and non-interactive contexts. |
 | [ADR-002](002-changeset-recording.md) | Changeset Recording | Accepted | `chronicle change` records per-package semver bump level and description as TOML-frontmatter Markdown files in `.chronicle/`, with conflict-free multi-branch support. |
 | [ADR-003](003-release-command.md) | Release Command | Accepted | `chronicle release` consumes changesets to bump versions, generate changelogs, and delete consumed changeset files -- filesystem only, no git operations. |

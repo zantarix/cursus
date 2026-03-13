@@ -1,5 +1,6 @@
 # ADR Inventory
 
+- **ADR-000** (Accepted): Founding Constraints and Initial Choices — retrospective capture of day-zero constraints: static binary distribution (portability + ecosystem-neutrality), Rust (chosen for static binary support), CLI interface, dual CLI/library artifact, JavaScript and Cargo as founding package managers (dogfooding + largest ecosystem), Nix flakes for dev environment, Claude Code for AI-assisted development.
 - **ADR-001** (Accepted): Project Initialisation
 - **ADR-002** (Accepted): Changeset Recording
 - **ADR-003** (Accepted): Release Command. Errata: ADR-006 adds optional git hooks; ADR-015 adds branch management; ADR-016 renames subcommand to `prepare`.

@@ -49,6 +49,7 @@ Key differences from old style:
 
 ## ADR Status Quick Reference
 
+- ADR-000: Accepted (founding constraints — retrospective)
 - ADR-001 to ADR-018: Accepted
 - ADR-013: backend sub-decision superseded by ADR-018 (log facade decision still valid)
 - ADR-019: Accepted (improved init workflow)

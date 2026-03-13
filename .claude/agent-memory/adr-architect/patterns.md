@@ -1,5 +1,9 @@
 # Architectural Patterns from ADRs
 
+## Ecosystem-Neutrality Principle (ADR-000)
+
+Chronicle must not favour any single package ecosystem. The static binary distribution constraint exists not just for portability but to ensure ecosystem-neutrality: users should never need to install an unrelated toolchain to run Chronicle. Distribution channels that depend on a specific ecosystem (npm package, Cargo crate) are secondary and must not be the only way to obtain the tool. This principle should inform any future distribution, packaging, or dependency decisions.
+
 ## Three-Step Release Workflow
 
 1. `chronicle prepare` (formerly `release`, renamed ADR-016) — filesystem changes + optional git branch management
