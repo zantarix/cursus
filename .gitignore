@@ -11,3 +11,6 @@
 
 # Cached files from build scripts
 /.cache/
+
+# Just Claude things
+/.claude/worktrees
