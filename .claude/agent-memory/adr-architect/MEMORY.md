@@ -57,7 +57,8 @@ Key differences from old style:
 - ADR-022: Proposed (distribution strategy)
 - ADR-023: Proposed (dependency propagation bumps)
 - ADR-024: Proposed (linked package versions)
-- Next ADR number: 025
+- ADR-025: Proposed (auto changeset from conventional commit)
+- Next ADR number: 026
 
 ## Project ADR Rules (from CLAUDE.md)
 
