@@ -37,11 +37,11 @@ jobs:
           use-flakehub: false
 
       - name: Build chronicle
-        shell: nix develop -c bash -e {0}
+        shell: nix develop .#ci -c bash -e {0}
         run: cargo build --release
 
       - name: Run chronicle ci
-        shell: nix develop -c bash -e {0}
+        shell: nix develop .#ci -c bash -e {0}
         env:
           # Override the default GITHUB_TOKEN so chronicle uses the App token
           # for all GitHub API calls (PRs, releases).

@@ -56,12 +56,12 @@ jobs:
           use-flakehub: false
 
       - name: Build chronicle
-        shell: nix develop -c bash -e {0}
+        shell: nix develop .#ci -c bash -e {0}
         run: cargo build --release
 
       # Derive a changeset from the single Renovate commit and push it back
       # to the PR branch.  Chronicle exits 0 without writing anything if the
       # commit type carries no semver significance (e.g. `chore:`).
       - name: Add changeset
-        shell: nix develop -c bash -e {0}
+        shell: nix develop .#ci -c bash -e {0}
         run: ./target/release/chronicle change --auto

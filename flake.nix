@@ -29,6 +29,8 @@
 						"aarch64-pc-windows-gnullvm"
 					];
 				};
+				# Minimal nightly toolchain for CI: just rustc + cargo for the host target.
+				rustToolchainCI = pkgs.rust-bin.nightly.latest.minimal;
 				rustPlatform = pkgs.makeRustPlatform {
 					cargo = rustToolchain;
 					rustc = rustToolchain;
@@ -82,6 +84,12 @@
 					];
 
 					RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+				};
+
+				# Minimal shell for CI: only what is needed for `cargo build --release`
+				# on the current host architecture.
+				devShells.ci = pkgs.mkShell {
+					buildInputs = [ rustToolchainCI ];
 				};
 			}
 		);
