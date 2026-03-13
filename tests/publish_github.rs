@@ -127,7 +127,7 @@ fn publish_dry_run_with_github_shows_would_create() {
 	);
 }
 
-/// During dry-run, the build_command is never executed.
+/// During dry-run, the build_command is suppressed by the DryRunCommandRunner.
 /// Verified by using `false` (always exits 1) as the build_command and checking success.
 #[test]
 fn publish_dry_run_with_github_no_build_command_executed() {
@@ -152,6 +152,51 @@ fn publish_dry_run_with_github_no_build_command_executed() {
 	assert!(
 		result.is_ok(),
 		"Expected success (build_command skipped in dry-run), got: {result:?}"
+	);
+}
+
+/// A failing build_command causes publish to exit with failure before any packages are published.
+///
+/// Using `false` as the build_command (always exits 1) with a real runner verifies that
+/// the build command runs before any registry publish, and a failure halts the whole operation.
+#[test]
+fn publish_build_command_failure_aborts_before_publishing() {
+	chronicle::test_logging::init_test_logger();
+	let _ = chronicle::test_logging::take_logs();
+
+	let dir = temp_git_repo();
+	write_config(
+		dir.path(),
+		"[cargo]\nenabled = true\n[github]\nenabled = true\nowner = \"acme\"\nrepo = \"app\"\nbuild_command = \"false\"\n",
+	);
+	std::fs::write(
+		dir.path().join("Cargo.toml"),
+		"[package]\nname = \"my-app\"\nversion = \"1.0.0\"\n",
+	)
+	.unwrap();
+
+	let result = run_chronicle_with_token(
+		["chronicle", "publish", "--no-interactive"],
+		dir.path(),
+		"test-token",
+	);
+	assert!(result.is_ok(), "Expected Ok(ExitCode), got: {result:?}");
+	assert_eq!(
+		result.unwrap(),
+		std::process::ExitCode::FAILURE,
+		"Expected ExitCode::FAILURE when build command fails"
+	);
+
+	let logs = chronicle::test_logging::take_logs();
+	assert!(
+		logs.iter().any(|(_, m)| m.contains("Build command failed")),
+		"Expected 'Build command failed' in logs, got: {logs:?}"
+	);
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("Published") || m.contains("Would publish")),
+		"No publish should have been attempted after build command failure, got: {logs:?}"
 	);
 }
 

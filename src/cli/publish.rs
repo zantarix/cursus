@@ -167,14 +167,30 @@ fn maybe_orchestrate_github_releases(
 		Some(c) => c,
 		None => bail!("GitHub client not available despite token being set"),
 	};
-	orchestrate_github_releases(
-		git,
-		config,
-		env,
-		client,
-		published_packages,
-		is_multi_package,
-	)
+	orchestrate_github_releases(git, config, client, published_packages, is_multi_package)
+}
+
+/// Runs pre-publish GitHub checks: validates token presence and runs the build command.
+///
+/// Returns `Ok(true)` if the build command failed (caller should return `ExitCode::FAILURE`),
+/// `Ok(false)` if checks pass or GitHub is not enabled, or `Err` if no token was found.
+fn run_pre_publish_github_checks(
+	env: &crate::Env,
+	config: &Config,
+	git: &git::GitWorkdir,
+	no_git: bool,
+	dry_run: bool,
+) -> anyhow::Result<bool> {
+	if !config.github.enabled || no_git {
+		return Ok(false);
+	}
+	if !dry_run && env.github_client().is_none() {
+		bail!(
+			"GitHub Releases is enabled but no GitHub token found. \
+			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
+		);
+	}
+	run_github_build_command(env, config, git)
 }
 
 /// Execute the publish command.
@@ -192,11 +208,8 @@ pub(crate) fn cmd_publish(
 		selected_projects,
 		config.global.disable_dependency_cycle_warnings,
 	)?;
-	if config.github.enabled && !args.no_git && !dry_run && env.github_client().is_none() {
-		bail!(
-			"GitHub Releases is enabled but no GitHub token found. \
-			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
-		);
+	if run_pre_publish_github_checks(env, &config, git, args.no_git, dry_run)? {
+		return Ok(ExitCode::FAILURE);
 	}
 	let is_multi_package = projects.len() > 1;
 	let (published_packages, skipped_count, publish_failed) =
@@ -438,7 +451,7 @@ fn run_github_build_command(
 	}
 	info!("Running build command: {}", config.github.build_command);
 	let output = env
-		.run_shell(&config.github.build_command, git.path())
+		.run_shell_mut(&config.github.build_command, git.path())
 		.with_context(|| {
 			format!(
 				"Failed to execute build command: {}",
@@ -461,7 +474,6 @@ fn run_github_build_command(
 fn orchestrate_github_releases(
 	git: &git::GitWorkdir,
 	config: &Config,
-	env: &crate::Env,
 	github_client: &dyn GitHubClient,
 	published_packages: &[PublishedPackage],
 	is_multi_package: bool,
@@ -471,11 +483,7 @@ fn orchestrate_github_releases(
 	}
 
 	let gh_repo = GitHubRepo::resolve(&config.github, git)?;
-	let mut github_failed = run_github_build_command(env, config, git)?;
-	if github_failed {
-		return Ok((0, true));
-	}
-
+	let mut github_failed = false;
 	let mut created_count = 0;
 
 	for pkg in published_packages {
@@ -617,15 +625,8 @@ mod tests {
 			wd.clone(),
 		);
 
-		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&[],
-			false,
-		)
-		.unwrap();
+		let (created, failed) =
+			orchestrate_github_releases(&git, &config, &client, &[], false).unwrap();
 
 		assert_eq!(created, 0);
 		assert!(!failed);
@@ -649,15 +650,8 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			wd.clone(),
 		);
-		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&packages,
-			false,
-		)
-		.unwrap();
+		let (created, failed) =
+			orchestrate_github_releases(&git, &config, &client, &packages, false).unwrap();
 
 		assert_eq!(created, 1);
 		assert!(!failed);
@@ -688,12 +682,7 @@ mod tests {
 			wd.clone(),
 		);
 		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&packages,
-			true, // is_multi_package
+			&git, &config, &client, &packages, true, // is_multi_package
 		)
 		.unwrap();
 
@@ -704,39 +693,6 @@ mod tests {
 			&invocations[0],
 			GitHubInvocation::CreateRelease { tag_name, .. } if tag_name == "my-app@1.2.0"
 		));
-	}
-
-	#[test]
-	fn github_release_build_command_failure_skips_releases() {
-		let config =
-			Config::new(&workdir()).with_github(make_github_config("exit 1", BTreeMap::new()));
-		let client = RecordingGitHubClient::new();
-		let runner = Arc::new(RecordingCommandRunner::new(1)); // fails
-
-		let packages = vec![PublishedPackage {
-			name: "my-app".to_string(),
-			version: "1.0.0".parse().unwrap(),
-			project_path: AbsolutePath::new("/nonexistent").unwrap(),
-		}];
-
-		let wd = workdir();
-		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			wd.clone(),
-		);
-		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&packages,
-			false,
-		)
-		.unwrap();
-
-		assert_eq!(created, 0);
-		assert!(failed);
-		assert!(client.invocations().is_empty());
 	}
 
 	#[test]
@@ -763,15 +719,8 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			wd.clone(),
 		);
-		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&packages,
-			true,
-		)
-		.unwrap();
+		let (created, failed) =
+			orchestrate_github_releases(&git, &config, &client, &packages, true).unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -821,15 +770,8 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&packages,
-			false,
-		)
-		.unwrap();
+		let (created, failed) =
+			orchestrate_github_releases(&git, &config, &client, &packages, false).unwrap();
 
 		// Release was created even though uploads failed
 		assert_eq!(created, 1);
@@ -885,15 +827,8 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, failed) = orchestrate_github_releases(
-			&git,
-			&config,
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
-			&client,
-			&packages,
-			true,
-		)
-		.unwrap();
+		let (created, failed) =
+			orchestrate_github_releases(&git, &config, &client, &packages, true).unwrap();
 
 		assert_eq!(created, 2);
 		assert!(!failed);
