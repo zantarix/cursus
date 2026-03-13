@@ -308,6 +308,37 @@ impl GitWorkdir {
 
 		Ok(())
 	}
+
+	/// Returns the list of files reported by `git diff --name-only <extra_args>`.
+	///
+	/// `extra_args` is appended after `--name-only`. Pass `&["origin/HEAD..HEAD"]`
+	/// for committed-but-not-pushed changes, `&["--cached"]` for staged changes,
+	/// or `&[]` for unstaged working-tree changes.
+	///
+	/// Returns one relative path per line, filtering empty lines.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git diff` exits with a non-zero status.
+	pub(crate) fn diff_names(&self, extra_args: &[&str]) -> anyhow::Result<Vec<String>> {
+		let mut args = vec!["diff", "--name-only"];
+		args.extend_from_slice(extra_args);
+		let output = self
+			.env
+			.run("git", &args, &self.path)
+			.context("Failed to run git diff --name-only")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git diff --name-only failed: {stderr}");
+		}
+
+		Ok(String::from_utf8_lossy(&output.stdout)
+			.lines()
+			.filter(|l| !l.is_empty())
+			.map(|l| l.to_string())
+			.collect())
+	}
 }
 
 #[cfg(test)]
@@ -780,6 +811,91 @@ mod tests {
 		let (git, _) = make_git(runner, dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(result, None);
+	}
+
+	// --- diff_names ---
+
+	#[test]
+	fn diff_names_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.diff_names(&["origin/HEAD..HEAD"]).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			["diff", "--name-only", "origin/HEAD..HEAD"]
+		);
+		assert_eq!(invocations[0].cwd, dir.path());
+	}
+
+	#[test]
+	fn diff_names_staged_passes_cached_flag() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.diff_names(&["--cached"]).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations[0].args, ["diff", "--name-only", "--cached"]);
+	}
+
+	#[test]
+	fn diff_names_unstaged_passes_no_extra_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.diff_names(&[]).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations[0].args, ["diff", "--name-only"]);
+	}
+
+	#[test]
+	fn diff_names_returns_parsed_lines() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"packages/a/src/lib.rs\npackages/b/package.json\n".to_vec()),
+		);
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.diff_names(&["origin/HEAD..HEAD"]).unwrap();
+		assert_eq!(
+			result,
+			vec![
+				"packages/a/src/lib.rs".to_string(),
+				"packages/b/package.json".to_string(),
+			]
+		);
+	}
+
+	#[test]
+	fn diff_names_returns_empty_on_no_changes() {
+		let dir = temp_dir();
+		let runner = recording(0); // empty stdout
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.diff_names(&["origin/HEAD..HEAD"]).unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn diff_names_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: ambiguous argument 'origin/HEAD'");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.diff_names(&["origin/HEAD..HEAD"]);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git diff --name-only failed"),
+			"Expected 'git diff --name-only failed', got: {msg}"
+		);
 	}
 
 	#[test]
