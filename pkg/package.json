@@ -1,6 +1,6 @@
 {
 	"name": "@zantarix/chronicle",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"private": true,
 	"description": "Release management with style",
 	"homepage": "https://github.com/zantarix/chronicle#readme",
