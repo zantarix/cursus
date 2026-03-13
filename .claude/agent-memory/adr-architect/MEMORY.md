@@ -59,7 +59,8 @@ Key differences from old style:
 - ADR-023: Proposed (dependency propagation bumps)
 - ADR-024: Proposed (linked package versions)
 - ADR-025: Accepted (auto changeset from conventional commit)
-- Next ADR number: 026
+- ADR-026: Proposed (per-package change level in TUI wizard)
+- Next ADR number: 027
 
 ## Project ADR Rules (from CLAUDE.md)
 
