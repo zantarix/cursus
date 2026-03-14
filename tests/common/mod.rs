@@ -27,6 +27,19 @@ pub fn run_cursus(
 	)
 }
 
+/// Runs cursus with a caller-supplied [`cursus::Env`], returning the result.
+///
+/// Use this when you need to inject a custom command runner (e.g.
+/// [`cursus::command::test_support::DispatchingCommandRunner`]) or pre-populated
+/// environment variables into a test scenario.
+pub fn run_cursus_with_env(
+	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+	cwd: &std::path::Path,
+	env: cursus::Env,
+) -> anyhow::Result<std::process::ExitCode> {
+	cursus::run(args, cwd, env)
+}
+
 /// Runs a git command in the given directory and panics on failure.
 ///
 /// Stdout is suppressed to keep test output clean. Stderr is captured and
