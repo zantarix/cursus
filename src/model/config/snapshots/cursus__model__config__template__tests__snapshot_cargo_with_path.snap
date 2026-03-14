@@ -15,6 +15,9 @@ path = "rust/"
 # lock_command = "npm install"  # Custom command to update the lock file
 # access = "restricted"         # Access level for scoped packages: "public" or "restricted" (default: "restricted")
 
+# [prepare]
+# dependency_bump = "auto"      # Bump level for dependents: "auto" (default), "match", "patch", "minor", or "major"
+
 # [linked-versions]
 # Keep all packages at the same version (global linking).
 # enabled = true

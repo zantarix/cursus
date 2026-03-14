@@ -447,3 +447,42 @@ fn glob_pattern_matches_prefix() {
 	assert_eq!(read_pkg_version(dir.path(), "sdk-utils"), "1.1.0");
 	assert_eq!(read_pkg_version(dir.path(), "other"), "1.0.0");
 }
+
+// ── Linked group + dependency propagation interaction ───────────────────────
+
+#[test]
+fn propagation_into_linked_group_bumps_all_group_members() {
+	// Scenario: linked group [pkg-a@0.2.5, pkg-b@0.2.5], pkg-c@1.2.3.
+	// pkg-a depends on pkg-c. Changeset bumps only pkg-c (minor).
+	// Expected: pkg-c → 1.3.0, pkg-a → 0.2.6 (propagated patch), pkg-b → 0.2.6 (linked with pkg-a).
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_git_repo_with_cargo_workspace(&[
+		("pkg-a", "0.2.5"),
+		("pkg-b", "0.2.5"),
+		("pkg-c", "1.2.3"),
+	]);
+	// pkg-a depends on pkg-c
+	std::fs::write(
+		dir.path().join("pkg-a/Cargo.toml"),
+		"[package]\nname = \"pkg-a\"\nversion = \"0.2.5\"\nedition = \"2024\"\n\n[dependencies]\npkg-c = { path = \"../pkg-c\", version = \"1.2.3\" }\n",
+	)
+	.unwrap();
+
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+
+	write_changeset(
+		dir.path(),
+		"cs.md",
+		"+++\npkg-c = \"minor\"\n+++\n\nNew feature in pkg-c\n",
+	);
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "prepare failed: {result:?}");
+	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	assert_eq!(read_pkg_version(dir.path(), "pkg-c"), "1.3.0");
+	assert_eq!(read_pkg_version(dir.path(), "pkg-a"), "0.2.6");
+	// pkg-b is in the same linked group as pkg-a and must be co-bumped.
+	assert_eq!(read_pkg_version(dir.path(), "pkg-b"), "0.2.6");
+}

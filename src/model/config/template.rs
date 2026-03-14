@@ -101,6 +101,19 @@ fn write_git_section(out: &mut String, enabled: bool, strategy: Option<Strategy>
 	writeln!(out)
 }
 
+/// Appends a fully commented-out `[prepare]` section.
+///
+/// Always emitted as comments so users can discover the `dependency_bump`
+/// option without consulting documentation; it is never enabled by the init wizard.
+fn write_prepare_section(out: &mut String) -> fmt::Result {
+	writeln!(out, "# [prepare]")?;
+	writeln!(
+		out,
+		"# dependency_bump = \"auto\"      # Bump level for dependents: \"auto\" (default), \"match\", \"patch\", \"minor\", or \"major\""
+	)?;
+	writeln!(out)
+}
+
 /// Appends a fully commented-out `[linked-versions]` section.
 ///
 /// This section is always emitted as comments so users can discover it without
@@ -196,7 +209,7 @@ fn write_github_section(
 /// without consulting documentation.
 ///
 /// Section ordering: `[global]`, cargo, npm (enabled first as active TOML,
-/// disabled as comments), `[linked-versions]`, `[git]`, `[github]`.
+/// disabled as comments), `[prepare]`, `[linked-versions]`, `[git]`, `[github]`.
 ///
 /// # Errors
 ///
@@ -211,6 +224,7 @@ pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String
 	writeln!(out)?;
 	write_cargo_section(&mut out, result.cargo_enabled, &result.cargo_path)?;
 	write_npm_section(&mut out, result.npm_enabled, &result.npm_path)?;
+	write_prepare_section(&mut out)?;
 	write_linked_versions_section(&mut out)?;
 	write_git_section(&mut out, result.git_enabled, result.git_strategy)?;
 	write_github_section(

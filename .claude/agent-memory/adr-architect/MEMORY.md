@@ -56,7 +56,7 @@ Key differences from old style:
 - ADR-020: Accepted (TUI screen submodule structure)
 - ADR-021: Accepted (commit references in changelog entries)
 - ADR-022: Proposed (distribution strategy)
-- ADR-023: Proposed (dependency propagation bumps)
+- ADR-023: Accepted (dependency propagation bumps)
 - ADR-024: Accepted (linked package versions)
 - ADR-025: Accepted (auto changeset from conventional commit)
 - ADR-026: Accepted (per-package change level in TUI wizard)

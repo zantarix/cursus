@@ -1,6 +1,6 @@
 //! The `prepare` subcommand.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -17,7 +17,7 @@ use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
 use crate::model::changelog::{Changelog, CommitReference};
 use crate::model::changeset::{ChangeType, Changeset};
-use crate::model::config::{Config, Strategy};
+use crate::model::config::{Config, DependencyBump, Strategy};
 use crate::package_manager::{PackageManagerAdapter, Project, filter_projects_by_name};
 use crate::utils::today_iso_date;
 
@@ -415,6 +415,205 @@ fn infer_change_type(old: &Version, new: &Version) -> ChangeType {
 	}
 }
 
+/// Computes the effective new version for a package given its current state.
+///
+/// Checks, in priority order:
+/// 1. `version_overrides` (linked-version reconciliation)
+/// 2. `aggregated` (changeset-driven bump)
+/// 3. `propagation_map` (propagation-driven bump, complete after phase 1)
+///
+/// When called during the sweep phase, `aggregated` is being mutated. This
+/// function is correct because both the `aggregated` fallback (catches packages
+/// already updated earlier in the loop, ordered by BTreeMap iteration) and the
+/// `propagation_map` fallback (contains the complete phase-1 result) cover all
+/// upstream packages.
+fn effective_new_version(
+	pkg_name: &str,
+	projects: &[Project],
+	aggregated: &BTreeMap<String, ChangeType>,
+	version_overrides: &BTreeMap<String, Version>,
+	propagation_map: &BTreeMap<String, (ChangeType, Vec<String>)>,
+) -> Option<Version> {
+	if let Some(v) = version_overrides.get(pkg_name) {
+		return Some(v.clone());
+	}
+	let ct = aggregated
+		.get(pkg_name)
+		.copied()
+		.or_else(|| propagation_map.get(pkg_name).map(|(ct, _)| *ct))?;
+	let project = projects.iter().find(|p| p.name() == pkg_name)?;
+	Some(bump_version(project.version(), ct))
+}
+
+/// Builds a reverse dependency graph for intra-workspace dependencies.
+///
+/// Returns a map from each package name to the list of packages that depend on it.
+fn build_reverse_dep_graph(projects: &[Project]) -> BTreeMap<String, Vec<String>> {
+	let project_names: BTreeSet<String> = projects.iter().map(|p| p.name().to_string()).collect();
+	let mut reverse_deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	for project in projects {
+		for dep_name in project.dependency_names() {
+			if project_names.contains(dep_name.as_str()) {
+				reverse_deps
+					.entry(dep_name.clone())
+					.or_default()
+					.push(project.name().to_string());
+			}
+		}
+	}
+	reverse_deps
+}
+
+/// Phase 1 of dependency propagation: marks all transitively dependent packages.
+///
+/// Starting from the initially-bumped set (`aggregated`), traverses the reverse
+/// dependency graph and returns a map of `pkg_name → (effective_ct, [upstream_names])`.
+/// Packages in `version_overrides` (linked-version bumps) are exempt.
+fn mark_propagation_bumps(
+	aggregated: &BTreeMap<String, ChangeType>,
+	version_overrides: &BTreeMap<String, Version>,
+	reverse_deps: &BTreeMap<String, Vec<String>>,
+	dep_bump: DependencyBump,
+) -> BTreeMap<String, (ChangeType, Vec<String>)> {
+	let mut queue: VecDeque<(String, ChangeType)> = aggregated
+		.iter()
+		.map(|(name, &ct)| (name.clone(), ct))
+		.collect();
+	let mut propagation_map: BTreeMap<String, (ChangeType, Vec<String>)> = BTreeMap::new();
+
+	while let Some((bumped_name, upstream_ct)) = queue.pop_front() {
+		let effective_ct = dep_bump.to_change_type(upstream_ct);
+		let Some(dependents) = reverse_deps.get(&bumped_name) else {
+			continue;
+		};
+		for dependent_name in dependents {
+			if version_overrides.contains_key(dependent_name.as_str()) {
+				continue; // Linked packages are exempt from propagation.
+			}
+			let current_ct = aggregated
+				.get(dependent_name.as_str())
+				.copied()
+				.or_else(|| {
+					propagation_map
+						.get(dependent_name.as_str())
+						.map(|(ct, _)| *ct)
+				});
+			if current_ct.is_some_and(|c| c >= effective_ct) {
+				continue; // Already at a sufficient bump level.
+			}
+			let entry = propagation_map
+				.entry(dependent_name.clone())
+				.or_insert_with(|| (effective_ct, Vec::new()));
+			entry.0 = effective_ct;
+			entry.1.push(bumped_name.clone());
+			queue.push_back((dependent_name.clone(), effective_ct));
+		}
+	}
+	propagation_map
+}
+
+/// Writes or logs a changeset for an out-of-scope dependent package.
+fn write_out_of_scope_changeset(
+	pkg_name: &str,
+	effective_ct: ChangeType,
+	dep_msgs: &[String],
+	git: &git::GitWorkdir,
+	dry_run: bool,
+) -> anyhow::Result<Option<PathBuf>> {
+	let message = format!("Dependency updates: {}", dep_msgs.join(", "));
+	let mut packages = BTreeMap::new();
+	packages.insert(pkg_name.to_string(), effective_ct);
+	let changeset = Changeset::new(packages, Some(message));
+	if dry_run {
+		info!(
+			"Would write dependency propagation changeset for \
+			 out-of-scope package '{pkg_name}' ({effective_ct})"
+		);
+		return Ok(None);
+	}
+	let path = changeset
+		.write(git)
+		.with_context(|| format!("Failed to write propagation changeset for '{pkg_name}'"))?;
+	info!(
+		"Wrote dependency propagation changeset for '{pkg_name}': {}",
+		path.display()
+	);
+	Ok(Some(path))
+}
+
+/// `(dep_entries_per_package, new_changeset_paths)` returned by [`apply_dependency_propagation`].
+type PropagationResult = (BTreeMap<String, Vec<String>>, Vec<PathBuf>);
+
+/// Applies dependency propagation bumps (ADR-023).
+///
+/// Walks the intra-workspace dependency graph using a two-phase mark-then-sweep
+/// algorithm. In-scope packages have their entry in `aggregated` updated; out-of-scope
+/// dependents receive a newly written changeset file in `.cursus/`.
+///
+/// Returns `(dep_entries_per_package, new_changeset_paths)` where:
+/// - `dep_entries_per_package`: human-readable dependency update messages per in-scope
+///   package, for rendering in the `### Dependencies` changelog section.
+/// - `new_changeset_paths`: paths of changeset files written for out-of-scope packages.
+///
+/// # Errors
+///
+/// Returns an error if writing a changeset file for an out-of-scope dependent fails.
+fn apply_dependency_propagation(
+	projects: &[Project],
+	aggregated: &mut BTreeMap<String, ChangeType>,
+	version_overrides: &BTreeMap<String, Version>,
+	package_filter: &[String],
+	dep_bump: DependencyBump,
+	git: &git::GitWorkdir,
+	dry_run: bool,
+) -> anyhow::Result<PropagationResult> {
+	let reverse_deps = build_reverse_dep_graph(projects);
+	let propagation_map =
+		mark_propagation_bumps(aggregated, version_overrides, &reverse_deps, dep_bump);
+	if propagation_map.is_empty() {
+		return Ok((BTreeMap::new(), Vec::new()));
+	}
+
+	let mut dep_entries: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	let mut new_changeset_paths: Vec<PathBuf> = Vec::new();
+
+	for (pkg_name, (effective_ct, upstream_names)) in &propagation_map {
+		let dep_msgs: Vec<String> = upstream_names
+			.iter()
+			.map(|up| {
+				match effective_new_version(
+					up,
+					projects,
+					aggregated,
+					version_overrides,
+					&propagation_map,
+				) {
+					Some(v) => format!("`{up}` bumped to {v}"),
+					None => format!("`{up}` bumped"),
+				}
+			})
+			.collect();
+
+		if package_filter.is_empty() || package_filter.contains(pkg_name) {
+			let existing_ct = aggregated.get(pkg_name.as_str()).copied();
+			if existing_ct.is_none_or(|c| c < *effective_ct) {
+				aggregated.insert(pkg_name.clone(), *effective_ct);
+				dep_entries.insert(pkg_name.clone(), dep_msgs);
+				info!(
+					"{pkg_name}: dependency propagation bump ({effective_ct}) from {}",
+					upstream_names.join(", ")
+				);
+			}
+		} else if let Some(path) =
+			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, git, dry_run)?
+		{
+			new_changeset_paths.push(path);
+		}
+	}
+
+	Ok((dep_entries, new_changeset_paths))
+}
+
 /// Validates that a scoped prepare does not partially overlap any linked group.
 ///
 /// Returns an error if `--package` includes some but not all packages from a
@@ -602,6 +801,52 @@ fn reconcile_linked_versions(
 	version_overrides
 }
 
+/// After dependency propagation, syncs linked groups so that any member raised by
+/// propagation pulls the rest of the group with it.
+///
+/// Unlike `reconcile_linked_versions`, this pass does not re-derive a bump level
+/// from `aggregated` data (which would misread the synthetic sync entries the first
+/// pass inserted). Instead it promotes all group members to the max *effective new
+/// version* already determined for any member.
+fn sync_linked_groups_after_propagation(
+	aggregated: &mut BTreeMap<String, ChangeType>,
+	changes_per_package: &mut BTreeMap<String, PackageChanges>,
+	version_overrides: &mut BTreeMap<String, Version>,
+	linked_groups: &[Vec<String>],
+	projects: &[Project],
+) {
+	for group in linked_groups {
+		let mut max_effective: Option<Version> = None;
+		for pkg_name in group {
+			let Some(project) = projects.iter().find(|p| p.name() == pkg_name) else {
+				continue;
+			};
+			let effective = if let Some(v) = version_overrides.get(pkg_name) {
+				v.clone()
+			} else if let Some(&ct) = aggregated.get(pkg_name) {
+				bump_version(project.version(), ct)
+			} else {
+				project.version().clone()
+			};
+			max_effective = Some(match max_effective {
+				Some(m) => m.max(effective),
+				None => effective,
+			});
+		}
+		let Some(target) = max_effective else {
+			continue;
+		};
+		apply_group_final_version(
+			group,
+			&target,
+			aggregated,
+			changes_per_package,
+			version_overrides,
+			projects,
+		);
+	}
+}
+
 /// Bumps package versions, writes changelogs, and collects all modified file paths.
 ///
 /// Runs version bumping, changelog generation, dependency propagation, lock
@@ -612,16 +857,15 @@ fn prepare_release_files(
 	adapters: &[Arc<dyn PackageManagerAdapter>],
 	projects: &[crate::package_manager::Project],
 	changesets: &[(PathBuf, Changeset)],
-	aggregated: &BTreeMap<String, ChangeType>,
-	changes_per_package: &BTreeMap<String, PackageChanges>,
-	version_overrides: &BTreeMap<String, Version>,
+	plan: VersionPlan,
 	dry_run: bool,
 ) -> anyhow::Result<(Vec<ReleaseInfo>, Vec<PathBuf>)> {
 	let (release_infos, mut files) = bump_versions_and_generate_changelogs(
-		aggregated,
-		changes_per_package,
+		&plan.aggregated,
+		&plan.changes_per_package,
 		projects,
-		version_overrides,
+		&plan.version_overrides,
+		&plan.dep_entries,
 		dry_run,
 	)?;
 	files.extend(propagate_dependency_updates(
@@ -630,8 +874,9 @@ fn prepare_release_files(
 		dry_run,
 	)?);
 	files.extend(update_lock_files(adapters)?);
-	let released: BTreeSet<String> = aggregated.keys().cloned().collect();
+	let released: BTreeSet<String> = plan.aggregated.keys().cloned().collect();
 	files.extend(consume_changesets(changesets, &released, dry_run)?);
+	files.extend(plan.propagation_changeset_paths);
 	files.sort();
 	files.dedup();
 	Ok((release_infos, files))
@@ -649,6 +894,7 @@ fn bump_versions_and_generate_changelogs(
 	changes_per_package: &BTreeMap<String, PackageChanges>,
 	projects: &[crate::package_manager::Project],
 	version_overrides: &BTreeMap<String, Version>,
+	dep_entries: &BTreeMap<String, Vec<String>>,
 	dry_run: bool,
 ) -> anyhow::Result<(Vec<ReleaseInfo>, Vec<PathBuf>)> {
 	let mut release_infos: Vec<ReleaseInfo> = Vec::new();
@@ -671,12 +917,14 @@ fn bump_versions_and_generate_changelogs(
 			.get(pkg_name)
 			.cloned()
 			.unwrap_or_default();
+		let pkg_dep_entries = dep_entries.get(pkg_name).cloned().unwrap_or_default();
 		let changelog = Changelog::new(
 			new_version.clone(),
 			today_iso_date(),
 			changes,
 			project.path().clone(),
-		);
+		)
+		.with_dependency_entries(pkg_dep_entries);
 		let changelog_entry = changelog.format_sections();
 		project.write_version(&new_version, dry_run)?;
 		changelog.update(dry_run)?;
@@ -866,13 +1114,11 @@ fn finalize_git_lifecycle(
 ///
 /// Validates scoped-prepare rules, then runs reconciliation and returns the
 /// resulting version overrides.
-fn apply_linked_versions(
+fn resolve_linked_groups(
 	config: &Config,
 	args: &PrepareArgs,
-	aggregated: &mut BTreeMap<String, ChangeType>,
-	changes_per_package: &mut BTreeMap<String, PackageChanges>,
 	projects: &[Project],
-) -> anyhow::Result<BTreeMap<String, Version>> {
+) -> anyhow::Result<Vec<Vec<String>>> {
 	let project_names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
 	let linked_groups = config.linked_versions.resolve_groups(&project_names)?;
 	validate_scoped_prepare_linked_groups(
@@ -880,12 +1126,77 @@ fn apply_linked_versions(
 		&linked_groups,
 		config.linked_versions.is_global(),
 	)?;
-	Ok(reconcile_linked_versions(
-		aggregated,
-		changes_per_package,
+	Ok(linked_groups)
+}
+
+/// Result of computing the version plan for a prepare run.
+struct VersionPlan {
+	aggregated: BTreeMap<String, ChangeType>,
+	changes_per_package: BTreeMap<String, PackageChanges>,
+	version_overrides: BTreeMap<String, Version>,
+	dep_entries: BTreeMap<String, Vec<String>>,
+	propagation_changeset_paths: Vec<PathBuf>,
+}
+
+/// Aggregates changesets, applies linked versions, and runs dependency propagation.
+///
+/// Returns the full version plan for the prepare run.
+#[allow(clippy::too_many_arguments)]
+fn compute_version_plan(
+	git: &git::GitWorkdir,
+	changesets: &[(PathBuf, Changeset)],
+	args: &PrepareArgs,
+	config: &Config,
+	projects: &[Project],
+	git_enabled: bool,
+	dry_run: bool,
+) -> anyhow::Result<VersionPlan> {
+	let commit_refs = resolve_commit_references(changesets, git, git_enabled);
+	let (mut aggregated, mut changes_per_package) =
+		aggregate_changesets(changesets, &args.packages, projects, &commit_refs)?;
+	let linked_groups = resolve_linked_groups(config, args, projects)?;
+	// First pass: sync linked groups from explicit changesets.
+	let mut version_overrides = reconcile_linked_versions(
+		&mut aggregated,
+		&mut changes_per_package,
 		&linked_groups,
 		projects,
-	))
+	);
+	let (dep_entries, propagation_changeset_paths) = apply_dependency_propagation(
+		projects,
+		&mut aggregated,
+		&version_overrides,
+		&args.packages,
+		config.prepare.dependency_bump,
+		git,
+		dry_run,
+	)?;
+	// Second pass: propagated bumps may have raised a linked member's version, so
+	// re-sync to bring the rest of each group up to the new target.
+	sync_linked_groups_after_propagation(
+		&mut aggregated,
+		&mut changes_per_package,
+		&mut version_overrides,
+		&linked_groups,
+		projects,
+	);
+	Ok(VersionPlan {
+		aggregated,
+		changes_per_package,
+		version_overrides,
+		dep_entries,
+		propagation_changeset_paths,
+	})
+}
+
+/// Resolves git-enabled flag, strategy, and emits a warning for incompatible flags.
+fn setup_git_context(config: &Config, args: &PrepareArgs) -> (bool, Strategy) {
+	let git_enabled = config.git.enabled() && !args.no_git;
+	let strategy = config.git.strategy();
+	if args.branch.is_some() && strategy == Strategy::Push {
+		log::warn!("--branch has no effect with the push strategy; ignoring");
+	}
+	(git_enabled, strategy)
 }
 
 /// Runs the `prepare` subcommand.
@@ -898,41 +1209,27 @@ pub(crate) fn cmd_prepare(
 	let env = config.env().context("env not set")?;
 	let adapters = config.create_adapters()?;
 	let projects = config.load_projects_for_adapters(&adapters)?;
-
 	let changesets = Changeset::read_all(git)?;
+
 	if changesets.is_empty() {
 		info!("No pending changesets found. Nothing to prepare.");
 		return Ok(ExitCode::SUCCESS);
 	}
 
-	let git_enabled = config.git.enabled() && !args.no_git;
-	let commit_refs = resolve_commit_references(&changesets, git, git_enabled);
-	let (mut aggregated, mut changes_per_package) =
-		aggregate_changesets(&changesets, &args.packages, &projects, &commit_refs)?;
-	let strategy = config.git.strategy();
-	if args.branch.is_some() && strategy == Strategy::Push {
-		log::warn!("--branch has no effect with the push strategy; ignoring");
-	}
-	let version_overrides = apply_linked_versions(
-		&config,
-		args,
-		&mut aggregated,
-		&mut changes_per_package,
-		&projects,
-	)?;
-
-	let (original_branch, release_branch) =
-		preflight_checks(git, &config, env, args, git_enabled, strategy, dry_run)?;
-
-	let (release_infos, modified_files) = prepare_release_files(
-		&adapters,
-		&projects,
+	let (git_enabled, strategy) = setup_git_context(&config, args);
+	let plan = compute_version_plan(
+		git,
 		&changesets,
-		&aggregated,
-		&changes_per_package,
-		&version_overrides,
+		args,
+		&config,
+		&projects,
+		git_enabled,
 		dry_run,
 	)?;
+	let (original_branch, release_branch) =
+		preflight_checks(git, &config, env, args, git_enabled, strategy, dry_run)?;
+	let (release_infos, modified_files) =
+		prepare_release_files(&adapters, &projects, &changesets, plan, dry_run)?;
 
 	finalize_git_lifecycle(
 		git,
@@ -2114,5 +2411,270 @@ mod tests {
 			&projects,
 		);
 		assert_eq!(overrides.get("pkg-b"), Some(&v("1.0.2")));
+	}
+
+	// ── DependencyBump::to_change_type ───────────────────────────────────────
+
+	#[test]
+	fn propagation_change_type_patch_mode_always_returns_patch() {
+		for upstream in [ChangeType::Patch, ChangeType::Minor, ChangeType::Major] {
+			assert_eq!(
+				DependencyBump::Patch.to_change_type(upstream),
+				ChangeType::Patch,
+			);
+		}
+	}
+
+	#[test]
+	fn propagation_change_type_minor_mode_always_returns_minor() {
+		for upstream in [ChangeType::Patch, ChangeType::Minor, ChangeType::Major] {
+			assert_eq!(
+				DependencyBump::Minor.to_change_type(upstream),
+				ChangeType::Minor,
+			);
+		}
+	}
+
+	#[test]
+	fn propagation_change_type_major_mode_always_returns_major() {
+		for upstream in [ChangeType::Patch, ChangeType::Minor, ChangeType::Major] {
+			assert_eq!(
+				DependencyBump::Major.to_change_type(upstream),
+				ChangeType::Major,
+			);
+		}
+	}
+
+	#[test]
+	fn propagation_change_type_match_mode_mirrors_upstream() {
+		assert_eq!(
+			DependencyBump::Match.to_change_type(ChangeType::Patch),
+			ChangeType::Patch,
+		);
+		assert_eq!(
+			DependencyBump::Match.to_change_type(ChangeType::Minor),
+			ChangeType::Minor,
+		);
+		assert_eq!(
+			DependencyBump::Match.to_change_type(ChangeType::Major),
+			ChangeType::Major,
+		);
+	}
+
+	#[test]
+	fn propagation_change_type_auto_mode_maps_minor_and_patch_to_patch() {
+		assert_eq!(
+			DependencyBump::Auto.to_change_type(ChangeType::Patch),
+			ChangeType::Patch,
+		);
+		assert_eq!(
+			DependencyBump::Auto.to_change_type(ChangeType::Minor),
+			ChangeType::Patch,
+		);
+	}
+
+	#[test]
+	fn propagation_change_type_auto_mode_maps_major_to_major() {
+		assert_eq!(
+			DependencyBump::Auto.to_change_type(ChangeType::Major),
+			ChangeType::Major,
+		);
+	}
+
+	// ── build_reverse_dep_graph ───────────────────────────────────────────────
+
+	fn make_project_with_deps(
+		name: &str,
+		version: &str,
+		deps: Vec<&str>,
+	) -> crate::package_manager::Project {
+		crate::package_manager::Project::new_test_with_deps(name, version, deps)
+	}
+
+	#[test]
+	fn build_reverse_dep_graph_empty_projects_returns_empty() {
+		let graph = build_reverse_dep_graph(&[]);
+		assert!(graph.is_empty());
+	}
+
+	#[test]
+	fn build_reverse_dep_graph_no_deps_returns_empty() {
+		let projects = vec![
+			make_project("pkg-a", "1.0.0"),
+			make_project("pkg-b", "1.0.0"),
+		];
+		let graph = build_reverse_dep_graph(&projects);
+		assert!(graph.is_empty());
+	}
+
+	#[test]
+	fn build_reverse_dep_graph_filters_external_deps() {
+		// pkg-a depends on serde (external) and pkg-b (intra-workspace)
+		let projects = vec![
+			make_project_with_deps("pkg-a", "1.0.0", vec!["serde", "pkg-b"]),
+			make_project("pkg-b", "1.0.0"),
+		];
+		let graph = build_reverse_dep_graph(&projects);
+		// Only pkg-b should appear (serde is external)
+		assert_eq!(graph.len(), 1);
+		assert_eq!(graph["pkg-b"], vec!["pkg-a"]);
+	}
+
+	#[test]
+	fn build_reverse_dep_graph_multiple_dependents_on_same_package() {
+		let projects = vec![
+			make_project_with_deps("pkg-a", "1.0.0", vec!["pkg-c"]),
+			make_project_with_deps("pkg-b", "1.0.0", vec!["pkg-c"]),
+			make_project("pkg-c", "1.0.0"),
+		];
+		let graph = build_reverse_dep_graph(&projects);
+		let mut dependents = graph["pkg-c"].clone();
+		dependents.sort();
+		assert_eq!(dependents, vec!["pkg-a", "pkg-b"]);
+	}
+
+	// ── mark_propagation_bumps ────────────────────────────────────────────────
+
+	#[test]
+	fn mark_propagation_bumps_empty_aggregated_returns_empty() {
+		let aggregated = BTreeMap::new();
+		let version_overrides = BTreeMap::new();
+		let reverse_deps = BTreeMap::new();
+		let result = mark_propagation_bumps(
+			&aggregated,
+			&version_overrides,
+			&reverse_deps,
+			DependencyBump::Auto,
+		);
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn mark_propagation_bumps_skips_linked_packages() {
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Major);
+		let mut version_overrides = BTreeMap::new();
+		version_overrides.insert("pkg-b".to_string(), "2.0.0".parse().unwrap());
+		let mut reverse_deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+		reverse_deps.insert("pkg-a".to_string(), vec!["pkg-b".to_string()]);
+		let result = mark_propagation_bumps(
+			&aggregated,
+			&version_overrides,
+			&reverse_deps,
+			DependencyBump::Auto,
+		);
+		// pkg-b is linked (in version_overrides) so should not be propagated to
+		assert!(!result.contains_key("pkg-b"));
+	}
+
+	#[test]
+	fn mark_propagation_bumps_only_upgrades_not_downgrades() {
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Patch);
+		// pkg-b already has a Major changeset
+		aggregated.insert("pkg-b".to_string(), ChangeType::Major);
+		let version_overrides = BTreeMap::new();
+		let mut reverse_deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+		reverse_deps.insert("pkg-a".to_string(), vec!["pkg-b".to_string()]);
+		let result = mark_propagation_bumps(
+			&aggregated,
+			&version_overrides,
+			&reverse_deps,
+			DependencyBump::Auto, // Patch upstream → Patch propagation
+		);
+		// pkg-b already has Major, propagation would be Patch → should not appear
+		assert!(!result.contains_key("pkg-b"));
+	}
+
+	#[test]
+	fn mark_propagation_bumps_terminates_with_circular_deps() {
+		// A depends on B, B depends on A — cycle.
+		// Note: Cargo rejects circular dependencies at the workspace level, so this
+		// scenario is more relevant to npm workspaces. This unit test verifies that
+		// the BFS algorithm terminates regardless, via idempotent marking.
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Minor);
+		let version_overrides = BTreeMap::new();
+		let mut reverse_deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+		reverse_deps.insert("pkg-a".to_string(), vec!["pkg-b".to_string()]);
+		reverse_deps.insert("pkg-b".to_string(), vec!["pkg-a".to_string()]);
+		// Should terminate (not loop forever) and produce a result
+		let result = mark_propagation_bumps(
+			&aggregated,
+			&version_overrides,
+			&reverse_deps,
+			DependencyBump::Auto,
+		);
+		assert!(result.contains_key("pkg-b"));
+	}
+
+	// ── effective_new_version ─────────────────────────────────────────────────
+
+	#[test]
+	fn effective_new_version_returns_none_for_unknown_package() {
+		let projects = vec![make_project("pkg-a", "1.0.0")];
+		let aggregated = BTreeMap::new();
+		let version_overrides = BTreeMap::new();
+		let propagation_map = BTreeMap::new();
+		let result = effective_new_version(
+			"unknown",
+			&projects,
+			&aggregated,
+			&version_overrides,
+			&propagation_map,
+		);
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn effective_new_version_prefers_version_override() {
+		let projects = vec![make_project("pkg-a", "1.0.0")];
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Major);
+		let mut version_overrides = BTreeMap::new();
+		version_overrides.insert("pkg-a".to_string(), "9.9.9".parse().unwrap());
+		let propagation_map = BTreeMap::new();
+		let result = effective_new_version(
+			"pkg-a",
+			&projects,
+			&aggregated,
+			&version_overrides,
+			&propagation_map,
+		);
+		assert_eq!(result, Some("9.9.9".parse().unwrap()));
+	}
+
+	#[test]
+	fn effective_new_version_uses_aggregated_changeset() {
+		let projects = vec![make_project("pkg-a", "1.2.0")];
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Minor);
+		let version_overrides = BTreeMap::new();
+		let propagation_map = BTreeMap::new();
+		let result = effective_new_version(
+			"pkg-a",
+			&projects,
+			&aggregated,
+			&version_overrides,
+			&propagation_map,
+		);
+		assert_eq!(result, Some("1.3.0".parse().unwrap()));
+	}
+
+	#[test]
+	fn effective_new_version_falls_back_to_propagation_map() {
+		let projects = vec![make_project("pkg-a", "1.0.0")];
+		let aggregated = BTreeMap::new();
+		let version_overrides = BTreeMap::new();
+		let mut propagation_map = BTreeMap::new();
+		propagation_map.insert("pkg-a".to_string(), (ChangeType::Patch, vec![]));
+		let result = effective_new_version(
+			"pkg-a",
+			&projects,
+			&aggregated,
+			&version_overrides,
+			&propagation_map,
+		);
+		assert_eq!(result, Some("1.0.1".parse().unwrap()));
 	}
 }

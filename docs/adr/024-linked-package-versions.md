@@ -135,3 +135,12 @@ Infer linked groups from dependency relationships: packages that depend on each 
 ### Allow partial-overlap scoped prepare with intersection semantics
 
 When `prepare --package` partially overlaps a linked group, apply linking reconciliation only within the intersection of the scope and the group, leaving out-of-scope packages in the group untouched. This was rejected because it silently breaks the core invariant of linked versioning: that all packages in a group share the same version. A scoped prepare that bumps `@org/prefix-a` to `2.1.0` while leaving `@org/prefix-b` at `2.0.0` produces exactly the desync that linked versions are designed to prevent. Users who configured linked versions would reasonably expect the guarantee to hold after every `prepare` run, and a partial update would violate that expectation without any warning. An explicit error with guidance to include the full group is clearer and safer.
+
+## Errata
+
+**2026-03-15:** The "Version calculation algorithm" section (step 4) and the first bullet of the "Neutral" consequences section describe linked-version reconciliation as a single step that runs after changeset aggregation and before version bumping. With the introduction of dependency propagation ([ADR-023](023-dependency-propagation-bumps.md)), the implementation now performs two reconciliation passes:
+
+1. **First pass** (`reconcile_linked_versions`): runs after changeset aggregation and before dependency propagation, exactly as described in this ADR. Syncs linked groups based on explicit changesets using the max-then-bump algorithm.
+2. **Second pass** (`sync_linked_groups_after_propagation`): runs after dependency propagation. If propagation raised a linked-group member's version beyond the group target set by the first pass, this pass brings the rest of the group up to match. Unlike the first pass, it does not re-derive a bump level from aggregated change types (which would misread synthetic entries from the first pass). Instead it computes each member's effective new version and promotes all members to the maximum.
+
+The second pass preserves the same invariants documented in this ADR (convergence, monotonicity, single-version-per-group). The algorithm described in the "Version calculation algorithm" section remains accurate for the first pass. The second pass is an additive safeguard that maintains the linked-version guarantee across the full `prepare` pipeline when dependency propagation is active.

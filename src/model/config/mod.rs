@@ -12,6 +12,7 @@ mod git;
 mod github;
 mod linked_versions;
 mod npm;
+mod prepare;
 mod template;
 
 pub use cargo::CargoConfig;
@@ -19,6 +20,7 @@ pub use git::{GitConfig, Strategy, TagFormat};
 pub use github::GitHubConfig;
 pub use linked_versions::{LinkedVersionGroup, LinkedVersionsConfig};
 pub use npm::NpmConfig;
+pub use prepare::{DependencyBump, PrepareConfig};
 pub(crate) use template::render_init_template;
 
 use crate::package_manager::{self, CargoAdapter, NpmAdapter, PackageManagerAdapter, Project};
@@ -76,6 +78,9 @@ pub struct Config {
 	/// Linked package versions configuration.
 	#[serde(default, rename = "linked-versions")]
 	pub linked_versions: LinkedVersionsConfig,
+	/// Prepare command configuration.
+	#[serde(default)]
+	pub prepare: PrepareConfig,
 	/// Git repository root path.
 	///
 	/// Always `Some` when constructed via [`Config::new`] or [`load`].
@@ -101,6 +106,7 @@ impl Config {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			linked_versions: LinkedVersionsConfig::default(),
+			prepare: PrepareConfig::default(),
 			git_workdir: Some(git_workdir.clone()),
 			env: None,
 		}
@@ -139,6 +145,12 @@ impl Config {
 	/// Sets linked package versions configuration (builder pattern).
 	pub fn with_linked_versions(mut self, config: LinkedVersionsConfig) -> Self {
 		self.linked_versions = config;
+		self
+	}
+
+	/// Sets prepare command configuration (builder pattern).
+	pub fn with_prepare(mut self, config: PrepareConfig) -> Self {
+		self.prepare = config;
 		self
 	}
 
@@ -478,6 +490,7 @@ mod tests {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			linked_versions: LinkedVersionsConfig::default(),
+			prepare: PrepareConfig::default(),
 			git_workdir: None,
 			env: None,
 		};
@@ -530,6 +543,7 @@ mod tests {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			linked_versions: LinkedVersionsConfig::default(),
+			prepare: PrepareConfig::default(),
 			git_workdir: None,
 			env: None,
 		};
@@ -564,6 +578,7 @@ mod tests {
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
 			linked_versions: LinkedVersionsConfig::default(),
+			prepare: PrepareConfig::default(),
 			git_workdir: None,
 			env: None,
 		};

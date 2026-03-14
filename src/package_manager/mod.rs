@@ -192,6 +192,14 @@ impl Project {
 		Self::new_test_with_runner(name, path, Arc::new(RecordingCommandRunner::new(0)))
 	}
 
+	/// Creates a `Project` with specific dependency names for use in unit tests.
+	#[cfg(test)]
+	pub fn new_test_with_deps(name: &str, version: &str, deps: Vec<&str>) -> Self {
+		let mut p = Self::new_test_with_version(name, version.parse().unwrap());
+		p.info.dependency_names = deps.into_iter().map(str::to_string).collect();
+		p
+	}
+
 	/// Creates a minimal `Project` with a specific version for use in unit tests.
 	#[cfg(test)]
 	pub fn new_test_with_version(name: &str, version: semver::Version) -> Self {

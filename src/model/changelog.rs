@@ -71,6 +71,8 @@ pub struct Changelog {
 	version: semver::Version,
 	date: String,
 	changes: Vec<(ChangeType, Option<String>, Option<CommitReference>)>,
+	/// Dependency update entries rendered under a `### Dependencies` section.
+	dependency_entries: Vec<String>,
 	project_path: AbsolutePath,
 }
 
@@ -86,8 +88,19 @@ impl Changelog {
 			version,
 			date,
 			changes,
+			dependency_entries: Vec::new(),
 			project_path,
 		}
+	}
+
+	/// Attaches dependency update entries to this changelog entry (builder pattern).
+	///
+	/// Each entry is a human-readable string describing a dependency update, e.g.
+	/// `` "`pkg-a` bumped to 2.0.0" ``. These are rendered under a `### Dependencies`
+	/// section, separate from the regular change-type sections.
+	pub fn with_dependency_entries(mut self, entries: Vec<String>) -> Self {
+		self.dependency_entries = entries;
+		self
 	}
 
 	/// Formats just the categorised change sections (### headings + bullet items),
@@ -122,6 +135,20 @@ impl Changelog {
 					!output.is_empty(),
 				));
 			}
+		}
+
+		// Dependencies section: auto-generated entries for propagated version bumps.
+		if !self.dependency_entries.is_empty() {
+			let dep_messages: Vec<(&str, Option<&CommitReference>)> = self
+				.dependency_entries
+				.iter()
+				.map(|e| (e.as_str(), None))
+				.collect();
+			output.push_str(&format_change_section(
+				"Dependencies",
+				&dep_messages,
+				!output.is_empty(),
+			));
 		}
 
 		output

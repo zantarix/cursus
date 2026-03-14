@@ -106,6 +106,10 @@ the default command when no subcommand is given.
 Consumes pending changesets and applies the highest change type per package to
 bump versions, generate changelog entries, and update lock files.
 
+In monorepos, packages that depend on a bumped package automatically receive a
+propagated version bump. The bump level is controlled by `[prepare].dependency_bump`
+in config (default: `"auto"`).
+
 | Flag | Description |
 |------|-------------|
 | `-p, --package <name>` | Prepare specific package(s); repeatable |
@@ -190,6 +194,13 @@ access = "public"
 enabled = true
 # Subdirectory containing Cargo.toml, relative to the git root.
 path = "rust"
+
+[prepare]
+# Controls how packages that depend on a bumped package are themselves bumped.
+# "auto" (default): major upstream → major; minor/patch upstream → patch.
+# "match": mirrors the upstream bump level exactly.
+# "patch", "minor", "major": always use the specified level.
+dependency_bump = "auto"
 
 [linked-versions]
 # Keep groups of packages at the same version during prepare.
