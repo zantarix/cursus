@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -44,12 +44,14 @@ When a package is unchecked, the change level indicator for that row is hidden. 
 
 **Keyboard controls**:
 
-- **Up / Down** arrow keys move the cursor between packages in the list.
+- **Up / Down** arrow keys (or `k`/`j`) move the cursor between packages in the list.
 - **Space** toggles the checkbox for the focused package. Checking a package reveals its change level indicator at the default level; unchecking hides it.
-- **Left / Right** arrow keys shift the change level of the **currently focused** package, wrapping cyclically: patch -> minor -> major -> patch (Right) and patch -> major -> minor -> patch (Left). This means any level is reachable from any other level with a single keypress. This only has an effect when the focused package is checked.
-- **`,` and `.`** (comma and period) provide bulk adjustment. They shift the **first checked package's** change level left (`,`) or right (`.`) using the same wrapping cycle as Left/Right, then **force all other checked packages to that same level**. This makes `,`/`.` a "set all to X" operation anchored on the first checked package's current state, providing a fast path for the common case where all packages share the same bump level.
+- **Left / Right** arrow keys shift the change level of the **currently focused** package, wrapping cyclically: patch -> major -> minor -> patch (Right) and patch -> minor -> major -> patch (Left). This means any level is reachable from any other level with a single keypress. This only has an effect when the focused package is checked. Vim-style `h`/`l` keys are aliases for Left/Right.
+- **`,` and `.`** (comma and period) provide bulk adjustment. They shift the **first checked package's** change level backward (`,`) or forward (`.`) using the same wrapping cycle as Left/Right, then **force all other checked packages to that same level**. This makes `,`/`.` a "set all to X" operation anchored on the first checked package's current state, providing a fast path for the common case where all packages share the same bump level.
+- **`a`**, **`c`**, and **`u`** provide group toggling: `a` toggles all packages, `c` toggles the "Changed" group, `u` toggles the "Unchanged" group. If all packages in the targeted group are already checked, the key unchecks them; otherwise it checks them all.
+- **Mouse clicks** on a project row toggle its checkbox. Clicking a level indicator (Major / Minor / Patch) on a selected project sets its level directly.
 - **Enter** confirms the selection and proceeds to Screen 2. At least one package must be checked; if none are checked, Enter displays an inline error.
-- **Escape** cancels the wizard entirely.
+- **Escape** (or `q`) cancels the wizard entirely.
 
 ### Single-package screen
 
@@ -65,7 +67,7 @@ The second screen presents a multi-line `ratatui-textarea` widget for composing 
 
 - Standard text editing keys within the textarea (typing, backspace, arrow keys for cursor movement, etc.) as provided by the `ratatui-textarea` component.
 - **Enter** confirms the message and completes the wizard.
-- **Shift+Enter** inserts a newline within the textarea, allowing multi-line descriptions.
+- **Alt+Enter** (or **Shift+Enter**) inserts a newline within the textarea, allowing multi-line descriptions.
 - **Ctrl+E** terminates the TUI and drops to the user's external editor (`$VISUAL`, `$EDITOR`, falling back to `nano`, `vim`, `vi`) as the final step, in the same manner as the current post-TUI editor launch. The TUI does not resume after the editor exits -- the editor session is the final interaction, and the changeset is written from the editor's output. This avoids the complexity of suspending and restoring the TUI mid-flow.
 - **Escape** returns to the previous screen (multi-package or single-package), preserving the package selection and change level state.
 
@@ -106,7 +108,7 @@ The non-interactive path (`--change-type/-t`, `--message/-m`, `--project/-p`) is
 - The unified selection screen carries more visual information density than either of the two screens it replaces. Users with many packages may find the combined checkbox-plus-level-indicator layout harder to scan than the current sequential flow.
 - The `ChangeResult` struct change is a breaking internal API change. All consumers of `ChangeResult` (the changeset file writer, tests, and any code that reads the result) must be updated to handle per-package levels and the two completion modes (inline message vs editor handoff).
 - Non-interactive mode remains limited to a single change type for all packages, creating a capability gap between interactive and non-interactive usage.
-- Enter submitting the message while Shift+Enter inserts a newline is a common pattern but may surprise users accustomed to Enter always inserting a newline in text areas. A help line indicating the key bindings is important.
+- Enter submitting the message while Alt+Enter / Shift+Enter inserts a newline is a common pattern but may surprise users accustomed to Enter always inserting a newline in text areas. A help line indicating the key bindings is important.
 
 ### Neutral
 
