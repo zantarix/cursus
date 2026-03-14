@@ -10,7 +10,9 @@ use cursus::command::{RealCommandRunner, VerboseCommandRunner};
 ///
 /// Info/Debug/Trace go to stdout; Warn/Error go to stderr.
 /// Formatting mirrors the previous fern configuration.
-struct CliLogger;
+struct CliLogger {
+	stderr_is_terminal: bool,
+}
 
 #[coverage(off)]
 #[mutants::skip]
@@ -30,10 +32,20 @@ impl log::Log for CliLogger {
 				let _ = writeln!(std::io::stdout().lock(), "{args}");
 			}
 			log::Level::Warn => {
-				let _ = writeln!(std::io::stderr().lock(), "[warning] {args}");
+				let stderr = std::io::stderr();
+				if self.stderr_is_terminal {
+					let _ = writeln!(stderr.lock(), "\x1b[33m[warning] {args}\x1b[0m");
+				} else {
+					let _ = writeln!(stderr.lock(), "[warning] {args}");
+				}
 			}
 			log::Level::Error => {
-				let _ = writeln!(std::io::stderr().lock(), "[error] {args}");
+				let stderr = std::io::stderr();
+				if self.stderr_is_terminal {
+					let _ = writeln!(stderr.lock(), "\x1b[91m[error] {args}\x1b[0m");
+				} else {
+					let _ = writeln!(stderr.lock(), "[error] {args}");
+				}
 			}
 			log::Level::Debug => {
 				let _ = writeln!(std::io::stdout().lock(), "debug: {target}: {args}");
@@ -51,12 +63,16 @@ impl log::Log for CliLogger {
 	}
 }
 
-static LOGGER: CliLogger = CliLogger;
+static LOGGER: std::sync::OnceLock<CliLogger> = std::sync::OnceLock::new();
 
 #[coverage(off)]
 #[mutants::skip]
 fn init_logging(level: log::LevelFilter) {
-	if let Err(e) = log::set_logger(&LOGGER) {
+	use std::io::IsTerminal as _;
+	let logger = LOGGER.get_or_init(|| CliLogger {
+		stderr_is_terminal: std::io::stderr().is_terminal(),
+	});
+	if let Err(e) = log::set_logger(logger) {
 		eprintln!("warning: failed to initialize logging: {e}");
 	}
 	log::set_max_level(level);
