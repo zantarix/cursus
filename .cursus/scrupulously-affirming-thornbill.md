@@ -1,5 +1,4 @@
 +++
-"@zantarix/cursus" = "minor"
 cursus = "minor"
 +++
 
