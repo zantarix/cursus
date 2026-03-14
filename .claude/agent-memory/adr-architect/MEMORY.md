@@ -63,7 +63,8 @@ Key differences from old style:
 - ADR-027: Accepted (mutation testing approach)
 - ADR-028: Proposed (npm OIDC trusted publishing)
 - ADR-029: Proposed (cargo publish auth warning)
-- Next ADR number: 030
+- ADR-030: Accepted (bin/lib crate separation with environment injection)
+- Next ADR number: 031
 
 ## Project ADR Rules (from CLAUDE.md)
 
