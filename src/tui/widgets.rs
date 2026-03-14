@@ -9,9 +9,13 @@ use std::rc::Rc;
 use crossterm::{
 	ExecutableCommand,
 	event::{
-		DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
+		DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, KeyboardEnhancementFlags,
+		MouseButton, MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 	},
-	terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+	terminal::{
+		EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+		supports_keyboard_enhancement,
+	},
 };
 use ratatui::{
 	prelude::*,
@@ -175,26 +179,6 @@ pub fn render_yes_no_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef
 	}
 }
 
-/// Returns an iterator of styled spans for a button with an underlined shortcut key.
-///
-/// The `shortcut` character is underlined to signal keyboard navigation.
-/// All spans share the button style (selected or unselected).
-pub fn button_spans<'a>(
-	prefix: &'a str,
-	shortcut: &'a str,
-	suffix: &'a str,
-	selected: bool,
-) -> impl Iterator<Item = Span<'a>> {
-	let base = button_style(selected);
-	let underlined = base.add_modifier(Modifier::UNDERLINED);
-	[
-		Span::styled(prefix, base),
-		Span::styled(shortcut, underlined),
-		Span::styled(suffix, base),
-	]
-	.into_iter()
-}
-
 /// Creates the standard vertical wizard layout with a 2-cell margin.
 ///
 /// Returns layout areas corresponding to `constraints`, split over `area`.
@@ -238,6 +222,16 @@ where
 	enable_raw_mode()?;
 	io::stdout().execute(EnterAlternateScreen)?;
 	io::stdout().execute(EnableMouseCapture)?;
+	// Enable DISAMBIGUATE_ESCAPE_CODES on terminals that support the kitty
+	// keyboard protocol so that Shift+Enter is distinguishable from Enter.
+	// Falls back gracefully on terminals that don't support it; those users
+	// can use Alt+Enter instead.
+	let kbd_enhancement = supports_keyboard_enhancement().unwrap_or(false);
+	if kbd_enhancement {
+		io::stdout().execute(PushKeyboardEnhancementFlags(
+			KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+		))?;
+	}
 	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
 	let result: anyhow::Result<Option<T>> = loop {
@@ -266,6 +260,9 @@ where
 
 	// Always restore the terminal, even if the loop errored.
 	// Cleanup errors are suppressed to preserve the primary error.
+	if kbd_enhancement {
+		io::stdout().execute(PopKeyboardEnhancementFlags).ok();
+	}
 	disable_raw_mode().ok();
 	io::stdout().execute(DisableMouseCapture).ok();
 	io::stdout().execute(LeaveAlternateScreen).ok();
@@ -395,30 +392,6 @@ mod tests {
 			button_style_colored(false, Color::Red),
 			Style::default().fg(Color::Gray)
 		);
-	}
-
-	// button_spans tests
-	#[test]
-	fn button_spans_returns_three_spans() {
-		let spans: Vec<_> = button_spans(" ", "M", "ajor ", true).collect();
-		assert_eq!(spans.len(), 3);
-		assert_eq!(spans[0].content, " ");
-		assert_eq!(spans[1].content, "M");
-		assert_eq!(spans[2].content, "ajor ");
-	}
-
-	#[test]
-	fn button_spans_shortcut_has_underline_modifier() {
-		let spans: Vec<_> = button_spans(" ", "M", "ajor ", true).collect();
-		assert!(spans[1].style.add_modifier.contains(Modifier::UNDERLINED));
-	}
-
-	#[test]
-	fn button_spans_unselected_is_gray() {
-		let spans: Vec<_> = button_spans(" ", "M", "ajor ", false).collect();
-		for span in &spans {
-			assert_eq!(span.style.fg, Some(Color::Gray));
-		}
 	}
 
 	// render_question tests

@@ -19,8 +19,8 @@ impl ButtonScreen for EnableGitButtons {
 	const QUESTION: &'static str =
 		"Enable git automation? (commits, tags, push/branch on prepare and publish)";
 
-	fn buttons(&self) -> [ButtonDef<'_>; 2] {
-		[
+	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+		vec![
 			ButtonDef {
 				label: "Yes",
 				selected: self.yes,
@@ -34,7 +34,11 @@ impl ButtonScreen for EnableGitButtons {
 		]
 	}
 
-	fn toggled(self) -> Self {
+	fn next(self) -> Self {
+		EnableGitButtons { yes: !self.yes }
+	}
+
+	fn prev(self) -> Self {
 		EnableGitButtons { yes: !self.yes }
 	}
 

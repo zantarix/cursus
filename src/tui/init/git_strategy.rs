@@ -17,8 +17,8 @@ impl ButtonScreen for GitStrategyButtons {
 	const QUESTION: &'static str =
 		"Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
 
-	fn buttons(&self) -> [ButtonDef<'_>; 2] {
-		[
+	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+		vec![
 			ButtonDef {
 				label: "Push",
 				selected: self.strategy == Strategy::Push,
@@ -32,12 +32,16 @@ impl ButtonScreen for GitStrategyButtons {
 		]
 	}
 
-	fn toggled(self) -> Self {
+	fn next(self) -> Self {
 		let strategy = match self.strategy {
 			Strategy::Push => Strategy::Branch,
 			Strategy::Branch => Strategy::Push,
 		};
 		GitStrategyButtons { strategy }
+	}
+
+	fn prev(self) -> Self {
+		self.next()
 	}
 
 	fn with_index(self, index: usize) -> Self {

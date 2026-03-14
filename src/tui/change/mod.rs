@@ -1,22 +1,26 @@
 //! TUI for selecting projects and the type of change (major, minor, patch).
 
+use anyhow::Context;
 use crossterm::event::Event;
 use ratatui::prelude::*;
+use ratatui_textarea::TextArea;
 
+use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult};
 use crate::model::changeset::ChangeType;
 use crate::package_manager::Project;
 
-mod select_change_type;
+mod enter_message;
 mod select_projects;
+mod single_package;
 
 /// The result of a completed change selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ChangeResult {
-	/// The projects selected by the user.
-	pub projects: Vec<Project>,
-	/// The type of change selected by the user.
-	pub change_type: ChangeType,
+	/// The projects and their per-package change types selected by the user.
+	pub projects: Vec<(Project, ChangeType)>,
+	/// The changeset description. `None` means launch the editor.
+	pub message: Option<String>,
 }
 
 /// Options that can be pre-filled to skip interactive steps.
@@ -28,18 +32,36 @@ pub struct ChangeOptions {
 	pub projects: Option<Vec<usize>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// State carried when navigating back from [`Screen::EnterMessage`].
+enum BackState {
+	MultiPackage {
+		selected: Vec<bool>,
+		levels: Vec<ChangeType>,
+		cursor: usize,
+		changed_count: usize,
+	},
+	SinglePackage {
+		level: ChangeType,
+	},
+}
+
 enum Screen {
 	SelectProjects {
 		selected: Vec<bool>,
+		/// Per-project change level (shown only for selected projects).
+		levels: Vec<ChangeType>,
 		cursor: usize,
 		error: bool,
 		/// Number of projects in the "Changed" group (always the first slice).
 		changed_count: usize,
 	},
-	SelectChangeType {
-		change_type: ChangeType,
-		selected_indices: Vec<usize>,
+	SinglePackage {
+		level: ChangeType,
+	},
+	EnterMessage {
+		textarea: Box<TextArea<'static>>,
+		projects: Vec<(Project, ChangeType)>,
+		back: BackState,
 	},
 }
 
@@ -79,8 +101,8 @@ fn reorder_projects(projects: &[Project], changed_flags: &[bool]) -> ReorderedPr
 		.filter(|(i, _)| !changed_flags[*i])
 		.map(|(i, p)| (i, p.clone()))
 		.collect();
-	changed_pairs.sort_by_key(|(_, p)| p.name().to_string());
-	unchanged_pairs.sort_by_key(|(_, p)| p.name().to_string());
+	changed_pairs.sort_by(|a, b| a.1.name().cmp(b.1.name()));
+	unchanged_pairs.sort_by(|a, b| a.1.name().cmp(b.1.name()));
 	let reordered_pairs: Vec<(usize, Project)> =
 		changed_pairs.into_iter().chain(unchanged_pairs).collect();
 	let mut orig_to_new = vec![0usize; projects.len()];
@@ -96,7 +118,7 @@ fn reorder_projects(projects: &[Project], changed_flags: &[bool]) -> ReorderedPr
 }
 
 fn handle_event(
-	screen: &Screen,
+	screen: Screen,
 	event: Event,
 	area: Rect,
 	projects: &[Project],
@@ -104,31 +126,37 @@ fn handle_event(
 	match screen {
 		Screen::SelectProjects {
 			selected,
+			levels,
 			cursor,
+			error,
 			changed_count,
-			..
 		} => Ok(select_projects::handle_event_select_projects(
 			selected,
-			*cursor,
-			*changed_count,
+			levels,
+			cursor,
+			error,
+			changed_count,
 			event,
 			area,
+			projects,
 		)),
-		Screen::SelectChangeType {
-			change_type,
-			selected_indices,
-		} => match event {
-			Event::Key(key) => select_change_type::handle_key_change_type(
-				*change_type,
-				selected_indices,
-				key.code,
-				projects,
-			),
-			_ => Ok(KeyResult::Continue(Screen::SelectChangeType {
-				change_type: *change_type,
-				selected_indices: selected_indices.to_vec(),
-			})),
-		},
+		Screen::SinglePackage { level } => {
+			let project = projects
+				.first()
+				.context("SinglePackage screen requires at least one project")?
+				.clone();
+			let buttons = single_package::SinglePackageButtons { level };
+			match buttons.handle_event(vec![project], event, area)? {
+				KeyResult::Continue((_, screen)) => Ok(KeyResult::Continue(screen)),
+				KeyResult::Complete(cr) => Ok(KeyResult::Complete(cr)),
+				KeyResult::Cancelled => Ok(KeyResult::Cancelled),
+			}
+		}
+		Screen::EnterMessage {
+			textarea,
+			projects: proj,
+			back,
+		} => enter_message::handle_event_enter_message(textarea, proj, back, event),
 	}
 }
 
@@ -137,6 +165,7 @@ fn ui(frame: &mut Frame, screen: &Screen, project_names: &[&str]) {
 	match screen {
 		Screen::SelectProjects {
 			selected,
+			levels,
 			cursor,
 			error,
 			changed_count,
@@ -146,21 +175,55 @@ fn ui(frame: &mut Frame, screen: &Screen, project_names: &[&str]) {
 				area,
 				project_names,
 				selected,
+				levels,
 				*cursor,
 				*error,
 				*changed_count,
 			);
 		}
-		Screen::SelectChangeType { change_type, .. } => {
-			let chunks = widgets::wizard_layout(
-				area,
-				&[
-					Constraint::Length(3),
-					Constraint::Min(5),
-					Constraint::Length(1),
-				],
-			);
-			select_change_type::render_select_change_type(frame, &chunks, *change_type);
+		Screen::SinglePackage { level } => {
+			single_package::SinglePackageButtons { level: *level }.render(frame, area);
+		}
+		Screen::EnterMessage { textarea, .. } => {
+			enter_message::render_enter_message(frame, area, textarea);
+		}
+	}
+}
+
+/// Constructs the initial [`Screen`] for the TUI based on how many projects
+/// there are and whether the caller pre-selected any of them.
+fn build_initial_screen(
+	ro: &ReorderedProjects,
+	project_indices: &[usize],
+	have_projects: bool,
+) -> Screen {
+	if ro.projects.len() == 1 {
+		return Screen::SinglePackage {
+			level: ChangeType::Patch,
+		};
+	}
+	if have_projects {
+		let mut selected = vec![false; ro.projects.len()];
+		for &i in project_indices {
+			selected[i] = true;
+		}
+		Screen::SelectProjects {
+			selected,
+			levels: vec![ChangeType::Patch; ro.projects.len()],
+			cursor: 0,
+			error: false,
+			changed_count: ro.changed_count,
+		}
+	} else {
+		let selected = (0..ro.projects.len())
+			.map(|i| i < ro.changed_count)
+			.collect();
+		Screen::SelectProjects {
+			selected,
+			levels: vec![ChangeType::Patch; ro.projects.len()],
+			cursor: 0,
+			error: false,
+			changed_count: ro.changed_count,
 		}
 	}
 }
@@ -193,7 +256,7 @@ pub fn run(
 
 	let ro = reorder_projects(projects, &changed_flags);
 
-	let project_indices = match &options.projects {
+	let project_indices: Vec<usize> = match &options.projects {
 		Some(indices) => indices.iter().map(|&i| ro.orig_to_new[i]).collect(),
 		None if ro.projects.len() == 1 => vec![0],
 		_ => vec![], // Need interactive project selection
@@ -210,35 +273,19 @@ pub fn run(
 		return Ok(Some(ChangeResult {
 			projects: indices
 				.into_iter()
-				.map(|i| ro.projects[i].clone())
+				.map(|i| (ro.projects[i].clone(), change_type))
 				.collect(),
-			change_type,
+			message: None,
 		}));
 	}
 
 	let project_names: Vec<&str> = ro.projects.iter().map(|p| p.name()).collect();
-
-	let initial_screen = if have_projects {
-		Screen::SelectChangeType {
-			change_type: ChangeType::Patch,
-			selected_indices: project_indices,
-		}
-	} else {
-		let selected: Vec<bool> = (0..ro.projects.len())
-			.map(|i| i < ro.changed_count)
-			.collect();
-		Screen::SelectProjects {
-			selected,
-			cursor: 0,
-			error: false,
-			changed_count: ro.changed_count,
-		}
-	};
+	let initial_screen = build_initial_screen(&ro, &project_indices, have_projects);
 
 	let result = widgets::run_tui(
 		initial_screen,
 		|frame, screen| ui(frame, screen, &project_names),
-		|screen, event, area| handle_event(&screen, event, area, &ro.projects),
+		|screen, event, area| handle_event(screen, event, area, &ro.projects),
 	)?;
 
 	Ok(result)
@@ -249,7 +296,7 @@ pub fn run(
 /// Passes a default 80×24 content area so tests don't need to supply one.
 #[cfg(test)]
 fn handle_key(
-	screen: &Screen,
+	screen: Screen,
 	key: crossterm::event::KeyCode,
 	projects: &[Project],
 ) -> anyhow::Result<HandleResult> {
@@ -372,53 +419,82 @@ mod tests {
 		assert_eq!(ro.orig_to_new[1], 0); // "gamma" → new idx 0
 	}
 
+	/// Unwrap a `Continue(Screen::SelectProjects {...})` result, panicking on mismatch.
+	fn unwrap_select_projects(
+		result: anyhow::Result<HandleResult>,
+	) -> (Vec<bool>, Vec<ChangeType>, usize, bool, usize) {
+		match result.unwrap() {
+			KeyResult::Continue(Screen::SelectProjects {
+				selected,
+				levels,
+				cursor,
+				error,
+				changed_count,
+			}) => (selected, levels, cursor, error, changed_count),
+			other => panic!(
+				"Expected Continue(SelectProjects), got different variant: {:?}",
+				std::mem::discriminant(&other)
+			),
+		}
+	}
+
+	/// Unwrap a `Continue(Screen::EnterMessage {...})` result.
+	fn unwrap_enter_message(result: anyhow::Result<HandleResult>) -> Vec<(Project, ChangeType)> {
+		match result.unwrap() {
+			KeyResult::Continue(Screen::EnterMessage { projects, .. }) => projects,
+			_ => panic!("Expected Continue(EnterMessage)"),
+		}
+	}
+
 	#[test]
-	fn workflow_select_projects_then_change_type() {
+	fn workflow_select_projects_then_enter_message() {
 		let projects = dummy_projects(3);
 
 		let screen = Screen::SelectProjects {
 			selected: vec![true, true, true],
+			levels: vec![ChangeType::Patch; 3],
 			cursor: 0,
 			error: false,
 			changed_count: 3,
 		};
 
 		// Deselect first project
-		let screen = match handle_key(&screen, KeyCode::Char(' '), &projects).unwrap() {
-			KeyResult::Continue(s) => s,
-			_ => panic!("Expected Continue"),
-		};
-		assert_eq!(
-			screen,
-			Screen::SelectProjects {
-				selected: vec![false, true, true],
-				cursor: 0,
-				error: false,
-				changed_count: 3,
-			}
-		);
+		let (selected, levels, cursor, error, changed_count) =
+			unwrap_select_projects(handle_key(screen, KeyCode::Char(' '), &projects));
+		assert_eq!(selected, vec![false, true, true]);
+		assert_eq!(levels, vec![ChangeType::Patch; 3]);
+		assert_eq!(cursor, 0);
+		assert!(!error);
+		assert_eq!(changed_count, 3);
 
-		// Confirm project selection
-		let screen = match handle_key(&screen, KeyCode::Enter, &projects).unwrap() {
-			KeyResult::Continue(s) => s,
-			_ => panic!("Expected Continue"),
+		// Change level of project at cursor (0) — but it's not selected, so no change
+		let screen = Screen::SelectProjects {
+			selected: vec![false, true, true],
+			levels: vec![ChangeType::Patch; 3],
+			cursor: 1,
+			error: false,
+			changed_count: 3,
 		};
-		assert_eq!(
-			screen,
-			Screen::SelectChangeType {
-				change_type: ChangeType::Patch,
-				selected_indices: vec![1, 2],
-			}
-		);
 
-		// Select minor
-		let result = handle_key(&screen, KeyCode::Char('i'), &projects).unwrap();
-		assert_eq!(
-			result,
-			KeyResult::Complete(ChangeResult {
-				projects: vec![projects[1].clone(), projects[2].clone()],
-				change_type: ChangeType::Minor,
-			})
-		);
+		// Change level of project-1: Patch.next() == Major
+		let (selected2, levels2, ..) =
+			unwrap_select_projects(handle_key(screen, KeyCode::Right, &projects));
+		assert_eq!(selected2, vec![false, true, true]);
+		assert_eq!(levels2[1], ChangeType::Major);
+
+		// Confirm → EnterMessage with selected projects and levels
+		let screen = Screen::SelectProjects {
+			selected: vec![false, true, true],
+			levels: vec![ChangeType::Patch, ChangeType::Major, ChangeType::Patch],
+			cursor: 0,
+			error: false,
+			changed_count: 3,
+		};
+		let proj = unwrap_enter_message(handle_key(screen, KeyCode::Enter, &projects));
+		assert_eq!(proj.len(), 2);
+		assert_eq!(proj[0].0.name(), "project-1");
+		assert_eq!(proj[0].1, ChangeType::Major);
+		assert_eq!(proj[1].0.name(), "project-2");
+		assert_eq!(proj[1].1, ChangeType::Patch);
 	}
 }

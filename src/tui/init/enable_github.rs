@@ -18,8 +18,8 @@ impl ButtonScreen for EnableGitHubButtons {
 	const QUESTION: &'static str =
 		"Enable GitHub Releases? (creates a release on GitHub after publish)";
 
-	fn buttons(&self) -> [ButtonDef<'_>; 2] {
-		[
+	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+		vec![
 			ButtonDef {
 				label: "Yes",
 				selected: self.yes,
@@ -33,7 +33,11 @@ impl ButtonScreen for EnableGitHubButtons {
 		]
 	}
 
-	fn toggled(self) -> Self {
+	fn next(self) -> Self {
+		EnableGitHubButtons { yes: !self.yes }
+	}
+
+	fn prev(self) -> Self {
 		EnableGitHubButtons { yes: !self.yes }
 	}
 

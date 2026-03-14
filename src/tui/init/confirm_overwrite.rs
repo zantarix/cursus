@@ -17,8 +17,8 @@ impl ButtonScreen for ConfirmOverwriteButtons {
 
 	const QUESTION: &'static str = "Config already exists. Overwrite?";
 
-	fn buttons(&self) -> [ButtonDef<'_>; 2] {
-		[
+	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+		vec![
 			ButtonDef {
 				label: "Yes",
 				selected: self.yes,
@@ -32,7 +32,11 @@ impl ButtonScreen for ConfirmOverwriteButtons {
 		]
 	}
 
-	fn toggled(self) -> Self {
+	fn next(self) -> Self {
+		ConfirmOverwriteButtons { yes: !self.yes }
+	}
+
+	fn prev(self) -> Self {
 		ConfirmOverwriteButtons { yes: !self.yes }
 	}
 

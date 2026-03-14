@@ -55,6 +55,24 @@ impl ChangeType {
 			Self::Major => 2,
 		}
 	}
+
+	/// Returns the next change type when cycling forward through options in the TUI.
+	pub(crate) fn next(self) -> Self {
+		match self {
+			Self::Major => Self::Minor,
+			Self::Minor => Self::Patch,
+			Self::Patch => Self::Major,
+		}
+	}
+
+	/// Returns the previous change type when cycling backward through options in the TUI.
+	pub(crate) fn prev(self) -> Self {
+		match self {
+			Self::Major => Self::Patch,
+			Self::Minor => Self::Major,
+			Self::Patch => Self::Minor,
+		}
+	}
 }
 
 /// A changeset recording project changes and an optional description message.
@@ -541,6 +559,20 @@ mod tests {
 	}
 
 	// ChangeType tests
+	#[test]
+	fn change_type_next_cycles_forward() {
+		assert_eq!(ChangeType::Major.next(), ChangeType::Minor);
+		assert_eq!(ChangeType::Minor.next(), ChangeType::Patch);
+		assert_eq!(ChangeType::Patch.next(), ChangeType::Major);
+	}
+
+	#[test]
+	fn change_type_prev_cycles_backward() {
+		assert_eq!(ChangeType::Major.prev(), ChangeType::Patch);
+		assert_eq!(ChangeType::Minor.prev(), ChangeType::Major);
+		assert_eq!(ChangeType::Patch.prev(), ChangeType::Minor);
+	}
+
 	#[test]
 	fn change_type_ordering() {
 		assert!(ChangeType::Major > ChangeType::Minor);

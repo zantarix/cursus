@@ -8,7 +8,7 @@ use super::widgets::{
 	render_yes_no_buttons, wizard_layout,
 };
 
-/// A TUI screen that displays a question and two buttons.
+/// A TUI screen that displays a question and N buttons.
 ///
 /// Implementors provide the question text, button definitions, and state
 /// transitions. The default [`ButtonScreen::handle_event`] and
@@ -31,16 +31,19 @@ pub trait ButtonScreen: Sized {
 	/// Foreground color for the question text. Defaults to [`Color::Yellow`].
 	const QUESTION_COLOR: Color = Color::Yellow;
 
-	/// Returns the two button definitions for the current selection state.
-	fn buttons(&self) -> [ButtonDef<'_>; 2];
+	/// Returns the button definitions for the current selection state.
+	fn buttons(&self) -> Vec<ButtonDef<'_>>;
 
-	/// Returns a copy of `self` with the selection toggled to the next option.
-	fn toggled(self) -> Self;
+	/// Returns a copy of `self` with the selection advanced to the next option.
+	fn next(self) -> Self;
+
+	/// Returns a copy of `self` with the selection moved to the previous option.
+	fn prev(self) -> Self;
 
 	/// Returns a copy of `self` with the selection set to `index`.
 	///
 	/// Called when the user clicks a button. `index` is `0` for the first
-	/// button and `1` for the second.
+	/// button, `1` for the second, and so on.
 	fn with_index(self, index: usize) -> Self;
 
 	/// Wraps `self` back into a `Continue` result without any state change.
@@ -61,9 +64,10 @@ pub trait ButtonScreen: Sized {
 
 	/// Handles an input event and returns the next state.
 	///
-	/// Dispatches toggle, confirm, cancel, mouse, and no-op events using the
-	/// standard two-button wizard key bindings:
-	/// - `←`/`→`/`Tab`/`h`/`l` → toggle
+	/// Dispatches cycle, confirm, cancel, mouse, and no-op events using the
+	/// standard button wizard key bindings:
+	/// - `←`/`h` → prev
+	/// - `→`/`l`/`Tab` → next
 	/// - `Enter` → confirm
 	/// - `Esc`/`q` → cancel
 	/// - Mouse left-click on a button → confirm that button
@@ -81,18 +85,20 @@ pub trait ButtonScreen: Sized {
 	) -> anyhow::Result<KeyResult<(Self::State, Self::FullScreen), Self::Result>> {
 		match event {
 			Event::Key(KeyEvent { code, .. }) => match code {
-				KeyCode::Left
-				| KeyCode::Right
-				| KeyCode::Tab
-				| KeyCode::Char('h')
-				| KeyCode::Char('l') => Ok(KeyResult::Continue(self.toggled().into_continue(state))),
+				KeyCode::Left | KeyCode::Char('h') => {
+					Ok(KeyResult::Continue(self.prev().into_continue(state)))
+				}
+				KeyCode::Right | KeyCode::Tab | KeyCode::Char('l') => {
+					Ok(KeyResult::Continue(self.next().into_continue(state)))
+				}
 				KeyCode::Enter => self.on_confirm(state),
 				KeyCode::Esc | KeyCode::Char('q') => Ok(KeyResult::Cancelled),
 				_ => Ok(KeyResult::Continue(self.into_continue(state))),
 			},
 			Event::Mouse(me) if matches!(me.kind, MouseEventKind::Down(MouseButton::Left)) => {
+				let n = self.buttons().len() as u16;
 				if let Some(idx) =
-					button_click_index(content_area, Self::QUESTION, 2, me.column, me.row)
+					button_click_index(content_area, Self::QUESTION, n, me.column, me.row)
 				{
 					self.with_index(idx).on_confirm(state)
 				} else {
@@ -108,7 +114,7 @@ pub trait ButtonScreen: Sized {
 	///
 	/// `area` should be the content area below any tab bar. The question is
 	/// rendered in [`Self::QUESTION_COLOR`] inside a bordered block, followed
-	/// by the two buttons and a help line at the bottom.
+	/// by the buttons and a help line at the bottom.
 	fn render(&self, frame: &mut Frame, area: Rect) {
 		let chunks = wizard_layout(
 			area,
@@ -124,7 +130,7 @@ pub trait ButtonScreen: Sized {
 		render_help(
 			frame,
 			chunks[3],
-			"←/→/Tab or click to switch, Enter or click to confirm, Esc to cancel",
+			"←/→ or click to switch, Enter or click to confirm, Esc to cancel",
 		);
 	}
 }
@@ -160,8 +166,8 @@ mod tests {
 
 		const QUESTION: &'static str = "Test question?";
 
-		fn buttons(&self) -> [ButtonDef<'_>; 2] {
-			[
+		fn buttons(&self) -> Vec<ButtonDef<'_>> {
+			vec![
 				ButtonDef {
 					label: "Yes",
 					selected: self.yes,
@@ -175,7 +181,11 @@ mod tests {
 			]
 		}
 
-		fn toggled(self) -> Self {
+		fn next(self) -> Self {
+			TestButtons { yes: !self.yes }
+		}
+
+		fn prev(self) -> Self {
 			TestButtons { yes: !self.yes }
 		}
 
@@ -204,7 +214,7 @@ mod tests {
 	}
 
 	#[test]
-	fn button_screen_toggle_on_left() {
+	fn button_screen_prev_on_left() {
 		let result = TestButtons { yes: true }
 			.handle_event(TestState, test_key(KeyCode::Left), test_area())
 			.unwrap();
@@ -215,7 +225,7 @@ mod tests {
 	}
 
 	#[test]
-	fn button_screen_toggle_on_right() {
+	fn button_screen_next_on_right() {
 		let result = TestButtons { yes: false }
 			.handle_event(TestState, test_key(KeyCode::Right), test_area())
 			.unwrap();
@@ -226,7 +236,7 @@ mod tests {
 	}
 
 	#[test]
-	fn button_screen_toggle_on_tab() {
+	fn button_screen_next_on_tab() {
 		let result = TestButtons { yes: true }
 			.handle_event(TestState, test_key(KeyCode::Tab), test_area())
 			.unwrap();
@@ -237,7 +247,7 @@ mod tests {
 	}
 
 	#[test]
-	fn button_screen_toggle_on_h() {
+	fn button_screen_prev_on_h() {
 		let result = TestButtons { yes: true }
 			.handle_event(TestState, test_key(KeyCode::Char('h')), test_area())
 			.unwrap();
@@ -248,7 +258,7 @@ mod tests {
 	}
 
 	#[test]
-	fn button_screen_toggle_on_l() {
+	fn button_screen_next_on_l() {
 		let result = TestButtons { yes: false }
 			.handle_event(TestState, test_key(KeyCode::Char('l')), test_area())
 			.unwrap();

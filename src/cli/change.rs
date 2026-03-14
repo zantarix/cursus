@@ -278,13 +278,13 @@ pub(crate) fn cmd_change(
 		if args.message.is_none() {
 			bail!("--message is required in non-interactive mode");
 		}
-		let selected_projects = match &project_indices {
+		let selected_projects: Vec<crate::package_manager::Project> = match &project_indices {
 			Some(indices) => indices.iter().map(|&i| projects[i].clone()).collect(),
 			None => projects.clone(),
 		};
 		change::ChangeResult {
-			projects: selected_projects,
-			change_type: ct,
+			projects: selected_projects.into_iter().map(|p| (p, ct)).collect(),
+			message: args.message.clone(),
 		}
 	} else {
 		let options = change::ChangeOptions {
@@ -292,23 +292,28 @@ pub(crate) fn cmd_change(
 			projects: project_indices,
 		};
 		let changed = classify_changed_projects(git, &projects);
-		match change::run(&projects, &options, &changed)? {
+		let mut r = match change::run(&projects, &options, &changed)? {
 			Some(r) => r,
 			None => return Ok(ExitCode::from(2)),
+		};
+		// --message always takes precedence over any TUI-entered message.
+		if let Some(msg) = &args.message {
+			r.message = Some(msg.clone());
 		}
+		r
 	};
 
 	let packages: BTreeMap<String, ChangeType> = result
 		.projects
 		.iter()
-		.map(|p| (p.name().to_string(), result.change_type))
+		.map(|(p, ct)| (p.name().to_string(), *ct))
 		.collect();
 
-	let changeset = Changeset::new(packages, args.message.clone());
+	let changeset = Changeset::new(packages, result.message.clone());
 
 	let path = changeset.write(git)?;
 
-	if args.message.is_none() {
+	if result.message.is_none() {
 		env.run_editor_on(&path, git.path())?;
 	}
 

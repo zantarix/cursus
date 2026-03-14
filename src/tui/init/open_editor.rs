@@ -17,8 +17,8 @@ impl ButtonScreen for OpenEditorButtons {
 
 	const QUESTION: &'static str = "Open the config file in your editor after saving?";
 
-	fn buttons(&self) -> [ButtonDef<'_>; 2] {
-		[
+	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+		vec![
 			ButtonDef {
 				label: "Yes",
 				selected: self.yes,
@@ -32,7 +32,11 @@ impl ButtonScreen for OpenEditorButtons {
 		]
 	}
 
-	fn toggled(self) -> Self {
+	fn next(self) -> Self {
+		OpenEditorButtons { yes: !self.yes }
+	}
+
+	fn prev(self) -> Self {
 		OpenEditorButtons { yes: !self.yes }
 	}
 
