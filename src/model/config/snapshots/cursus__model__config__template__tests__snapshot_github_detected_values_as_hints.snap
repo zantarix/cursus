@@ -13,6 +13,7 @@ enabled = true
 # enabled = false
 # path = "subdir/"              # Subdirectory for package.json (relative to git root)
 # lock_command = "npm install"  # Custom command to update the lock file
+# access = "restricted"         # Access level for scoped packages: "public" or "restricted" (default: "restricted")
 
 # [linked-versions]
 # Keep all packages at the same version (global linking).

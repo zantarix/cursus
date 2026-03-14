@@ -48,6 +48,10 @@ fn write_npm_section(out: &mut String, enabled: bool, path: &Option<String>) -> 
 			out,
 			"# lock_command = \"npm install\"  # Custom command to update the lock file"
 		)?;
+		writeln!(
+			out,
+			"# access = \"restricted\"         # Access level for scoped packages: \"public\" or \"restricted\" (default: \"restricted\")"
+		)?;
 	} else {
 		writeln!(out, "# [npm]")?;
 		writeln!(out, "# enabled = false")?;
@@ -58,6 +62,10 @@ fn write_npm_section(out: &mut String, enabled: bool, path: &Option<String>) -> 
 		writeln!(
 			out,
 			"# lock_command = \"npm install\"  # Custom command to update the lock file"
+		)?;
+		writeln!(
+			out,
+			"# access = \"restricted\"         # Access level for scoped packages: \"public\" or \"restricted\" (default: \"restricted\")"
 		)?;
 	}
 	writeln!(out)
