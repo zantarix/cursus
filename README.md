@@ -191,6 +191,15 @@ enabled = true
 # Subdirectory containing Cargo.toml, relative to the git root.
 path = "rust"
 
+[linked-versions]
+# Keep groups of packages at the same version during prepare.
+# Set enabled = true with no groups to link all packages globally.
+enabled = true
+
+[[linked-versions.groups]]
+# Glob patterns to match package names. Packages in a group always share one version.
+packages = ["@org/sdk-*", "@org/sdk-core"]
+
 [git]
 # Commit, push, and tag as part of prepare/publish.
 # Defaults to true when [github] is enabled.
@@ -223,6 +232,7 @@ pull_request_title = "Release updates"
 # Map of asset display names to file paths relative to the git root.
 "linux-amd64.tar.gz" = "dist/app-linux-amd64.tar.gz"
 "macos-arm64.tar.gz" = "dist/app-macos-arm64.tar.gz"
+
 ```
 
 ## Contributing

@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 mod cargo;
 mod git;
 mod github;
+mod linked_versions;
 mod npm;
 mod template;
 
 pub use cargo::CargoConfig;
 pub use git::{GitConfig, Strategy, TagFormat};
 pub use github::GitHubConfig;
+pub use linked_versions::{LinkedVersionGroup, LinkedVersionsConfig};
 pub use npm::NpmConfig;
 pub(crate) use template::render_init_template;
 
@@ -71,6 +73,9 @@ pub struct Config {
 	/// GitHub Releases configuration.
 	#[serde(default)]
 	pub github: GitHubConfig,
+	/// Linked package versions configuration.
+	#[serde(default, rename = "linked-versions")]
+	pub linked_versions: LinkedVersionsConfig,
 	/// Git repository root path.
 	///
 	/// Always `Some` when constructed via [`Config::new`] or [`load`].
@@ -95,6 +100,7 @@ impl Config {
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
+			linked_versions: LinkedVersionsConfig::default(),
 			git_workdir: Some(git_workdir.clone()),
 			env: None,
 		}
@@ -127,6 +133,12 @@ impl Config {
 	/// Sets GitHub Releases configuration (builder pattern).
 	pub fn with_github(mut self, config: GitHubConfig) -> Self {
 		self.github = config;
+		self
+	}
+
+	/// Sets linked package versions configuration (builder pattern).
+	pub fn with_linked_versions(mut self, config: LinkedVersionsConfig) -> Self {
+		self.linked_versions = config;
 		self
 	}
 
@@ -465,6 +477,7 @@ mod tests {
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
+			linked_versions: LinkedVersionsConfig::default(),
 			git_workdir: None,
 			env: None,
 		};
@@ -516,6 +529,7 @@ mod tests {
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
+			linked_versions: LinkedVersionsConfig::default(),
 			git_workdir: None,
 			env: None,
 		};
@@ -549,6 +563,7 @@ mod tests {
 			cargo: CargoConfig::default(),
 			git: GitConfig::default(),
 			github: GitHubConfig::default(),
+			linked_versions: LinkedVersionsConfig::default(),
 			git_workdir: None,
 			env: None,
 		};

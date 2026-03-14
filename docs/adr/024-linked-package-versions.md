@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -53,13 +53,16 @@ Global linking (`enabled = true` without `groups`) is a convenience shorthand eq
 
 ### Version calculation algorithm
 
-During `prepare`, after changesets have been aggregated and independent version bumps have been computed per [ADR-003](003-release-command.md), a linked-version reconciliation step runs for each linked group:
+During `prepare`, after changesets have been aggregated per [ADR-003](003-release-command.md), a linked-version reconciliation step runs for each linked group:
 
-1. **Bump normally.** For every package in the group that has pending changesets, compute its next version using the standard semver bump rules (highest change type wins across all changesets for that package).
-2. **Find the maximum.** Across all packages in the group -- both those that were bumped in step 1 and those with no pending changesets -- find the highest version. This comparison uses standard semver ordering.
-3. **Apply the maximum.** Set every package in the group to that highest version. Packages that already had this version (or were bumped to it in step 1) are unchanged. Packages that had a lower version are raised to the maximum.
+1. **Find the maximum current version.** Across all packages in the group, find the highest current version using standard semver ordering.
+2. **Find the highest change type.** Across all pending changesets for packages in the group, find the highest change type (major > minor > patch).
+3. **Compute the final version.** If any changeset exists in the group, apply the highest change type as a bump to the maximum current version. If no changesets exist, the maximum current version itself is the final version (pure convergence, no increment).
+4. **Apply the final version.** Set every package in the group to that final version. Packages that already have this version are unchanged. Packages with a lower version are raised to the final version; those with changesets whose natural bump differs from the final version receive a version override.
 
-This "max version wins" algorithm has two important properties:
+This algorithm always advances the entire group when any member has a changeset, even if the changeset belongs to a package that is not the version leader. For example, if `A` is at `2.3.4` (no changeset) and `B` is at `1.2.3` (patch changeset), the final version is `bump(2.3.4, patch) = 2.3.5`, and both packages are set to `2.3.5`.
+
+This "max-then-bump" algorithm has two important properties:
 
 - **Convergence.** If versions within a group have drifted apart (due to initial migration, manual edits, or partial failures), a single `prepare` run brings them all to the same version. No iterative correction or manual alignment is needed.
 - **Monotonicity.** No package's version ever decreases. A package without changesets may be pulled forward to match the group maximum, but it will never be pushed backward. This satisfies the semver requirement that published versions are immutable and monotonically increasing.
@@ -68,7 +71,10 @@ Packages raised to the group maximum without having their own changesets will st
 
 ### Interaction with scoped prepare
 
-When `prepare --package` is used to scope a release ([ADR-010](010-scoped-release-changeset-consumption.md)), Cursus will refuse to run if the `--package` scope partially overlaps with a linked group. If any package in a linked group is included in the scope but other packages in the same group are excluded, `prepare` will exit with an error identifying the linked group and the missing packages. The user must either include all packages in the linked group in their `--package` scope, or exclude all of them.
+When `prepare --package` is used to scope a release ([ADR-010](010-scoped-release-changeset-consumption.md)), Cursus enforces two constraints:
+
+- **Global linking**: `--package` is rejected outright when global linking is active (`enabled = true` with no groups). All packages must be prepared together when globally linked.
+- **Group-based linking**: Cursus will refuse to run if the `--package` scope partially overlaps with a linked group. If any package in a linked group is included in the scope but other packages in the same group are excluded, `prepare` will exit with an error identifying the linked group and the missing packages. The user must either include all packages in the linked group in their `--package` scope, or exclude all of them.
 
 This strict enforcement prevents a scoped prepare from producing a desynced linked group, which would violate the invariant that linked packages always share the same version. Allowing partial overlap would silently break the linking guarantee and confuse users who configured linked versions precisely to avoid version divergence.
 
@@ -103,7 +109,7 @@ Running validation during `ci` ensures that users on the branch strategy ([ADR-0
 
 ### Neutral
 
-- The linked-version reconciliation step runs after the existing per-package bump logic and before changelog generation. It is an additive step in the `prepare` pipeline, not a replacement for existing logic.
+- The linked-version reconciliation step runs after changeset aggregation and before version bumping and changelog generation. It modifies the aggregated change types and changelog entries, and produces version overrides that the downstream bumping logic applies. It is an additive step in the `prepare` pipeline, not a replacement for existing logic.
 - Changeset files themselves are unaffected by this feature. Changesets continue to record per-package change types. The linking is applied at `prepare` time, not at `change` time.
 - This decision does not affect `publish` ordering or behavior. Publishing remains per-package and respects dependency order as before.
 - `cursus change` does not validate linked-version configuration. Invalid group patterns or overlapping memberships are only surfaced when `prepare` or `ci` runs. This keeps `change` lightweight and avoids requiring package enumeration during changeset recording.

@@ -187,6 +187,30 @@ impl Project {
 		Self::new_test_with_runner(name, path, Arc::new(RecordingCommandRunner::new(0)))
 	}
 
+	/// Creates a minimal `Project` with a specific version for use in unit tests.
+	#[cfg(test)]
+	pub fn new_test_with_version(name: &str, version: semver::Version) -> Self {
+		use crate::command::test_support::RecordingCommandRunner;
+		use crate::model::config::NpmConfig;
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(runner as Arc<dyn crate::command::CommandRunner>);
+		let path = format!("/nonexistent/packages/{name}");
+		Self {
+			info: ProjectInfo {
+				name: name.to_string(),
+				path: AbsolutePath::new(&path).unwrap(),
+				version,
+				publishable: true,
+				dependency_names: Vec::new(),
+			},
+			adapter: Arc::new(NpmAdapter::new(
+				NpmConfig::default(),
+				AbsolutePath::new("/nonexistent").unwrap(),
+				env,
+			)),
+		}
+	}
+
 	/// Creates a `Project` with a custom recording runner for use in unit tests.
 	#[cfg(test)]
 	pub fn new_test_with_runner(

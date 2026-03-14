@@ -93,6 +93,27 @@ fn write_git_section(out: &mut String, enabled: bool, strategy: Option<Strategy>
 	writeln!(out)
 }
 
+/// Appends a fully commented-out `[linked-versions]` section.
+///
+/// This section is always emitted as comments so users can discover it without
+/// consulting documentation; it is never enabled by the init wizard.
+fn write_linked_versions_section(out: &mut String) -> fmt::Result {
+	writeln!(out, "# [linked-versions]")?;
+	writeln!(
+		out,
+		"# Keep all packages at the same version (global linking)."
+	)?;
+	writeln!(out, "# enabled = true")?;
+	writeln!(out)?;
+	writeln!(
+		out,
+		"# Or define groups of packages that should share a version:"
+	)?;
+	writeln!(out, "# [[linked-versions.groups]]")?;
+	writeln!(out, "# packages = [\"@org/prefix-*\", \"@org/other\"]")?;
+	writeln!(out)
+}
+
 fn write_github_advanced_comments(out: &mut String) -> fmt::Result {
 	writeln!(
 		out,
@@ -167,7 +188,7 @@ fn write_github_section(
 /// without consulting documentation.
 ///
 /// Section ordering: `[global]`, cargo, npm (enabled first as active TOML,
-/// disabled as comments), `[git]`, `[github]`.
+/// disabled as comments), `[linked-versions]`, `[git]`, `[github]`.
 ///
 /// # Errors
 ///
@@ -182,6 +203,7 @@ pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String
 	writeln!(out)?;
 	write_cargo_section(&mut out, result.cargo_enabled, &result.cargo_path)?;
 	write_npm_section(&mut out, result.npm_enabled, &result.npm_path)?;
+	write_linked_versions_section(&mut out)?;
 	write_git_section(&mut out, result.git_enabled, result.git_strategy)?;
 	write_github_section(
 		&mut out,

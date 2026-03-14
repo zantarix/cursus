@@ -14,6 +14,14 @@ enabled = true
 # path = "subdir/"              # Subdirectory for package.json (relative to git root)
 # lock_command = "npm install"  # Custom command to update the lock file
 
+# [linked-versions]
+# Keep all packages at the same version (global linking).
+# enabled = true
+
+# Or define groups of packages that should share a version:
+# [[linked-versions.groups]]
+# packages = ["@org/prefix-*", "@org/other"]
+
 [git]
 enabled = true
 strategy = "branch"
