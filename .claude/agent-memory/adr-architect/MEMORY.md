@@ -54,7 +54,7 @@ Key differences from old style:
 - ADR-013: backend sub-decision superseded by ADR-018 (log facade decision still valid)
 - ADR-019: Accepted (improved init workflow)
 - ADR-020: Accepted (TUI screen submodule structure)
-- ADR-021: Proposed (commit references in changelog entries)
+- ADR-021: Accepted (commit references in changelog entries)
 - ADR-022: Proposed (distribution strategy)
 - ADR-023: Proposed (dependency propagation bumps)
 - ADR-024: Proposed (linked package versions)
