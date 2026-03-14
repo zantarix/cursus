@@ -61,7 +61,9 @@ Key differences from old style:
 - ADR-025: Accepted (auto changeset from conventional commit)
 - ADR-026: Accepted (per-package change level in TUI wizard)
 - ADR-027: Accepted (mutation testing approach)
-- Next ADR number: 028
+- ADR-028: Proposed (npm OIDC trusted publishing)
+- ADR-029: Proposed (cargo publish auth warning)
+- Next ADR number: 030
 
 ## Project ADR Rules (from CLAUDE.md)
 
