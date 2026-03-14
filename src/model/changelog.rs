@@ -9,11 +9,68 @@ use anyhow::Context;
 use crate::model::changeset::ChangeType;
 use crate::path::AbsolutePath;
 
+/// A reference to the git commit that introduced a changeset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitReference {
+	/// The first 7 characters of the full commit SHA.
+	pub short_hash: String,
+	/// The PR number, if one could be extracted from the commit subject.
+	pub pr_number: Option<u64>,
+}
+
+impl CommitReference {
+	/// Creates a new `CommitReference` from a full SHA and the commit subject line.
+	pub fn new(full_sha: &str, subject: &str) -> Self {
+		Self {
+			short_hash: full_sha.chars().take(7).collect(),
+			pr_number: extract_pr_number(subject),
+		}
+	}
+
+	/// Formats the commit reference as a suffix string.
+	///
+	/// Returns ` [abc1234] via #123` when a PR number is present,
+	/// or ` [abc1234]` when no PR number is known.
+	pub fn format_suffix(&self) -> String {
+		if let Some(pr) = self.pr_number {
+			format!(" [{}] via #{}", self.short_hash, pr)
+		} else {
+			format!(" [{}]", self.short_hash)
+		}
+	}
+}
+
+/// Extracts a PR number from a git commit subject line.
+///
+/// Recognises two patterns:
+/// - Squash-merge: subject contains `(#NNN)` (e.g. `feat: add thing (#42)`)
+/// - Merge commit: subject starts with `Merge pull request #NNN`
+fn extract_pr_number(subject: &str) -> Option<u64> {
+	// Check squash-merge pattern: (#NNN) anywhere in the subject
+	if let Some(pos) = subject.rfind("(#") {
+		let rest = &subject[pos + 2..];
+		if let Some(end) = rest.find(')') {
+			let num_str = &rest[..end];
+			if let Ok(n) = num_str.parse::<u64>() {
+				return Some(n);
+			}
+		}
+	}
+	// Check merge-commit pattern: "Merge pull request #NNN ..."
+	if let Some(rest) = subject.strip_prefix("Merge pull request #") {
+		let num_str = rest.split_whitespace().next().unwrap_or("");
+		if let Ok(n) = num_str.parse::<u64>() {
+			return Some(n);
+		}
+	}
+	None
+}
+
 /// A changelog entry for a specific version.
 pub struct Changelog {
 	version: semver::Version,
 	date: String,
-	changes: Vec<(ChangeType, Option<String>)>,
+	changes: Vec<(ChangeType, Option<String>, Option<CommitReference>)>,
 	project_path: AbsolutePath,
 }
 
@@ -22,7 +79,7 @@ impl Changelog {
 	pub fn new(
 		version: semver::Version,
 		date: String,
-		changes: Vec<(ChangeType, Option<String>)>,
+		changes: Vec<(ChangeType, Option<String>, Option<CommitReference>)>,
 		project_path: AbsolutePath,
 	) -> Self {
 		Self {
@@ -38,10 +95,14 @@ impl Changelog {
 	///
 	/// Returns an empty string when no changeset has a message.
 	pub fn format_sections(&self) -> String {
-		let mut sections: BTreeMap<ChangeType, Vec<&str>> = BTreeMap::new();
-		for (ct, msg) in &self.changes {
+		let mut sections: BTreeMap<ChangeType, Vec<(&str, Option<&CommitReference>)>> =
+			BTreeMap::new();
+		for (ct, msg, commit_ref) in &self.changes {
 			if let Some(text) = msg.as_deref() {
-				sections.entry(*ct).or_default().push(text);
+				sections
+					.entry(*ct)
+					.or_default()
+					.push((text, commit_ref.as_ref()));
 			}
 		}
 
@@ -169,14 +230,44 @@ pub fn extract_version_body(
 ///
 /// Returns a string containing the `### heading` line followed by bullet items.
 /// Prepends a blank separator line when `needs_separator` is true.
-fn format_change_section(heading: &str, messages: &[&str], needs_separator: bool) -> String {
+///
+/// Each entry is a `(message, commit_reference)` pair. When a commit reference is
+/// present, its suffix is appended to the **first line** of the message so that
+/// multiline entries render as:
+/// ```text
+/// - Added widget [abc1234] via #123
+///   with additional details
+/// ```
+fn format_change_section(
+	heading: &str,
+	messages: &[(&str, Option<&CommitReference>)],
+	needs_separator: bool,
+) -> String {
 	let mut section = String::new();
 	if needs_separator {
 		section.push('\n');
 	}
 	let _ = writeln!(section, "### {heading}\n");
-	for msg in messages {
-		let _ = writeln!(section, "- {}", indent_continuation_lines(msg));
+	for (msg, commit_ref) in messages {
+		let suffix = commit_ref.map_or_else(String::new, CommitReference::format_suffix);
+		// Apply suffix to first line, then indent continuation lines.
+		let text_with_suffix = if suffix.is_empty() {
+			(*msg).to_string()
+		} else {
+			let mut lines = msg.splitn(2, '\n');
+			let first = lines.next().unwrap_or("");
+			let rest = lines.next().unwrap_or("");
+			if rest.is_empty() {
+				format!("{first}{suffix}")
+			} else {
+				format!("{first}{suffix}\n{rest}")
+			}
+		};
+		let _ = writeln!(
+			section,
+			"- {}",
+			indent_continuation_lines(&text_with_suffix)
+		);
 	}
 	section
 }
@@ -220,6 +311,120 @@ fn split_at_first_h2(content: &str) -> (&str, &str) {
 mod tests {
 	use super::*;
 
+	// --- extract_pr_number ---
+
+	#[test]
+	fn extract_pr_number_squash_merge_format() {
+		assert_eq!(extract_pr_number("feat: add widget (#42)"), Some(42));
+	}
+
+	#[test]
+	fn extract_pr_number_squash_merge_at_start() {
+		assert_eq!(extract_pr_number("fix: thing (#1)"), Some(1));
+	}
+
+	#[test]
+	fn extract_pr_number_merge_commit_format() {
+		assert_eq!(
+			extract_pr_number("Merge pull request #123 from owner/branch"),
+			Some(123)
+		);
+	}
+
+	#[test]
+	fn extract_pr_number_no_match_rebase() {
+		assert_eq!(extract_pr_number("feat: add widget"), None);
+	}
+
+	#[test]
+	fn extract_pr_number_no_match_hash_without_parens() {
+		assert_eq!(extract_pr_number("fix: issue #99 workaround"), None);
+	}
+
+	#[test]
+	fn extract_pr_number_empty_subject() {
+		assert_eq!(extract_pr_number(""), None);
+	}
+
+	// --- CommitReference::format_suffix ---
+
+	#[test]
+	fn commit_reference_format_suffix_with_pr() {
+		let r = CommitReference {
+			short_hash: "abc1234".to_string(),
+			pr_number: Some(42),
+		};
+		assert_eq!(r.format_suffix(), " [abc1234] via #42");
+	}
+
+	#[test]
+	fn commit_reference_format_suffix_without_pr() {
+		let r = CommitReference {
+			short_hash: "abc1234".to_string(),
+			pr_number: None,
+		};
+		assert_eq!(r.format_suffix(), " [abc1234]");
+	}
+
+	#[test]
+	fn commit_reference_new_truncates_sha_to_7_chars() {
+		let r = CommitReference::new("abcdef1234567890", "feat: stuff (#5)");
+		assert_eq!(r.short_hash, "abcdef1");
+		assert_eq!(r.pr_number, Some(5));
+	}
+
+	// --- format_sections with commit references ---
+
+	#[test]
+	fn format_sections_with_commit_reference_renders_suffix() {
+		let commit_ref = CommitReference {
+			short_hash: "abc1234".to_string(),
+			pr_number: Some(42),
+		};
+		let changes = vec![(
+			ChangeType::Minor,
+			Some("Added widget".to_string()),
+			Some(commit_ref),
+		)];
+		let changelog = Changelog::new(
+			"1.0.0".parse().unwrap(),
+			"2024-01-01".to_string(),
+			changes,
+			AbsolutePath::new("/nonexistent").unwrap(),
+		);
+		let sections = changelog.format_sections();
+		assert!(
+			sections.contains("- Added widget [abc1234] via #42"),
+			"Expected suffix in output, got: {sections}"
+		);
+	}
+
+	#[test]
+	fn format_sections_multiline_message_suffix_on_first_line() {
+		let commit_ref = CommitReference {
+			short_hash: "abc1234".to_string(),
+			pr_number: None,
+		};
+		let changes = vec![(
+			ChangeType::Minor,
+			Some("Added widget\nwith extra details".to_string()),
+			Some(commit_ref),
+		)];
+		let changelog = Changelog::new(
+			"1.0.0".parse().unwrap(),
+			"2024-01-01".to_string(),
+			changes,
+			AbsolutePath::new("/nonexistent").unwrap(),
+		);
+		let sections = changelog.format_sections();
+		assert!(
+			sections.contains("- Added widget [abc1234]\n  with extra details"),
+			"Expected suffix on first line with indented continuation, got: {sections}"
+		);
+	}
+
+	// --- split_at_first_h2 ---
+
 	#[test]
 	fn split_at_first_h2_with_preamble() {
 		let content = "# Changelog\n\nIntro paragraph.\n\n## 1.0.0\n\nOld\n";
@@ -259,7 +464,7 @@ mod tests {
 			"# My Custom Title\n\nAn intro paragraph.\n\n## 0.1.0\n\nOld entry\n",
 		)
 		.unwrap();
-		let changes = vec![(ChangeType::Minor, Some("New thing".to_string()))];
+		let changes = vec![(ChangeType::Minor, Some("New thing".to_string()), None)];
 		let changelog = Changelog::new(
 			"0.2.0".parse().unwrap(),
 			"2024-06-01".to_string(),
@@ -275,8 +480,8 @@ mod tests {
 	#[test]
 	fn format_sections_returns_sections_without_heading() {
 		let changes = vec![
-			(ChangeType::Minor, Some("Added feature X".to_string())),
-			(ChangeType::Patch, Some("Fixed bug Y".to_string())),
+			(ChangeType::Minor, Some("Added feature X".to_string()), None),
+			(ChangeType::Patch, Some("Fixed bug Y".to_string()), None),
 		];
 		let changelog = Changelog::new(
 			"1.1.0".parse().unwrap(),
@@ -294,7 +499,8 @@ mod tests {
 
 	#[test]
 	fn format_sections_returns_empty_when_no_messages() {
-		let changes: Vec<(ChangeType, Option<String>)> = vec![(ChangeType::Minor, None)];
+		let changes: Vec<(ChangeType, Option<String>, Option<CommitReference>)> =
+			vec![(ChangeType::Minor, None, None)];
 		let changelog = Changelog::new(
 			"1.1.0".parse().unwrap(),
 			"2024-01-15".to_string(),
@@ -307,8 +513,8 @@ mod tests {
 	#[test]
 	fn format_changelog_entry_with_messages() {
 		let changes = vec![
-			(ChangeType::Minor, Some("Added feature X".to_string())),
-			(ChangeType::Patch, Some("Fixed bug Y".to_string())),
+			(ChangeType::Minor, Some("Added feature X".to_string()), None),
+			(ChangeType::Patch, Some("Fixed bug Y".to_string()), None),
 		];
 		let changelog = Changelog::new(
 			"1.1.0".parse().unwrap(),
@@ -326,7 +532,8 @@ mod tests {
 
 	#[test]
 	fn format_changelog_entry_no_messages() {
-		let changes: Vec<(ChangeType, Option<String>)> = vec![(ChangeType::Minor, None)];
+		let changes: Vec<(ChangeType, Option<String>, Option<CommitReference>)> =
+			vec![(ChangeType::Minor, None, None)];
 		let changelog = Changelog::new(
 			"1.1.0".parse().unwrap(),
 			"2024-01-15".to_string(),
@@ -343,6 +550,7 @@ mod tests {
 		let changes = vec![(
 			ChangeType::Minor,
 			Some("First line\nSecond line\nThird line".to_string()),
+			None,
 		)];
 		let changelog = Changelog::new(
 			"1.1.0".parse().unwrap(),
@@ -360,6 +568,7 @@ mod tests {
 		let changes = vec![(
 			ChangeType::Minor,
 			Some("First line\n\nSecond paragraph".to_string()),
+			None,
 		)];
 		let changelog = Changelog::new(
 			"1.1.0".parse().unwrap(),
@@ -374,7 +583,11 @@ mod tests {
 
 	#[test]
 	fn format_changelog_entry_major_section() {
-		let changes = vec![(ChangeType::Major, Some("Breaking API change".to_string()))];
+		let changes = vec![(
+			ChangeType::Major,
+			Some("Breaking API change".to_string()),
+			None,
+		)];
 		let changelog = Changelog::new(
 			"2.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
@@ -389,7 +602,7 @@ mod tests {
 	#[test]
 	fn update_changelog_creates_new_file() {
 		let dir = tempfile::tempdir().unwrap();
-		let changes = vec![(ChangeType::Minor, Some("Something new".to_string()))];
+		let changes = vec![(ChangeType::Minor, Some("Something new".to_string()), None)];
 		let changelog = Changelog::new(
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
@@ -411,7 +624,7 @@ mod tests {
 			"# Changelog\n\n## 0.1.0\n\nOld entry\n",
 		)
 		.unwrap();
-		let changes = vec![(ChangeType::Minor, Some("New thing".to_string()))];
+		let changes = vec![(ChangeType::Minor, Some("New thing".to_string()), None)];
 		let changelog = Changelog::new(
 			"0.2.0".parse().unwrap(),
 			"2024-06-01".to_string(),
@@ -439,7 +652,7 @@ mod tests {
 			Changelog::new(
 				version.parse().unwrap(),
 				"2024-01-01".to_string(),
-				vec![(ChangeType::Patch, Some(msg.to_string()))],
+				vec![(ChangeType::Patch, Some(msg.to_string()), None)],
 				AbsolutePath::new(dir.path()).unwrap(),
 			)
 		};
@@ -460,7 +673,7 @@ mod tests {
 			Changelog::new(
 				version.parse().unwrap(),
 				"2024-01-01".to_string(),
-				vec![(ChangeType::Patch, Some(msg.to_string()))],
+				vec![(ChangeType::Patch, Some(msg.to_string()), None)],
 				AbsolutePath::new(dir.path()).unwrap(),
 			)
 		};
@@ -487,7 +700,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let sub = dir.path().join("packages/my-pkg");
 		std::fs::create_dir_all(&sub).unwrap();
-		let changes = vec![(ChangeType::Patch, Some("Release".to_string()))];
+		let changes = vec![(ChangeType::Patch, Some("Release".to_string()), None)];
 		let changelog = Changelog::new(
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
@@ -507,7 +720,7 @@ mod tests {
 		// Create a directory with the same name as the file we want to read
 		std::fs::create_dir(&changelog_path).unwrap();
 
-		let changes = vec![(ChangeType::Minor, Some("New".to_string()))];
+		let changes = vec![(ChangeType::Minor, Some("New".to_string()), None)];
 		let changelog = Changelog::new(
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),
@@ -529,7 +742,7 @@ mod tests {
 		perms.set_mode(0o444);
 		std::fs::set_permissions(dir.path(), perms).unwrap();
 
-		let changes = vec![(ChangeType::Patch, Some("Fix".to_string()))];
+		let changes = vec![(ChangeType::Patch, Some("Fix".to_string()), None)];
 		let changelog = Changelog::new(
 			"1.0.0".parse().unwrap(),
 			"2024-01-15".to_string(),

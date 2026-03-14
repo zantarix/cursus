@@ -385,6 +385,71 @@ impl GitWorkdir {
 			.collect())
 	}
 
+	/// Returns the full SHA of the commit that first added the given path.
+	///
+	/// Runs `git log --first-parent --diff-filter=A --format=%H -- <path>` and returns
+	/// the first SHA found. Returns `Ok(None)` when no commit is found (file was not
+	/// added via a tracked commit, or the history was rewritten).
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git log` exits with a non-zero status.
+	pub(crate) fn log_added_commit(
+		&self,
+		path: &std::path::Path,
+	) -> anyhow::Result<Option<String>> {
+		let path_str = path.to_string_lossy();
+		let output = self
+			.env
+			.run(
+				"git",
+				&[
+					"log",
+					"--first-parent",
+					"--diff-filter=A",
+					"--format=%H",
+					"--",
+					path_str.as_ref(),
+				],
+				&self.path,
+			)
+			.context("Failed to run git log --diff-filter=A")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git log --diff-filter=A failed: {stderr}");
+		}
+
+		let sha = String::from_utf8_lossy(&output.stdout)
+			.lines()
+			.next()
+			.map(|l| l.trim().to_string())
+			.filter(|s| !s.is_empty());
+
+		Ok(sha)
+	}
+
+	/// Returns the subject line of the given commit.
+	///
+	/// Runs `git log -1 --format=%s <rev>` and returns the trimmed subject.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git log` exits with a non-zero status.
+	pub(crate) fn log_subject(&self, rev: &str) -> anyhow::Result<String> {
+		let output = self
+			.env
+			.run("git", &["log", "-1", "--format=%s", rev], &self.path)
+			.context("Failed to run git log --format=%s")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git log --format=%s failed: {stderr}");
+		}
+
+		Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+	}
+
 	/// Returns the list of files reported by `git diff --name-only <extra_args>`.
 	///
 	/// `extra_args` is appended after `--name-only`. Pass `&["origin/HEAD..HEAD"]`
@@ -1146,5 +1211,119 @@ mod tests {
 		let (git, _) = make_git(runner, dir_abs);
 		let result = git.remote_origin_url().unwrap();
 		assert_eq!(result, Some("git@github.com:owner/repo.git".to_string()));
+	}
+
+	// --- log_added_commit ---
+
+	#[test]
+	fn log_added_commit_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"abc1234\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.log_added_commit(std::path::Path::new(".cursus/change.md"))
+			.unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(
+			invocations[0].args,
+			[
+				"log",
+				"--first-parent",
+				"--diff-filter=A",
+				"--format=%H",
+				"--",
+				".cursus/change.md"
+			]
+		);
+	}
+
+	#[test]
+	fn log_added_commit_returns_sha_when_found() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0)
+				.with_stdout(b"abcdef1234567890abcdef1234567890abcdef12\n".to_vec()),
+		);
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git
+			.log_added_commit(std::path::Path::new(".cursus/change.md"))
+			.unwrap();
+		assert_eq!(
+			result,
+			Some("abcdef1234567890abcdef1234567890abcdef12".to_string())
+		);
+	}
+
+	#[test]
+	fn log_added_commit_returns_none_on_empty_output() {
+		let dir = temp_dir();
+		let runner = recording(0); // empty stdout
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git
+			.log_added_commit(std::path::Path::new(".cursus/change.md"))
+			.unwrap();
+		assert_eq!(result, None);
+	}
+
+	#[test]
+	fn log_added_commit_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: not a git repo");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.log_added_commit(std::path::Path::new(".cursus/change.md"));
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git log --diff-filter=A failed"),
+			"Expected 'git log --diff-filter=A failed', got: {msg}"
+		);
+	}
+
+	// --- log_subject ---
+
+	#[test]
+	fn log_subject_passes_correct_args() {
+		let dir = temp_dir();
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0).with_stdout(b"feat: add thing\n".to_vec()));
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.log_subject("abc1234").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args, ["log", "-1", "--format=%s", "abc1234"]);
+	}
+
+	#[test]
+	fn log_subject_returns_trimmed_subject() {
+		let dir = temp_dir();
+		let runner = Arc::new(
+			RecordingCommandRunner::new(0).with_stdout(b"feat: add thing (#42)\n".to_vec()),
+		);
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.log_subject("abc1234").unwrap();
+		assert_eq!(result, "feat: add thing (#42)");
+	}
+
+	#[test]
+	fn log_subject_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"fatal: bad revision 'abc1234'");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.log_subject("abc1234");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git log --format=%s failed"),
+			"Expected 'git log --format=%s failed', got: {msg}"
+		);
 	}
 }

@@ -841,3 +841,106 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	mock_find_existing.assert_calls(1);
 	mock_update.assert_calls(1);
 }
+
+// ── Commit reference integration tests ────────────────────────────────────────
+
+#[test]
+fn prepare_with_git_adds_commit_references() {
+	// A changeset committed to the repo should get its SHA added to the changelog.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nA feature\n",
+	);
+	// Commit the changeset — this is what log_added_commit will find.
+	git_commit_all(dir.path(), "feat: add feature");
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "prepare failed: {result:?}");
+
+	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+	// Should contain a 7-character hex SHA reference like [abc1234] on a bullet line
+	let has_sha_ref = changelog.lines().any(|line| {
+		line.starts_with("- ") && line.contains('[') && line.contains(']') && {
+			// Extract content between [ and ] and verify it's a 7-char hex string
+			line.find('[')
+				.and_then(|start| {
+					line[start + 1..]
+						.find(']')
+						.map(|end| &line[start + 1..start + 1 + end])
+				})
+				.map(|hash| hash.len() == 7 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+				.unwrap_or(false)
+		}
+	});
+	assert!(
+		has_sha_ref,
+		"Expected 7-char hex SHA reference on a bullet line in changelog, got:\n{changelog}"
+	);
+}
+
+#[test]
+fn prepare_with_squash_merge_includes_pr_number() {
+	// A changeset introduced by a squash-merge commit (subject has `(#NN)`) should
+	// include the PR number in the changelog entry.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"patch\"\n+++\n\nFix from PR\n",
+	);
+	// Commit with a squash-merge-style subject
+	git_commit_all(dir.path(), "fix: resolve issue (#42)");
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "prepare failed: {result:?}");
+
+	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+	assert!(
+		changelog.contains("via #42"),
+		"Expected PR reference 'via #42' in changelog, got:\n{changelog}"
+	);
+}
+
+#[test]
+fn prepare_without_git_no_references() {
+	// When git is disabled, no commit references should appear in the changelog.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"patch\"\n+++\n\nFix\n",
+	);
+	git_commit_all(dir.path(), "fix: something (#10)");
+
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--no-git"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "prepare --no-git failed: {result:?}");
+
+	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+	// When git is disabled no SHA references should be added
+	assert!(
+		!changelog.contains("via #"),
+		"Expected no PR reference when --no-git, got:\n{changelog}"
+	);
+	// Also no SHA bracket references
+	let has_sha_ref = changelog.lines().any(|l| {
+		l.contains('[') && l.contains(']') && !l.starts_with("##") && !l.starts_with("###")
+	});
+	assert!(
+		!has_sha_ref,
+		"Expected no SHA reference in changelog when --no-git, got:\n{changelog}"
+	);
+}
