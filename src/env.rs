@@ -23,6 +23,15 @@ pub struct Env {
 	runner: Arc<dyn CommandRunner>,
 	/// The GitHub client for API operations, if a token was provided.
 	github_client: Option<Arc<dyn GitHubClient>>,
+	/// Whether an OIDC-capable CI environment is detected.
+	///
+	/// `true` when `ACTIONS_ID_TOKEN_REQUEST_URL` (GitHub Actions) or
+	/// `CI_JOB_JWT_V2` (GitLab CI) is set.
+	oidc_environment: bool,
+	/// Whether `NODE_AUTH_TOKEN` is set in the environment.
+	node_auth_token_present: bool,
+	/// Whether `CARGO_REGISTRY_TOKEN` is set in the environment.
+	cargo_registry_token_present: bool,
 }
 
 impl Env {
@@ -35,7 +44,28 @@ impl Env {
 			runner,
 			editor: None,
 			github_client: None,
+			oidc_environment: false,
+			node_auth_token_present: false,
+			cargo_registry_token_present: false,
 		}
+	}
+
+	/// Sets whether an OIDC-capable CI environment is detected.
+	pub fn with_oidc_environment(mut self, oidc_environment: bool) -> Self {
+		self.oidc_environment = oidc_environment;
+		self
+	}
+
+	/// Sets whether `NODE_AUTH_TOKEN` is present in the environment.
+	pub fn with_node_auth_token_present(mut self, present: bool) -> Self {
+		self.node_auth_token_present = present;
+		self
+	}
+
+	/// Sets whether `CARGO_REGISTRY_TOKEN` is present in the environment.
+	pub fn with_cargo_registry_token_present(mut self, present: bool) -> Self {
+		self.cargo_registry_token_present = present;
+		self
 	}
 
 	/// Sets the editor to open changeset files with.
@@ -79,6 +109,9 @@ impl Env {
 			runner: dry_runner,
 			editor: self.editor,
 			github_client: self.github_client,
+			oidc_environment: self.oidc_environment,
+			node_auth_token_present: self.node_auth_token_present,
+			cargo_registry_token_present: self.cargo_registry_token_present,
 		}
 	}
 
@@ -90,6 +123,21 @@ impl Env {
 	/// Returns the GitHub client, if one was configured.
 	pub(crate) fn github_client(&self) -> Option<&dyn GitHubClient> {
 		self.github_client.as_deref()
+	}
+
+	/// Returns `true` when an OIDC-capable CI environment is detected.
+	pub(crate) fn oidc_environment(&self) -> bool {
+		self.oidc_environment
+	}
+
+	/// Returns `true` when `NODE_AUTH_TOKEN` is present in the environment.
+	pub(crate) fn node_auth_token_present(&self) -> bool {
+		self.node_auth_token_present
+	}
+
+	/// Returns `true` when `CARGO_REGISTRY_TOKEN` is present in the environment.
+	pub(crate) fn cargo_registry_token_present(&self) -> bool {
+		self.cargo_registry_token_present
 	}
 
 	/// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
@@ -194,6 +242,48 @@ mod tests {
 		let (_, env) = recording_env(0);
 		assert!(env.editor().is_none());
 		assert!(env.github_client().is_none());
+	}
+
+	#[test]
+	fn new_has_false_auth_flags() {
+		let (_, env) = recording_env(0);
+		assert!(!env.oidc_environment());
+		assert!(!env.node_auth_token_present());
+		assert!(!env.cargo_registry_token_present());
+	}
+
+	#[test]
+	fn with_oidc_environment_sets_flag() {
+		let (_, env) = recording_env(0);
+		let env = env.with_oidc_environment(true);
+		assert!(env.oidc_environment());
+	}
+
+	#[test]
+	fn with_node_auth_token_present_sets_flag() {
+		let (_, env) = recording_env(0);
+		let env = env.with_node_auth_token_present(true);
+		assert!(env.node_auth_token_present());
+	}
+
+	#[test]
+	fn with_cargo_registry_token_present_sets_flag() {
+		let (_, env) = recording_env(0);
+		let env = env.with_cargo_registry_token_present(true);
+		assert!(env.cargo_registry_token_present());
+	}
+
+	#[test]
+	fn with_dry_run_runner_preserves_auth_flags() {
+		let (_, env) = recording_env(0);
+		let env = env
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(true)
+			.with_cargo_registry_token_present(true);
+		let dry_env = env.with_dry_run_runner();
+		assert!(dry_env.oidc_environment());
+		assert!(dry_env.node_auth_token_present());
+		assert!(dry_env.cargo_registry_token_present());
 	}
 
 	#[test]

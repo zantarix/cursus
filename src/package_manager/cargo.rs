@@ -7,6 +7,8 @@ use glob::glob;
 use semver::Version;
 use serde::Deserialize;
 
+use log::warn;
+
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
 use crate::model::config::CargoConfig;
 use crate::path::AbsolutePath;
@@ -168,6 +170,7 @@ fn read_workspace_member(member_path: &Path) -> anyhow::Result<Option<ProjectInf
 		version,
 		publishable,
 		dependency_names,
+		publishconfig_provenance: None,
 	}))
 }
 
@@ -328,6 +331,7 @@ fn build_cargo_root_project_info(
 		version,
 		publishable,
 		dependency_names,
+		publishconfig_provenance: None,
 	})
 }
 
@@ -433,6 +437,14 @@ impl PackageManagerAdapter for CargoAdapter {
 	}
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
+		if !self.env.cargo_registry_token_present() {
+			warn!(
+				"{}: CARGO_REGISTRY_TOKEN is not set; publish may fail if no other \
+				 authentication is configured",
+				project.name
+			);
+		}
+
 		let manifest_path = project.path.join("Cargo.toml");
 		let manifest_str = manifest_path.to_string_lossy();
 
@@ -1303,6 +1315,84 @@ tempfile = "3.0"
 		);
 		let result = adapter.update_lock_file().unwrap();
 		assert_eq!(result, Some(dir.path().join("Cargo.lock")));
+	}
+
+	fn recording_adapter_with_env(dir: &Path, env: crate::Env) -> CargoAdapter {
+		CargoAdapter::new(
+			CargoConfig::default(),
+			crate::path::AbsolutePath::new(dir).unwrap(),
+			env,
+		)
+	}
+
+	#[test]
+	fn publish_without_cargo_token_still_executes_publish() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_cargo_registry_token_present(false);
+		let adapter = recording_adapter_with_env(dir.path(), env);
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		// Command must still be dispatched despite missing token
+		assert_eq!(runner.invocations()[0].program, "cargo");
+		assert_eq!(runner.invocations()[0].args[0], "publish");
+	}
+
+	#[test]
+	fn publish_without_cargo_token_emits_warning() {
+		crate::test_logging::init_test_logger();
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_cargo_registry_token_present(false);
+		let adapter = recording_adapter_with_env(dir.path(), env);
+		adapter.publish(&info).unwrap();
+		let logs = crate::test_logging::take_logs();
+		let warn_msgs: Vec<_> = logs
+			.iter()
+			.filter(|(lvl, _)| *lvl == log::Level::Warn)
+			.collect();
+		assert!(
+			warn_msgs
+				.iter()
+				.any(|(_, msg)| msg.contains("CARGO_REGISTRY_TOKEN is not set")),
+			"Expected token-absent warning, got: {warn_msgs:?}"
+		);
+	}
+
+	#[test]
+	fn publish_with_cargo_token_no_warning() {
+		crate::test_logging::init_test_logger();
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_cargo_registry_token_present(true);
+		let adapter = recording_adapter_with_env(dir.path(), env);
+		adapter.publish(&info).unwrap();
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			!logs
+				.iter()
+				.any(|(_, msg)| msg.contains("CARGO_REGISTRY_TOKEN")),
+			"Should NOT emit token warning when token is present"
+		);
+	}
+
+	#[test]
+	fn publish_with_cargo_token_executes_publish() {
+		let dir = temp_dir();
+		let info = setup_publish_project(dir.path());
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_cargo_registry_token_present(true);
+		let adapter = recording_adapter_with_env(dir.path(), env);
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		assert_eq!(runner.invocations()[0].program, "cargo");
 	}
 
 	#[test]

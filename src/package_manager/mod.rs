@@ -33,6 +33,10 @@ pub struct ProjectInfo {
 	pub publishable: bool,
 	/// Names of intra-workspace dependencies.
 	pub dependency_names: Vec<String>,
+	/// Whether `publishConfig.provenance` is `true` in the manifest.
+	///
+	/// Only populated by the npm adapter; `None` for other adapters.
+	pub publishconfig_provenance: Option<bool>,
 }
 
 #[cfg(test)]
@@ -54,6 +58,7 @@ impl ProjectInfo {
 			},
 			publishable: true,
 			dependency_names: Vec::new(),
+			publishconfig_provenance: None,
 		}
 	}
 }
@@ -202,6 +207,7 @@ impl Project {
 				version,
 				publishable: true,
 				dependency_names: Vec::new(),
+				publishconfig_provenance: None,
 			},
 			adapter: Arc::new(NpmAdapter::new(
 				NpmConfig::default(),

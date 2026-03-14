@@ -140,9 +140,28 @@ fn main() -> ExitCode {
 			Arc::new(cursus::github::RestGitHubClient::new(token))
 				as Arc<dyn cursus::github::client::GitHubClient>
 		});
+	let oidc_environment = std::env::var("ACTIONS_ID_TOKEN_REQUEST_URL")
+		.ok()
+		.filter(|s| !s.is_empty())
+		.is_some()
+		|| std::env::var("CI_JOB_JWT_V2")
+			.ok()
+			.filter(|s| !s.is_empty())
+			.is_some();
+	let node_auth_token_present = std::env::var("NODE_AUTH_TOKEN")
+		.ok()
+		.filter(|s| !s.is_empty())
+		.is_some();
+	let cargo_registry_token_present = std::env::var("CARGO_REGISTRY_TOKEN")
+		.ok()
+		.filter(|s| !s.is_empty())
+		.is_some();
 	let env = cursus::Env::new(runner)
 		.with_editor_opt(editor)
-		.with_github_client_opt(github_client);
+		.with_github_client_opt(github_client)
+		.with_oidc_environment(oidc_environment)
+		.with_node_auth_token_present(node_auth_token_present)
+		.with_cargo_registry_token_present(cargo_registry_token_present);
 	match cursus::run_with(cli, &cwd, env) {
 		Ok(code) => code,
 		Err(e) => {

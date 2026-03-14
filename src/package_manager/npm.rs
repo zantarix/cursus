@@ -43,6 +43,12 @@ impl NpmAdapter {
 	}
 }
 
+/// Represents the `publishConfig` field of package.json.
+#[derive(Debug, Deserialize)]
+struct PublishConfig {
+	provenance: Option<bool>,
+}
+
 /// Represents the relevant fields from package.json.
 #[derive(Debug, Deserialize)]
 struct PackageJson {
@@ -57,6 +63,8 @@ struct PackageJson {
 	peer_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
 	#[serde(rename = "optionalDependencies")]
 	optional_dependencies: Option<std::collections::HashMap<String, serde_json::Value>>,
+	#[serde(rename = "publishConfig")]
+	publish_config: Option<PublishConfig>,
 }
 
 /// Workspaces can be either an array of globs or an object with a packages field.
@@ -141,8 +149,10 @@ fn get_workspace_patterns(
 
 /// Extracts project metadata from a parsed package.json.
 ///
-/// Returns version, publishable status, and dependency names.
-fn extract_project_metadata(package: &PackageJson) -> anyhow::Result<(Version, bool, Vec<String>)> {
+/// Returns version, publishable status, dependency names, and provenance setting.
+fn extract_project_metadata(
+	package: &PackageJson,
+) -> anyhow::Result<(Version, bool, Vec<String>, Option<bool>)> {
 	// Extract version
 	let version_str = package
 		.version
@@ -169,7 +179,9 @@ fn extract_project_metadata(package: &PackageJson) -> anyhow::Result<(Version, b
 		dependency_names.extend(deps_map.keys().cloned());
 	}
 
-	Ok((version, publishable, dependency_names))
+	let provenance = package.publish_config.as_ref().and_then(|pc| pc.provenance);
+
+	Ok((version, publishable, dependency_names, provenance))
 }
 
 /// Attempts to create a ProjectInfo from a workspace directory path.
@@ -195,8 +207,8 @@ fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<Projec
 		)
 	})?;
 
-	let (version, publishable, dependency_names) = extract_project_metadata(&package)
-		.with_context(|| {
+	let (version, publishable, dependency_names, publishconfig_provenance) =
+		extract_project_metadata(&package).with_context(|| {
 			let manifest_path = workspace_path.join("package.json");
 			format!(
 				"Failed to extract metadata from {}",
@@ -210,6 +222,7 @@ fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<Projec
 		version,
 		publishable,
 		dependency_names,
+		publishconfig_provenance,
 	}))
 }
 
@@ -246,7 +259,7 @@ fn build_npm_root_project_info(
 		.name
 		.clone()
 		.with_context(|| format!("Missing name in {}", manifest_path.display()))?;
-	let (version, publishable, dependency_names) =
+	let (version, publishable, dependency_names, publishconfig_provenance) =
 		extract_project_metadata(package).with_context(|| {
 			format!(
 				"Failed to extract metadata from {}",
@@ -259,6 +272,7 @@ fn build_npm_root_project_info(
 		version,
 		publishable,
 		dependency_names,
+		publishconfig_provenance,
 	})
 }
 
@@ -486,13 +500,41 @@ impl PackageManagerAdapter for NpmAdapter {
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let project_dir = project.path.clone();
+		let oidc = self.env.oidc_environment();
+		let node_auth = self.env.node_auth_token_present();
+		let access = self.config.access();
+
+		// Warn when NODE_AUTH_TOKEN overrides OIDC trusted publishing.
+		if oidc && node_auth {
+			warn!(
+				"{}: NODE_AUTH_TOKEN is set in an OIDC-capable CI environment; the token will \
+				 take precedence over OIDC trusted publishing",
+				project.name
+			);
+		}
+		// Warn when no authentication is configured at all.
+		if !oidc && !node_auth {
+			warn!(
+				"{}: no npm authentication detected (no OIDC environment, no NODE_AUTH_TOKEN); \
+				 publish is likely to fail",
+				project.name
+			);
+		}
+		// Warn when provenance attestation is not configured for a public package in OIDC.
+		if oidc && access == "public" && project.publishconfig_provenance != Some(true) {
+			warn!(
+				"{}: publishConfig.provenance is not set to true; consider adding it to \
+				 package.json for explicit provenance attestations",
+				project.name
+			);
+		}
 
 		let mut args = vec!["publish"];
 
 		// For scoped packages, add --access flag
 		let access_owned;
 		if project.name.starts_with('@') {
-			access_owned = self.config.access().to_string();
+			access_owned = access.to_string();
 			args.push("--access");
 			args.push(&access_owned);
 		}
@@ -1591,6 +1633,237 @@ mod tests {
 			!args.contains(&"--access".to_string()),
 			"Non-scoped package should not have --access flag"
 		);
+	}
+
+	// --- publish() warning tests ---
+
+	/// Creates a `NpmAdapter` with a fully-configured `Env` for warning tests.
+	fn recording_adapter_with_env(config: NpmConfig, dir: &Path, env: crate::Env) -> NpmAdapter {
+		NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
+	}
+
+	fn project_info_with_provenance(
+		dir: &Path,
+		name: &str,
+		provenance: Option<bool>,
+	) -> ProjectInfo {
+		let mut info = project_info(dir, name, "");
+		info.publishconfig_provenance = provenance;
+		info
+	}
+
+	#[test]
+	fn publish_no_auth_still_executes_command() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(false)
+			.with_node_auth_token_present(false);
+		let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
+		let info = project_info(dir.path(), "my-app", "");
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		assert_eq!(runner.invocations()[0].program, "npm");
+	}
+
+	#[test]
+	fn publish_no_auth_emits_no_auth_warning() {
+		crate::test_logging::init_test_logger();
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(false)
+			.with_node_auth_token_present(false);
+		let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
+		adapter
+			.publish(&project_info(dir.path(), "my-app", ""))
+			.unwrap();
+		let logs = crate::test_logging::take_logs();
+		let warn_msgs: Vec<_> = logs
+			.iter()
+			.filter(|(lvl, _)| *lvl == log::Level::Warn)
+			.collect();
+		assert!(
+			warn_msgs
+				.iter()
+				.any(|(_, msg)| msg.contains("no npm authentication detected")),
+			"Expected no-auth warning, got: {warn_msgs:?}"
+		);
+	}
+
+	#[test]
+	fn publish_oidc_with_node_auth_token_still_executes_command() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(true);
+		let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
+		let info = project_info(dir.path(), "my-app", "");
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		assert_eq!(runner.invocations()[0].program, "npm");
+	}
+
+	#[test]
+	fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
+		crate::test_logging::init_test_logger();
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(true);
+		let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
+		adapter
+			.publish(&project_info(dir.path(), "my-app", ""))
+			.unwrap();
+		let logs = crate::test_logging::take_logs();
+		let warn_msgs: Vec<_> = logs
+			.iter()
+			.filter(|(lvl, _)| *lvl == log::Level::Warn)
+			.collect();
+		assert!(
+			warn_msgs
+				.iter()
+				.any(|(_, msg)| msg.contains("NODE_AUTH_TOKEN is set in an OIDC-capable CI")),
+			"Expected token-override warning, got: {warn_msgs:?}"
+		);
+	}
+
+	#[test]
+	fn publish_oidc_without_provenance_still_executes_command() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(false);
+		let adapter = recording_adapter_with_env(
+			NpmConfig::enabled().with_access("public".to_string()),
+			dir.path(),
+			env,
+		);
+		// publishconfig_provenance is None — provenance warning should fire but publish proceeds
+		let info = project_info_with_provenance(dir.path(), "my-app", None);
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		assert_eq!(runner.invocations()[0].program, "npm");
+	}
+
+	#[test]
+	fn publish_oidc_public_without_provenance_emits_provenance_warning() {
+		crate::test_logging::init_test_logger();
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(false);
+		let adapter = recording_adapter_with_env(
+			NpmConfig::enabled().with_access("public".to_string()),
+			dir.path(),
+			env,
+		);
+		let info = project_info_with_provenance(dir.path(), "my-app", None);
+		adapter.publish(&info).unwrap();
+		let logs = crate::test_logging::take_logs();
+		let warn_msgs: Vec<_> = logs
+			.iter()
+			.filter(|(lvl, _)| *lvl == log::Level::Warn)
+			.collect();
+		assert!(
+			warn_msgs
+				.iter()
+				.any(|(_, msg)| msg.contains("publishConfig.provenance is not set to true")),
+			"Expected provenance warning, got: {warn_msgs:?}"
+		);
+	}
+
+	#[test]
+	fn publish_oidc_with_provenance_true_still_executes_command() {
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(false);
+		let adapter = recording_adapter_with_env(
+			NpmConfig::enabled().with_access("public".to_string()),
+			dir.path(),
+			env,
+		);
+		let info = project_info_with_provenance(dir.path(), "my-app", Some(true));
+		let result = adapter.publish(&info).unwrap();
+		assert_eq!(result, PublishOutcome::Published);
+		assert_eq!(runner.invocations()[0].program, "npm");
+	}
+
+	#[test]
+	fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
+		crate::test_logging::init_test_logger();
+		let dir = temp_dir();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_oidc_environment(true)
+			.with_node_auth_token_present(false);
+		let adapter = recording_adapter_with_env(
+			NpmConfig::enabled().with_access("public".to_string()),
+			dir.path(),
+			env,
+		);
+		let info = project_info_with_provenance(dir.path(), "my-app", Some(true));
+		adapter.publish(&info).unwrap();
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			!logs
+				.iter()
+				.any(|(_, msg)| msg.contains("publishConfig.provenance is not set to true")),
+			"Should NOT emit provenance warning when provenance is true"
+		);
+	}
+
+	// --- provenance parsing tests ---
+
+	#[test]
+	fn enumerate_parses_publishconfig_provenance_true() {
+		let dir = temp_dir();
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "publishConfig": {"provenance": true}}"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].publishconfig_provenance, Some(true));
+	}
+
+	#[test]
+	fn enumerate_parses_publishconfig_provenance_false() {
+		let dir = temp_dir();
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "publishConfig": {"provenance": false}}"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].publishconfig_provenance, Some(false));
+	}
+
+	#[test]
+	fn enumerate_parses_no_publishconfig_as_none() {
+		let dir = temp_dir();
+		write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].publishconfig_provenance, None);
+	}
+
+	#[test]
+	fn enumerate_parses_publishconfig_without_provenance_as_none() {
+		let dir = temp_dir();
+		write_package_json(
+			dir.path(),
+			r#"{"name": "my-app", "version": "1.0.0", "publishConfig": {"registry": "https://registry.npmjs.org"}}"#,
+		);
+		let projects = enumerate(dir.path()).unwrap();
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].publishconfig_provenance, None);
 	}
 
 	// --- update_lock_file shell execution tests (ADR-011) ---
