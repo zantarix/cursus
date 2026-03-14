@@ -55,6 +55,9 @@ cursus
 # Or non-interactively
 cursus change -t minor -m "Add user authentication"
 
+# Or derive from a Conventional Commit (useful for Renovate/Dependabot PRs)
+cursus change --auto
+
 # When ready to release
 cursus prepare
 
@@ -79,13 +82,11 @@ subcommand name.
 
 ### `cursus init`
 
-Creates a `.cursus/config.toml` at the repository root. In interactive mode a
-TUI wizard guides you through setup; in non-interactive mode pass
-`--no-interactive`. You can check which options are available with `--help`.
+Creates a `.cursus/config.toml` at the repository root. A TUI wizard guides
+you through setup. This command is interactive-only; scripts that need
+non-interactive setup can write `.cursus/config.toml` directly.
 
-| Flag | Description |
-|------|-------------|
-| `-p, --package-manager <pm>` | Package manager to configure: `cargo` or `npm` (required in non-interactive mode) |
+This command has no additional flags beyond the [global flags](#global-flags).
 
 ### `cursus change`
 
@@ -94,9 +95,11 @@ the default command when no subcommand is given.
 
 | Flag | Description |
 |------|-------------|
-| `-t, --change-type <type>` | `major`, `minor`, or `patch` (required in non-interactive mode) |
-| `-m, --message <text>` | Change description (opens editor if omitted; required in non-interactive mode) |
+| `-t, --change-type <type>` | `major`, `minor`, or `patch` (required in non-interactive mode; conflicts with `--auto`) |
+| `-m, --message <text>` | Change description (opens editor if omitted; required in non-interactive mode; conflicts with `--auto`) |
 | `-p, --project <name>` | Target project(s); repeatable, defaults to all |
+| `--auto` | Derive changeset from the single Conventional Commit on this branch (conflicts with `-t`/`-m`) |
+| `--no-git` | Skip committing and pushing the generated changeset (only with `--auto`) |
 
 ### `cursus prepare`
 
