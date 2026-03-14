@@ -60,7 +60,8 @@ Key differences from old style:
 - ADR-024: Proposed (linked package versions)
 - ADR-025: Accepted (auto changeset from conventional commit)
 - ADR-026: Accepted (per-package change level in TUI wizard)
-- Next ADR number: 027
+- ADR-027: Accepted (mutation testing approach)
+- Next ADR number: 028
 
 ## Project ADR Rules (from CLAUDE.md)
 
