@@ -110,6 +110,7 @@ fn publish_dry_run_with_github_shows_would_create() {
 		"[package]\nname = \"my-app\"\nversion = \"1.0.0\"\n",
 	)
 	.unwrap();
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus_with_token(
 		["cursus", "publish", "--dry-run", "--no-interactive"],
@@ -245,6 +246,7 @@ fn publish_dry_run_with_artifacts_shows_would_attach() {
 		"[package]\nname = \"my-app\"\nversion = \"1.0.0\"\n",
 	)
 	.unwrap();
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus_with_token(
 		["cursus", "publish", "--dry-run", "--no-interactive"],

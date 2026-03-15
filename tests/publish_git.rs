@@ -127,6 +127,8 @@ fn publish_multi_package_dry_run_logs_prefixed_tag_format() {
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
 	);
+	std::fs::write(dir.path().join("pkg-a/CHANGELOG.md"), "# Changelog\n").unwrap();
+	std::fs::write(dir.path().join("pkg-b/CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
@@ -157,6 +159,7 @@ fn publish_git_enabled_dry_run_logs_would_create_tag_and_summary_tag_note() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],

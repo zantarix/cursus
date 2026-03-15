@@ -418,6 +418,11 @@ fn publish_dry_run_cyclic_npm_workspace() {
 		r#"{"name": "@test/types", "version": "1.0.0", "dependencies": {"@test/utils": "1.0.0"}}"#,
 	)
 	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/types/CHANGELOG.md"),
+		"# Changelog\n",
+	)
+	.unwrap();
 
 	std::fs::create_dir_all(dir.path().join("packages/utils")).unwrap();
 	std::fs::write(
@@ -425,11 +430,21 @@ fn publish_dry_run_cyclic_npm_workspace() {
 		r#"{"name": "@test/utils", "version": "1.0.0", "dependencies": {"@test/types": "1.0.0"}}"#,
 	)
 	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/utils/CHANGELOG.md"),
+		"# Changelog\n",
+	)
+	.unwrap();
 
 	std::fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/app/package.json"),
 		r#"{"name": "@test/app", "version": "1.0.0", "dependencies": {"@test/types": "1.0.0", "@test/utils": "1.0.0"}}"#,
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/app/CHANGELOG.md"),
+		"# Changelog\n",
 	)
 	.unwrap();
 
@@ -540,6 +555,7 @@ fn publish_dry_run_summary_single_public_package() {
 		r#"{"name": "my-pkg", "version": "1.2.3"}"#,
 	)
 	.unwrap();
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
@@ -585,11 +601,21 @@ fn publish_dry_run_summary_multiple_public_packages() {
 		r#"{"name": "alpha", "version": "2.0.0"}"#,
 	)
 	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/alpha/CHANGELOG.md"),
+		"# Changelog\n",
+	)
+	.unwrap();
 
 	std::fs::create_dir_all(dir.path().join("packages/beta")).unwrap();
 	std::fs::write(
 		dir.path().join("packages/beta/package.json"),
 		r#"{"name": "beta", "version": "3.0.0"}"#,
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/beta/CHANGELOG.md"),
+		"# Changelog\n",
 	)
 	.unwrap();
 
@@ -630,6 +656,11 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	std::fs::write(
 		dir.path().join("packages/public-pkg/package.json"),
 		r#"{"name": "public-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/public-pkg/CHANGELOG.md"),
+		"# Changelog\n",
 	)
 	.unwrap();
 
@@ -685,5 +716,123 @@ fn publish_dry_run_summary_all_private_packages() {
 		logs.iter()
 			.any(|(_, m)| m.contains("Summary: 0 would be published, 0 would be skipped")),
 		"Expected summary log, got: {logs:?}"
+	);
+}
+
+/// A public package without `CHANGELOG.md` is warned about and skipped; publish succeeds.
+#[test]
+fn publish_skips_package_without_changelog() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_git_repo();
+
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
+	std::fs::write(
+		dir.path().join(".cursus/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "my-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	// No CHANGELOG.md — package has never been prepared.
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
+	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	let warn_log = logs
+		.iter()
+		.find(|(level, m)| *level == log::Level::Warn && m.contains("no CHANGELOG.md found"))
+		.map(|(_, m)| m.as_str())
+		.expect("Expected warning about missing CHANGELOG.md");
+	assert!(
+		warn_log.contains("cursus prepare"),
+		"Warning should mention 'cursus prepare', got: {warn_log}"
+	);
+}
+
+/// In a two-package workspace, only the package with `CHANGELOG.md` is published;
+/// the other is warned about and skipped with a correct summary.
+#[test]
+fn publish_mixed_changelog_packages() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_git_repo();
+
+	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
+	std::fs::write(
+		dir.path().join(".cursus/config.toml"),
+		"[npm]\nenabled = true\n",
+	)
+	.unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "private": true, "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/prepared")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/prepared/package.json"),
+		r#"{"name": "prepared-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/prepared/CHANGELOG.md"),
+		"# Changelog\n",
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("packages/unprepared")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/unprepared/package.json"),
+		r#"{"name": "unprepared-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+	// No CHANGELOG.md for unprepared-pkg.
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected success, got: {result:?}");
+
+	let logs = take_logs();
+
+	// Only the prepared package should appear in "Would publish".
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("Would publish prepared-pkg")),
+		"Expected 'Would publish prepared-pkg' in logs, got: {logs:?}"
+	);
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("Would publish unprepared-pkg")),
+		"unprepared-pkg should not appear in 'Would publish', got: {logs:?}"
+	);
+
+	// Warning for unprepared-pkg.
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Warn && m.contains("no CHANGELOG.md found")),
+		"Expected warning for unprepared-pkg, got: {logs:?}"
+	);
+
+	// Summary should reflect 1 unprepared skipped.
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("1 skipped (not yet prepared)")),
+		"Expected summary to mention '1 skipped (not yet prepared)', got: {logs:?}"
 	);
 }

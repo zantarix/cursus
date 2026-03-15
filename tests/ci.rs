@@ -123,6 +123,9 @@ fn ci_tags_missing_triggers_publish_dry_run() {
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
 
+	// Add CHANGELOG.md so the package is considered prepared and tag check applies.
+	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
+
 	// No changesets. Tag for v1.0.0 is absent → post-release, pre-publish state.
 	assert!(!git_tag_exists(dir.path(), "v1.0.0"));
 
@@ -219,6 +222,10 @@ fn ci_multi_package_partial_tags_triggers_publish() {
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
 	);
+
+	// Add CHANGELOG.md to both packages so they are considered prepared.
+	std::fs::write(dir.path().join("pkg-a/CHANGELOG.md"), "# Changelog\n").unwrap();
+	std::fs::write(dir.path().join("pkg-b/CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	// Tag pkg-a but not pkg-b — should still trigger publish.
 	git_tag(dir.path(), "pkg-a@1.0.0");
@@ -349,6 +356,69 @@ fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
 	assert!(
 		!logs.iter().any(|(_, m)| m.contains("running publish")),
 		"Should not trigger publish when all tags are present, got: {logs:?}"
+	);
+}
+
+/// Multi-package workspace with no changesets and no `CHANGELOG.md` in any package:
+/// `ci` should do nothing (all packages excluded from tag check).
+#[test]
+fn ci_all_packages_lack_changelog_nothing_to_do() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_cargo_workspace(
+		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
+		git_enabled_config(),
+	);
+
+	// No changesets, no CHANGELOG.md in either package — tag check skipped for all.
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("nothing to do")),
+		"Expected 'ci: nothing to do' when no packages have CHANGELOG.md, got: {logs:?}"
+	);
+	assert!(
+		!logs.iter().any(|(_, m)| m.contains("running publish")),
+		"Should not trigger publish when no packages have CHANGELOG.md, got: {logs:?}"
+	);
+}
+
+/// When one package has `CHANGELOG.md` (and its tag is missing) and another does not,
+/// `ci` should trigger publish (the prepared package qualifies).
+#[test]
+fn ci_no_changelog_package_excluded_from_tag_check() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_cargo_workspace(
+		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
+		git_enabled_config(),
+	);
+
+	// pkg-a has CHANGELOG.md and its tag is missing → qualifies for publish.
+	// pkg-b has no CHANGELOG.md → excluded from tag check.
+	std::fs::write(dir.path().join("pkg-a/CHANGELOG.md"), "# Changelog\n").unwrap();
+
+	assert!(!git_tag_exists(dir.path(), "pkg-a@1.0.0"));
+	assert!(!git_tag_exists(dir.path(), "pkg-b@2.0.0"));
+
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter().any(|(level, m)| *level == log::Level::Info
+			&& m.contains("unpublished tags detected")
+			&& m.contains("publish")),
+		"Expected publish triggered by pkg-a, got: {logs:?}"
 	);
 }
 

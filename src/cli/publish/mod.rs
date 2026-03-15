@@ -254,24 +254,24 @@ pub(crate) fn cmd_publish(
 		return Ok(ExitCode::FAILURE);
 	}
 	let is_multi_package = projects.len() > 1;
-	let (published_packages, skipped_count, dep_skipped_count, publish_failed) =
-		publish_projects(&sorted_projects, &graph, dry_run)?;
+	let publish = publish_projects(&sorted_projects, &graph, dry_run)?;
 	let git_enabled = config.git.enabled() && !args.no_git;
 	let (tags_created, tags_skipped, github_created, github_failed, tag_push_failed) =
 		run_git_release_operations(
 			git,
 			&config,
 			env,
-			&published_packages,
+			&publish.published,
 			dry_run,
 			git_enabled,
 			args.no_git,
 			is_multi_package,
 		)?;
 	log_publish_summary(
-		&published_packages,
-		skipped_count,
-		dep_skipped_count,
+		&publish.published,
+		publish.skipped_count,
+		publish.dep_skipped_count,
+		publish.unprepared_count,
 		dry_run,
 		git_enabled,
 		tags_created,
@@ -283,7 +283,7 @@ pub(crate) fn cmd_publish(
 		github_failed,
 	);
 
-	let code = if publish_failed || github_failed || tag_push_failed > 0 {
+	let code = if publish.failed || github_failed || tag_push_failed > 0 {
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
@@ -291,17 +291,78 @@ pub(crate) fn cmd_publish(
 	Ok(code)
 }
 
+/// Mutable state accumulated while iterating over projects in `publish_projects`.
+struct PublishState {
+	published: Vec<PublishedPackage>,
+	skipped_count: usize,
+	dep_skipped_count: usize,
+	unprepared_count: usize,
+	failed: bool,
+	blocked: std::collections::HashSet<String>,
+}
+
+impl PublishState {
+	fn new() -> Self {
+		Self {
+			published: Vec::new(),
+			skipped_count: 0,
+			dep_skipped_count: 0,
+			unprepared_count: 0,
+			failed: false,
+			blocked: std::collections::HashSet::new(),
+		}
+	}
+
+	/// Records the outcome of publishing a single project.
+	///
+	/// In dry-run mode, logs what would be published and pushes to `published`.
+	/// In real mode, delegates to `do_publish` and updates counts/blocked set on failure.
+	fn record_outcome(
+		&mut self,
+		project: &package_manager::Project,
+		graph: &DependencyGraph,
+		dry_run: bool,
+	) {
+		if dry_run {
+			let version = project.version();
+			info!(
+				"Would publish {}@{} to {}",
+				project.name(),
+				version,
+				project.registry_name()
+			);
+			self.published.push(PublishedPackage {
+				name: project.name().to_string(),
+				version: version.clone(),
+				project_path: project.path().clone(),
+			});
+		} else {
+			match do_publish(project) {
+				PublishResult::Published => self.published.push(PublishedPackage {
+					name: project.name().to_string(),
+					version: project.version().clone(),
+					project_path: project.path().clone(),
+				}),
+				PublishResult::Skipped => self.skipped_count += 1,
+				PublishResult::Failed => {
+					self.failed = true;
+					add_transitive_dependents(graph, project.name(), &mut self.blocked);
+				}
+			}
+		}
+	}
+}
+
 /// Publishes the given projects to their registries, tracking outcomes.
 ///
 /// Projects should be pre-sorted in dependency order (leaves first).
 /// Private packages (marked with `private: true` in npm or `publish = false` in Cargo)
-/// are silently skipped.
+/// are silently skipped. Public packages without a `CHANGELOG.md` (never prepared) are
+/// warned about and skipped without blocking their dependents.
 ///
 /// When a package fails to publish, all of its transitive dependents are skipped
 /// (with a warning) to avoid confusing errors from publishing against a registry
 /// that is missing a dependency.
-///
-/// Returns `(published_packages, skipped_count, dep_skipped_count, failed)`.
 ///
 /// # Arguments
 ///
@@ -312,70 +373,63 @@ fn publish_projects(
 	projects: &[package_manager::Project],
 	graph: &DependencyGraph,
 	dry_run: bool,
-) -> anyhow::Result<(Vec<PublishedPackage>, usize, usize, bool)> {
-	let mut published = Vec::new();
-	let mut skipped_count = 0;
-	let mut dep_skipped_count = 0;
-	let mut failed = false;
-	let mut blocked: std::collections::HashSet<String> = std::collections::HashSet::new();
+) -> anyhow::Result<PublishState> {
+	let mut state = PublishState::new();
 
 	for project in projects {
-		// Skip packages whose dependency failed to publish
-		if blocked.contains(project.name()) {
+		if state.blocked.contains(project.name()) {
 			warn!(
 				"Skipping {} because a dependency failed to publish",
 				project.name()
 			);
-			dep_skipped_count += 1;
+			state.dep_skipped_count += 1;
 			continue;
 		}
-
-		// Check if the project is publishable (not private)
-		let is_publishable = project.is_publishable()?;
-		if !is_publishable {
-			// Silently skip private packages (per ADR-007). Private packages are not
-			// added to `blocked`, because their dependents may still be publishable via
-			// other means. If a dependent genuinely requires this package on the registry,
-			// its own publish will fail and that failure will correctly block further
-			// transitive dependents at that point.
+		// Silently skip private packages (per ADR-007).
+		if !project.is_publishable()? {
 			continue;
 		}
-
-		if dry_run {
-			// Dry run: just print what would be published
-			let version = project.version();
-			let registry = project.registry_name();
-			info!(
-				"Would publish {}@{} to {}",
-				project.name(),
-				version,
-				registry
+		// Skip public packages that have never been prepared (no CHANGELOG.md).
+		// Not added to `blocked` — dependents may be independently publishable.
+		if !project.path().join("CHANGELOG.md").exists() {
+			warn!(
+				"Skipping {}: no CHANGELOG.md found (run 'cursus prepare' first, with an appropriate changeset)",
+				project.name()
 			);
-			published.push(PublishedPackage {
-				name: project.name().to_string(),
-				version: version.clone(),
-				project_path: project.path().clone(),
-			});
-		} else {
-			// Real publish: delegate to do_publish which handles everything
-			match do_publish(project) {
-				PublishResult::Published => {
-					published.push(PublishedPackage {
-						name: project.name().to_string(),
-						version: project.version().clone(),
-						project_path: project.path().clone(),
-					});
-				}
-				PublishResult::Skipped => skipped_count += 1,
-				PublishResult::Failed => {
-					failed = true;
-					add_transitive_dependents(graph, project.name(), &mut blocked);
-				}
-			}
+			state.unprepared_count += 1;
+			continue;
 		}
+		state.record_outcome(project, graph, dry_run);
 	}
 
-	Ok((published, skipped_count, dep_skipped_count, failed))
+	Ok(state)
+}
+
+/// Logs the GitHub Releases portion of the publish summary.
+fn log_github_releases_summary(
+	published_count: usize,
+	skipped_count: usize,
+	dep_skipped_note: &str,
+	unprepared_note: &str,
+	github_created: usize,
+	github_failed: bool,
+) {
+	match (github_created, github_failed) {
+		(created, false) => info!(
+			"Summary: {published_count} published, {skipped_count} skipped, \
+			 {created} GitHub Releases created{dep_skipped_note}{unprepared_note}",
+		),
+		(created, true) => {
+			let failed_count = published_count.saturating_sub(created);
+			info!(
+				"Summary: {published_count} published, {skipped_count} skipped, \
+				 {created} GitHub Release{} created, {failed_count} GitHub Release{} failed\
+				 {dep_skipped_note}{unprepared_note}",
+				if created == 1 { "" } else { "s" },
+				if failed_count == 1 { "" } else { "s" },
+			);
+		}
+	}
 }
 
 /// Logs the first line of the publish summary (published/skipped/GitHub counts).
@@ -384,6 +438,7 @@ fn log_summary_line(
 	published_packages: &[PublishedPackage],
 	skipped_count: usize,
 	dep_skipped_count: usize,
+	unprepared_count: usize,
 	dry_run: bool,
 	git_enabled: bool,
 	github_enabled: bool,
@@ -396,6 +451,11 @@ fn log_summary_line(
 	} else {
 		String::new()
 	};
+	let unprepared_note = if unprepared_count > 0 {
+		format!(", {unprepared_count} skipped (not yet prepared)")
+	} else {
+		String::new()
+	};
 	if dry_run {
 		let tag_note = if git_enabled && !published_packages.is_empty() {
 			format!(", {} would be tagged", published_packages.len())
@@ -403,37 +463,26 @@ fn log_summary_line(
 			String::new()
 		};
 		info!(
-			"Summary: {} would be published, {} would be skipped{tag_note}",
+			"Summary: {} would be published, {} would be skipped{tag_note}{unprepared_note}",
 			published_packages.len(),
 			skipped_count
 		);
 		warn!(
-			"Dry-run assumes all packages need publishing and will succeed; actual results may differ if some packages are already published or if publish failures occur"
+			"Dry-run assumes all packages need publishing and will succeed; actual results may \
+			 differ if some packages are already published or if publish failures occur"
 		);
 	} else if github_enabled && !no_git {
-		match (github_created, github_failed) {
-			(created, false) => info!(
-				"Summary: {} published, {} skipped, {} GitHub Releases created{dep_skipped_note}",
-				published_packages.len(),
-				skipped_count,
-				created
-			),
-			(created, true) => {
-				let failed_count = published_packages.len().saturating_sub(created);
-				info!(
-					"Summary: {} published, {} skipped, {} GitHub Release{} created, {} GitHub Release{} failed{dep_skipped_note}",
-					published_packages.len(),
-					skipped_count,
-					created,
-					if created == 1 { "" } else { "s" },
-					failed_count,
-					if failed_count == 1 { "" } else { "s" },
-				);
-			}
-		}
+		log_github_releases_summary(
+			published_packages.len(),
+			skipped_count,
+			&dep_skipped_note,
+			&unprepared_note,
+			github_created,
+			github_failed,
+		);
 	} else {
 		info!(
-			"Summary: {} published, {} skipped{dep_skipped_note}",
+			"Summary: {} published, {} skipped{dep_skipped_note}{unprepared_note}",
 			published_packages.len(),
 			skipped_count
 		);
@@ -446,6 +495,7 @@ fn log_publish_summary(
 	published_packages: &[PublishedPackage],
 	skipped_count: usize,
 	dep_skipped_count: usize,
+	unprepared_count: usize,
 	dry_run: bool,
 	git_enabled: bool,
 	tags_created: usize,
@@ -461,6 +511,7 @@ fn log_publish_summary(
 		published_packages,
 		skipped_count,
 		dep_skipped_count,
+		unprepared_count,
 		dry_run,
 		git_enabled,
 		github_enabled,

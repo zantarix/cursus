@@ -64,7 +64,8 @@ Key differences from old style:
 - ADR-028: Accepted (npm OIDC trusted publishing)
 - ADR-029: Accepted (cargo publish auth warning)
 - ADR-030: Accepted (bin/lib crate separation with environment injection)
-- Next ADR number: 031
+- ADR-031: Accepted (CHANGELOG.md guard for unprepared packages)
+- Next ADR number: 032
 
 ## Project ADR Rules (from CLAUDE.md)
 

@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use clap::Args;
-use log::info;
+use log::{debug, info};
 
 use crate::git;
 use crate::model::changeset::Changeset;
@@ -75,6 +75,10 @@ pub(crate) fn cmd_ci(
 		let is_multi = projects.len() > 1;
 
 		let any_tag_missing = selected.iter().any(|project| {
+			if !project.path().join("CHANGELOG.md").exists() {
+				debug!("skipping tag check for {}", project.name());
+				return false;
+			}
 			let version = project.version();
 			let tag = config.git.tag_format.tag(project.name(), version, is_multi);
 			// Treat git errors as "tag not found" — conservative, triggers publish.
