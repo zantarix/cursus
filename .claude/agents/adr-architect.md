@@ -115,7 +115,7 @@ Follow this precise format for all ADRs:
 
 **Quality Standards**
 
-- ADRs must be **immutable once accepted** - they are historical records
+- ADRs must be **immutable once accepted** and committed into the `main` git branch - they are historical records
 - Context section should be comprehensive enough that someone unfamiliar with the project can understand the decision
 - Consequences should be honest about trade-offs, not just cheerleading
 - Alternatives section proves due diligence was done
