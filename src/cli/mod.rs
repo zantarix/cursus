@@ -5,6 +5,7 @@ mod ci;
 mod init;
 mod prepare;
 mod publish;
+mod verify;
 
 pub use change::ChangeArgs;
 pub(crate) use change::cmd_change;
@@ -16,6 +17,8 @@ pub use prepare::PrepareArgs;
 pub(crate) use prepare::cmd_prepare;
 pub use publish::PublishArgs;
 pub(crate) use publish::cmd_publish;
+pub use verify::VerifyArgs;
+pub(crate) use verify::cmd_verify;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
@@ -79,6 +82,8 @@ pub enum Command {
 	Prepare(PrepareArgs),
 	/// Publish packages to their registries
 	Publish(PublishArgs),
+	/// Verify that the current branch adds at least one changeset (for CI use)
+	Verify(VerifyArgs),
 }
 
 #[cfg(test)]

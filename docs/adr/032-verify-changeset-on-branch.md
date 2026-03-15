@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -39,10 +39,10 @@ The command does not parse or validate the changeset file contents. It only chec
 The command uses three distinct exit codes to provide a machine-readable signal:
 
 - **Exit 0**: At least one changeset file was added on this branch. The command prints an informational message listing the detected changeset file(s).
-- **Exit 1**: No changeset files were added on this branch. The command prints a message explaining that no changesets were found and suggesting `cursus change` to create one.
-- **Exit 2**: An error occurred that prevented the check from completing (e.g., git is not available, the base ref does not exist, the diff command failed). The command prints the error to stderr.
+- **Exit 1**: An error occurred that prevented the check from completing (e.g., git is not available, the base ref does not exist, the diff command failed). The command prints the error to stderr. This matches the conventional Unix semantics where exit 1 signals a general failure, and is also the fallback code that `std::process::exit` and most error-handling harnesses produce by default.
+- **Exit 2**: No changeset files were added on this branch. The command prints a message explaining that no changesets were found and suggesting `cursus change` to create one.
 
-The distinction between exit 1 and exit 2 is critical for CI integration. Exit 1 is a definitive "no changeset" signal that a pipeline can act on (e.g., fail the PR check). Exit 2 indicates that the check itself could not run, which a pipeline may want to handle differently (e.g., retry, alert, or allow to pass rather than blocking on infrastructure failures).
+The distinction between exit 1 and exit 2 is critical for CI integration. Exit 2 is a definitive "no changeset" signal that a pipeline can act on (e.g., fail the PR check). Exit 1 indicates that the check itself could not run, which a pipeline may want to handle differently (e.g., retry, alert, or allow to pass rather than blocking on infrastructure failures). Reserving exit 1 for general errors keeps Cursus consistent with Unix conventions and with the default behaviour of Rust's `std::process::Termination` implementation, which maps `Err` to exit code 1.
 
 ### Output
 
@@ -54,14 +54,14 @@ Changeset(s) found on this branch:
   .cursus/gently-waving-ibis.md
 ```
 
-On failure (exit 1), the command logs at `warn!` level:
+On no-changeset (exit 2), the command logs at `warn!` level:
 
 ```
 No changesets found on this branch (compared against origin/HEAD).
 Run `cursus change` to record a changeset before merging.
 ```
 
-On error (exit 2), the error is reported via the standard `anyhow` error chain to stderr.
+On error (exit 1), the error is reported via the standard `anyhow` error chain to stderr.
 
 Verbose mode (`-v`) logs the base ref being used and the full `git diff` command for debugging. Silent mode (`-s`) suppresses all output except errors, consistent with [ADR-014](014-verbose-mode.md).
 
@@ -82,7 +82,7 @@ Coupling them would conflate these concerns. A feature branch that legitimately 
 
 ### No built-in escape hatch
 
-The command does not provide a mechanism to skip verification (e.g., a `[skip changeset]` marker in commit messages or a `--allow-missing` flag). How users integrate `verify` into their CI workflows -- including when to skip it -- is entirely their responsibility. The clear exit code contract (0 vs 1 vs 2) provides the necessary signal for pipelines to implement whatever branching logic they need.
+The command does not provide a mechanism to skip verification (e.g., a `[skip changeset]` marker in commit messages or a `--allow-missing` flag). How users integrate `verify` into their CI workflows -- including when to skip it -- is entirely their responsibility. The clear exit code contract (0 vs 2 vs 1) provides the necessary signal for pipelines to implement whatever branching logic they need.
 
 This keeps the command simple and opinionated: it answers a single question with a clear signal. Policy decisions about when a missing changeset is acceptable belong in the CI configuration, not in Cursus.
 

@@ -97,6 +97,7 @@ pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global, &env),
+		Some(cli::Command::Verify(args)) => cli::cmd_verify(&git, &args),
 		command => {
 			let config = model::config::load(&git_workdir, &env)?;
 			match command {
@@ -107,10 +108,10 @@ pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, dry_run, config),
 				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, dry_run, config),
 				None => cli::cmd_change(&git, &cli::ChangeArgs::default(), &cli.global, config),
-				Some(cli::Command::Init(_)) => {
-					// The outer match arm already handles Init; this arm cannot be reached.
+				Some(cli::Command::Init(_)) | Some(cli::Command::Verify(_)) => {
+					// The outer match arms already handle Init and Verify; these arms cannot be reached.
 					anyhow::bail!(
-						"Unexpected Init command in inner dispatch - this is a bug, please report it."
+						"Unexpected Init/Verify command in inner dispatch - this is a bug, please report it."
 					)
 				}
 			}

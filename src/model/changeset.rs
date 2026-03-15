@@ -12,6 +12,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::GitWorkdir;
 
+/// Returns `true` if `filename` looks like a changeset file name
+/// (ends with `.md`, case-insensitive, and is not `README.md`).
+pub fn is_changeset_filename(filename: &str) -> bool {
+	let p = Path::new(filename);
+	p.extension()
+		.is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+		&& !p
+			.file_stem()
+			.is_some_and(|stem| stem.eq_ignore_ascii_case("readme"))
+}
+
 /// The type of semantic version change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -200,10 +211,8 @@ impl Changeset {
 					Ok(p) => p,
 					Err(e) => return Some(Err(e)),
 				};
-				if path
-					.file_name()
-					.is_some_and(|n| n.eq_ignore_ascii_case("README.md"))
-				{
+				let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+				if !is_changeset_filename(filename) {
 					return None;
 				}
 				let contents = match std::fs::read_to_string(&path)
@@ -272,6 +281,40 @@ mod tests {
 	use crate::path::AbsolutePath;
 
 	use super::*;
+
+	// --- is_changeset_filename ---
+
+	#[test]
+	fn is_changeset_filename_accepts_md_files() {
+		assert!(is_changeset_filename("evidently-uptown-primate.md"));
+		assert!(is_changeset_filename("my-change.md"));
+		assert!(is_changeset_filename("a.md"));
+	}
+
+	#[test]
+	fn is_changeset_filename_rejects_readme_md() {
+		assert!(!is_changeset_filename("README.md"));
+	}
+
+	#[test]
+	fn is_changeset_filename_rejects_readme_case_variants() {
+		assert!(!is_changeset_filename("readme.md"));
+		assert!(!is_changeset_filename("Readme.md"));
+		assert!(!is_changeset_filename("README.MD"));
+		assert!(!is_changeset_filename("ReadMe.Md"));
+	}
+
+	#[test]
+	fn is_changeset_filename_rejects_non_md_files() {
+		assert!(!is_changeset_filename("config.toml"));
+		assert!(!is_changeset_filename("changeset.txt"));
+		assert!(!is_changeset_filename("no_extension"));
+	}
+
+	#[test]
+	fn is_changeset_filename_accepts_uppercase_md_extension() {
+		assert!(is_changeset_filename("my-change.MD"));
+	}
 
 	fn make_git(dir: &tempfile::TempDir) -> (AbsolutePath, Arc<RecordingCommandRunner>) {
 		let abs = AbsolutePath::new(dir.path()).unwrap();
