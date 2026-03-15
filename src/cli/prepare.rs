@@ -1031,10 +1031,7 @@ fn upsert_release_pull_request(
 	let Some(client) = env.github_client() else {
 		return Ok(());
 	};
-	let base = original_branch.unwrap_or_else(|| {
-		log::warn!("HEAD is detached; using \"main\" as the PR base branch.");
-		"main"
-	});
+	let base = original_branch.context("HEAD is detached; cannot determine PR base branch")?;
 	let gh_repo = GitHubRepo::resolve(&config.github, git)
 		.context("Could not resolve GitHub repository for PR creation")?;
 	let title = config.github.pull_request_title();
@@ -1245,7 +1242,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use crate::command::CommandRunner;
-	use crate::command::test_support::RecordingCommandRunner;
+	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 	use crate::model::config;
 
 	use super::*;
@@ -1878,7 +1875,16 @@ mod tests {
 		use crate::github::client::GitHubClient;
 		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 		let dir = setup_branch_strategy_with_github();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+			"git",
+			vec![
+				"rev-parse".to_string(),
+				"--abbrev-ref".to_string(),
+				"HEAD".to_string(),
+			],
+			0,
+			b"main\n".to_vec(),
+		));
 		let client = Arc::new(RecordingGitHubClient::new());
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
 			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
@@ -1908,7 +1914,16 @@ mod tests {
 		use crate::github::client::GitHubClient;
 		use crate::github::client::test_support::RecordingGitHubClient;
 		let dir = setup_branch_strategy_with_github();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+			"git",
+			vec![
+				"rev-parse".to_string(),
+				"--abbrev-ref".to_string(),
+				"HEAD".to_string(),
+			],
+			0,
+			b"main\n".to_vec(),
+		));
 		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
 		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
 			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
