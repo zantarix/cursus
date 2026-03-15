@@ -175,6 +175,7 @@ impl Changeset {
 	/// Reads all changeset files from the `.cursus/` directory.
 	///
 	/// Returns a list of `(path, changeset)` pairs for each `.md` file found.
+	/// `README.md` (case-insensitive) is silently skipped.
 	/// Returns an empty vec if no changesets exist.
 	///
 	/// # Errors
@@ -194,13 +195,30 @@ impl Changeset {
 
 		glob::glob(&pattern)
 			.context("Invalid glob pattern")?
-			.map(|entry| {
-				let path = entry.context("Failed to read glob entry")?;
-				let contents = std::fs::read_to_string(&path)
-					.with_context(|| format!("Failed to read changeset: {}", path.display()))?;
-				let changeset = Self::parse(&contents)
-					.with_context(|| format!("Failed to parse changeset: {}", path.display()))?;
-				Ok((path, changeset))
+			.filter_map(|entry| {
+				let path = match entry.context("Failed to read glob entry") {
+					Ok(p) => p,
+					Err(e) => return Some(Err(e)),
+				};
+				if path
+					.file_name()
+					.is_some_and(|n| n.eq_ignore_ascii_case("README.md"))
+				{
+					return None;
+				}
+				let contents = match std::fs::read_to_string(&path)
+					.with_context(|| format!("Failed to read changeset: {}", path.display()))
+				{
+					Ok(c) => c,
+					Err(e) => return Some(Err(e)),
+				};
+				let changeset = match Self::parse(&contents)
+					.with_context(|| format!("Failed to parse changeset: {}", path.display()))
+				{
+					Ok(c) => c,
+					Err(e) => return Some(Err(e)),
+				};
+				Some(Ok((path, changeset)))
 			})
 			.collect()
 	}
@@ -556,6 +574,40 @@ mod tests {
 
 		let result = Changeset::read_all(&git);
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn read_all_changesets_skips_readme() {
+		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		std::fs::write(
+			cursus_dir.join("README.md"),
+			"# Changesets\nNot a changeset.",
+		)
+		.unwrap();
+		std::fs::write(cursus_dir.join("valid.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
+
+		let result = Changeset::read_all(&git).unwrap();
+		assert_eq!(result.len(), 1, "README.md should be skipped");
+		assert_eq!(result[0].1.packages["app"], ChangeType::Minor);
+	}
+
+	#[test]
+	fn read_all_changesets_skips_readme_case_insensitive() {
+		let dir = tempfile::tempdir().unwrap();
+		let (abs, runner) = make_git(&dir);
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let git = GitWorkdir::new(&env, abs.clone());
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::create_dir_all(&cursus_dir).unwrap();
+		std::fs::write(cursus_dir.join("readme.md"), "not a changeset").unwrap();
+
+		let result = Changeset::read_all(&git).unwrap();
+		assert!(result.is_empty(), "readme.md (lowercase) should be skipped");
 	}
 
 	// ChangeType tests
