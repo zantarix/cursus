@@ -105,23 +105,6 @@ struct ReleaseInfo {
 	changelog_entry: String,
 }
 
-/// Normalises a path by resolving `.` and `..` components without requiring
-/// the path to exist on disk.
-fn normalize_path(path: &Path) -> PathBuf {
-	use std::path::Component;
-	let mut result = PathBuf::new();
-	for component in path.components() {
-		match component {
-			Component::ParentDir => {
-				result.pop();
-			}
-			Component::CurDir => {}
-			c => result.push(c),
-		}
-	}
-	result
-}
-
 /// Formats the git commit message for a prepare run.
 ///
 /// Produces `chore(release): pkg1@1.0.0, pkg2@2.0.0` for the given releases.
@@ -173,10 +156,19 @@ fn stage_and_commit(
 
 	// Build the full staging list, validating that extra_files resolve inside the repo root.
 	let git_workdir = git.path();
+	let canonical_workdir = std::fs::canonicalize(git_workdir)
+		.with_context(|| format!("failed to canonicalize git workdir {:?}", git_workdir))?;
 	let mut all_files = modified_files.to_vec();
 	for f in extra_files {
-		let resolved = normalize_path(&git_workdir.join(f));
-		if !resolved.starts_with(git_workdir) {
+		let full_path = git_workdir.join(f);
+		let resolved = match std::fs::canonicalize(&full_path) {
+			Ok(p) => p,
+			Err(_) => {
+				log::warn!("extra_files entry {:?} does not exist, skipping", f);
+				continue;
+			}
+		};
+		if !resolved.starts_with(&canonical_workdir) {
 			anyhow::bail!(
 				"extra_files entry {:?} resolves outside the repository root",
 				f
@@ -1261,20 +1253,6 @@ mod tests {
 		Arc::new(RecordingCommandRunner::new(0))
 	}
 
-	// ── normalize_path ────────────────────────────────────────────────────────
-
-	#[test]
-	fn normalize_path_collapses_parent_dir() {
-		let p = std::path::Path::new("/repo/foo/../bar");
-		assert_eq!(normalize_path(p), std::path::Path::new("/repo/bar"));
-	}
-
-	#[test]
-	fn normalize_path_collapses_current_dir() {
-		let p = std::path::Path::new("/repo/./foo");
-		assert_eq!(normalize_path(p), std::path::Path::new("/repo/foo"));
-	}
-
 	// ── format_commit_message ─────────────────────────────────────────────────
 
 	#[test]
@@ -1354,8 +1332,43 @@ mod tests {
 
 	#[test]
 	fn extra_files_outside_repo_is_rejected() {
+		// Create an outer temp dir with a repo subdir and a secret file alongside it.
+		let outer = tempfile::tempdir().unwrap();
+		let repo_dir = outer.path().join("repo");
+		std::fs::create_dir(&repo_dir).unwrap();
+		let secret = outer.path().join("secret.txt");
+		std::fs::write(&secret, "secret").unwrap();
+		// "../secret.txt" from repo_dir resolves to outer/secret.txt (outside the repo).
+		let extra_files = vec!["../secret.txt".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(&repo_dir).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("resolves outside the repository root")
+		);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn extra_files_symlink_outside_repo_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
-		let extra_files = vec!["../../etc/passwd".to_string()];
+		// Create a symlink inside the tempdir pointing to /tmp (outside the repo).
+		let symlink_path = dir.path().join("escape");
+		std::os::unix::fs::symlink("/tmp", &symlink_path).unwrap();
+		let extra_files = vec!["escape".to_string()];
 		let release_infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.0.0".parse().unwrap(),
@@ -1375,6 +1388,26 @@ mod tests {
 				.to_string()
 				.contains("resolves outside the repository root")
 		);
+	}
+
+	#[test]
+	fn extra_files_nonexistent_is_skipped() {
+		let dir = tempfile::tempdir().unwrap();
+		let extra_files = vec!["does-not-exist.txt".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		// Should succeed (non-existent file is a warning, not an error).
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		assert!(result.is_ok());
 	}
 
 	#[test]
