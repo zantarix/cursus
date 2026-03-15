@@ -32,14 +32,6 @@ jobs:
           app-id: ${{ vars.ZANTARIX_APP_ID }}
           private-key: ${{ secrets.ZANTARIX_APP_PRIVATE_KEY }}
 
-      # Checkout the PR branch with full history so that
-      # `git rev-list origin/HEAD..HEAD` works correctly.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.head_ref }}
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
-
       # Point origin/HEAD at the repository default branch so that
       # `cursus change --auto` can count commits ahead of it.
       - name: Resolve origin/HEAD
