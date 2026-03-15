@@ -65,6 +65,7 @@ pub struct InitResult {
 #[derive(Debug, Clone)]
 struct WizardState {
 	git_workdir: std::path::PathBuf,
+	dry_run: bool,
 	cargo_enabled: bool,
 	npm_enabled: bool,
 	cargo_path: Option<String>,
@@ -177,7 +178,7 @@ fn handle_event(
 	event: Event,
 	content_area: Rect,
 ) -> HandleResult {
-	match screen {
+	let result = match screen {
 		Screen::ConfirmOverwrite(yes) => confirm_overwrite::ConfirmOverwriteButtons { yes }
 			.handle_event(state, event, content_area),
 		Screen::SelectPackageManagers { cargo, npm, focus } => {
@@ -201,7 +202,15 @@ fn handle_event(
 		Screen::OpenEditor(yes) => {
 			open_editor::OpenEditorButtons { yes }.handle_event(state, event, content_area)
 		}
-	}
+	}?;
+	// In dry-run mode the config is never written to disk, so skip the
+	// OpenEditor screen and complete immediately with open_editor = false.
+	Ok(match result {
+		KeyResult::Continue((state, Screen::OpenEditor(_))) if state.dry_run => {
+			KeyResult::Complete(complete(state, false))
+		}
+		other => other,
+	})
 }
 
 /// Maps a screen to the `[Managers, Git, GitHub]` tab statuses.
@@ -280,6 +289,10 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 /// Guides the user through selecting package managers, manifest paths,
 /// git automation, GitHub integration, and opening the config file in an editor.
 ///
+/// When `dry_run` is `true`, the wizard skips the overwrite-confirmation prompt
+/// (since nothing will be written) and skips the "open in editor" screen (since
+/// there is no file to open).
+///
 /// # Returns
 ///
 /// Returns `Ok(Some(InitResult))` if the user completes setup, or `Ok(None)` if
@@ -288,7 +301,11 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
-pub fn run(git_workdir: &AbsolutePath, env: &Env) -> anyhow::Result<Option<InitResult>> {
+pub fn run(
+	git_workdir: &AbsolutePath,
+	env: &Env,
+	dry_run: bool,
+) -> anyhow::Result<Option<InitResult>> {
 	let (cargo_detected, npm_detected) = detect_package_managers(git_workdir.as_ref());
 	let initial_npm = npm_detected || !cargo_detected;
 
@@ -299,6 +316,7 @@ pub fn run(git_workdir: &AbsolutePath, env: &Env) -> anyhow::Result<Option<InitR
 
 	let initial_state = WizardState {
 		git_workdir: git_workdir.as_ref().to_path_buf(),
+		dry_run,
 		cargo_enabled: false,
 		npm_enabled: false,
 		cargo_path: None,
@@ -312,7 +330,7 @@ pub fn run(git_workdir: &AbsolutePath, env: &Env) -> anyhow::Result<Option<InitR
 		remaining_manifest_pms: Vec::new(),
 	};
 
-	let initial_screen = if config_exists(git_workdir.as_ref()) {
+	let initial_screen = if !dry_run && config_exists(git_workdir.as_ref()) {
 		Screen::ConfirmOverwrite(false)
 	} else {
 		Screen::SelectPackageManagers {
@@ -373,6 +391,7 @@ pub(super) mod test_helpers {
 	pub(super) fn make_state(dir: &TempDir) -> WizardState {
 		WizardState {
 			git_workdir: dir.path().to_path_buf(),
+			dry_run: false,
 			cargo_enabled: false,
 			npm_enabled: false,
 			cargo_path: None,

@@ -28,12 +28,17 @@ pub(crate) fn cmd_init(
 		bail!("cursus init is interactive-only. Scripts can write .cursus/config.toml directly.");
 	}
 
-	let result = match init::run(git_workdir, env)? {
+	let result = match init::run(git_workdir, env, global.dry_run)? {
 		Some(r) => r,
 		None => return Ok(ExitCode::from(2)),
 	};
 
 	let config_toml = render_init_template(&result)?;
+
+	if global.dry_run {
+		print!("{config_toml}");
+		return Ok(ExitCode::SUCCESS);
+	}
 
 	let cursus_dir = git_workdir.as_ref().join(".cursus");
 	std::fs::create_dir_all(&cursus_dir)?;
