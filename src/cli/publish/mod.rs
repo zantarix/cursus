@@ -346,6 +346,9 @@ fn log_summary_line(
 			published_packages.len(),
 			skipped_count
 		);
+		warn!(
+			"Dry-run assumes all packages need publishing and will succeed; actual results may differ if some packages are already published or if publish failures occur"
+		);
 	} else if github_enabled && !no_git {
 		match (github_created, github_failed) {
 			(created, false) => info!(
