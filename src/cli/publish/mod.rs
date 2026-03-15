@@ -13,7 +13,7 @@ use log::{error, info, warn};
 
 use crate::git;
 use crate::model::config::Config;
-use crate::package_manager::{self, PublishOutcome, filter_projects_by_name};
+use crate::package_manager::{self, DependencyGraph, PublishOutcome, filter_projects_by_name};
 use crate::path::AbsolutePath;
 
 use github_releases::{
@@ -55,11 +55,14 @@ pub struct PublishArgs {
 /// Sorts selected projects into dependency-first order using the full project graph.
 ///
 /// Emits cycle warnings for circular dependencies unless disabled in config.
+///
+/// Returns the sorted project list and the full dependency graph (for use in
+/// downstream failure propagation).
 fn sort_projects_by_dependency(
 	projects: &[crate::package_manager::Project],
 	selected_projects: Vec<crate::package_manager::Project>,
 	disable_cycle_warnings: bool,
-) -> anyhow::Result<Vec<crate::package_manager::Project>> {
+) -> anyhow::Result<(Vec<crate::package_manager::Project>, DependencyGraph)> {
 	let graph = package_manager::build_dependency_graph(projects)?;
 	if !disable_cycle_warnings {
 		let cycle_groups = graph.cycle_groups();
@@ -87,7 +90,33 @@ fn sort_projects_by_dependency(
 		.iter()
 		.filter_map(|name| selected_projects.iter().find(|p| p.name() == name).cloned())
 		.collect();
-	Ok(sorted)
+	Ok((sorted, graph))
+}
+
+/// Adds all transitive dependents of `failed_package` to `blocked` using BFS.
+///
+/// Handles cycles safely via the set membership check — a package is only
+/// enqueued once, so cycles in the dependency graph never cause infinite loops.
+///
+/// # Arguments
+///
+/// * `graph` - The dependency graph used to look up direct dependents.
+/// * `failed_package` - The package whose dependents should be blocked.
+/// * `blocked` - Set of blocked package names, mutated in place.
+fn add_transitive_dependents(
+	graph: &DependencyGraph,
+	failed_package: &str,
+	blocked: &mut std::collections::HashSet<String>,
+) {
+	let mut queue = std::collections::VecDeque::new();
+	queue.push_back(failed_package.to_string());
+	while let Some(pkg) = queue.pop_front() {
+		for dependent in graph.direct_dependents(&pkg) {
+			if blocked.insert(dependent.clone()) {
+				queue.push_back(dependent);
+			}
+		}
+	}
 }
 
 /// Creates git tags and GitHub Releases for all published packages.
@@ -216,7 +245,7 @@ pub(crate) fn cmd_publish(
 	let env = config.env().context("env not set")?;
 	let projects = config.load_projects()?;
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
-	let sorted_projects = sort_projects_by_dependency(
+	let (sorted_projects, graph) = sort_projects_by_dependency(
 		&projects,
 		selected_projects,
 		config.global.disable_dependency_cycle_warnings,
@@ -225,8 +254,8 @@ pub(crate) fn cmd_publish(
 		return Ok(ExitCode::FAILURE);
 	}
 	let is_multi_package = projects.len() > 1;
-	let (published_packages, skipped_count, publish_failed) =
-		publish_projects(&sorted_projects, dry_run)?;
+	let (published_packages, skipped_count, dep_skipped_count, publish_failed) =
+		publish_projects(&sorted_projects, &graph, dry_run)?;
 	let git_enabled = config.git.enabled() && !args.no_git;
 	let (tags_created, tags_skipped, github_created, github_failed, tag_push_failed) =
 		run_git_release_operations(
@@ -242,6 +271,7 @@ pub(crate) fn cmd_publish(
 	log_publish_summary(
 		&published_packages,
 		skipped_count,
+		dep_skipped_count,
 		dry_run,
 		git_enabled,
 		tags_created,
@@ -267,25 +297,47 @@ pub(crate) fn cmd_publish(
 /// Private packages (marked with `private: true` in npm or `publish = false` in Cargo)
 /// are silently skipped.
 ///
-/// Returns `(published_packages, skipped_count, failed)`.
+/// When a package fails to publish, all of its transitive dependents are skipped
+/// (with a warning) to avoid confusing errors from publishing against a registry
+/// that is missing a dependency.
+///
+/// Returns `(published_packages, skipped_count, dep_skipped_count, failed)`.
 ///
 /// # Arguments
 ///
 /// * `projects` - Projects to publish, pre-sorted in dependency order.
+/// * `graph` - The dependency graph used to determine which packages to skip on failure.
 /// * `dry_run` - If true, only print what would be published without actually publishing.
 fn publish_projects(
 	projects: &[package_manager::Project],
+	graph: &DependencyGraph,
 	dry_run: bool,
-) -> anyhow::Result<(Vec<PublishedPackage>, usize, bool)> {
+) -> anyhow::Result<(Vec<PublishedPackage>, usize, usize, bool)> {
 	let mut published = Vec::new();
 	let mut skipped_count = 0;
+	let mut dep_skipped_count = 0;
 	let mut failed = false;
+	let mut blocked: std::collections::HashSet<String> = std::collections::HashSet::new();
 
 	for project in projects {
+		// Skip packages whose dependency failed to publish
+		if blocked.contains(project.name()) {
+			warn!(
+				"Skipping {} because a dependency failed to publish",
+				project.name()
+			);
+			dep_skipped_count += 1;
+			continue;
+		}
+
 		// Check if the project is publishable (not private)
 		let is_publishable = project.is_publishable()?;
 		if !is_publishable {
-			// Silently skip private packages
+			// Silently skip private packages (per ADR-007). Private packages are not
+			// added to `blocked`, because their dependents may still be publishable via
+			// other means. If a dependent genuinely requires this package on the registry,
+			// its own publish will fail and that failure will correctly block further
+			// transitive dependents at that point.
 			continue;
 		}
 
@@ -315,12 +367,15 @@ fn publish_projects(
 					});
 				}
 				PublishResult::Skipped => skipped_count += 1,
-				PublishResult::Failed => failed = true,
+				PublishResult::Failed => {
+					failed = true;
+					add_transitive_dependents(graph, project.name(), &mut blocked);
+				}
 			}
 		}
 	}
 
-	Ok((published, skipped_count, failed))
+	Ok((published, skipped_count, dep_skipped_count, failed))
 }
 
 /// Logs the first line of the publish summary (published/skipped/GitHub counts).
@@ -328,6 +383,7 @@ fn publish_projects(
 fn log_summary_line(
 	published_packages: &[PublishedPackage],
 	skipped_count: usize,
+	dep_skipped_count: usize,
 	dry_run: bool,
 	git_enabled: bool,
 	github_enabled: bool,
@@ -335,6 +391,11 @@ fn log_summary_line(
 	github_created: usize,
 	github_failed: bool,
 ) {
+	let dep_skipped_note = if dep_skipped_count > 0 {
+		format!(", {dep_skipped_count} skipped (dependency failed)")
+	} else {
+		String::new()
+	};
 	if dry_run {
 		let tag_note = if git_enabled && !published_packages.is_empty() {
 			format!(", {} would be tagged", published_packages.len())
@@ -352,7 +413,7 @@ fn log_summary_line(
 	} else if github_enabled && !no_git {
 		match (github_created, github_failed) {
 			(created, false) => info!(
-				"Summary: {} published, {} skipped, {} GitHub Releases created",
+				"Summary: {} published, {} skipped, {} GitHub Releases created{dep_skipped_note}",
 				published_packages.len(),
 				skipped_count,
 				created
@@ -360,7 +421,7 @@ fn log_summary_line(
 			(created, true) => {
 				let failed_count = published_packages.len().saturating_sub(created);
 				info!(
-					"Summary: {} published, {} skipped, {} GitHub Release{} created, {} GitHub Release{} failed",
+					"Summary: {} published, {} skipped, {} GitHub Release{} created, {} GitHub Release{} failed{dep_skipped_note}",
 					published_packages.len(),
 					skipped_count,
 					created,
@@ -372,7 +433,7 @@ fn log_summary_line(
 		}
 	} else {
 		info!(
-			"Summary: {} published, {} skipped",
+			"Summary: {} published, {} skipped{dep_skipped_note}",
 			published_packages.len(),
 			skipped_count
 		);
@@ -384,6 +445,7 @@ fn log_summary_line(
 fn log_publish_summary(
 	published_packages: &[PublishedPackage],
 	skipped_count: usize,
+	dep_skipped_count: usize,
 	dry_run: bool,
 	git_enabled: bool,
 	tags_created: usize,
@@ -398,6 +460,7 @@ fn log_publish_summary(
 	log_summary_line(
 		published_packages,
 		skipped_count,
+		dep_skipped_count,
 		dry_run,
 		git_enabled,
 		github_enabled,
@@ -456,5 +519,75 @@ mod tests {
 		let args = PublishArgs::default();
 		assert!(args.packages.is_empty());
 		assert!(!args.no_git);
+	}
+
+	fn make_graph(edges: &[(&str, &[&str])]) -> DependencyGraph {
+		let adjacency = edges
+			.iter()
+			.map(|(k, vs)| (k.to_string(), vs.iter().map(|v| v.to_string()).collect()))
+			.collect();
+		DependencyGraph::from_adjacency(adjacency)
+	}
+
+	#[test]
+	fn add_transitive_dependents_linear_chain() {
+		// c -> b -> a: if c fails, b and a should be blocked
+		let graph = make_graph(&[("a", &["b"]), ("b", &["c"]), ("c", &[])]);
+		let mut blocked = std::collections::HashSet::new();
+		add_transitive_dependents(&graph, "c", &mut blocked);
+		assert!(blocked.contains("b"), "b depends on c");
+		assert!(blocked.contains("a"), "a depends on b (transitive)");
+		assert!(
+			!blocked.contains("c"),
+			"failed package itself not in blocked"
+		);
+	}
+
+	#[test]
+	fn add_transitive_dependents_diamond() {
+		// d <- b <- a, d <- c <- a: if d fails, b, c and a should be blocked
+		let graph = make_graph(&[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"]), ("d", &[])]);
+		let mut blocked = std::collections::HashSet::new();
+		add_transitive_dependents(&graph, "d", &mut blocked);
+		assert!(blocked.contains("b"));
+		assert!(blocked.contains("c"));
+		assert!(blocked.contains("a"));
+		assert!(!blocked.contains("d"));
+	}
+
+	#[test]
+	fn add_transitive_dependents_cycle_terminates() {
+		// a <-> b: if a fails, b should be blocked; cycle must not loop infinitely
+		let graph = make_graph(&[("a", &["b"]), ("b", &["a"])]);
+		let mut blocked = std::collections::HashSet::new();
+		add_transitive_dependents(&graph, "a", &mut blocked);
+		assert!(blocked.contains("b"));
+		// Must terminate (would panic/hang otherwise)
+	}
+
+	#[test]
+	fn add_transitive_dependents_independent_subtree_not_blocked() {
+		// a -> b, c -> d: if b fails only a is blocked; c and d are unaffected
+		let graph = make_graph(&[("a", &["b"]), ("b", &[]), ("c", &["d"]), ("d", &[])]);
+		let mut blocked = std::collections::HashSet::new();
+		add_transitive_dependents(&graph, "b", &mut blocked);
+		assert!(blocked.contains("a"));
+		assert!(!blocked.contains("c"));
+		assert!(!blocked.contains("d"));
+	}
+
+	#[test]
+	fn add_transitive_dependents_with_prepopulated_blocked_set() {
+		// a -> b -> c: if blocked already contains "a" and we add dependents of b,
+		// "a" should not be re-enqueued (returns false from insert) and the BFS still terminates.
+		let graph = make_graph(&[("a", &["b"]), ("b", &["c"]), ("c", &[])]);
+		let mut blocked = std::collections::HashSet::new();
+		blocked.insert("a".to_string()); // pre-populated
+		add_transitive_dependents(&graph, "c", &mut blocked);
+		// b should be added (depends on c)
+		assert!(blocked.contains("b"));
+		// a was already present and should still be there
+		assert!(blocked.contains("a"));
+		// The already-present "a" entry must not cause re-enqueuing (BFS terminates)
 	}
 }

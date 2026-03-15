@@ -240,6 +240,27 @@ impl DependencyGraph {
 		self.sccs.iter().flatten().cloned().collect()
 	}
 
+	/// Returns the direct dependents of a package (packages that depend on it).
+	///
+	/// Scans the adjacency list for entries whose dependency lists contain the given
+	/// package name. Only considers internal packages (those present in the graph).
+	///
+	/// # Arguments
+	///
+	/// * `package` - The package name to find dependents for.
+	///
+	/// # Returns
+	///
+	/// A vector of package names that directly depend on the given package.
+	/// The order is not guaranteed to be deterministic.
+	pub fn direct_dependents(&self, package: &str) -> Vec<String> {
+		self.adjacency
+			.iter()
+			.filter(|(_, deps)| deps.iter().any(|dep| dep == package))
+			.map(|(name, _)| name.clone())
+			.collect()
+	}
+
 	/// Topologically sorts all nodes in the graph with roots (dependents) first.
 	///
 	/// This ordering ensures that dependents are processed before their dependencies,
@@ -996,6 +1017,47 @@ mod tests {
 		let mut reversed_leaves = leaves_first.clone();
 		reversed_leaves.reverse();
 		assert_eq!(roots_first, reversed_leaves);
+	}
+
+	#[test]
+	fn direct_dependents_leaf_node_has_no_dependents() {
+		// In a -> b -> c, c has no dependents
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec!["c".to_string()]);
+		adjacency.insert("c".to_string(), vec![]);
+
+		let graph = DependencyGraph::from_adjacency(adjacency);
+		let dependents = graph.direct_dependents("a");
+		assert!(dependents.is_empty(), "root node should have no dependents");
+
+		let dependents_c = graph.direct_dependents("c");
+		assert_eq!(dependents_c, vec!["b"], "b depends on c");
+	}
+
+	#[test]
+	fn direct_dependents_mid_graph_node() {
+		// a -> b, c -> b: both a and c depend on b, so direct_dependents("b") returns [a, c]
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("c".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec![]);
+
+		let graph = DependencyGraph::from_adjacency(adjacency);
+		let mut dependents = graph.direct_dependents("b");
+		dependents.sort();
+		assert_eq!(dependents, vec!["a", "c"]);
+	}
+
+	#[test]
+	fn direct_dependents_absent_node_returns_empty() {
+		let mut adjacency = std::collections::HashMap::new();
+		adjacency.insert("a".to_string(), vec!["b".to_string()]);
+		adjacency.insert("b".to_string(), vec![]);
+
+		let graph = DependencyGraph::from_adjacency(adjacency);
+		let dependents = graph.direct_dependents("nonexistent");
+		assert!(dependents.is_empty());
 	}
 
 	#[test]
