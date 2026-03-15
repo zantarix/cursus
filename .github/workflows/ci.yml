@@ -10,6 +10,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop -c bash -e {0}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -19,20 +22,20 @@ jobs:
           use-flakehub: false
 
       - name: Check formatting
-        shell: nix develop -c bash -e {0}
         run: cargo fmt --check
 
       - name: Lint with Clippy
-        shell: nix develop -c bash -e {0}
         run: cargo clippy -- -D warnings
 
       - name: Check dependencies
-        shell: nix develop -c bash -e {0}
         run: cargo deny check
 
   test:
     name: Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop -c bash -e {0}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -42,8 +45,31 @@ jobs:
           use-flakehub: false
 
       - name: Check code coverage
-        shell: nix develop -c bash -e {0}
         run: cargo make coverage
+
+  lint-js:
+    name: Lint JS
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pkg
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pkg/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm test
 
   nix-build:
     name: Nix build

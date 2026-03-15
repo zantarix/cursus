@@ -1,0 +1,9 @@
+# TypeScript source (compiled output bin/download-binary.js is included via prepare script)
+src/
+tsconfig.json
+eslint.config.js
+package-lock.json
+
+# Downloaded native binaries (postinstall downloads these at install time)
+bin/cursus
+bin/cursus.exe

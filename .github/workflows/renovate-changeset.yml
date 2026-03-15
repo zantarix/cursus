@@ -23,6 +23,9 @@ jobs:
     name: Add changeset
     if: contains(github.event.pull_request.labels.*.name, 'dependencies')
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop .#ci -c bash -e {0}
 
     steps:
       - name: Generate GitHub App token
@@ -32,28 +35,21 @@ jobs:
           app-id: ${{ vars.ZANTARIX_APP_ID }}
           private-key: ${{ secrets.ZANTARIX_APP_PRIVATE_KEY }}
 
-      # Point origin/HEAD at the repository default branch so that
-      # `cursus change --auto` can count commits ahead of it.
-      - name: Resolve origin/HEAD
-        run: git remote set-head origin ${{ github.event.repository.default_branch }}
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+        with:
+          use-flakehub: false
 
       - name: Configure git identity
         run: |
           git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
           git config user.email "${{ vars.ZANTARIX_APP_ID }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
 
-      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
-      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
-        with:
-          use-flakehub: false
-
       - name: Build cursus
-        shell: nix develop .#ci -c bash -e {0}
         run: cargo build --release
 
       # Derive a changeset from the single Renovate commit and push it back
       # to the PR branch.  Cursus exits 0 without writing anything if the
       # commit type carries no semver significance (e.g. `chore:`).
       - name: Add changeset
-        shell: nix develop .#ci -c bash -e {0}
         run: ./target/release/cursus change --auto
