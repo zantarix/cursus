@@ -65,7 +65,8 @@ Key differences from old style:
 - ADR-029: Accepted (cargo publish auth warning)
 - ADR-030: Accepted (bin/lib crate separation with environment injection)
 - ADR-031: Accepted (CHANGELOG.md guard for unprepared packages)
-- Next ADR number: 032
+- ADR-032: Proposed (verify changeset on feature branch)
+- Next ADR number: 033
 
 ## Project ADR Rules (from CLAUDE.md)
 
