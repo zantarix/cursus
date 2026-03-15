@@ -1,0 +1,622 @@
+use std::path::PathBuf;
+
+use anyhow::Context;
+use log::info;
+
+use crate::git;
+use crate::model::config::{Config, Strategy};
+
+use super::{PrepareArgs, ReleaseInfo};
+
+/// Checks that the working tree is clean before making changes.
+///
+/// # Errors
+///
+/// Returns an error if the working tree has uncommitted changes.
+pub(super) fn check_dirty_tree(git: &git::GitWorkdir) -> anyhow::Result<()> {
+	let status = git.status_porcelain()?;
+	if !status.trim().is_empty() {
+		anyhow::bail!(
+			"Working tree is dirty. Commit or stash changes before releasing.\n\
+			 Run `git status` to see pending changes."
+		);
+	}
+	Ok(())
+}
+
+/// Computes the release branch name from CLI flags, config, and current branch.
+///
+/// Priority order:
+/// 1. `args_branch` — explicit `--branch` flag
+/// 2. `{config_prefix}{current_branch}` — derived from config prefix and current branch
+/// 3. `{config_prefix}detached` — fallback when HEAD is detached
+pub(super) fn compute_release_branch(
+	args_branch: Option<&str>,
+	config_prefix: &str,
+	current_branch: Option<&str>,
+) -> String {
+	if let Some(branch) = args_branch {
+		return branch.to_string();
+	}
+	let base = current_branch.unwrap_or("detached");
+	format!("{config_prefix}{base}")
+}
+
+/// Formats the git commit message for a prepare run.
+///
+/// Produces `chore(release): pkg1@1.0.0, pkg2@2.0.0` for the given releases.
+///
+/// # Note
+///
+/// `release_infos` must be non-empty; passing an empty slice produces the
+/// malformed string `"chore(release): "`. This is guaranteed by the early
+/// return in [`stage_and_commit`] which skips all git operations when there
+/// are no releases.
+pub(super) fn format_commit_message(release_infos: &[ReleaseInfo]) -> String {
+	let parts: Vec<String> = release_infos
+		.iter()
+		.map(|r| format!("{}@{}", r.package_name, r.new_version))
+		.collect();
+	format!("chore(release): {}", parts.join(", "))
+}
+
+/// Stages files and creates a commit for the prepare step.
+///
+/// This is the core git operation for `prepare` — it only commits.
+/// Pushing is handled by the strategy dispatch in `cmd_prepare`, and tagging
+/// happens in `publish`.
+///
+/// If `dry_run` is `true`, prints what would be done without executing any git commands.
+///
+/// # Arguments
+///
+/// * `git` - Git working directory with command runner.
+/// * `extra_files` - Additional files to unconditionally stage, relative to the git root.
+/// * `release_infos` - The packages that were prepared for release.
+/// * `modified_files` - Files to stage before committing.
+/// * `dry_run` - If `true`, only print a summary; do not modify git state.
+///
+/// # Errors
+///
+/// Returns an error if any git command fails.
+pub(super) fn stage_and_commit(
+	git: &git::GitWorkdir,
+	extra_files: &[String],
+	release_infos: &[ReleaseInfo],
+	modified_files: &[PathBuf],
+) -> anyhow::Result<()> {
+	if release_infos.is_empty() {
+		return Ok(());
+	}
+
+	let commit_message = format_commit_message(release_infos);
+
+	// Build the full staging list, validating that extra_files resolve inside the repo root.
+	let git_workdir = git.path();
+	let canonical_workdir = std::fs::canonicalize(git_workdir)
+		.with_context(|| format!("failed to canonicalize git workdir {:?}", git_workdir))?;
+	let mut all_files = modified_files.to_vec();
+	for f in extra_files {
+		let full_path = git_workdir.join(f);
+		let resolved = match std::fs::canonicalize(&full_path) {
+			Ok(p) => p,
+			Err(_) => {
+				log::warn!("extra_files entry {:?} does not exist, skipping", f);
+				continue;
+			}
+		};
+		if !resolved.starts_with(&canonical_workdir) {
+			anyhow::bail!(
+				"extra_files entry {:?} resolves outside the repository root",
+				f
+			);
+		}
+		all_files.push(resolved);
+	}
+
+	git.add(&all_files)
+		.context("Failed to stage files for git commit")?;
+	git.commit(&commit_message)
+		.context("Failed to create git commit")?;
+
+	Ok(())
+}
+
+/// Runs pre-release checks and sets up the git branch if needed.
+///
+/// Validates GitHub token availability when required, checks for a dirty working
+/// tree, and checks out the release branch for the branch strategy.
+/// Returns `(original_branch, release_branch)`.
+pub(super) fn preflight_checks(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	args: &PrepareArgs,
+	git_enabled: bool,
+	strategy: Strategy,
+	dry_run: bool,
+) -> anyhow::Result<(Option<String>, Option<String>)> {
+	if git_enabled
+		&& strategy == Strategy::Branch
+		&& config.github.enabled
+		&& !dry_run
+		&& env.github_client().is_none()
+	{
+		anyhow::bail!(
+			"GitHub integration is enabled but no GitHub token found. \
+			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
+		);
+	}
+	if !git_enabled {
+		return Ok((None, None));
+	}
+	if !dry_run {
+		check_dirty_tree(git)?;
+	}
+	if strategy == Strategy::Branch {
+		let current = if dry_run {
+			git.current_branch().ok().flatten()
+		} else {
+			git.current_branch()?
+		};
+		let branch = compute_release_branch(
+			args.branch.as_deref(),
+			config.git.release_branch_prefix(),
+			current.as_deref(),
+		);
+		git.checkout_or_reset_branch(&branch)?;
+		Ok((current, Some(branch)))
+	} else {
+		Ok((None, None))
+	}
+}
+
+/// Stages, commits, and pushes release changes according to the configured git strategy.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn finalize_git_lifecycle(
+	git: &git::GitWorkdir,
+	config: &Config,
+	env: &crate::Env,
+	release_infos: &[ReleaseInfo],
+	modified_files: &[PathBuf],
+	original_branch: Option<&str>,
+	release_branch: Option<&str>,
+	git_enabled: bool,
+	strategy: Strategy,
+	dry_run: bool,
+) -> anyhow::Result<()> {
+	if !git_enabled {
+		return Ok(());
+	}
+	stage_and_commit(git, &config.git.extra_files, release_infos, modified_files)?;
+	match strategy {
+		Strategy::Push => {
+			git.push()?;
+		}
+		Strategy::Branch => {
+			if let Some(branch) = release_branch {
+				info!("Pushing branch '{branch}' to origin");
+				git.force_push_branch(branch).with_context(|| {
+					format!(
+						"Failed to push release branch '{branch}'. \
+						 You are still on the release branch; run \
+						 `git checkout <your-branch>` to return."
+					)
+				})?;
+				let pr_result = if config.github.enabled {
+					super::github::upsert_release_pull_request(
+						git,
+						config,
+						env,
+						release_infos,
+						branch,
+						original_branch,
+						dry_run,
+					)
+				} else {
+					Ok(())
+				};
+				if let Some(orig) = original_branch
+					&& let Err(checkout_err) = git.checkout(orig)
+				{
+					log::error!(
+						"Failed to check out original branch after release: {checkout_err:#}"
+					);
+				}
+				pr_result?;
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Resolves git-enabled flag, strategy, and emits a warning for incompatible flags.
+pub(super) fn setup_git_context(config: &Config, args: &PrepareArgs) -> (bool, Strategy) {
+	let git_enabled = config.git.enabled() && !args.no_git;
+	let strategy = config.git.strategy();
+	if args.branch.is_some() && strategy == Strategy::Push {
+		log::warn!("--branch has no effect with the push strategy; ignoring");
+	}
+	(git_enabled, strategy)
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use crate::command::CommandRunner;
+	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
+	use crate::model::config;
+
+	use super::*;
+
+	// ── format_commit_message ─────────────────────────────────────────────────
+
+	#[test]
+	fn format_commit_message_single_package() {
+		let infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		assert_eq!(
+			format_commit_message(&infos),
+			"chore(release): my-pkg@1.0.0"
+		);
+	}
+
+	#[test]
+	fn format_commit_message_multiple_packages() {
+		let infos = vec![
+			ReleaseInfo {
+				package_name: "pkg-a".to_string(),
+				new_version: "1.0.0".parse().unwrap(),
+				changelog_entry: String::new(),
+			},
+			ReleaseInfo {
+				package_name: "pkg-b".to_string(),
+				new_version: "2.1.0".parse().unwrap(),
+				changelog_entry: String::new(),
+			},
+		];
+		assert_eq!(
+			format_commit_message(&infos),
+			"chore(release): pkg-a@1.0.0, pkg-b@2.1.0"
+		);
+	}
+
+	#[test]
+	fn format_commit_message_empty() {
+		assert_eq!(format_commit_message(&[]), "chore(release): ");
+	}
+
+	// ── stage_and_commit ──────────────────────────────────────────────────────
+
+	#[test]
+	fn stage_and_commit_empty_releases_is_noop() {
+		let dir = tempfile::tempdir().unwrap();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = stage_and_commit(&git, &[], &[], &[]);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn stage_and_commit_dry_run_suppresses_git_commands() {
+		let dir = tempfile::tempdir().unwrap();
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let inner = Arc::new(RecordingCommandRunner::new(0));
+		let dry_run_runner =
+			crate::command::DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::new(dry_run_runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = stage_and_commit(&git, &[], &release_infos, &[]);
+		assert!(result.is_ok());
+		// DryRunCommandRunner suppresses run_mut calls — the inner recorder receives nothing.
+		assert!(inner.invocations().is_empty());
+	}
+
+	#[test]
+	fn extra_files_outside_repo_is_rejected() {
+		// Create an outer temp dir with a repo subdir and a secret file alongside it.
+		let outer = tempfile::tempdir().unwrap();
+		let repo_dir = outer.path().join("repo");
+		std::fs::create_dir(&repo_dir).unwrap();
+		let secret = outer.path().join("secret.txt");
+		std::fs::write(&secret, "secret").unwrap();
+		// "../secret.txt" from repo_dir resolves to outer/secret.txt (outside the repo).
+		let extra_files = vec!["../secret.txt".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(&repo_dir).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("resolves outside the repository root")
+		);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn extra_files_symlink_outside_repo_is_rejected() {
+		let dir = tempfile::tempdir().unwrap();
+		// Create a symlink inside the tempdir pointing to /tmp (outside the repo).
+		let symlink_path = dir.path().join("escape");
+		std::os::unix::fs::symlink("/tmp", &symlink_path).unwrap();
+		let extra_files = vec!["escape".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("resolves outside the repository root")
+		);
+	}
+
+	#[test]
+	fn extra_files_nonexistent_is_skipped() {
+		let dir = tempfile::tempdir().unwrap();
+		let extra_files = vec!["does-not-exist.txt".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		// Should succeed (non-existent file is a warning, not an error).
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn extra_files_absolute_path_is_rejected() {
+		let dir = tempfile::tempdir().unwrap();
+		let extra_files = vec!["/etc/passwd".to_string()];
+		let release_infos = vec![ReleaseInfo {
+			package_name: "my-pkg".to_string(),
+			new_version: "1.0.0".parse().unwrap(),
+			changelog_entry: String::new(),
+		}];
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("resolves outside the repository root")
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_uses_flag_over_all() {
+		assert_eq!(
+			compute_release_branch(Some("my-branch"), "release/", Some("main")),
+			"my-branch"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_uses_config_prefix() {
+		assert_eq!(
+			compute_release_branch(None, "release/", Some("main")),
+			"release/main"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_uses_default_prefix() {
+		assert_eq!(
+			compute_release_branch(None, "cursus-release/", Some("main")),
+			"cursus-release/main"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_detached_fallback() {
+		assert_eq!(
+			compute_release_branch(None, "cursus-release/", None),
+			"cursus-release/detached"
+		);
+	}
+
+	#[test]
+	fn check_dirty_tree_succeeds_when_clean() {
+		let dir = tempfile::tempdir().unwrap();
+		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout → clean
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = check_dirty_tree(&git);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn check_dirty_tree_fails_when_dirty() {
+		let dir = tempfile::tempdir().unwrap();
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let result = check_dirty_tree(&git);
+		assert!(result.is_err());
+		assert!(
+			result.unwrap_err().to_string().contains("dirty"),
+			"Expected 'dirty' in error message"
+		);
+	}
+
+	/// Sets up a temp dir with a Cargo project, branch strategy git config, and GitHub config.
+	fn setup_branch_strategy_with_github() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::model::config::CargoConfig::enabled())
+				.with_git(
+					crate::model::config::GitConfig::enabled_config()
+						.with_strategy(crate::model::config::Strategy::Branch),
+				)
+				.with_github(
+					crate::model::config::GitHubConfig::enabled_config()
+						.with_owner("acme".to_string())
+						.with_repo("app".to_string())
+						.with_pull_request_title("My Release PR".to_string()),
+				);
+		cfg.save().unwrap();
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"test-pkg\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
+		)
+		.unwrap();
+		std::fs::create_dir_all(dir.path().join("src")).unwrap();
+		std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+		let cursus_dir = dir.path().join(".cursus");
+		std::fs::write(
+			cursus_dir.join("change.md"),
+			"+++\ntest-pkg = \"patch\"\n+++\n\nFix\n",
+		)
+		.unwrap();
+		dir
+	}
+
+	#[test]
+	fn cmd_prepare_branch_strategy_with_github_creates_pr() {
+		use crate::github::client::GitHubClient;
+		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+		let dir = setup_branch_strategy_with_github();
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+			"git",
+			vec![
+				"rev-parse".to_string(),
+				"--abbrev-ref".to_string(),
+				"HEAD".to_string(),
+			],
+			0,
+			b"main\n".to_vec(),
+		));
+		let client = Arc::new(RecordingGitHubClient::new());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let args = PrepareArgs::default();
+
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(&env, dir_abs.clone());
+		let result = super::super::cmd_prepare(&git, &args, false, config);
+		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+		let invocations = client.invocations();
+		let pr = invocations
+			.iter()
+			.find(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. }));
+		assert!(pr.is_some(), "Expected PR creation, got: {invocations:?}");
+		if let Some(GitHubInvocation::CreatePullRequest { title, gh_repo, .. }) = pr {
+			assert_eq!(title, "My Release PR");
+			assert_eq!(gh_repo.owner, "acme");
+			assert_eq!(gh_repo.repo, "app");
+		}
+	}
+
+	#[test]
+	fn cmd_prepare_branch_strategy_pr_failure_is_fatal() {
+		use crate::github::client::GitHubClient;
+		use crate::github::client::test_support::RecordingGitHubClient;
+		let dir = setup_branch_strategy_with_github();
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+			"git",
+			vec![
+				"rev-parse".to_string(),
+				"--abbrev-ref".to_string(),
+				"HEAD".to_string(),
+			],
+			0,
+			b"main\n".to_vec(),
+		));
+		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let args = PrepareArgs::default();
+
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(&env, dir_abs.clone());
+		let result = super::super::cmd_prepare(&git, &args, false, config);
+		assert!(
+			result.is_err(),
+			"PR failure should be fatal, got: {result:?}"
+		);
+	}
+
+	#[test]
+	fn cmd_prepare_no_github_client_errors() {
+		let dir = setup_branch_strategy_with_github();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		// No github client — pre-flight check should error
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let args = PrepareArgs::default();
+
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(&env, dir_abs.clone());
+		let result = super::super::cmd_prepare(&git, &args, false, config);
+		assert!(result.is_err(), "Expected Err without github client");
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("no GitHub token"),
+			"Expected 'no GitHub token' error, got: {msg}"
+		);
+	}
+}

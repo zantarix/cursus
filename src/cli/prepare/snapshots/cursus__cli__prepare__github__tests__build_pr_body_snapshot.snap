@@ -1,5 +1,5 @@
 ---
-source: src/cli/prepare.rs
+source: src/cli/prepare/github.rs
 expression: "build_pr_body(&releases, \"main\")"
 ---
 This PR was opened by Cursus. When ready to release, you should merge this PR which will trigger a release. If you're not ready to do a release then simply leave this PR and it will be updated as you merge more changesets into `main`.
@@ -23,3 +23,4 @@ This PR was opened by Cursus. When ready to release, you should merge this PR wh
 - Fixed crash
 
 ## pkg-c@0.9.1
+
