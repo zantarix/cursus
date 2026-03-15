@@ -275,6 +275,7 @@ mod tests {
 			vec![
 				"push".to_string(),
 				"origin".to_string(),
+				"tag".to_string(),
 				"v1.0.0".to_string(),
 			],
 			1,
@@ -319,6 +320,7 @@ mod tests {
 			vec![
 				"push".to_string(),
 				"origin".to_string(),
+				"tag".to_string(),
 				"v1.0.0".to_string(),
 			],
 			1,

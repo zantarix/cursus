@@ -312,7 +312,8 @@ impl GitWorkdir {
 
 	/// Pushes a specific tag to origin.
 	///
-	/// Runs `git push origin <tag>`, pushing only that tag rather than all local tags.
+	/// Runs `git push origin tag <tag>`, using the `tag` keyword to unambiguously
+	/// push a tag ref rather than a branch ref of the same name.
 	///
 	/// # Errors
 	///
@@ -320,7 +321,7 @@ impl GitWorkdir {
 	pub(crate) fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
 		let output = self
 			.env
-			.run_mut("git", &["push", "origin", tag], &self.path)
+			.run_mut("git", &["push", "origin", "tag", tag], &self.path)
 			.context("Failed to run git push tag")?;
 
 		if !output.status.success() {
@@ -506,3 +507,6 @@ impl GitWorkdir {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod integration_tests;

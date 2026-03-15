@@ -328,7 +328,7 @@ fn git_push_tag_passes_correct_args() {
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "git");
-	assert_eq!(invocations[0].args, ["push", "origin", "v1.2.0"]);
+	assert_eq!(invocations[0].args, ["push", "origin", "tag", "v1.2.0"]);
 	assert_eq!(invocations[0].cwd, dir.path());
 }
 
