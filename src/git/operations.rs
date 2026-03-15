@@ -288,6 +288,28 @@ impl GitWorkdir {
 		Ok(())
 	}
 
+	/// Deletes a local git tag.
+	///
+	/// Runs `git tag -d <tag>`. Used as cleanup after a failed tag push, so that
+	/// a retry can re-create and re-push the tag without hitting "tag already exists".
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git tag -d` exits with a non-zero status.
+	pub(crate) fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
+		let output = self
+			.env
+			.run_mut("git", &["tag", "-d", tag], &self.path)
+			.context("Failed to run git tag -d")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git tag -d failed: {stderr}");
+		}
+
+		Ok(())
+	}
+
 	/// Pushes a specific tag to origin.
 	///
 	/// Runs `git push origin <tag>`, pushing only that tag rather than all local tags.
@@ -772,6 +794,35 @@ mod tests {
 		assert!(
 			msg.contains("git checkout failed"),
 			"Expected 'git checkout failed', got: {msg}"
+		);
+	}
+
+	#[test]
+	fn git_delete_tag_passes_correct_args() {
+		let dir = temp_dir();
+		let runner = recording(0);
+		let dir_abs = abs(&dir);
+		let (git, runner) = make_git(runner, dir_abs);
+		git.delete_tag("v1.0.0").unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert_eq!(invocations[0].program, "git");
+		assert_eq!(invocations[0].args, ["tag", "-d", "v1.0.0"]);
+		assert_eq!(invocations[0].cwd, dir.path());
+	}
+
+	#[test]
+	fn git_delete_tag_failure_propagates() {
+		let dir = temp_dir();
+		let runner = recording_with_stderr(1, b"error: tag 'v1.0.0' not found");
+		let dir_abs = abs(&dir);
+		let (git, _) = make_git(runner, dir_abs);
+		let result = git.delete_tag("v1.0.0");
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(
+			msg.contains("git tag -d failed"),
+			"Expected 'git tag -d failed', got: {msg}"
 		);
 	}
 

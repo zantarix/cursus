@@ -85,7 +85,7 @@ fn sort_projects_by_dependency(
 
 /// Creates git tags and GitHub Releases for all published packages.
 ///
-/// Returns `(tags_created, tags_skipped, github_created, github_failed)`.
+/// Returns `(tags_created, tags_skipped, github_created, github_failed, tags_push_failed)`.
 #[allow(clippy::too_many_arguments)]
 fn run_git_release_operations(
 	git: &git::GitWorkdir,
@@ -96,8 +96,8 @@ fn run_git_release_operations(
 	git_enabled: bool,
 	no_git: bool,
 	is_multi_package: bool,
-) -> anyhow::Result<(usize, usize, usize, bool)> {
-	let (tags_created, tags_skipped) = maybe_create_tags(
+) -> anyhow::Result<(usize, usize, usize, bool, usize)> {
+	let (tags_created, tags_skipped, tags_push_failed) = maybe_create_tags(
 		published_packages,
 		config,
 		git,
@@ -114,12 +114,18 @@ fn run_git_release_operations(
 		no_git,
 		is_multi_package,
 	)?;
-	Ok((tags_created, tags_skipped, github_created, github_failed))
+	Ok((
+		tags_created,
+		tags_skipped,
+		github_created,
+		github_failed,
+		tags_push_failed,
+	))
 }
 
 /// Creates git tags for published packages (or logs dry-run intent) and returns counts.
 ///
-/// Returns `(tags_created, tags_skipped)`.
+/// Returns `(tags_created, tags_skipped, tags_push_failed)`.
 fn maybe_create_tags(
 	published_packages: &[PublishedPackage],
 	config: &Config,
@@ -127,9 +133,9 @@ fn maybe_create_tags(
 	dry_run: bool,
 	git_enabled: bool,
 	is_multi_package: bool,
-) -> anyhow::Result<(usize, usize)> {
+) -> anyhow::Result<(usize, usize, usize)> {
 	if !git_enabled {
-		return Ok((0, 0));
+		return Ok((0, 0, 0));
 	}
 	if dry_run {
 		for pkg in published_packages {
@@ -139,7 +145,7 @@ fn maybe_create_tags(
 				.tag(&pkg.name, &pkg.version, is_multi_package);
 			info!("Would create tag {tag}");
 		}
-		return Ok((0, 0));
+		return Ok((0, 0, 0));
 	}
 	create_and_push_tags(published_packages, config, git, is_multi_package)
 }
@@ -215,16 +221,17 @@ pub(crate) fn cmd_publish(
 	let (published_packages, skipped_count, publish_failed) =
 		publish_projects(&sorted_projects, dry_run)?;
 	let git_enabled = config.git.enabled() && !args.no_git;
-	let (tags_created, tags_skipped, github_created, github_failed) = run_git_release_operations(
-		git,
-		&config,
-		env,
-		&published_packages,
-		dry_run,
-		git_enabled,
-		args.no_git,
-		is_multi_package,
-	)?;
+	let (tags_created, tags_skipped, github_created, github_failed, tag_push_failed) =
+		run_git_release_operations(
+			git,
+			&config,
+			env,
+			&published_packages,
+			dry_run,
+			git_enabled,
+			args.no_git,
+			is_multi_package,
+		)?;
 	log_publish_summary(
 		&published_packages,
 		skipped_count,
@@ -232,13 +239,14 @@ pub(crate) fn cmd_publish(
 		git_enabled,
 		tags_created,
 		tags_skipped,
+		tag_push_failed,
 		config.github.enabled,
 		args.no_git,
 		github_created,
 		github_failed,
 	);
 
-	let code = if publish_failed || github_failed {
+	let code = if publish_failed || github_failed || tag_push_failed > 0 {
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
@@ -246,20 +254,22 @@ pub(crate) fn cmd_publish(
 	Ok(code)
 }
 
-/// Creates an annotated git tag for each published package and pushes all new tags.
+/// Creates and pushes an annotated git tag for each published package serially.
 ///
 /// Tags that already exist in the repository are skipped (making the operation idempotent).
-/// Tags are pushed in a single `git push origin --tags` call after all tags are created.
+/// Each tag is pushed immediately after creation. If a push fails, the local tag is deleted
+/// so that a retry can re-create and re-push it, then processing continues with the next tag.
 ///
-/// Returns `(tags_created, tags_skipped)`.
+/// Returns `(tags_created, tags_skipped, tags_push_failed)`.
 fn create_and_push_tags(
 	published: &[PublishedPackage],
 	config: &Config,
 	git: &git::GitWorkdir,
 	is_multi_package: bool,
-) -> anyhow::Result<(usize, usize)> {
-	let mut created_tags: Vec<String> = Vec::new();
+) -> anyhow::Result<(usize, usize, usize)> {
+	let mut created = 0;
 	let mut skipped = 0;
+	let mut push_failed = 0;
 
 	for pkg in published {
 		let tag = config
@@ -274,17 +284,24 @@ fn create_and_push_tags(
 		}
 
 		let message = format!("Release {} version {}", pkg.name, pkg.version);
+		// Tag creation failure is propagated as a hard error: an `Err` from `git tag -a`
+		// typically indicates a deeper problem (corrupt repo, permission denied) that
+		// cannot be resolved by retrying. Push failures, by contrast, are often transient
+		// and are handled with best-effort cleanup so retries can succeed.
 		git.tag(&tag, &message)?;
 		info!("Created tag {tag}");
-		created_tags.push(tag);
+
+		if let Err(e) = git.push_tag(&tag) {
+			warn!("Failed to push tag {tag}: {e:#}");
+			if let Err(del_err) = git.delete_tag(&tag) {
+				warn!("Failed to delete local tag {tag} after push failure: {del_err:#}");
+			}
+			push_failed += 1;
+		} else {
+			created += 1;
+		}
 	}
 
-	// Push only the tags created in this invocation (not all local tags).
-	for tag_name in &created_tags {
-		git.push_tag(tag_name)?;
-	}
-
-	let created = created_tags.len();
 	if created > 0 {
 		info!(
 			"Pushed {} tag{} to origin",
@@ -293,7 +310,7 @@ fn create_and_push_tags(
 		);
 	}
 
-	Ok((created, skipped))
+	Ok((created, skipped, push_failed))
 }
 
 /// Publishes the given projects to their registries, tracking outcomes.
@@ -376,21 +393,18 @@ fn log_dry_run_github_releases(
 	}
 }
 
-/// Logs the publish summary after all publish operations have completed.
+/// Logs the first line of the publish summary (published/skipped/GitHub counts).
 #[allow(clippy::too_many_arguments)]
-fn log_publish_summary(
+fn log_summary_line(
 	published_packages: &[PublishedPackage],
 	skipped_count: usize,
 	dry_run: bool,
 	git_enabled: bool,
-	tags_created: usize,
-	tags_skipped: usize,
 	github_enabled: bool,
 	no_git: bool,
 	github_created: usize,
 	github_failed: bool,
 ) {
-	info!("");
 	if dry_run {
 		let tag_note = if git_enabled && !published_packages.is_empty() {
 			format!(", {} would be tagged", published_packages.len())
@@ -430,10 +444,44 @@ fn log_publish_summary(
 			skipped_count
 		);
 	}
+}
+
+/// Logs the publish summary after all publish operations have completed.
+#[allow(clippy::too_many_arguments)]
+fn log_publish_summary(
+	published_packages: &[PublishedPackage],
+	skipped_count: usize,
+	dry_run: bool,
+	git_enabled: bool,
+	tags_created: usize,
+	tags_skipped: usize,
+	tags_push_failed: usize,
+	github_enabled: bool,
+	no_git: bool,
+	github_created: usize,
+	github_failed: bool,
+) {
+	info!("");
+	log_summary_line(
+		published_packages,
+		skipped_count,
+		dry_run,
+		git_enabled,
+		github_enabled,
+		no_git,
+		github_created,
+		github_failed,
+	);
 	if !dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
 		info!(
 			"{tags_created} tag{} created, {tags_skipped} skipped",
 			if tags_created == 1 { "" } else { "s" }
+		);
+	}
+	if !dry_run && git_enabled && tags_push_failed > 0 {
+		info!(
+			"{tags_push_failed} tag push{} failed; run again to retry",
+			if tags_push_failed == 1 { "" } else { "es" }
 		);
 	}
 }
@@ -591,7 +639,7 @@ mod tests {
 
 	use super::*;
 	use crate::command::CommandRunner;
-	use crate::command::test_support::RecordingCommandRunner;
+	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 	use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 	use crate::model::config::{Config, GitHubConfig};
 
@@ -868,10 +916,12 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
-		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&published, &config, &git, false).unwrap();
 
 		assert_eq!(created, 1);
 		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 0);
 		let invocations = runner.invocations();
 		// tag -l (exists check), tag -a (create), push origin <tag>
 		assert_eq!(invocations.len(), 3);
@@ -906,10 +956,12 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
-		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&published, &config, &git, false).unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 1);
+		assert_eq!(push_failed, 0);
 		// Only the tag -l check; no tag creation or push
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -927,10 +979,12 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, skipped) = create_and_push_tags(&[], &config, &git, false).unwrap();
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&[], &config, &git, false).unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 0);
 		assert!(runner.invocations().is_empty());
 	}
 
@@ -952,9 +1006,11 @@ mod tests {
 			dir_abs,
 		);
 
-		let (created, skipped) = create_and_push_tags(&[], &config, &git, false).unwrap();
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&[], &config, &git, false).unwrap();
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 0);
 
 		let logs = take_logs();
 		assert!(
@@ -990,9 +1046,11 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
-		let (created, skipped) = create_and_push_tags(&published, &config, &git, false).unwrap();
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&published, &config, &git, false).unwrap();
 		assert_eq!(created, 1);
 		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 0);
 
 		let logs = take_logs();
 		assert!(
@@ -1027,5 +1085,120 @@ mod tests {
 			"Expected monorepo tag name, got: {:?}",
 			invocations[0].args
 		);
+	}
+
+	#[test]
+	fn create_and_push_tags_push_failure_deletes_local_tag_and_counts_failed() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		// All git commands succeed by default; push of v1.0.0 fails specifically.
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
+			"git",
+			vec![
+				"push".to_string(),
+				"origin".to_string(),
+				"v1.0.0".to_string(),
+			],
+			1,
+		));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let published = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.0.0".parse().unwrap(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
+		}];
+
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&published, &config, &git, false).unwrap();
+
+		assert_eq!(created, 0);
+		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 1);
+
+		let invocations = runner.invocations();
+		// tag -l (exists check), tag -a (create), push origin <tag> (fails), tag -d (cleanup)
+		assert_eq!(invocations.len(), 4);
+		assert!(invocations[0].args.contains(&"-l".to_string()));
+		assert!(invocations[1].args.contains(&"-a".to_string()));
+		assert!(invocations[2].args.contains(&"push".to_string()));
+		// Cleanup: git tag -d
+		assert_eq!(invocations[3].args[0], "tag");
+		assert_eq!(invocations[3].args[1], "-d");
+		assert!(invocations[3].args.contains(&"v1.0.0".to_string()));
+	}
+
+	#[test]
+	fn create_and_push_tags_push_failure_continues_to_next_package() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		// Only the first push (v1.0.0) fails; the second (v2.0.0) succeeds via default.
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
+			"git",
+			vec![
+				"push".to_string(),
+				"origin".to_string(),
+				"v1.0.0".to_string(),
+			],
+			1,
+		));
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let published = vec![
+			PublishedPackage {
+				name: "pkg-a".to_string(),
+				version: "1.0.0".parse().unwrap(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
+			},
+			PublishedPackage {
+				name: "pkg-b".to_string(),
+				version: "2.0.0".parse().unwrap(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
+			},
+		];
+
+		let (created, skipped, push_failed) =
+			create_and_push_tags(&published, &config, &git, false).unwrap();
+
+		// First package push failed, second succeeded.
+		assert_eq!(created, 1);
+		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 1);
+	}
+
+	#[test]
+	fn create_and_push_tags_delete_failure_after_push_failure_is_non_fatal() {
+		let dir = tempfile::tempdir().unwrap();
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
+		// Push fails; delete also fails.
+		let runner = Arc::new(
+			DispatchingCommandRunner::new(0)
+				.on_with_args("git", vec!["push".to_string()], 1)
+				.on_with_args("git", vec!["tag".to_string(), "-d".to_string()], 1),
+		);
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let git = git::GitWorkdir::new(
+			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			dir_abs.clone(),
+		);
+		let published = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.0.0".parse().unwrap(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
+		}];
+
+		// Must not error out even though both push and delete failed.
+		let result = create_and_push_tags(&published, &config, &git, false);
+		assert!(result.is_ok());
+		let (created, skipped, push_failed) = result.unwrap();
+		assert_eq!(created, 0);
+		assert_eq!(skipped, 0);
+		assert_eq!(push_failed, 1);
 	}
 }
