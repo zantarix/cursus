@@ -87,9 +87,13 @@
 				};
 
 				# Minimal shell for CI: only what is needed for `cargo build --release`
-				# on the current host architecture.
+				# and `cursus ci` on the current host architecture.
 				devShells.ci = pkgs.mkShell {
-					buildInputs = [ rustToolchainCI ];
+					buildInputs = with pkgs; [
+						rustToolchainCI
+						git
+						nodejs
+					];
 				};
 			}
 		);
