@@ -6,7 +6,21 @@ use log::info;
 use crate::git;
 use crate::model::config::{Config, Strategy};
 
-use super::{PrepareArgs, ReleaseInfo};
+use super::{PrepareArgs, PrepareOutput, ReleaseInfo};
+
+/// Git-related configuration resolved for a prepare run.
+#[derive(Debug)]
+pub(super) struct GitContext {
+	pub(super) enabled: bool,
+	pub(super) strategy: Strategy,
+}
+
+/// Branch state established during preflight checks.
+#[derive(Debug)]
+pub(super) struct BranchState {
+	pub(super) original: Option<String>,
+	pub(super) release: Option<String>,
+}
 
 /// Checks that the working tree is clean before making changes.
 ///
@@ -137,18 +151,17 @@ pub(super) fn stage_and_commit(
 ///
 /// Validates GitHub token availability when required, checks for a dirty working
 /// tree, and checks out the release branch for the branch strategy.
-/// Returns `(original_branch, release_branch)`.
+/// Returns a [`BranchState`] with the original and release branch names.
 pub(super) fn preflight_checks(
 	git: &git::GitWorkdir,
 	config: &Config,
 	env: &crate::Env,
 	args: &PrepareArgs,
-	git_enabled: bool,
-	strategy: Strategy,
+	git_ctx: &GitContext,
 	dry_run: bool,
-) -> anyhow::Result<(Option<String>, Option<String>)> {
-	if git_enabled
-		&& strategy == Strategy::Branch
+) -> anyhow::Result<BranchState> {
+	if git_ctx.enabled
+		&& git_ctx.strategy == Strategy::Branch
 		&& config.github.enabled
 		&& !dry_run
 		&& env.github_client().is_none()
@@ -158,13 +171,16 @@ pub(super) fn preflight_checks(
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
 		);
 	}
-	if !git_enabled {
-		return Ok((None, None));
+	if !git_ctx.enabled {
+		return Ok(BranchState {
+			original: None,
+			release: None,
+		});
 	}
 	if !dry_run {
 		check_dirty_tree(git)?;
 	}
-	if strategy == Strategy::Branch {
+	if git_ctx.strategy == Strategy::Branch {
 		let current = if dry_run {
 			git.current_branch().ok().flatten()
 		} else {
@@ -176,36 +192,43 @@ pub(super) fn preflight_checks(
 			current.as_deref(),
 		)?;
 		git.checkout_or_reset_branch(&branch)?;
-		Ok((current, Some(branch)))
+		Ok(BranchState {
+			original: current,
+			release: Some(branch),
+		})
 	} else {
-		Ok((None, None))
+		Ok(BranchState {
+			original: None,
+			release: None,
+		})
 	}
 }
 
 /// Stages, commits, and pushes release changes according to the configured git strategy.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_git_lifecycle(
 	git: &git::GitWorkdir,
 	config: &Config,
 	env: &crate::Env,
-	release_infos: &[ReleaseInfo],
-	modified_files: &[PathBuf],
-	original_branch: Option<&str>,
-	release_branch: Option<&str>,
-	git_enabled: bool,
-	strategy: Strategy,
+	output: &PrepareOutput,
+	branches: &BranchState,
+	git_ctx: &GitContext,
 	dry_run: bool,
 ) -> anyhow::Result<()> {
-	if !git_enabled {
+	if !git_ctx.enabled {
 		return Ok(());
 	}
-	stage_and_commit(git, &config.git.extra_files, release_infos, modified_files)?;
-	match strategy {
+	stage_and_commit(
+		git,
+		&config.git.extra_files,
+		&output.release_infos,
+		&output.modified_files,
+	)?;
+	match git_ctx.strategy {
 		Strategy::Push => {
 			git.push()?;
 		}
 		Strategy::Branch => {
-			if let Some(branch) = release_branch {
+			if let Some(branch) = branches.release.as_deref() {
 				info!("Pushing branch '{branch}' to origin");
 				git.force_push_branch(branch).with_context(|| {
 					format!(
@@ -219,15 +242,15 @@ pub(super) fn finalize_git_lifecycle(
 						git,
 						config,
 						env,
-						release_infos,
+						&output.release_infos,
 						branch,
-						original_branch,
+						branches.original.as_deref(),
 						dry_run,
 					)
 				} else {
 					Ok(())
 				};
-				if let Some(orig) = original_branch
+				if let Some(orig) = branches.original.as_deref()
 					&& let Err(checkout_err) = git.checkout(orig)
 				{
 					log::error!(
@@ -242,13 +265,13 @@ pub(super) fn finalize_git_lifecycle(
 }
 
 /// Resolves git-enabled flag, strategy, and emits a warning for incompatible flags.
-pub(super) fn setup_git_context(config: &Config, args: &PrepareArgs) -> (bool, Strategy) {
-	let git_enabled = config.git.enabled() && !args.no_git;
+pub(super) fn setup_git_context(config: &Config, args: &PrepareArgs) -> GitContext {
+	let enabled = config.git.enabled() && !args.no_git;
 	let strategy = config.git.strategy();
 	if args.branch.is_some() && strategy == Strategy::Push {
 		log::warn!("--branch has no effect with the push strategy; ignoring");
 	}
-	(git_enabled, strategy)
+	GitContext { enabled, strategy }
 }
 
 #[cfg(test)]

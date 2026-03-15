@@ -8,6 +8,11 @@ use super::widgets::{
 	render_yes_no_buttons, wizard_layout,
 };
 
+/// The [`KeyResult`] type for [`ButtonScreen`] event handlers.
+///
+/// Either continues with `(State, FullScreen)` or completes with `Result`.
+pub type ButtonKeyResult<State, FullScreen, Result> = KeyResult<(State, FullScreen), Result>;
+
 /// A TUI screen that displays a question and N buttons.
 ///
 /// Implementors provide the question text, button definitions, and state
@@ -56,11 +61,10 @@ pub trait ButtonScreen: Sized {
 	/// # Errors
 	///
 	/// Returns an error if any state transition fails.
-	#[allow(clippy::type_complexity)]
 	fn on_confirm(
 		self,
 		state: Self::State,
-	) -> anyhow::Result<KeyResult<(Self::State, Self::FullScreen), Self::Result>>;
+	) -> anyhow::Result<ButtonKeyResult<Self::State, Self::FullScreen, Self::Result>>;
 
 	/// Handles an input event and returns the next state.
 	///
@@ -76,13 +80,12 @@ pub trait ButtonScreen: Sized {
 	/// # Errors
 	///
 	/// Returns an error if `on_confirm` fails.
-	#[allow(clippy::type_complexity)]
 	fn handle_event(
 		self,
 		state: Self::State,
 		event: Event,
 		content_area: Rect,
-	) -> anyhow::Result<KeyResult<(Self::State, Self::FullScreen), Self::Result>> {
+	) -> anyhow::Result<ButtonKeyResult<Self::State, Self::FullScreen, Self::Result>> {
 		match event {
 			Event::Key(KeyEvent { code, .. }) => match code {
 				KeyCode::Left | KeyCode::Char('h') => {

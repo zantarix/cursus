@@ -33,18 +33,10 @@ pub(super) fn initial_textarea() -> Box<TextArea<'static>> {
 
 fn back_to_screen(back: BackState) -> Screen {
 	match back {
-		BackState::MultiPackage {
-			selected,
-			levels,
-			cursor,
-			changed_count,
-		} => Screen::SelectProjects {
-			selected,
-			levels,
-			cursor,
-			error: false,
-			changed_count,
-		},
+		BackState::MultiPackage(mut state) => {
+			state.error = false;
+			Screen::SelectProjects(state)
+		}
 		BackState::SinglePackage { level } => Screen::SinglePackage { level },
 	}
 }
@@ -216,23 +208,25 @@ mod tests {
 
 	#[test]
 	fn esc_goes_back_to_select_projects() {
+		use crate::tui::change::SelectProjectsState;
 		let ta = initial_textarea();
-		let back = BackState::MultiPackage {
+		let back = BackState::MultiPackage(SelectProjectsState {
 			selected: vec![true, false],
 			levels: vec![ChangeType::Major, ChangeType::Patch],
 			cursor: 0,
+			error: false,
 			changed_count: 1,
-		};
+		});
 		let result =
 			handle_event_enter_message(ta, projects_with_patch(), back, key(KeyCode::Esc)).unwrap();
 		match result {
-			KeyResult::Continue(Screen::SelectProjects {
+			KeyResult::Continue(Screen::SelectProjects(SelectProjectsState {
 				selected,
 				levels,
 				cursor,
 				error,
 				changed_count,
-			}) => {
+			})) => {
 				assert_eq!(selected, vec![true, false]);
 				assert_eq!(levels, vec![ChangeType::Major, ChangeType::Patch]);
 				assert_eq!(cursor, 0);

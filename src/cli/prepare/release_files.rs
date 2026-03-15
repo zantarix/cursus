@@ -11,21 +11,20 @@ use crate::package_manager::{PackageManagerAdapter, Project};
 use crate::utils::today_iso_date;
 
 use super::version::bump_version;
-use super::{PackageChanges, ReleaseInfo, VersionPlan};
+use super::{PackageChanges, PrepareOutput, ReleaseInfo, VersionPlan};
 
 /// Bumps package versions, writes changelogs, and collects all modified file paths.
 ///
 /// Runs version bumping, changelog generation, dependency propagation, lock
-/// file updates, and changeset consumption. Returns the list of release infos
-/// and the deduplicated list of all paths written.
-#[allow(clippy::too_many_arguments)]
+/// file updates, and changeset consumption. Returns a [`PrepareOutput`] containing
+/// release infos and the deduplicated list of all paths written.
 pub(super) fn prepare_release_files(
 	adapters: &[Arc<dyn PackageManagerAdapter>],
 	projects: &[Project],
 	changesets: &[(PathBuf, Changeset)],
 	plan: VersionPlan,
 	dry_run: bool,
-) -> anyhow::Result<(Vec<ReleaseInfo>, Vec<PathBuf>)> {
+) -> anyhow::Result<PrepareOutput> {
 	let (release_infos, mut files) = bump_versions_and_generate_changelogs(
 		&plan.aggregated,
 		&plan.changes_per_package,
@@ -45,7 +44,10 @@ pub(super) fn prepare_release_files(
 	files.extend(plan.propagation_changeset_paths);
 	files.sort();
 	files.dedup();
-	Ok((release_infos, files))
+	Ok(PrepareOutput {
+		release_infos,
+		modified_files: files,
+	})
 }
 
 /// Bumps versions and generates changelog entries for all affected packages.

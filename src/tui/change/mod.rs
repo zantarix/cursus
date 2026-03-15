@@ -32,29 +32,26 @@ pub struct ChangeOptions {
 	pub projects: Option<Vec<usize>>,
 }
 
+/// State for the [`Screen::SelectProjects`] screen.
+#[derive(Debug)]
+struct SelectProjectsState {
+	selected: Vec<bool>,
+	/// Per-project change level (shown only for selected projects).
+	levels: Vec<ChangeType>,
+	cursor: usize,
+	error: bool,
+	/// Number of projects in the "Changed" group (always the first slice).
+	changed_count: usize,
+}
+
 /// State carried when navigating back from [`Screen::EnterMessage`].
 enum BackState {
-	MultiPackage {
-		selected: Vec<bool>,
-		levels: Vec<ChangeType>,
-		cursor: usize,
-		changed_count: usize,
-	},
-	SinglePackage {
-		level: ChangeType,
-	},
+	MultiPackage(SelectProjectsState),
+	SinglePackage { level: ChangeType },
 }
 
 enum Screen {
-	SelectProjects {
-		selected: Vec<bool>,
-		/// Per-project change level (shown only for selected projects).
-		levels: Vec<ChangeType>,
-		cursor: usize,
-		error: bool,
-		/// Number of projects in the "Changed" group (always the first slice).
-		changed_count: usize,
-	},
+	SelectProjects(SelectProjectsState),
 	SinglePackage {
 		level: ChangeType,
 	},
@@ -124,21 +121,8 @@ fn handle_event(
 	projects: &[Project],
 ) -> anyhow::Result<HandleResult> {
 	match screen {
-		Screen::SelectProjects {
-			selected,
-			levels,
-			cursor,
-			error,
-			changed_count,
-		} => Ok(select_projects::handle_event_select_projects(
-			selected,
-			levels,
-			cursor,
-			error,
-			changed_count,
-			event,
-			area,
-			projects,
+		Screen::SelectProjects(state) => Ok(select_projects::handle_event_select_projects(
+			state, event, area, projects,
 		)),
 		Screen::SinglePackage { level } => {
 			let project = projects
@@ -163,23 +147,8 @@ fn handle_event(
 fn ui(frame: &mut Frame, screen: &Screen, project_names: &[&str]) {
 	let area = frame.area();
 	match screen {
-		Screen::SelectProjects {
-			selected,
-			levels,
-			cursor,
-			error,
-			changed_count,
-		} => {
-			select_projects::render_select_projects(
-				frame,
-				area,
-				project_names,
-				selected,
-				levels,
-				*cursor,
-				*error,
-				*changed_count,
-			);
+		Screen::SelectProjects(state) => {
+			select_projects::render_select_projects(frame, area, project_names, state);
 		}
 		Screen::SinglePackage { level } => {
 			single_package::SinglePackageButtons { level: *level }.render(frame, area);
@@ -207,24 +176,24 @@ fn build_initial_screen(
 		for &i in project_indices {
 			selected[i] = true;
 		}
-		Screen::SelectProjects {
+		Screen::SelectProjects(SelectProjectsState {
 			selected,
 			levels: vec![ChangeType::Patch; ro.projects.len()],
 			cursor: 0,
 			error: false,
 			changed_count: ro.changed_count,
-		}
+		})
 	} else {
 		let selected = (0..ro.projects.len())
 			.map(|i| i < ro.changed_count)
 			.collect();
-		Screen::SelectProjects {
+		Screen::SelectProjects(SelectProjectsState {
 			selected,
 			levels: vec![ChangeType::Patch; ro.projects.len()],
 			cursor: 0,
 			error: false,
 			changed_count: ro.changed_count,
-		}
+		})
 	}
 }
 
@@ -419,18 +388,18 @@ mod tests {
 		assert_eq!(ro.orig_to_new[1], 0); // "gamma" → new idx 0
 	}
 
-	/// Unwrap a `Continue(Screen::SelectProjects {...})` result, panicking on mismatch.
+	/// Unwrap a `Continue(Screen::SelectProjects(...))` result, panicking on mismatch.
 	fn unwrap_select_projects(
 		result: anyhow::Result<HandleResult>,
 	) -> (Vec<bool>, Vec<ChangeType>, usize, bool, usize) {
 		match result.unwrap() {
-			KeyResult::Continue(Screen::SelectProjects {
+			KeyResult::Continue(Screen::SelectProjects(SelectProjectsState {
 				selected,
 				levels,
 				cursor,
 				error,
 				changed_count,
-			}) => (selected, levels, cursor, error, changed_count),
+			})) => (selected, levels, cursor, error, changed_count),
 			other => panic!(
 				"Expected Continue(SelectProjects), got different variant: {:?}",
 				std::mem::discriminant(&other)
@@ -450,13 +419,13 @@ mod tests {
 	fn workflow_select_projects_then_enter_message() {
 		let projects = dummy_projects(3);
 
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(SelectProjectsState {
 			selected: vec![true, true, true],
 			levels: vec![ChangeType::Patch; 3],
 			cursor: 0,
 			error: false,
 			changed_count: 3,
-		};
+		});
 
 		// Deselect first project
 		let (selected, levels, cursor, error, changed_count) =
@@ -468,13 +437,13 @@ mod tests {
 		assert_eq!(changed_count, 3);
 
 		// Change level of project at cursor (0) — but it's not selected, so no change
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(SelectProjectsState {
 			selected: vec![false, true, true],
 			levels: vec![ChangeType::Patch; 3],
 			cursor: 1,
 			error: false,
 			changed_count: 3,
-		};
+		});
 
 		// Change level of project-1: Patch.next() == Major
 		let (selected2, levels2, ..) =
@@ -483,13 +452,13 @@ mod tests {
 		assert_eq!(levels2[1], ChangeType::Major);
 
 		// Confirm → EnterMessage with selected projects and levels
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(SelectProjectsState {
 			selected: vec![false, true, true],
 			levels: vec![ChangeType::Patch, ChangeType::Major, ChangeType::Patch],
 			cursor: 0,
 			error: false,
 			changed_count: 3,
-		};
+		});
 		let proj = unwrap_enter_message(handle_key(screen, KeyCode::Enter, &projects));
 		assert_eq!(proj.len(), 2);
 		assert_eq!(proj[0].0.name(), "project-1");

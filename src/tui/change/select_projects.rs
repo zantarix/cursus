@@ -8,7 +8,7 @@ use crate::model::changeset::ChangeType;
 use crate::package_manager::Project;
 use crate::tui::widgets::{self, KeyResult, button_style};
 
-use super::{BackState, HandleResult, Screen, enter_message};
+use super::{BackState, HandleResult, Screen, SelectProjectsState, enter_message};
 
 const HELP: &str = "↑/↓/j/k: navigate | Space: toggle | ←/→: change level | ,/.: set all levels | a: all | c: changed | u: unchanged | Enter: confirm | Esc: cancel";
 const QUESTION: &str = "Which projects does this change apply to?";
@@ -22,13 +22,13 @@ fn new_screen(
 	error: bool,
 	changed_count: usize,
 ) -> Screen {
-	Screen::SelectProjects {
+	Screen::SelectProjects(SelectProjectsState {
 		selected: selected.to_vec(),
 		levels: levels.to_vec(),
 		cursor,
 		error,
 		changed_count,
-	}
+	})
 }
 
 fn move_project_cursor(
@@ -69,12 +69,13 @@ fn advance_to_enter_message(
 			.filter(|(_, s)| **s)
 			.map(|(i, _)| (projects[i].clone(), levels[i]))
 			.collect();
-		let back = BackState::MultiPackage {
+		let back = BackState::MultiPackage(SelectProjectsState {
 			selected: selected.to_vec(),
 			levels: levels.to_vec(),
 			cursor,
+			error: false,
 			changed_count,
-		};
+		});
 		let textarea = enter_message::initial_textarea();
 		KeyResult::Continue(Screen::EnterMessage {
 			textarea,
@@ -280,17 +281,9 @@ fn click_level_at(col: u16, inner_x_start: u16, name_col_width: usize) -> Option
 	}
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_mouse_select_projects(
-	selected: &[bool],
-	levels: &[ChangeType],
-	cursor: usize,
-	changed_count: usize,
-	col: u16,
-	row: u16,
-	content_area: Rect,
-	name_col_width: usize,
-) -> HandleResult {
+/// Returns `(inner_y_start, inner_y_end, inner_x_start, inner_x_end)` for the
+/// project-list block inside the wizard layout.
+fn project_block_inner_bounds(content_area: Rect) -> (u16, u16, u16, u16) {
 	let help_h = widgets::paragraph_height(HELP, content_area.width, 0);
 	let chunks = widgets::wizard_layout(
 		content_area,
@@ -300,41 +293,61 @@ fn handle_mouse_select_projects(
 			Constraint::Length(help_h),
 		],
 	);
-	let block_area = chunks[1];
-	let inner_y_start = block_area.y + 1;
-	let inner_y_end = block_area.y + block_area.height.saturating_sub(1);
-	let inner_x_start = block_area.x + 1;
-	let inner_x_end = block_area.x + block_area.width.saturating_sub(1);
-	let no_change =
-		|| KeyResult::Continue(new_screen(selected, levels, cursor, false, changed_count));
+	let b = chunks[1];
+	(
+		b.y + 1,
+		b.y + b.height.saturating_sub(1),
+		b.x + 1,
+		b.x + b.width.saturating_sub(1),
+	)
+}
+
+fn handle_mouse_select_projects(
+	state: &SelectProjectsState,
+	col: u16,
+	row: u16,
+	content_area: Rect,
+	name_col_width: usize,
+) -> HandleResult {
+	let (inner_y_start, inner_y_end, inner_x_start, inner_x_end) =
+		project_block_inner_bounds(content_area);
+	let no_change = || {
+		KeyResult::Continue(new_screen(
+			&state.selected,
+			&state.levels,
+			state.cursor,
+			false,
+			state.changed_count,
+		))
+	};
 	if row < inner_y_start || row >= inner_y_end || col < inner_x_start || col >= inner_x_end {
 		return no_change();
 	}
 	let inner_row = row - inner_y_start;
-	let total = selected.len();
-	match row_to_project_index(inner_row, changed_count, total) {
+	let total = state.selected.len();
+	match row_to_project_index(inner_row, state.changed_count, total) {
 		Some(project_idx) => {
-			if selected[project_idx]
+			if state.selected[project_idx]
 				&& let Some(lvl) = click_level_at(col, inner_x_start, name_col_width)
 			{
-				let mut new_levels = levels.to_vec();
+				let mut new_levels = state.levels.to_vec();
 				new_levels[project_idx] = lvl;
 				return KeyResult::Continue(new_screen(
-					selected,
+					&state.selected,
 					&new_levels,
 					project_idx,
 					false,
-					changed_count,
+					state.changed_count,
 				));
 			}
-			let mut new_selected = selected.to_vec();
+			let mut new_selected = state.selected.to_vec();
 			new_selected[project_idx] = !new_selected[project_idx];
 			KeyResult::Continue(new_screen(
 				&new_selected,
-				levels,
+				&state.levels,
 				project_idx,
 				false,
-				changed_count,
+				state.changed_count,
 			))
 		}
 		None => no_change(),
@@ -342,18 +355,20 @@ fn handle_mouse_select_projects(
 }
 
 /// Handles events for the [`Screen::SelectProjects`] screen.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_event_select_projects(
-	selected: Vec<bool>,
-	levels: Vec<ChangeType>,
-	cursor: usize,
-	error: bool,
-	changed_count: usize,
+	state: SelectProjectsState,
 	event: Event,
 	content_area: Rect,
 	projects: &[Project],
 ) -> HandleResult {
-	let _ = error; // error is cleared on any action
+	let SelectProjectsState {
+		selected,
+		levels,
+		cursor,
+		changed_count,
+		..
+	} = state;
+	// error is cleared on any action (the field is intentionally ignored here)
 	match event {
 		Event::Key(KeyEvent { code, .. }) => {
 			handle_key_inner(&selected, &levels, cursor, changed_count, code, projects)
@@ -361,10 +376,13 @@ pub(super) fn handle_event_select_projects(
 		Event::Mouse(me) if matches!(me.kind, MouseEventKind::Down(MouseButton::Left)) => {
 			let name_col_width = projects.iter().map(|p| p.name().len()).max().unwrap_or(0);
 			handle_mouse_select_projects(
-				&selected,
-				&levels,
-				cursor,
-				changed_count,
+				&SelectProjectsState {
+					selected,
+					levels,
+					cursor,
+					error: false,
+					changed_count,
+				},
 				me.column,
 				me.row,
 				content_area,
@@ -464,19 +482,22 @@ fn build_project_lines(
 }
 
 /// Renders the [`Screen::SelectProjects`] screen.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_select_projects(
 	frame: &mut Frame,
 	area: Rect,
 	project_names: &[&str],
-	selected: &[bool],
-	levels: &[ChangeType],
-	cursor: usize,
-	error: bool,
-	changed_count: usize,
+	state: &SelectProjectsState,
 ) {
-	let question_text = if error { QUESTION_ERROR } else { QUESTION };
-	let question_color = if error { Color::Red } else { Color::Yellow };
+	let question_text = if state.error {
+		QUESTION_ERROR
+	} else {
+		QUESTION
+	};
+	let question_color = if state.error {
+		Color::Red
+	} else {
+		Color::Yellow
+	};
 	let help_h = widgets::paragraph_height(HELP, area.width, 0);
 	let chunks = widgets::wizard_layout(
 		area,
@@ -487,7 +508,13 @@ pub(super) fn render_select_projects(
 		],
 	);
 	widgets::render_question(frame, chunks[0], question_text, question_color);
-	let lines = build_project_lines(project_names, selected, levels, cursor, changed_count);
+	let lines = build_project_lines(
+		project_names,
+		&state.selected,
+		&state.levels,
+		state.cursor,
+		state.changed_count,
+	);
 	let para = Paragraph::new(lines).block(
 		Block::default()
 			.borders(Borders::ALL)
@@ -510,31 +537,33 @@ mod tests {
 
 	fn projects_screen(selected: Vec<bool>, levels: Vec<ChangeType>, cursor: usize) -> Screen {
 		let changed_count = selected.len(); // treat all as "changed" for test simplicity
-		Screen::SelectProjects {
+		Screen::SelectProjects(super::super::SelectProjectsState {
 			selected,
 			levels,
 			cursor,
 			error: false,
 			changed_count,
-		}
+		})
 	}
 
 	fn default_levels(n: usize) -> Vec<ChangeType> {
 		vec![ChangeType::Patch; n]
 	}
 
-	/// Unwrap a `Continue(SelectProjects {...})` result.
+	/// Unwrap a `Continue(SelectProjects(...))` result.
 	fn unwrap_select_projects(
 		result: anyhow::Result<super::super::HandleResult>,
 	) -> (Vec<bool>, Vec<ChangeType>, usize, bool, usize) {
 		match result.unwrap() {
-			super::super::KeyResult::Continue(Screen::SelectProjects {
-				selected,
-				levels,
-				cursor,
-				error,
-				changed_count,
-			}) => (selected, levels, cursor, error, changed_count),
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState {
+					selected,
+					levels,
+					cursor,
+					error,
+					changed_count,
+				},
+			)) => (selected, levels, cursor, error, changed_count),
 			_ => panic!("Expected Continue(SelectProjects)"),
 		}
 	}
@@ -550,11 +579,13 @@ mod tests {
 	) -> super::HandleResult {
 		let area = Rect::new(0, 0, 80, 24);
 		super::handle_event_select_projects(
-			selected.to_vec(),
-			levels.to_vec(),
-			cursor,
-			false,
-			changed_count,
+			super::super::SelectProjectsState {
+				selected: selected.to_vec(),
+				levels: levels.to_vec(),
+				cursor,
+				error: false,
+				changed_count,
+			},
 			mouse_click(col, row),
 			area,
 			&[],
@@ -695,13 +726,13 @@ mod tests {
 
 	#[test]
 	fn projects_c_toggles_changed_group_on() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false, false, true],
 			levels: default_levels(3),
 			cursor: 0,
 			error: false,
 			changed_count: 2,
-		};
+		});
 		let (selected, _, _, _, changed_count) =
 			unwrap_select_projects(handle_key(screen, KeyCode::Char('c'), &[]));
 		assert_eq!(selected[0], true);
@@ -712,65 +743,65 @@ mod tests {
 
 	#[test]
 	fn projects_c_toggles_changed_group_off_when_all_on() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![true, true, false],
 			levels: default_levels(3),
 			cursor: 0,
 			error: false,
 			changed_count: 2,
-		};
+		});
 		let (selected, ..) = unwrap_select_projects(handle_key(screen, KeyCode::Char('c'), &[]));
 		assert_eq!(selected, vec![false, false, false]);
 	}
 
 	#[test]
 	fn projects_c_with_zero_changed_count_is_noop() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false, false],
 			levels: default_levels(2),
 			cursor: 0,
 			error: false,
 			changed_count: 0,
-		};
+		});
 		let (selected, ..) = unwrap_select_projects(handle_key(screen, KeyCode::Char('c'), &[]));
 		assert_eq!(selected, vec![false, false]);
 	}
 
 	#[test]
 	fn projects_u_toggles_unchanged_group_on() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![true, false, false],
 			levels: default_levels(3),
 			cursor: 0,
 			error: false,
 			changed_count: 1,
-		};
+		});
 		let (selected, ..) = unwrap_select_projects(handle_key(screen, KeyCode::Char('u'), &[]));
 		assert_eq!(selected, vec![true, true, true]);
 	}
 
 	#[test]
 	fn projects_u_toggles_unchanged_group_off_when_all_on() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false, true, true],
 			levels: default_levels(3),
 			cursor: 0,
 			error: false,
 			changed_count: 1,
-		};
+		});
 		let (selected, ..) = unwrap_select_projects(handle_key(screen, KeyCode::Char('u'), &[]));
 		assert_eq!(selected, vec![false, false, false]);
 	}
 
 	#[test]
 	fn projects_u_with_all_changed_is_noop() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![true, true],
 			levels: default_levels(2),
 			cursor: 0,
 			error: false,
 			changed_count: 2,
-		};
+		});
 		let (selected, ..) = unwrap_select_projects(handle_key(screen, KeyCode::Char('u'), &[]));
 		assert_eq!(selected, vec![true, true]);
 	}
@@ -840,13 +871,13 @@ mod tests {
 
 	#[test]
 	fn projects_error_clears_on_navigation() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false, false],
 			levels: default_levels(2),
 			cursor: 0,
 			error: true,
 			changed_count: 2,
-		};
+		});
 		let (_, _, cursor, error, _) =
 			unwrap_select_projects(handle_key(screen, KeyCode::Down, &[]));
 		assert_eq!(cursor, 1);
@@ -855,13 +886,13 @@ mod tests {
 
 	#[test]
 	fn projects_error_clears_on_toggle() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false, false],
 			levels: default_levels(2),
 			cursor: 0,
 			error: true,
 			changed_count: 2,
-		};
+		});
 		let (selected, _, _, error, _) =
 			unwrap_select_projects(handle_key(screen, KeyCode::Char(' '), &[]));
 		assert_eq!(selected, vec![true, false]);
@@ -882,19 +913,21 @@ mod tests {
 			KeyCode::Char('x'),
 		] {
 			let result = handle_key(
-				Screen::SelectProjects {
+				Screen::SelectProjects(super::super::SelectProjectsState {
 					selected: vec![],
 					levels: vec![],
 					cursor: 0,
 					error: false,
 					changed_count: 0,
-				},
+				}),
 				key,
 				&[],
 			)
 			.unwrap();
 			match result {
-				super::super::KeyResult::Continue(Screen::SelectProjects { selected, .. }) => {
+				super::super::KeyResult::Continue(Screen::SelectProjects(
+					super::super::SelectProjectsState { selected, .. },
+				)) => {
 					assert!(
 						selected.is_empty(),
 						"key {key:?} should be a no-op on empty projects"
@@ -907,26 +940,26 @@ mod tests {
 
 	#[test]
 	fn projects_empty_esc_cancels() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![],
 			levels: vec![],
 			cursor: 0,
 			error: false,
 			changed_count: 0,
-		};
+		});
 		let result = handle_key(screen, KeyCode::Esc, &[]).unwrap();
 		assert!(matches!(result, super::super::KeyResult::Cancelled));
 	}
 
 	#[test]
 	fn projects_empty_q_cancels() {
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![],
 			levels: vec![],
 			cursor: 0,
 			error: false,
 			changed_count: 0,
-		};
+		});
 		let result = handle_key(screen, KeyCode::Char('q'), &[]).unwrap();
 		assert!(matches!(result, super::super::KeyResult::Cancelled));
 	}
@@ -940,7 +973,9 @@ mod tests {
 		// inner_row=1 → project[0], absolute row 7
 		let result = click(10, 7, &selected, &levels, 0, 1);
 		match result {
-			super::super::KeyResult::Continue(Screen::SelectProjects { selected, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { selected, .. },
+			)) => {
 				assert_eq!(selected[0], false);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -954,7 +989,9 @@ mod tests {
 		// inner_row=3 → project[1] (unchanged), absolute row 9
 		let result = click(10, 9, &selected, &levels, 0, 1);
 		match result {
-			super::super::KeyResult::Continue(Screen::SelectProjects { selected, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { selected, .. },
+			)) => {
 				assert_eq!(selected[1], true);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -968,7 +1005,9 @@ mod tests {
 		// inner_row=0 → "Changed" header, absolute row 6
 		let result = click(10, 6, &selected, &levels, 0, 1);
 		match result {
-			super::super::KeyResult::Continue(Screen::SelectProjects { selected: sel, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { selected: sel, .. },
+			)) => {
 				assert_eq!(sel, vec![true, false]);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -982,7 +1021,9 @@ mod tests {
 		// inner_row=2 → "Unchanged" header, absolute row 8
 		let result = click(10, 8, &selected, &levels, 0, 1);
 		match result {
-			super::super::KeyResult::Continue(Screen::SelectProjects { selected: sel, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { selected: sel, .. },
+			)) => {
 				assert_eq!(sel, vec![true, false]);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -995,7 +1036,9 @@ mod tests {
 		let levels = default_levels(2);
 		let result = click(10, 23, &selected, &levels, 0, 1);
 		match result {
-			super::super::KeyResult::Continue(Screen::SelectProjects { selected: sel, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { selected: sel, .. },
+			)) => {
 				assert_eq!(sel, vec![true, false]);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -1017,7 +1060,9 @@ mod tests {
 	fn mouse_click_on_major_indicator_sets_major() {
 		// name_col_width=0, level_start=12, Major at offset 0–7 → col 12
 		match click_level(12, 7) {
-			super::super::KeyResult::Continue(Screen::SelectProjects { levels, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { levels, .. },
+			)) => {
 				assert_eq!(levels[0], ChangeType::Major);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -1028,7 +1073,9 @@ mod tests {
 	fn mouse_click_on_minor_indicator_sets_minor() {
 		// Minor at offset 8–15 → col 20
 		match click_level(20, 7) {
-			super::super::KeyResult::Continue(Screen::SelectProjects { levels, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { levels, .. },
+			)) => {
 				assert_eq!(levels[0], ChangeType::Minor);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -1039,7 +1086,9 @@ mod tests {
 	fn mouse_click_on_patch_indicator_sets_patch() {
 		// Patch at offset 16–23 → col 28
 		match click_level(28, 7) {
-			super::super::KeyResult::Continue(Screen::SelectProjects { levels, .. }) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState { levels, .. },
+			)) => {
 				assert_eq!(levels[0], ChangeType::Patch);
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
@@ -1052,11 +1101,13 @@ mod tests {
 		let selected = vec![false];
 		let levels = vec![ChangeType::Patch];
 		match click(12, 7, &selected, &levels, 0, 1) {
-			super::super::KeyResult::Continue(Screen::SelectProjects {
-				selected: sel,
-				levels: lvl,
-				..
-			}) => {
+			super::super::KeyResult::Continue(Screen::SelectProjects(
+				super::super::SelectProjectsState {
+					selected: sel,
+					levels: lvl,
+					..
+				},
+			)) => {
 				assert_eq!(sel[0], true); // toggled on
 				assert_eq!(lvl[0], ChangeType::Patch); // level unchanged
 			}
@@ -1118,13 +1169,13 @@ mod tests {
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(2);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![true, false],
 			levels: default_levels(2),
 			cursor: 0,
 			error: false,
 			changed_count: 2,
-		};
+		});
 		terminal
 			.draw(|frame| super::super::ui(frame, &screen, &names))
 			.unwrap();
@@ -1141,13 +1192,13 @@ mod tests {
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(1);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![true],
 			levels: vec![ChangeType::Minor],
 			cursor: 0,
 			error: false,
 			changed_count: 1,
-		};
+		});
 		terminal
 			.draw(|frame| super::super::ui(frame, &screen, &names))
 			.unwrap();
@@ -1160,13 +1211,13 @@ mod tests {
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(2);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![true, false],
 			levels: default_levels(2),
 			cursor: 0,
 			error: false,
 			changed_count: 1,
-		};
+		});
 		terminal
 			.draw(|frame| super::super::ui(frame, &screen, &names))
 			.unwrap();
@@ -1180,13 +1231,13 @@ mod tests {
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(1);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false],
 			levels: default_levels(1),
 			cursor: 0,
 			error: false,
 			changed_count: 0,
-		};
+		});
 		terminal
 			.draw(|frame| super::super::ui(frame, &screen, &names))
 			.unwrap();
@@ -1200,13 +1251,13 @@ mod tests {
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(1);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
-		let screen = Screen::SelectProjects {
+		let screen = Screen::SelectProjects(super::super::SelectProjectsState {
 			selected: vec![false],
 			levels: default_levels(1),
 			cursor: 0,
 			error: true,
 			changed_count: 1,
-		};
+		});
 		terminal
 			.draw(|frame| super::super::ui(frame, &screen, &names))
 			.unwrap();

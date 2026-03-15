@@ -24,7 +24,7 @@ use crate::model::config::Config;
 use crate::package_manager::Project;
 
 use changeset::{aggregate_changesets, resolve_commit_references};
-use git_lifecycle::{finalize_git_lifecycle, preflight_checks, setup_git_context};
+use git_lifecycle::{GitContext, finalize_git_lifecycle, preflight_checks, setup_git_context};
 use linked_versions::{
 	reconcile_linked_versions, resolve_linked_groups, sync_linked_groups_after_propagation,
 };
@@ -72,6 +72,13 @@ pub(super) type PropagationResult = (BTreeMap<String, Vec<String>>, Vec<PathBuf>
 /// Map of `pkg_name → (effective_ct, [upstream_names])` from dependency propagation phase 1.
 pub(super) type PropagationMap = BTreeMap<String, (ChangeType, BTreeSet<String>)>;
 
+/// Output of the release file preparation phase.
+#[derive(Debug)]
+pub(super) struct PrepareOutput {
+	pub(super) release_infos: Vec<ReleaseInfo>,
+	pub(super) modified_files: Vec<PathBuf>,
+}
+
 /// Result of computing the version plan for a prepare run.
 pub(super) struct VersionPlan {
 	pub(super) aggregated: BTreeMap<String, ChangeType>,
@@ -84,17 +91,16 @@ pub(super) struct VersionPlan {
 /// Aggregates changesets, applies linked versions, and runs dependency propagation.
 ///
 /// Returns the full version plan for the prepare run.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn compute_version_plan(
+fn compute_version_plan(
 	git: &git::GitWorkdir,
 	changesets: &[(PathBuf, Changeset)],
 	args: &PrepareArgs,
 	config: &Config,
 	projects: &[Project],
-	git_enabled: bool,
+	git_ctx: &GitContext,
 	dry_run: bool,
 ) -> anyhow::Result<VersionPlan> {
-	let commit_refs = resolve_commit_references(changesets, git, git_enabled);
+	let commit_refs = resolve_commit_references(changesets, git, git_ctx.enabled);
 	let (mut aggregated, mut changes_per_package) =
 		aggregate_changesets(changesets, &args.packages, projects, &commit_refs)?;
 	let linked_groups = resolve_linked_groups(config, args, projects)?;
@@ -149,33 +155,20 @@ pub(crate) fn cmd_prepare(
 		return Ok(ExitCode::SUCCESS);
 	}
 
-	let (git_enabled, strategy) = setup_git_context(&config, args);
+	let git_ctx = setup_git_context(&config, args);
 	let plan = compute_version_plan(
 		git,
 		&changesets,
 		args,
 		&config,
 		&projects,
-		git_enabled,
+		&git_ctx,
 		dry_run,
 	)?;
-	let (original_branch, release_branch) =
-		preflight_checks(git, &config, env, args, git_enabled, strategy, dry_run)?;
-	let (release_infos, modified_files) =
-		prepare_release_files(&adapters, &projects, &changesets, plan, dry_run)?;
+	let branches = preflight_checks(git, &config, env, args, &git_ctx, dry_run)?;
+	let output = prepare_release_files(&adapters, &projects, &changesets, plan, dry_run)?;
 
-	finalize_git_lifecycle(
-		git,
-		&config,
-		env,
-		&release_infos,
-		&modified_files,
-		original_branch.as_deref(),
-		release_branch.as_deref(),
-		git_enabled,
-		strategy,
-		dry_run,
-	)?;
+	finalize_git_lifecycle(git, &config, env, &output, &branches, &git_ctx, dry_run)?;
 
 	Ok(ExitCode::SUCCESS)
 }

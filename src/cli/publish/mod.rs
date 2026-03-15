@@ -41,6 +41,26 @@ pub(super) struct PublishedPackage {
 	pub(super) project_path: AbsolutePath,
 }
 
+/// Feature flags governing publish behavior.
+#[derive(Debug)]
+struct PublishFlags {
+	dry_run: bool,
+	git_enabled: bool,
+	github_enabled: bool,
+	no_git: bool,
+	is_multi_package: bool,
+}
+
+/// Outcome of git tag and GitHub Release operations.
+#[derive(Debug)]
+struct GitReleaseOutcome {
+	tags_created: usize,
+	tags_skipped: usize,
+	tags_push_failed: usize,
+	github_created: usize,
+	github_failed: bool,
+}
+
 /// Arguments for the publish subcommand.
 #[derive(Args, Default)]
 pub struct PublishArgs {
@@ -121,42 +141,38 @@ fn add_transitive_dependents(
 
 /// Creates git tags and GitHub Releases for all published packages.
 ///
-/// Returns `(tags_created, tags_skipped, github_created, github_failed, tags_push_failed)`.
-#[allow(clippy::too_many_arguments)]
+/// Returns a [`GitReleaseOutcome`] with tag and GitHub Release counts.
 fn run_git_release_operations(
 	git: &git::GitWorkdir,
 	config: &Config,
 	env: &crate::Env,
 	published_packages: &[PublishedPackage],
-	dry_run: bool,
-	git_enabled: bool,
-	no_git: bool,
-	is_multi_package: bool,
-) -> anyhow::Result<(usize, usize, usize, bool, usize)> {
+	flags: &PublishFlags,
+) -> anyhow::Result<GitReleaseOutcome> {
 	let (tags_created, tags_skipped, tags_push_failed) = maybe_create_tags(
 		published_packages,
 		config,
 		git,
-		dry_run,
-		git_enabled,
-		is_multi_package,
+		flags.dry_run,
+		flags.git_enabled,
+		flags.is_multi_package,
 	)?;
 	let (github_created, github_failed) = maybe_orchestrate_github_releases(
 		git,
 		config,
 		env,
 		published_packages,
-		dry_run,
-		no_git,
-		is_multi_package,
+		flags.dry_run,
+		flags.no_git,
+		flags.is_multi_package,
 	)?;
-	Ok((
+	Ok(GitReleaseOutcome {
 		tags_created,
 		tags_skipped,
+		tags_push_failed,
 		github_created,
 		github_failed,
-		tags_push_failed,
-	))
+	})
 }
 
 /// Creates git tags for published packages (or logs dry-run intent) and returns counts.
@@ -253,37 +269,18 @@ pub(crate) fn cmd_publish(
 	if run_pre_publish_github_checks(env, &config, git, args.no_git, dry_run)? {
 		return Ok(ExitCode::FAILURE);
 	}
-	let is_multi_package = projects.len() > 1;
-	let publish = publish_projects(&sorted_projects, &graph, dry_run)?;
-	let git_enabled = config.git.enabled() && !args.no_git;
-	let (tags_created, tags_skipped, github_created, github_failed, tag_push_failed) =
-		run_git_release_operations(
-			git,
-			&config,
-			env,
-			&publish.published,
-			dry_run,
-			git_enabled,
-			args.no_git,
-			is_multi_package,
-		)?;
-	log_publish_summary(
-		&publish.published,
-		publish.skipped_count,
-		publish.dep_skipped_count,
-		publish.unprepared_count,
+	let flags = PublishFlags {
 		dry_run,
-		git_enabled,
-		tags_created,
-		tags_skipped,
-		tag_push_failed,
-		config.github.enabled,
-		args.no_git,
-		github_created,
-		github_failed,
-	);
+		git_enabled: config.git.enabled() && !args.no_git,
+		github_enabled: config.github.enabled,
+		no_git: args.no_git,
+		is_multi_package: projects.len() > 1,
+	};
+	let publish = publish_projects(&sorted_projects, &graph, dry_run)?;
+	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags)?;
+	log_publish_summary(&publish, &flags, &outcome);
 
-	let code = if publish.failed || github_failed || tag_push_failed > 0 {
+	let code = if publish.failed || outcome.github_failed || outcome.tags_push_failed > 0 {
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
@@ -433,102 +430,72 @@ fn log_github_releases_summary(
 }
 
 /// Logs the first line of the publish summary (published/skipped/GitHub counts).
-#[allow(clippy::too_many_arguments)]
-fn log_summary_line(
-	published_packages: &[PublishedPackage],
-	skipped_count: usize,
-	dep_skipped_count: usize,
-	unprepared_count: usize,
-	dry_run: bool,
-	git_enabled: bool,
-	github_enabled: bool,
-	no_git: bool,
-	github_created: usize,
-	github_failed: bool,
-) {
-	let dep_skipped_note = if dep_skipped_count > 0 {
-		format!(", {dep_skipped_count} skipped (dependency failed)")
+fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitReleaseOutcome) {
+	let dep_skipped_note = if state.dep_skipped_count > 0 {
+		format!(", {} skipped (dependency failed)", state.dep_skipped_count)
 	} else {
 		String::new()
 	};
-	let unprepared_note = if unprepared_count > 0 {
-		format!(", {unprepared_count} skipped (not yet prepared)")
+	let unprepared_note = if state.unprepared_count > 0 {
+		format!(", {} skipped (not yet prepared)", state.unprepared_count)
 	} else {
 		String::new()
 	};
-	if dry_run {
-		let tag_note = if git_enabled && !published_packages.is_empty() {
-			format!(", {} would be tagged", published_packages.len())
+	if flags.dry_run {
+		let tag_note = if flags.git_enabled && !state.published.is_empty() {
+			format!(", {} would be tagged", state.published.len())
 		} else {
 			String::new()
 		};
 		info!(
 			"Summary: {} would be published, {} would be skipped{tag_note}{unprepared_note}",
-			published_packages.len(),
-			skipped_count
+			state.published.len(),
+			state.skipped_count
 		);
 		warn!(
 			"Dry-run assumes all packages need publishing and will succeed; actual results may \
 			 differ if some packages are already published or if publish failures occur"
 		);
-	} else if github_enabled && !no_git {
+	} else if flags.github_enabled && !flags.no_git {
 		log_github_releases_summary(
-			published_packages.len(),
-			skipped_count,
+			state.published.len(),
+			state.skipped_count,
 			&dep_skipped_note,
 			&unprepared_note,
-			github_created,
-			github_failed,
+			outcome.github_created,
+			outcome.github_failed,
 		);
 	} else {
 		info!(
 			"Summary: {} published, {} skipped{dep_skipped_note}{unprepared_note}",
-			published_packages.len(),
-			skipped_count
+			state.published.len(),
+			state.skipped_count
 		);
 	}
 }
 
 /// Logs the publish summary after all publish operations have completed.
-#[allow(clippy::too_many_arguments)]
-fn log_publish_summary(
-	published_packages: &[PublishedPackage],
-	skipped_count: usize,
-	dep_skipped_count: usize,
-	unprepared_count: usize,
-	dry_run: bool,
-	git_enabled: bool,
-	tags_created: usize,
-	tags_skipped: usize,
-	tags_push_failed: usize,
-	github_enabled: bool,
-	no_git: bool,
-	github_created: usize,
-	github_failed: bool,
-) {
+fn log_publish_summary(state: &PublishState, flags: &PublishFlags, outcome: &GitReleaseOutcome) {
 	info!("");
-	log_summary_line(
-		published_packages,
-		skipped_count,
-		dep_skipped_count,
-		unprepared_count,
-		dry_run,
-		git_enabled,
-		github_enabled,
-		no_git,
-		github_created,
-		github_failed,
-	);
-	if !dry_run && git_enabled && (tags_created > 0 || tags_skipped > 0) {
+	log_summary_line(state, flags, outcome);
+	if !flags.dry_run && flags.git_enabled && (outcome.tags_created > 0 || outcome.tags_skipped > 0)
+	{
 		info!(
-			"{tags_created} tag{} created, {tags_skipped} skipped",
-			if tags_created == 1 { "" } else { "s" }
+			"{} tag{} created, {} skipped",
+			outcome.tags_created,
+			if outcome.tags_created == 1 { "" } else { "s" },
+			outcome.tags_skipped
 		);
 	}
-	if !dry_run && git_enabled && tags_push_failed > 0 {
+	if !flags.dry_run && flags.git_enabled && outcome.tags_push_failed > 0 {
 		info!(
-			"{tags_push_failed} tag push{} failed; run again to retry",
-			if tags_push_failed == 1 { "" } else { "es" }
+			"{} tag push{} failed; run again to retry",
+			outcome.tags_push_failed,
+			if outcome.tags_push_failed == 1 {
+				""
+			} else {
+				"es"
+			}
 		);
 	}
 }
