@@ -30,16 +30,27 @@ pub(super) fn check_dirty_tree(git: &git::GitWorkdir) -> anyhow::Result<()> {
 /// 1. `args_branch` — explicit `--branch` flag
 /// 2. `{config_prefix}{current_branch}` — derived from config prefix and current branch
 /// 3. `{config_prefix}detached` — fallback when HEAD is detached
+///
+/// # Errors
+///
+/// Returns an error if `args_branch` starts with `-`, which would cause git to
+/// interpret the value as a flag rather than a branch name.
 pub(super) fn compute_release_branch(
 	args_branch: Option<&str>,
 	config_prefix: &str,
 	current_branch: Option<&str>,
-) -> String {
+) -> anyhow::Result<String> {
 	if let Some(branch) = args_branch {
-		return branch.to_string();
+		if branch.is_empty() {
+			anyhow::bail!("Invalid branch name: branch name must not be empty");
+		}
+		if branch.starts_with('-') {
+			anyhow::bail!("Invalid branch name '{branch}': branch names must not start with '-'");
+		}
+		return Ok(branch.to_string());
 	}
 	let base = current_branch.unwrap_or("detached");
-	format!("{config_prefix}{base}")
+	Ok(format!("{config_prefix}{base}"))
 }
 
 /// Formats the git commit message for a prepare run.
@@ -163,7 +174,7 @@ pub(super) fn preflight_checks(
 			args.branch.as_deref(),
 			config.git.release_branch_prefix(),
 			current.as_deref(),
-		);
+		)?;
 		git.checkout_or_reset_branch(&branch)?;
 		Ok((current, Some(branch)))
 	} else {
@@ -435,7 +446,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_flag_over_all() {
 		assert_eq!(
-			compute_release_branch(Some("my-branch"), "release/", Some("main")),
+			compute_release_branch(Some("my-branch"), "release/", Some("main")).unwrap(),
 			"my-branch"
 		);
 	}
@@ -443,7 +454,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_config_prefix() {
 		assert_eq!(
-			compute_release_branch(None, "release/", Some("main")),
+			compute_release_branch(None, "release/", Some("main")).unwrap(),
 			"release/main"
 		);
 	}
@@ -451,7 +462,7 @@ mod tests {
 	#[test]
 	fn compute_release_branch_uses_default_prefix() {
 		assert_eq!(
-			compute_release_branch(None, "cursus-release/", Some("main")),
+			compute_release_branch(None, "cursus-release/", Some("main")).unwrap(),
 			"cursus-release/main"
 		);
 	}
@@ -459,8 +470,44 @@ mod tests {
 	#[test]
 	fn compute_release_branch_detached_fallback() {
 		assert_eq!(
-			compute_release_branch(None, "cursus-release/", None),
+			compute_release_branch(None, "cursus-release/", None).unwrap(),
 			"cursus-release/detached"
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_rejects_dash_prefix() {
+		let result = compute_release_branch(Some("--detach"), "release/", Some("main"));
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("must not start with '-'")
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_rejects_single_dash() {
+		let result = compute_release_branch(Some("-"), "release/", None);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("must not start with '-'")
+		);
+	}
+
+	#[test]
+	fn compute_release_branch_rejects_empty() {
+		let result = compute_release_branch(Some(""), "release/", Some("main"));
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("must not be empty")
 		);
 	}
 
