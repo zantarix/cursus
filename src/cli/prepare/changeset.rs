@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::git;
 use crate::model::changelog::CommitReference;
 use crate::model::changeset::{ChangeType, Changeset};
-use crate::package_manager::filter_projects_by_name;
+use crate::package_manager::validate_package_names;
 
 use super::PackageChanges;
 
@@ -43,7 +43,7 @@ pub(super) fn aggregate_changesets(
 		}
 	}
 	if !package_filter.is_empty() {
-		filter_projects_by_name(projects, package_filter)?;
+		validate_package_names(projects, package_filter)?;
 		aggregated.retain(|name, _| package_filter.contains(name));
 		changes_per_package.retain(|name, _| package_filter.contains(name));
 	}
@@ -198,6 +198,80 @@ mod tests {
 		// Should not panic or return an error — just None
 		let result = resolve_commit_references(&changesets, &git, true);
 		assert_eq!(result[&changeset_path], None);
+	}
+
+	// ── aggregate_changesets ─────────────────────────────────────────────────
+
+	fn make_changeset(
+		pkg: &str,
+		ct: crate::model::changeset::ChangeType,
+	) -> crate::model::changeset::Changeset {
+		let mut packages = std::collections::BTreeMap::new();
+		packages.insert(pkg.to_string(), ct);
+		crate::model::changeset::Changeset {
+			packages,
+			message: None,
+		}
+	}
+
+	#[test]
+	fn aggregate_changesets_filter_retains_only_matching_packages() {
+		let projects = vec![
+			crate::package_manager::Project::new_test("alpha", "/nonexistent/alpha"),
+			crate::package_manager::Project::new_test("beta", "/nonexistent/beta"),
+		];
+		let changesets = vec![
+			(
+				PathBuf::from("a.md"),
+				make_changeset("alpha", crate::model::changeset::ChangeType::Minor),
+			),
+			(
+				PathBuf::from("b.md"),
+				make_changeset("beta", crate::model::changeset::ChangeType::Major),
+			),
+		];
+		let commit_refs = BTreeMap::new();
+
+		let (aggregated, changes) =
+			aggregate_changesets(&changesets, &["alpha".to_string()], &projects, &commit_refs)
+				.unwrap();
+
+		assert!(aggregated.contains_key("alpha"), "alpha should be present");
+		assert!(
+			!aggregated.contains_key("beta"),
+			"beta should be filtered out"
+		);
+		assert!(changes.contains_key("alpha"));
+		assert!(!changes.contains_key("beta"));
+	}
+
+	#[test]
+	fn aggregate_changesets_unknown_package_filter_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::model::config::CargoConfig::enabled());
+		cfg.save().unwrap();
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"my-pkg\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let runner = make_runner();
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			crate::model::config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env)
+				.unwrap();
+		let adapters = config.create_adapters().unwrap();
+		let projects = config.load_projects_for_adapters(&adapters).unwrap();
+
+		let commit_refs = BTreeMap::new();
+		let result =
+			aggregate_changesets(&[], &["nonexistent".to_string()], &projects, &commit_refs);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("nonexistent"));
 	}
 
 	// ── aggregate_changesets with commit_refs ─────────────────────────────────

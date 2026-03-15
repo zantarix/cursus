@@ -375,6 +375,23 @@ pub(crate) fn semver_range_prefix(version_range: &str) -> &str {
 mod dependency_graph;
 pub use dependency_graph::DependencyGraph;
 
+/// Validates that every name in `package_names` matches a known project.
+///
+/// # Errors
+///
+/// Returns an error if any name in `package_names` does not match a known project.
+pub fn validate_package_names(
+	projects: &[Project],
+	package_names: &[String],
+) -> anyhow::Result<()> {
+	for name in package_names {
+		if !projects.iter().any(|p| p.name() == name) {
+			anyhow::bail!("Unknown package: {name}");
+		}
+	}
+	Ok(())
+}
+
 /// Filters a project list by package names, validating that all names exist.
 ///
 /// If `package_names` is empty, returns all projects unchanged.
@@ -611,6 +628,36 @@ mod tests {
 				.unwrap_err()
 				.to_string()
 				.contains("Unknown package: nonexistent")
+		);
+	}
+
+	// ── validate_package_names ────────────────────────────────────────────────
+
+	#[test]
+	fn validate_package_names_all_known_returns_ok() {
+		let projects = vec![
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+		];
+		assert!(validate_package_names(&projects, &["a".to_string(), "b".to_string()]).is_ok());
+	}
+
+	#[test]
+	fn validate_package_names_empty_list_returns_ok() {
+		let projects = vec![Project::new_test("a", "/nonexistent/packages/a")];
+		assert!(validate_package_names(&projects, &[]).is_ok());
+	}
+
+	#[test]
+	fn validate_package_names_unknown_name_returns_error() {
+		let projects = vec![Project::new_test("a", "/nonexistent/packages/a")];
+		let result = validate_package_names(&projects, &["unknown".to_string()]);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("Unknown package: unknown")
 		);
 	}
 }
