@@ -54,7 +54,7 @@ Integration tests live in `tests/` and should always use the `--no-interactive` 
 - `prepare`: `--package/-p` (repeatable, filters which packages to prepare)
 - `--dry-run` is a global flag on `GlobalArgs` and can be passed to any subcommand
 
-**Shared test utilities:** `tests/common/mod.rs` provides helpers shared across integration test files.
+**Shared test utilities:** `tests/common/mod.rs` provides helpers shared across integration test files. Two categories of git helpers exist: `temp_git_repo*` (fake `.git` folder, fast, for tests not needing real git operations) and `temp_real_git_repo*` (proper repo with commits, required when `rev-list`, `diff-tree`, or push/fetch operations run). Use `run_cursus_subprocess` instead of `run_cursus` when testing clap-generated output (help, version, invalid flags).
 
 **Git root discovery:** `run()` walks up the directory tree to find the `.git` directory. Integration tests must set up a git repo in their temp directory.
 
@@ -64,7 +64,7 @@ Cursus is a Rust CLI tool for release management. It uses an interactive TUI for
 
 **Key modules:**
 
-- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`, `-v`/`-s`, `--dry-run`) and subcommands (`init`, `change`, `prepare`, `publish`, `ci`). `change` is the default when no subcommand is given. `ci` auto-detects repo state and dispatches to `prepare` or `publish`.
+- `src/cli/` - clap-based CLI with `GlobalArgs` (`--interactive`/`--no-interactive`, `-v`/`-s`, `--dry-run`) and subcommands (`init`, `change`, `prepare`, `publish`, `ci`, `verify`). `change` is the default when no subcommand is given. `ci` auto-detects repo state and dispatches to `prepare` or `publish`. `verify` checks that the current branch adds at least one changeset vs a base ref (default `origin/HEAD`), returning exit code 2 if none found.
 - `src/tui/` - ratatui/crossterm terminal UI wizards
 - `src/model/` - Core domain types:
   - `config.rs` - `Config` and `PackageManager` types, TOML persistence in `.cursus/config.toml`
@@ -75,6 +75,8 @@ Cursus is a Rust CLI tool for release management. It uses an interactive TUI for
 - `src/github/` - GitHub release creation, PRs, and asset uploads
 - `src/command.rs` - `CommandRunner` trait with `run`/`run_mut`/`run_shell` variants; `DryRunCommandRunner` decorator implements the ADR-017 late-guard dry-run pattern
 - `src/env.rs` - Dependency injection and runner composition
+- `src/conventional_commit.rs` - Parser for Conventional Commits; maps `feat`→Minor, `fix`→Patch, breaking→Major via `ConventionalCommit::change_type()`
+- `src/path.rs` - `AbsolutePath` newtype wrapping validated absolute `PathBuf`
 
 **TUI pattern:** Each TUI wizard uses a `Screen` enum for state, a pure `handle_key()` function for state transitions (testable without a terminal), and separate `ui()`/`render_*()` functions. Tests use `ratatui::backend::TestBackend`.
 
