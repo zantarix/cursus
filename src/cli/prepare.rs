@@ -1035,18 +1035,12 @@ fn upsert_release_pull_request(
 		log::warn!("HEAD is detached; using \"main\" as the PR base branch.");
 		"main"
 	});
-	match GitHubRepo::resolve(&config.github, git) {
-		Ok(gh_repo) => {
-			let title = config.github.pull_request_title();
-			let pr_body = build_pr_body(release_infos, base);
-			if let Err(e) = upsert_pull_request(client, &gh_repo, title, &pr_body, branch, base) {
-				log::warn!("Failed to create or update pull request: {e:#}");
-			}
-		}
-		Err(e) => {
-			log::warn!("Could not resolve GitHub repository for PR creation: {e:#}");
-		}
-	}
+	let gh_repo = GitHubRepo::resolve(&config.github, git)
+		.context("Could not resolve GitHub repository for PR creation")?;
+	let title = config.github.pull_request_title();
+	let pr_body = build_pr_body(release_infos, base);
+	upsert_pull_request(client, &gh_repo, title, &pr_body, branch, base)
+		.context("Failed to create or update pull request")?;
 	Ok(())
 }
 
@@ -1082,7 +1076,7 @@ fn finalize_git_lifecycle(
 						 `git checkout <your-branch>` to return."
 					)
 				})?;
-				if config.github.enabled {
+				let pr_result = if config.github.enabled {
 					upsert_release_pull_request(
 						git,
 						config,
@@ -1091,11 +1085,18 @@ fn finalize_git_lifecycle(
 						branch,
 						original_branch,
 						dry_run,
-					)?;
+					)
+				} else {
+					Ok(())
+				};
+				if let Some(orig) = original_branch
+					&& let Err(checkout_err) = git.checkout(orig)
+				{
+					log::error!(
+						"Failed to check out original branch after release: {checkout_err:#}"
+					);
 				}
-			}
-			if let Some(orig) = original_branch {
-				git.checkout(orig)?;
+				pr_result?;
 			}
 		}
 	}
@@ -1903,7 +1904,7 @@ mod tests {
 	}
 
 	#[test]
-	fn cmd_prepare_branch_strategy_pr_failure_is_nonfatal() {
+	fn cmd_prepare_branch_strategy_pr_failure_is_fatal() {
 		use crate::github::client::GitHubClient;
 		use crate::github::client::test_support::RecordingGitHubClient;
 		let dir = setup_branch_strategy_with_github();
@@ -1918,10 +1919,9 @@ mod tests {
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(&env, dir_abs.clone());
 		let result = cmd_prepare(&git, &args, false, config);
-		// PR failure is non-fatal — command should still succeed
 		assert!(
-			result.is_ok(),
-			"PR failure should be non-fatal, got: {result:?}"
+			result.is_err(),
+			"PR failure should be fatal, got: {result:?}"
 		);
 	}
 
