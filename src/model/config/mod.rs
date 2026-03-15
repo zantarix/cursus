@@ -19,7 +19,7 @@ pub use cargo::CargoConfig;
 pub use git::{GitConfig, Strategy, TagFormat};
 pub use github::GitHubConfig;
 pub use linked_versions::{LinkedVersionGroup, LinkedVersionsConfig};
-pub use npm::NpmConfig;
+pub use npm::{NpmAccess, NpmConfig};
 pub use prepare::{DependencyBump, PrepareConfig};
 pub(crate) use template::render_init_template;
 

@@ -11,7 +11,7 @@ use semver::Version;
 use serde::Deserialize;
 
 use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
-use crate::model::config::NpmConfig;
+use crate::model::config::{NpmAccess, NpmConfig};
 use crate::path::AbsolutePath;
 
 /// Adapter for npm-based projects.
@@ -521,7 +521,7 @@ impl PackageManagerAdapter for NpmAdapter {
 			);
 		}
 		// Warn when provenance attestation is not configured for a public package in OIDC.
-		if oidc && access == "public" && project.publishconfig_provenance != Some(true) {
+		if oidc && access == NpmAccess::Public && project.publishconfig_provenance != Some(true) {
 			warn!(
 				"{}: publishConfig.provenance is not set to true; consider adding it to \
 				 package.json for explicit provenance attestations",
@@ -532,11 +532,9 @@ impl PackageManagerAdapter for NpmAdapter {
 		let mut args = vec!["publish"];
 
 		// For scoped packages, add --access flag
-		let access_owned;
 		if project.name.starts_with('@') {
-			access_owned = access.to_string();
 			args.push("--access");
-			args.push(&access_owned);
+			args.push(access.as_str());
 		}
 
 		// run_mut is a no-op when DryRunCommandRunner is active.
@@ -1606,7 +1604,7 @@ mod tests {
 		let dir = temp_dir();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let adapter = recording_adapter(
-			NpmConfig::enabled().with_access("public".to_string()),
+			NpmConfig::enabled().with_access(NpmAccess::Public),
 			dir.path(),
 			Arc::clone(&runner),
 		);
@@ -1738,7 +1736,7 @@ mod tests {
 			.with_oidc_environment(true)
 			.with_node_auth_token_present(false);
 		let adapter = recording_adapter_with_env(
-			NpmConfig::enabled().with_access("public".to_string()),
+			NpmConfig::enabled().with_access(NpmAccess::Public),
 			dir.path(),
 			env,
 		);
@@ -1758,7 +1756,7 @@ mod tests {
 			.with_oidc_environment(true)
 			.with_node_auth_token_present(false);
 		let adapter = recording_adapter_with_env(
-			NpmConfig::enabled().with_access("public".to_string()),
+			NpmConfig::enabled().with_access(NpmAccess::Public),
 			dir.path(),
 			env,
 		);
@@ -1785,7 +1783,7 @@ mod tests {
 			.with_oidc_environment(true)
 			.with_node_auth_token_present(false);
 		let adapter = recording_adapter_with_env(
-			NpmConfig::enabled().with_access("public".to_string()),
+			NpmConfig::enabled().with_access(NpmAccess::Public),
 			dir.path(),
 			env,
 		);
@@ -1804,7 +1802,7 @@ mod tests {
 			.with_oidc_environment(true)
 			.with_node_auth_token_present(false);
 		let adapter = recording_adapter_with_env(
-			NpmConfig::enabled().with_access("public".to_string()),
+			NpmConfig::enabled().with_access(NpmAccess::Public),
 			dir.path(),
 			env,
 		);
