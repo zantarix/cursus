@@ -21,6 +21,9 @@ pub struct PullRequest {
 pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// Creates a GitHub Release for the given tag, returning the release ID.
 	///
+	/// The release is created as a draft. Call [`publish_release`](Self::publish_release)
+	/// after uploading all artifacts to make it public.
+	///
 	/// # Errors
 	///
 	/// Returns an error if the API call fails or authentication is missing.
@@ -92,6 +95,13 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 		title: &str,
 		body: &str,
 	) -> anyhow::Result<String>;
+
+	/// Transitions a draft release to published.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the API call fails or `release_id` is not numeric.
+	fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()>;
 }
 
 /// Test support types for GitHub client operations.
@@ -166,6 +176,13 @@ pub mod test_support {
 			/// New pull request body (markdown).
 			body: String,
 		},
+		/// A `publish_release` call.
+		PublishRelease {
+			/// GitHub repository (owner and name).
+			gh_repo: GitHubRepo,
+			/// ID of the draft release to publish.
+			release_id: String,
+		},
 	}
 
 	/// A [`GitHubClient`] that records all invocations and returns configured responses.
@@ -179,6 +196,7 @@ pub mod test_support {
 		existing_pr: Option<PullRequest>,
 		fail_find_pr: bool,
 		fail_update_pr: bool,
+		fail_publish_release: bool,
 	}
 
 	impl RecordingGitHubClient {
@@ -193,6 +211,7 @@ pub mod test_support {
 				existing_pr: None,
 				fail_find_pr: false,
 				fail_update_pr: false,
+				fail_publish_release: false,
 			}
 		}
 
@@ -237,6 +256,12 @@ pub mod test_support {
 		/// Causes [`update_pull_request`](GitHubClient::update_pull_request) to return an error.
 		pub fn with_update_pr_failure(mut self) -> Self {
 			self.fail_update_pr = true;
+			self
+		}
+
+		/// Causes [`publish_release`](GitHubClient::publish_release) to return an error.
+		pub fn with_publish_release_failure(mut self) -> Self {
+			self.fail_publish_release = true;
 			self
 		}
 
@@ -361,6 +386,19 @@ pub mod test_support {
 			Ok(format!(
 				"https://github.com/{owner}/{repo}/pull/{pull_number}"
 			))
+		}
+
+		fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
+			self.invocations.lock().expect("mutex poisoned").push(
+				GitHubInvocation::PublishRelease {
+					gh_repo: gh_repo.clone(),
+					release_id: release_id.to_string(),
+				},
+			);
+			if self.fail_publish_release {
+				bail!("simulated publish_release failure");
+			}
+			Ok(())
 		}
 	}
 
@@ -555,6 +593,30 @@ pub mod test_support {
 				"body",
 			);
 			assert!(result.is_err());
+			assert_eq!(client.invocations().len(), 1);
+		}
+
+		#[test]
+		fn recording_client_records_publish_release() {
+			let client = RecordingGitHubClient::new();
+			client
+				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
+				.unwrap();
+			let invocations = client.invocations();
+			assert_eq!(invocations.len(), 1);
+			assert!(matches!(
+				&invocations[0],
+				GitHubInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
+			));
+		}
+
+		#[test]
+		fn recording_client_publish_release_failure_returns_error() {
+			let client = RecordingGitHubClient::new().with_publish_release_failure();
+			let result =
+				client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1");
+			assert!(result.is_err());
+			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);
 		}
 	}

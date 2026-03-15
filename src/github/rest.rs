@@ -58,6 +58,19 @@ struct UpdatePullRequestRequest<'a> {
 	body: &'a str,
 }
 
+/// Request body for updating an existing GitHub Release (e.g. draft → published).
+#[derive(Debug, Serialize)]
+struct UpdateReleaseRequest {
+	draft: bool,
+}
+
+/// Response body from a GitHub Release update.
+#[derive(Debug, Deserialize)]
+struct UpdateReleaseResponse {
+	#[allow(dead_code)]
+	id: u64,
+}
+
 /// Response body from a GitHub pull request update.
 #[derive(Debug, Deserialize)]
 struct UpdatePullRequestResponse {
@@ -229,7 +242,7 @@ impl GitHubClient for RestGitHubClient {
 			tag_name,
 			name,
 			body,
-			draft: false,
+			draft: true,
 			prerelease: false,
 		};
 		log::trace!(
@@ -375,6 +388,33 @@ impl GitHubClient for RestGitHubClient {
 			.context("Failed to parse pull request update response")?;
 		Ok(pr.html_url)
 	}
+
+	fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
+		if release_id.is_empty() || !release_id.chars().all(|c| c.is_ascii_digit()) {
+			anyhow::bail!("Invalid GitHub release_id: {release_id:?}");
+		}
+		let url = format!(
+			"{}/repos/{}/{}/releases/{release_id}",
+			self.api_base_url, gh_repo.owner, gh_repo.repo
+		);
+		let request_body = UpdateReleaseRequest { draft: false };
+		log::trace!(
+			"  request body: {}",
+			serde_json::to_string(&request_body).unwrap_or_default()
+		);
+		let mut response = self
+			.patch_request(&url)
+			.send_json(&request_body)
+			.with_context(|| format!("Failed to publish GitHub Release {release_id}"))?;
+		Self::require_success("PATCH", &url, &mut response, || {
+			format!("Failed to publish GitHub Release {release_id}")
+		})?;
+		let _: UpdateReleaseResponse = response
+			.body_mut()
+			.read_json()
+			.context("Failed to parse GitHub Release update response")?;
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -393,15 +433,34 @@ mod tests {
 			tag_name: "v1.2.3",
 			name: "Release 1.2.3",
 			body: "## Changes\n- Fixed bug",
-			draft: false,
+			draft: true,
 			prerelease: false,
 		};
 		let json = serde_json::to_value(&req).unwrap();
 		assert_eq!(json["tag_name"], "v1.2.3");
 		assert_eq!(json["name"], "Release 1.2.3");
 		assert_eq!(json["body"], "## Changes\n- Fixed bug");
-		assert_eq!(json["draft"], false);
+		assert_eq!(json["draft"], true);
 		assert_eq!(json["prerelease"], false);
+	}
+
+	#[test]
+	fn update_release_request_serializes_correctly() {
+		let req = UpdateReleaseRequest { draft: false };
+		let json = serde_json::to_value(&req).unwrap();
+		assert_eq!(json["draft"], false);
+	}
+
+	#[test]
+	fn publish_release_rejects_invalid_release_id() {
+		let client = RestGitHubClient::new("token".to_string());
+		for bad_id in &["", "abc", "12-34", "../evil", "12 34"] {
+			let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), bad_id);
+			assert!(
+				result.is_err(),
+				"Expected error for release_id={bad_id:?}, but got Ok"
+			);
+		}
 	}
 
 	#[test]
@@ -694,5 +753,56 @@ mod tests {
 		let json = r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#;
 		let response: UpdatePullRequestResponse = serde_json::from_str(json).unwrap();
 		assert_eq!(response.html_url, "https://github.com/acme/app/pull/7");
+	}
+
+	#[test]
+	fn update_release_response_deserializes_correctly() {
+		let json = r#"{"id": 42, "tag_name": "v1.0.0", "draft": false}"#;
+		let response: UpdateReleaseResponse = serde_json::from_str(json).unwrap();
+		assert_eq!(response.id, 42);
+	}
+
+	#[test]
+	fn publish_release_sends_correct_request() {
+		let server = MockServer::start();
+		let mock = server.mock(|when, then| {
+			when.method(PATCH)
+				.path("/repos/owner/repo/releases/12345")
+				.header("Authorization", "Bearer test-token")
+				.header("Accept", "application/vnd.github+json")
+				.header("X-GitHub-Api-Version", "2022-11-28");
+			then.status(200)
+				.header("Content-Type", "application/json")
+				.body(r#"{"id": 12345}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+		assert!(result.is_ok(), "publish_release failed: {:?}", result.err());
+		mock.assert();
+	}
+
+	#[test]
+	fn publish_release_handles_api_error() {
+		let server = MockServer::start();
+		let _mock = server.mock(|when, then| {
+			when.method(PATCH).path("/repos/owner/repo/releases/12345");
+			then.status(404)
+				.header("Content-Type", "application/json")
+				.body(r#"{"message": "Not Found"}"#);
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("12345"),
+			"Error should mention release_id, got: {msg}"
+		);
 	}
 }

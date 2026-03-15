@@ -124,6 +124,11 @@ fn publish_dry_run_with_github_shows_would_create() {
 			.any(|(_, m)| m.contains("Would create GitHub Release for v1.0.0")),
 		"Expected 'Would create GitHub Release for v1.0.0' in logs, got: {logs:?}"
 	);
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("Would publish release after artifact upload")),
+		"Expected 'Would publish release after artifact upload' in logs, got: {logs:?}"
+	);
 }
 
 /// During dry-run, the build_command is suppressed by the DryRunCommandRunner.
@@ -224,7 +229,8 @@ fn publish_github_missing_token_fails() {
 	);
 }
 
-/// Dry-run with artifacts configured prints "Would attach: {name}" for each artifact.
+/// Dry-run with artifacts configured prints "Would attach: {name}" and "Would publish release"
+/// for each artifact.
 #[test]
 fn publish_dry_run_with_artifacts_shows_would_attach() {
 	init_test_logger();
@@ -252,5 +258,10 @@ fn publish_dry_run_with_artifacts_shows_would_attach() {
 		logs.iter()
 			.any(|(_, m)| m.contains("Would attach: linux-amd64")),
 		"Expected 'Would attach: linux-amd64' in logs, got: {logs:?}"
+	);
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("Would publish release after artifact upload")),
+		"Expected 'Would publish release after artifact upload' in logs, got: {logs:?}"
 	);
 }

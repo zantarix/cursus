@@ -77,6 +77,14 @@ fn update_pull_request_schema(spec: &Value) -> Option<Value> {
 	)
 }
 
+/// Extracts the JSON Schema for the `PATCH /repos/{owner}/{repo}/releases/{release_id}` request body.
+fn update_release_schema(spec: &Value) -> Option<Value> {
+	extract_schema(
+		spec,
+		"/paths/~1repos~1{owner}~1{repo}~1releases~1{release_id}/patch/requestBody/content/application~1json/schema",
+	)
+}
+
 /// Validates `instance` against `schema` using [`jsonschema`].
 ///
 /// Returns `Ok(())` if the instance is valid, or an error listing all
@@ -592,6 +600,52 @@ fn update_pull_request_handles_api_error() {
 	);
 }
 
+// ── publish_release tests ─────────────────────────────────────────────────────
+
+#[test]
+fn publish_release_sends_correct_request() {
+	let server = MockServer::start();
+	let mock = server.mock(|when, then| {
+		when.method(PATCH)
+			.path("/repos/owner/repo/releases/12345")
+			.header("Authorization", "Bearer test-token")
+			.header("Accept", "application/vnd.github+json")
+			.header("X-GitHub-Api-Version", "2022-11-28");
+		then.status(200)
+			.header("Content-Type", "application/json")
+			.body(r#"{"id": 12345}"#);
+	});
+
+	let client = RestGitHubClient::new("test-token".to_string())
+		.with_base_urls(server.base_url(), server.base_url());
+
+	let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+	assert!(result.is_ok(), "publish_release failed: {:?}", result.err());
+	mock.assert();
+}
+
+#[test]
+fn publish_release_handles_api_error() {
+	let server = MockServer::start();
+	let _mock = server.mock(|when, then| {
+		when.method(PATCH).path("/repos/owner/repo/releases/12345");
+		then.status(404)
+			.header("Content-Type", "application/json")
+			.body(r#"{"message": "Not Found"}"#);
+	});
+
+	let client = RestGitHubClient::new("test-token".to_string())
+		.with_base_urls(server.base_url(), server.base_url());
+
+	let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+	assert!(result.is_err(), "Expected error on 404 response");
+	let err = format!("{:#}", result.unwrap_err());
+	assert!(
+		err.contains("12345"),
+		"Error message should mention the release_id, got: {err}"
+	);
+}
+
 // ── upload_asset tests ────────────────────────────────────────────────────────
 
 #[test]
@@ -885,5 +939,59 @@ fn update_pull_request_always_spec_compliant() {
 
 		validate(&body_json, &schema)
 			.unwrap_or_else(|e| panic!("update_pull_request body not spec-compliant:\n{e}"));
+	});
+}
+
+#[test]
+fn publish_release_always_spec_compliant() {
+	let spec = match try_load_spec() {
+		Some(s) => s,
+		None => {
+			eprintln!(
+				"Skipping publish_release_always_spec_compliant: \
+                 OpenAPI spec not available at {OPENAPI_SPEC_PATH}"
+			);
+			return;
+		}
+	};
+	let schema = update_release_schema(&spec)
+		.expect("could not extract publish_release schema from spec — update the path pointer");
+
+	proptest!(ProptestConfig::with_cases(64), |(
+		release_id in 1u64..=999_999_999u64,
+	)| {
+		let captured_body: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+		let captured_body_clone = Arc::clone(&captured_body);
+
+		let server = MockServer::start();
+		let path = format!("/repos/owner/repo/releases/{release_id}");
+		let _mock = server.mock(|when, then| {
+			when.method(PATCH)
+				.path(path)
+				.is_true(move |req| {
+					*captured_body_clone.lock().unwrap() = req.body_string();
+					true
+				});
+			then.status(200)
+				.header("Content-Type", "application/json")
+				.body(format!(r#"{{"id": {release_id}}}"#));
+		});
+
+		let client = RestGitHubClient::new("test-token".to_string())
+			.with_base_urls(server.base_url(), server.base_url());
+
+		client
+			.publish_release(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				&release_id.to_string(),
+			)
+			.expect("publish_release should succeed against mock server");
+
+		let body_str = captured_body.lock().unwrap().clone();
+		let body_json: Value =
+			serde_json::from_str(&body_str).expect("client sent non-JSON request body");
+
+		validate(&body_json, &schema)
+			.unwrap_or_else(|e| panic!("publish_release body not spec-compliant:\n{e}"));
 	});
 }
