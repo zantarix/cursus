@@ -5,6 +5,8 @@ use semver::Version;
 use crate::model::changeset::ChangeType;
 use crate::package_manager::Project;
 
+use super::PropagationMap;
+
 /// Bumps a semver version according to the given change type.
 pub(super) fn bump_version(version: &semver::Version, change_type: ChangeType) -> semver::Version {
 	let mut v = version.clone();
@@ -60,7 +62,7 @@ pub(super) fn effective_new_version(
 	projects: &[Project],
 	aggregated: &BTreeMap<String, ChangeType>,
 	version_overrides: &BTreeMap<String, Version>,
-	propagation_map: &BTreeMap<String, (ChangeType, Vec<String>)>,
+	propagation_map: &PropagationMap,
 ) -> Option<Version> {
 	if let Some(v) = version_overrides.get(pkg_name) {
 		return Some(v.clone());
@@ -75,6 +77,8 @@ pub(super) fn effective_new_version(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeSet;
+
 	use super::*;
 
 	fn v(s: &str) -> semver::Version {
@@ -207,7 +211,7 @@ mod tests {
 		let aggregated = BTreeMap::new();
 		let version_overrides = BTreeMap::new();
 		let mut propagation_map = BTreeMap::new();
-		propagation_map.insert("pkg-a".to_string(), (ChangeType::Patch, vec![]));
+		propagation_map.insert("pkg-a".to_string(), (ChangeType::Patch, BTreeSet::new()));
 		let result = effective_new_version(
 			"pkg-a",
 			&projects,

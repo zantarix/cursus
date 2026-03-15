@@ -70,9 +70,9 @@ pub(super) fn mark_propagation_bumps(
 			}
 			let entry = propagation_map
 				.entry(dependent_name.clone())
-				.or_insert_with(|| (effective_ct, Vec::new()));
+				.or_insert_with(|| (effective_ct, BTreeSet::new()));
 			entry.0 = effective_ct;
-			entry.1.push(bumped_name.clone());
+			entry.1.insert(bumped_name.clone());
 			queue.push_back((dependent_name.clone(), effective_ct));
 		}
 	}
@@ -165,7 +165,11 @@ pub(super) fn apply_dependency_propagation(
 				dep_entries.insert(pkg_name.clone(), dep_msgs);
 				info!(
 					"{pkg_name}: dependency propagation bump ({effective_ct}) from {}",
-					upstream_names.join(", ")
+					upstream_names
+						.iter()
+						.cloned()
+						.collect::<Vec<_>>()
+						.join(", ")
 				);
 			}
 		} else if let Some(path) =
@@ -353,6 +357,43 @@ mod tests {
 		);
 		// pkg-b already has Major, propagation would be Patch → should not appear
 		assert!(!result.contains_key("pkg-b"));
+	}
+
+	#[test]
+	fn mark_propagation_bumps_diamond_graph_no_duplicate_upstreams() {
+		// Two aggregated packages feed into pkg-b at different bump levels, causing
+		// pkg-b to be re-enqueued at the higher level. This means pkg-b is processed
+		// twice from the BFS queue, and without BTreeSet it would push itself into
+		// pkg-d's upstream list twice. With BTreeSet, .insert() is idempotent.
+		//
+		//   pkg-a (Minor) ──┐
+		//                   ▼
+		//   pkg-x (Major) ──► pkg-b ──► pkg-d
+		//
+		// BFS with DependencyBump::Match:
+		//   (pkg-a, Minor) → pkg-b gets (Minor, {"pkg-a"}), enqueue (pkg-b, Minor)
+		//   (pkg-x, Major) → pkg-b upgraded to (Major, {"pkg-a","pkg-x"}), enqueue (pkg-b, Major)
+		//   (pkg-b, Minor) → pkg-d gets (Minor, {"pkg-b"}), enqueue (pkg-d, Minor)
+		//   (pkg-b, Major) → pkg-d upgraded to (Major, insert "pkg-b") → still {"pkg-b"} ✓
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Minor);
+		aggregated.insert("pkg-x".to_string(), ChangeType::Major);
+		let version_overrides = BTreeMap::new();
+		let mut reverse_deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+		reverse_deps.insert("pkg-a".to_string(), vec!["pkg-b".to_string()]);
+		reverse_deps.insert("pkg-x".to_string(), vec!["pkg-b".to_string()]);
+		reverse_deps.insert("pkg-b".to_string(), vec!["pkg-d".to_string()]);
+		let result = mark_propagation_bumps(
+			&aggregated,
+			&version_overrides,
+			&reverse_deps,
+			DependencyBump::Match,
+		);
+		assert!(result.contains_key("pkg-d"));
+		let (_, upstreams) = &result["pkg-d"];
+		// pkg-b is the sole direct upstream of pkg-d — must appear exactly once
+		assert_eq!(upstreams.len(), 1);
+		assert!(upstreams.contains("pkg-b"));
 	}
 
 	#[test]

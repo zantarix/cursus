@@ -8,7 +8,7 @@ pub mod propagation;
 pub mod release_files;
 pub mod version;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -70,7 +70,7 @@ pub(super) type PackageChanges = Vec<(
 pub(super) type PropagationResult = (BTreeMap<String, Vec<String>>, Vec<PathBuf>);
 
 /// Map of `pkg_name → (effective_ct, [upstream_names])` from dependency propagation phase 1.
-pub(super) type PropagationMap = BTreeMap<String, (ChangeType, Vec<String>)>;
+pub(super) type PropagationMap = BTreeMap<String, (ChangeType, BTreeSet<String>)>;
 
 /// Result of computing the version plan for a prepare run.
 pub(super) struct VersionPlan {
