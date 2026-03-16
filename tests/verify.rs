@@ -4,7 +4,10 @@ mod common;
 
 use std::process::ExitCode;
 
-use common::{add_local_remote, git_cmd, git_push_to_remote, git_set_remote_head, run_cursus};
+use common::{
+	add_local_remote, git_cmd, git_push_to_remote, git_set_remote_head, run_cursus,
+	temp_real_git_repo,
+};
 use tempfile::TempDir;
 
 /// Creates a repo with a feature branch ready for verify tests.
@@ -12,18 +15,8 @@ use tempfile::TempDir;
 /// Sets up: main repo → bare remote → push main → set origin/HEAD → checkout feature branch.
 /// Returns `(working_dir, remote_dir)` — both must stay alive for the test duration.
 fn setup_verify_repo() -> (TempDir, TempDir) {
-	let working = tempfile::tempdir().expect("Failed to create working dir");
+	let working = temp_real_git_repo();
 	let dir = working.path();
-
-	git_cmd(dir, &["init"]);
-	git_cmd(dir, &["config", "user.name", "Cursus Test"]);
-	git_cmd(dir, &["config", "user.email", "test@cursus.local"]);
-	git_cmd(dir, &["config", "commit.gpgsign", "false"]);
-	git_cmd(dir, &["config", "tag.gpgsign", "false"]);
-	git_cmd(
-		dir,
-		&["commit", "--allow-empty", "-m", "chore: initial commit"],
-	);
 
 	let remote = add_local_remote(dir);
 	git_push_to_remote(dir);
@@ -145,18 +138,8 @@ fn verify_error_on_invalid_base_ref() {
 #[test]
 fn verify_ignores_modified_changesets() {
 	// Build a repo where an existing changeset is committed to main BEFORE branching.
-	let working = tempfile::tempdir().expect("Failed to create working dir");
+	let working = temp_real_git_repo();
 	let dir = working.path();
-
-	git_cmd(dir, &["init"]);
-	git_cmd(dir, &["config", "user.name", "Cursus Test"]);
-	git_cmd(dir, &["config", "user.email", "test@cursus.local"]);
-	git_cmd(dir, &["config", "commit.gpgsign", "false"]);
-	git_cmd(dir, &["config", "tag.gpgsign", "false"]);
-	git_cmd(
-		dir,
-		&["commit", "--allow-empty", "-m", "chore: initial commit"],
-	);
 
 	// Add the changeset on main, then push.
 	std::fs::create_dir_all(dir.join(".cursus")).unwrap();

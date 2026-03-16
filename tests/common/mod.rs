@@ -64,9 +64,9 @@ pub fn git_cmd(dir: &std::path::Path, args: &[&str]) {
 ///
 /// Configures `user.name`, `user.email`, and disables commit/tag signing so that
 /// git operations succeed in any environment without a GPG key.
-fn temp_real_git_repo() -> TempDir {
+pub fn temp_real_git_repo() -> TempDir {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
-	git_cmd(dir.path(), &["init"]);
+	git_cmd(dir.path(), &["init", "-b", "main"]);
 	git_cmd(dir.path(), &["config", "user.name", "Cursus Test"]);
 	git_cmd(dir.path(), &["config", "user.email", "test@cursus.local"]);
 	git_cmd(dir.path(), &["config", "commit.gpgsign", "false"]);
