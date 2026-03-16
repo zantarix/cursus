@@ -19,7 +19,7 @@
 	"devDependencies": {
 		"@mscharley/eslint-config": "^4.2.22",
 		"@types/node": "^24.12.0",
-		"typescript": "^5.9.3"
+		"typescript": "5.9.3"
 	},
 	"bugs": {
 		"url": "https://github.com/zantarix/cursus/issues"
