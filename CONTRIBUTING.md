@@ -6,6 +6,21 @@ This project uses [Nix flakes](https://nixos.wiki/wiki/Flakes) and
 [direnv](https://direnv.net/) for a reproducible development environment. The
 flake supports x86_64-linux, aarch64-linux, and aarch64-darwin.
 
+### Option A: Dev container (no Nix required)
+
+If you would prefer not to install Nix, a
+[dev container](https://containers.dev) configuration is provided in
+`.devcontainer/`. Any tool that supports the spec will work — including
+[VS Code](https://code.visualstudio.com/docs/devcontainers/containers) with the
+Dev Containers extension, the standalone
+[devcontainer CLI](https://github.com/devcontainers/cli), and
+[GitHub Codespaces](https://codespaces.new/zantarix/cursus) (zero local setup).
+
+The container installs Nix and enters the flake's dev shell automatically, so
+all the same build commands work inside it.
+
+### Option B: Nix + direnv
+
 If you are new to Nix, the [First Steps with Nix](https://nix.dev/tutorials/first-steps/)
 tutorial is a good place to start if you want to know more, but simply having
 the `nix` package manager and `direnv` installed should be enough to get

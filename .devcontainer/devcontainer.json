@@ -1,0 +1,19 @@
+{
+	"name": "Cursus",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+	"features": {
+		"ghcr.io/devcontainers/features/nix:1": {
+			"multiUser": true,
+			"extraNixConfig": "experimental-features = nix-command flakes"
+		}
+	},
+	"postCreateCommand": "bash .devcontainer/setup.sh",
+	"remoteUser": "vscode",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer"
+			]
+		}
+	}
+}
