@@ -17,7 +17,7 @@
 		"postinstall": "node --input-type=module --eval \"import{existsSync}from'node:fs';if(!existsSync('./src'))await import('./bin/download-binary.js')\""
 	},
 	"devDependencies": {
-		"@mscharley/eslint-config": "^4.2.22",
+		"@mscharley/eslint-config": "4.2.22",
 		"@types/node": "24.12.0",
 		"typescript": "5.9.3"
 	},
