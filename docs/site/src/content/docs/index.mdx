@@ -1,0 +1,54 @@
+---
+title: Cursus
+description: Release management with style
+template: splash
+hero:
+  tagline: A structured workflow for recording changes, bumping semantic versions, generating changelogs, and publishing packages to registries.
+  actions:
+    - text: Get Started
+      link: /cursus/getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/zantarix/cursus
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## How it works
+
+Cursus breaks the release process into three distinct steps, giving you control over each stage.
+
+<CardGrid>
+  <Card title="1. Record changes" icon="pencil">
+    As you work, record what changed and how significant it is. Each change
+    gets its own changeset file — no merge conflicts, no manual changelog
+    editing.
+  </Card>
+  <Card title="2. Prepare a release" icon="setting">
+    Cursus aggregates your changesets, determines the next version using
+    semantic versioning, updates version files, and generates a changelog.
+  </Card>
+  <Card title="3. Publish" icon="rocket">
+    Publish your packages to registries (crates.io, npm) and create GitHub
+    Releases with build artifacts — all in one step.
+  </Card>
+  <Card title="CI-native" icon="laptop">
+    The `ci` subcommand auto-detects your repo state and runs the right step
+    automatically. Works with any CI provider.
+  </Card>
+</CardGrid>
+
+## Features
+
+- **Changeset-based workflow** — each change is a small file, avoiding merge conflicts
+- **Semantic versioning** — automatic version bumps based on change types
+- **Monorepo support** — manage multiple packages with independent or linked versions
+- **Package manager adapters** — first-class support for many different package ecosystems
+- **Polyglot monorepo support** — support for deploying to multiple ecosystems at the same time
+- **Git lifecycle management** — automated branching, tagging, and pushing
+- **GitHub integration** — pull requests, releases, and asset uploads
+- **Conventional Commits** — optionally derive changesets from commit messages
+- **Dry-run mode** — preview every action before it happens
