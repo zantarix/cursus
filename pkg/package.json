@@ -20,9 +20,10 @@
 	"bin": "bin/cursus",
 	"scripts": {
 		"build": "tsc",
+		"clean": "rm -rf bin",
 		"test": "eslint src",
 		"prepare": "tsc",
-		"postinstall": "node bin/download-binary.js"
+		"postinstall": "node --input-type=module --eval \"import{existsSync}from'node:fs';if(!existsSync('./src'))await import('./bin/download-binary.js')\""
 	},
 	"devDependencies": {
 		"@mscharley/eslint-config": "^4.2.22",
