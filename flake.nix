@@ -31,15 +31,13 @@
 				};
 				# Minimal nightly toolchain for CI: just rustc + cargo for the host target.
 				rustToolchainCI = pkgs.rust-bin.nightly.latest.minimal;
+				# Nix package uses the same minimal toolchain which is all that is needed to build for the current
+				# system.
 				rustPlatform = pkgs.makeRustPlatform {
-					cargo = rustToolchain;
-					rustc = rustToolchain;
+					cargo = rustToolchainCI;
+					rustc = rustToolchainCI;
 				};
 				cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-				# Create a wrapper for yarn-berry (yarn 4) with a different executable name
-				yarnBerryWrapper = pkgs.writeShellScriptBin "yarn-berry" ''
-					exec ${pkgs.yarn-berry}/bin/yarn "$@"
-				'';
 			in
 			{
 				packages.default = rustPlatform.buildRustPackage {
@@ -48,13 +46,14 @@
 					src = ./.;
 					cargoLock.lockFile = ./Cargo.lock;
 
-					# Required for tests that invoke npm/pnpm/yarn
+					# Skip nix-shell integration tests: they require `nix develop` which
+					# is not available inside the Nix sandbox.
+					cargoTestFlags = [ "--no-default-features" ];
+
+					# Required for managing the node module in this project
 					nativeBuildInputs = with pkgs; [
 						git
 						nodejs
-						nodePackages.pnpm
-						nodePackages.yarn
-						yarnBerryWrapper
 					];
 				};
 
@@ -76,11 +75,8 @@
 						# Lint tools
 						markdownlint-cli
 
-						# Other package managers that may be needed for testing
+						# Required for managing the node module in this project
 						nodejs
-						nodePackages.pnpm
-						nodePackages.yarn  # yarn 1.x
-						yarnBerryWrapper   # yarn 4.x accessible via 'yarn-berry' command
 					];
 
 					RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
@@ -94,6 +90,27 @@
 						git
 						nodejs
 					];
+				};
+
+				# Minimal shells for package-manager-specific integration tests.
+				# Each shell provides exactly the tools available in a typical user
+				# installation of that package manager. Tests use these via
+				# `run_cursus_in_nix_shell` to exercise auto-detection in isolation.
+				devShells.test-npm = pkgs.mkShell {
+					buildInputs = with pkgs; [ git nodejs ];
+				};
+
+				devShells.test-pnpm = pkgs.mkShell {
+					buildInputs = with pkgs; [ git nodejs nodePackages.pnpm ];
+				};
+
+				devShells.test-yarn-classic = pkgs.mkShell {
+					buildInputs = with pkgs; [ git nodejs nodePackages.yarn ];
+				};
+
+				# yarn-berry provides the `yarn` binary directly — no wrapper needed.
+				devShells.test-yarn-berry = pkgs.mkShell {
+					buildInputs = with pkgs; [ git nodejs yarn-berry ];
 				};
 			}
 		);

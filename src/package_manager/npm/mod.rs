@@ -318,6 +318,68 @@ fn run_lock_update(
 	Ok(Some(lock_path))
 }
 
+/// Detects the installed yarn major version by running `yarn --version`.
+///
+/// Returns the major version as a `u32`, or an error if the version cannot be
+/// determined.
+fn yarn_major_version(env: &crate::Env, workspace_root: &AbsolutePath) -> anyhow::Result<u32> {
+	let output = env
+		.run("yarn", &["--version"], workspace_root)
+		.context("Failed to run 'yarn --version'")?;
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let major = stdout
+		.trim()
+		.split('.')
+		.next()
+		.context("Empty output from 'yarn --version'")?
+		.parse::<u32>()
+		.context("Failed to parse yarn major version")?;
+	Ok(major)
+}
+
+/// Updates the yarn lock file, selecting the correct flags for the installed
+/// yarn version.
+///
+/// - Yarn Berry (v2+): `yarn install --mode update-lockfile` — lock-only, no
+///   scripts.
+/// - Yarn Classic (v1): `yarn install --ignore-scripts` — full install but
+///   scripts are suppressed. Classic silently ignores `--mode`, so it must be
+///   detected explicitly.
+///
+/// Returns `Ok(None)` when `yarn.lock` does not exist in `workspace_root`.
+fn run_yarn_lock_update(
+	env: &crate::Env,
+	workspace_root: &AbsolutePath,
+) -> anyhow::Result<Option<PathBuf>> {
+	let lock_path = workspace_root.join("yarn.lock");
+	if !lock_path.exists() {
+		return Ok(None);
+	}
+	let major = yarn_major_version(env, workspace_root)?;
+	let args: &[&str] = if major >= 2 {
+		&["install", "--mode", "update-lockfile"]
+	} else {
+		&["install", "--ignore-scripts"]
+	};
+	let output = env.run_mut("yarn", args, workspace_root).with_context(|| {
+		format!(
+			"Failed to execute yarn {} in {}",
+			args.join(" "),
+			workspace_root.display()
+		)
+	})?;
+	if !output.status.success() {
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		anyhow::bail!(
+			"yarn {} failed in {}: {}",
+			args.join(" "),
+			workspace_root.display(),
+			stderr
+		);
+	}
+	Ok(Some(lock_path))
+}
+
 /// Executes a custom lock file command via the shell.
 ///
 /// Returns an error if the command fails. Used when `lock_command` is set in config.
@@ -489,13 +551,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		)? {
 			return Ok(Some(path));
 		}
-		run_lock_update(
-			&self.env,
-			"yarn",
-			&["install", "--mode", "update-lockfile"],
-			&workspace_root,
-			"yarn.lock",
-		)
+		run_yarn_lock_update(&self.env, &workspace_root)
 	}
 
 	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {

@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::Arc;
 
-use crate::command::test_support::RecordingCommandRunner;
+use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 
 #[test]
 fn update_lock_file_no_op_when_no_lock_file() {
@@ -162,24 +162,71 @@ fn update_lock_file_pnpm_failure_propagates() {
 }
 
 #[test]
-fn update_lock_file_yarn_passes_correct_args() {
+fn update_lock_file_yarn_classic_passes_correct_args() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
 
-	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
+	// Yarn Classic (1.x) silently ignores --mode, so we detect the version and
+	// use --ignore-scripts instead to suppress lifecycle scripts.
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"yarn",
+		vec!["--version".into()],
+		0,
+		b"1.22.22\n".to_vec(),
+	));
+	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
 	let result = adapter.update_lock_file();
 	assert_eq!(result.unwrap(), Some(dir.path().join("yarn.lock")));
 
 	let invocations = runner.invocations();
-	assert_eq!(invocations.len(), 1);
-	assert_eq!(invocations[0].program, "yarn");
+	assert_eq!(invocations.len(), 2);
+	assert_eq!(invocations[0].args, ["--version"]);
+	assert_eq!(invocations[1].args, ["install", "--ignore-scripts"]);
+}
+
+#[test]
+fn update_lock_file_yarn_berry_passes_correct_args() {
+	let dir = temp_dir();
+	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
+	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+
+	// Yarn Berry (v2+) supports --mode update-lockfile which skips scripts automatically.
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"yarn",
+		vec!["--version".into()],
+		0,
+		b"4.13.0\n".to_vec(),
+	));
+	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
+
+	let result = adapter.update_lock_file();
+	assert_eq!(result.unwrap(), Some(dir.path().join("yarn.lock")));
+
+	let invocations = runner.invocations();
+	assert_eq!(invocations.len(), 2);
+	assert_eq!(invocations[0].args, ["--version"]);
 	assert_eq!(
-		invocations[0].args,
+		invocations[1].args,
 		["install", "--mode", "update-lockfile"]
 	);
+}
+
+#[test]
+fn update_lock_file_yarn_version_detection_failure_propagates() {
+	let dir = temp_dir();
+	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
+	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stderr(
+		"yarn",
+		vec!["--version".into()],
+		1,
+		b"command not found".to_vec(),
+	));
+	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), runner);
+	assert!(adapter.update_lock_file().is_err());
 }
 
 #[test]
@@ -188,8 +235,12 @@ fn update_lock_file_yarn_failure_propagates() {
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
 
-	let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"yarn error".to_vec()));
-	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+	let runner = Arc::new(
+		DispatchingCommandRunner::new(0)
+			.on_with_args_stdout("yarn", vec!["--version".into()], 0, b"1.22.22\n".to_vec())
+			.on_with_args_stderr("yarn", vec!["install".into()], 1, b"yarn error".to_vec()),
+	);
+	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), runner);
 	assert!(adapter.update_lock_file().is_err());
 }
 
@@ -280,9 +331,26 @@ fn update_lock_file_dry_run_pnpm_lock_yaml_returns_path() {
 
 #[test]
 fn update_lock_file_dry_run_yarn_lock_returns_path() {
+	use crate::command::DryRunCommandRunner;
 	let dir = temp_dir();
 	std::fs::write(dir.path().join("yarn.lock"), "").unwrap();
-	let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
+	// yarn --version is a read-only call that passes through DryRunCommandRunner,
+	// so the inner runner must return a parseable version string.
+	let inner: Arc<dyn crate::command::CommandRunner> =
+		Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+			"yarn",
+			vec!["--version".into()],
+			0,
+			b"1.22.22\n".to_vec(),
+		));
+	let dry_runner: Arc<dyn crate::command::CommandRunner> =
+		Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
+	let env = crate::Env::new(dry_runner);
+	let adapter = NpmAdapter::new(
+		NpmConfig::default(),
+		crate::path::AbsolutePath::new(dir.path()).unwrap(),
+		env,
+	);
 	assert_eq!(
 		adapter.update_lock_file().unwrap(),
 		Some(dir.path().join("yarn.lock"))

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use crate::command::CommandRunner;
-use crate::command::test_support::RecordingCommandRunner;
+use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 
 pub(super) fn temp_dir() -> TempDir {
 	tempfile::tempdir().expect("Failed to create temp dir")
@@ -29,6 +29,16 @@ pub(super) fn recording_adapter(
 	config: NpmConfig,
 	dir: &std::path::Path,
 	runner: Arc<RecordingCommandRunner>,
+) -> NpmAdapter {
+	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
+}
+
+/// Creates a `NpmAdapter` backed by a dispatching runner for inspection.
+pub(super) fn dispatching_adapter(
+	config: NpmConfig,
+	dir: &std::path::Path,
+	runner: Arc<DispatchingCommandRunner>,
 ) -> NpmAdapter {
 	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)

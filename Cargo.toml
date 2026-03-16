@@ -25,10 +25,12 @@ toml_edit = "=0.25.4"
 ureq = { version = "=3.2.0", features = ["json"] }
 
 [features]
+default = ["nix-tests"]
+nix-tests = []
 test-support = []
 
 [dev-dependencies]
-cursus = { path = ".", features = ["test-support"] }
+cursus = { path = ".", features = ["test-support"], default-features = false }
 httpmock = "=0.8.3"
 insta = "=1.46.3"
 jsonschema = "=0.45.0"

@@ -239,6 +239,40 @@ pub fn git_current_branch(dir: &std::path::Path) -> String {
 	branch
 }
 
+/// Runs the cursus binary inside a specific Nix dev shell.
+///
+/// Each shell provides a controlled, minimal set of tools matching a typical user
+/// installation of a particular package manager (e.g. only npm, only pnpm, yarn
+/// classic as `yarn`, yarn berry as `yarn`). This lets integration tests exercise
+/// the auto-detection and version-branching logic in a realistic environment.
+///
+/// The pre-compiled cursus binary (`CARGO_BIN_EXE_cursus`) is used so no Rust
+/// toolchain is required inside the shell. The shell is resolved against the
+/// workspace flake using its absolute path.
+///
+/// Nix is a required development dependency of this project, so tests using
+/// this helper run as part of the normal `cargo test` suite.
+#[cfg(feature = "nix-tests")]
+pub fn run_cursus_in_nix_shell(
+	shell_attr: &str,
+	args: &[&str],
+	cwd: &std::path::Path,
+) -> (bool, String, String) {
+	let bin = env!("CARGO_BIN_EXE_cursus");
+	let flake_root = env!("CARGO_MANIFEST_DIR");
+	let flake_ref = format!("{flake_root}#{shell_attr}");
+	let mut nix_args = vec!["develop", flake_ref.as_str(), "--command", bin];
+	nix_args.extend_from_slice(args);
+	let output = Command::new("nix")
+		.args(&nix_args)
+		.current_dir(cwd)
+		.output()
+		.expect("Failed to spawn `nix develop` — is nix installed?");
+	let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+	let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+	(output.status.success(), stdout, stderr)
+}
+
 /// Runs cursus as a real subprocess, capturing stdout and stderr.
 ///
 /// Returns `(success, stdout, stderr)`. Use this instead of [`run_cursus`] when

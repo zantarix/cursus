@@ -2,7 +2,7 @@
 .direnv/
 
 # Nix build output
-/result/
+/result
 
 # Cargo output folders
 /mutants.out/
