@@ -14,7 +14,7 @@ cargo clippy                   # Lint the code
 cargo fmt                      # Format the code
 
 # Generate static binaries (all via cargo-zigbuild)
-cargo make release                  # Build all release targets
+cargo make release                 # Build all release targets
 cargo make release-linux-x86_64    # x86_64 Linux (musl static)
 cargo make release-linux-aarch64   # ARM64 Linux (musl static)
 cargo make release-linux-riscv64   # RISC-V Linux (musl static)

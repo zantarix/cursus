@@ -12,8 +12,8 @@ the `nix` package manager and `direnv` installed should be enough to get
 things to just work for you.
 
 The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer,
-cargo-make, cargo-llvm-cov, and a musl cross-compilation toolchain for static
-binaries (Linux only).
+cargo-make, cargo-llvm-cov, zig, and cargo-zigbuild for cross-compilation to
+all targets (Linux, macOS, Windows).
 
 ## Build commands
 
@@ -25,6 +25,16 @@ cargo test <test_name>         # Run a specific test
 cargo clippy                   # Lint
 cargo fmt                      # Format
 cargo make coverage            # Check coverage thresholds
+
+# Generate static release binaries (all via cargo-zigbuild)
+cargo make release                 # Build all release targets
+cargo make release-linux-x86_64    # x86_64 Linux (musl static)
+cargo make release-linux-aarch64   # ARM64 Linux (musl static)
+cargo make release-linux-riscv64   # RISC-V Linux (musl static)
+cargo make release-macos-x86_64    # x86_64 macOS
+cargo make release-macos-aarch64   # ARM64 macOS
+cargo make release-windows-x86_64  # x86_64 Windows (GNULLVM)
+cargo make release-windows-aarch64 # ARM64 Windows (GNULLVM)
 ```
 
 ## Code style
@@ -32,6 +42,7 @@ cargo make coverage            # Check coverage thresholds
 - Rust 2024 edition
 - Format code before every commit (`cargo fmt`)
 - Prefer functional style over imperative style
+- Never write production code that panics — avoid `unwrap()`, `expect()`, `panic!()`, and `unreachable!()` outside of tests; use `anyhow::Result`, `context()`, or `bail!()` instead
 
 ## Testing
 
