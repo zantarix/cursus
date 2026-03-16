@@ -2,22 +2,13 @@
 	"name": "@zantarix/cursus",
 	"version": "0.0.1",
 	"private": true,
-	"description": "Release management with style",
-	"homepage": "https://github.com/zantarix/cursus#readme",
-	"bugs": {
-		"url": "https://github.com/zantarix/cursus/issues"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/zantarix/cursus.git"
-	},
-	"license": "MPL-2.0",
-	"author": "Matthew Scharley <github@zantarix.com>",
-	"type": "module",
 	"engines": {
 		"node": ">=22.0.0"
 	},
+	"description": "Release management with style",
+	"homepage": "https://github.com/zantarix/cursus#readme",
 	"bin": "bin/cursus",
+	"type": "module",
 	"scripts": {
 		"build": "tsc",
 		"clean": "rm -rf bin",
@@ -27,8 +18,17 @@
 	},
 	"devDependencies": {
 		"@mscharley/eslint-config": "^4.2.22",
-		"@types/node": "^25.5.0",
+		"@types/node": "^24.12.0",
 		"typescript": "^5.9.3"
 	},
+	"bugs": {
+		"url": "https://github.com/zantarix/cursus/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/zantarix/cursus.git"
+	},
+	"license": "MPL-2.0",
+	"author": "Matthew Scharley <github@zantarix.com>",
 	"packageManager": "npm@11.11.1+sha512.6ac6b30a876415dcf545e433ba4cb34bf0c3efbb86088a9415e446de0b5a4fc6fd511d277b59bd40e06e3204fbda28f5aeded346b3a8c780355b39ed31622e12"
 }
