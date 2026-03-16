@@ -104,7 +104,10 @@ fn update_lock_file_npm_passes_correct_args() {
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "npm");
-	assert_eq!(invocations[0].args, ["install", "--package-lock-only"]);
+	assert_eq!(
+		invocations[0].args,
+		["install", "--package-lock-only", "--ignore-scripts"]
+	);
 }
 
 #[test]
@@ -137,7 +140,10 @@ fn update_lock_file_pnpm_passes_correct_args() {
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "pnpm");
-	assert_eq!(invocations[0].args, ["install", "--lockfile-only"]);
+	assert_eq!(
+		invocations[0].args,
+		["install", "--lockfile-only", "--ignore-scripts"]
+	);
 }
 
 #[test]

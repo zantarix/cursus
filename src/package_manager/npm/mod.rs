@@ -474,7 +474,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		if let Some(path) = run_lock_update(
 			&self.env,
 			"npm",
-			&["install", "--package-lock-only"],
+			&["install", "--package-lock-only", "--ignore-scripts"],
 			&workspace_root,
 			"package-lock.json",
 		)? {
@@ -483,7 +483,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		if let Some(path) = run_lock_update(
 			&self.env,
 			"pnpm",
-			&["install", "--lockfile-only"],
+			&["install", "--lockfile-only", "--ignore-scripts"],
 			&workspace_root,
 			"pnpm-lock.yaml",
 		)? {
