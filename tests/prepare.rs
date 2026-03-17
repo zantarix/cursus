@@ -92,6 +92,8 @@ fn prepare_with_single_changeset_cargo() {
 
 #[test]
 fn prepare_with_single_changeset_npm() {
+	init_test_logger();
+	let _ = take_logs();
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
 	write_changeset(
 		dir.path(),
@@ -102,6 +104,13 @@ fn prepare_with_single_changeset_npm() {
 	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		logs.iter().any(|(level, m)| *level == log::Level::Info
+			&& m.contains("test-project: 0.1.0 -> 0.1.1 (patch)")),
+		"Expected info version bump summary log, got: {logs:?}"
+	);
 
 	// Verify version was bumped
 	let pkg_json = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
