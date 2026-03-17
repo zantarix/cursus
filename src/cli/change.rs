@@ -41,37 +41,60 @@ pub struct ChangeArgs {
 	pub no_git: bool,
 }
 
-/// Returns `true` if any of the given changed files fall within the project's directory.
+/// Assigns each changed file to the project with the longest matching path prefix,
+/// returning a boolean mask parallel to `projects`.
 ///
-/// Computes the project's path relative to the git root. A file matches if its
-/// relative path starts with the project's relative path (with a `/` separator
-/// guard to avoid false prefix matches like `packages/a` matching `packages/a-extra`).
+/// When multiple projects share a prefix (e.g. nested projects), a file is attributed
+/// only to the most specific (deepest) project whose path contains it. The root project
+/// (at the git root) only receives files not claimed by any sub-project.
 ///
-/// If the project path is not under the git root, this returns `true`
-/// conservatively to avoid silently hiding it.
-fn project_has_changed_files(
-	project: &Project,
+/// Projects whose path is outside the git root are always treated as unchanged — git
+/// cannot track files outside the repository, so there are no changed files to attribute.
+fn match_files_to_projects(
+	projects: &[Project],
 	git_path: &AbsolutePath,
 	changed_files: &HashSet<String>,
-) -> bool {
-	let project_path = project.path();
-	let rel = match project_path.strip_prefix(git_path.as_path()) {
-		Ok(r) => r,
-		// Project path is not under the git root — treat as changed to avoid
-		// silently hiding it from the "Changed" group.
-		Err(_) => return true,
-	};
-	let rel_str = rel.to_string_lossy();
-	if rel_str.is_empty() {
-		// Root project: any changed file counts
-		!changed_files.is_empty()
-	} else {
-		changed_files.iter().any(|file| {
-			file.starts_with(rel_str.as_ref())
-				&& (file.len() == rel_str.len()
-					|| file.as_bytes().get(rel_str.len()) == Some(&b'/'))
+) -> Vec<bool> {
+	// Pre-compute relative path strings for each project.
+	// `None` means the project path is outside the git root; such projects are left as false.
+	let rel_paths: Vec<Option<String>> = projects
+		.iter()
+		.map(|p| {
+			p.path()
+				.strip_prefix(git_path.as_path())
+				.ok()
+				.map(|r| r.to_string_lossy().into_owned())
 		})
+		.collect();
+
+	let mut matched = vec![false; projects.len()];
+
+	// For each changed file, find the project with the longest matching prefix.
+	for file in changed_files {
+		let best = rel_paths
+			.iter()
+			.enumerate()
+			.filter_map(|(i, rel_opt)| {
+				let rel = rel_opt.as_deref()?;
+				if rel.is_empty() {
+					// Root project: matches any file, but with the lowest priority (0).
+					Some((i, 0usize))
+				} else if file.starts_with(rel)
+					&& (file.len() == rel.len() || file.as_bytes().get(rel.len()) == Some(&b'/'))
+				{
+					Some((i, rel.len()))
+				} else {
+					None
+				}
+			})
+			.max_by_key(|(_, len)| *len);
+
+		if let Some((i, _)) = best {
+			matched[i] = true;
+		}
 	}
+
+	matched
 }
 
 /// Classifies each project as changed (`true`) or unchanged (`false`).
@@ -105,10 +128,7 @@ fn classify_changed_projects(
 		.flatten()
 		.collect();
 
-	projects
-		.iter()
-		.map(|project| project_has_changed_files(project, git.path(), &changed_files))
-		.collect()
+	match_files_to_projects(projects, git.path(), &changed_files)
 }
 
 /// Maps `--project` names to indices into the project list.
@@ -228,9 +248,11 @@ fn cmd_change_auto(
 
 	let projects = config.load_projects()?;
 	let changed_files: HashSet<String> = git.diff_tree_names("HEAD")?.into_iter().collect();
+	let matched_flags = match_files_to_projects(&projects, git.path(), &changed_files);
 	let matched: Vec<_> = projects
 		.iter()
-		.filter(|p| project_has_changed_files(p, git.path(), &changed_files))
+		.zip(matched_flags.iter())
+		.filter_map(|(p, &m)| m.then_some(p))
 		.collect();
 
 	if matched.is_empty() {
@@ -558,49 +580,169 @@ mod tests {
 		assert_eq!(result, vec![true, true]);
 	}
 
-	// --- project_has_changed_files ---
+	// --- match_files_to_projects ---
 
 	#[test]
-	fn project_has_changed_files_matches_file_in_project() {
+	fn match_files_to_projects_basic_prefix_match() {
 		let path = AbsolutePath::new("/repo").unwrap();
-		let project = Project::new_test("a", "/repo/packages/a");
+		let projects = vec![
+			Project::new_test("a", "/repo/packages/a"),
+			Project::new_test("b", "/repo/packages/b"),
+		];
 		let mut files = HashSet::new();
 		files.insert("packages/a/src/lib.rs".to_string());
-		assert!(project_has_changed_files(&project, &path, &files));
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![true, false]
+		);
 	}
 
 	#[test]
-	fn project_has_changed_files_no_match_for_different_project() {
+	fn match_files_to_projects_no_match_for_different_project() {
 		let path = AbsolutePath::new("/repo").unwrap();
-		let project = Project::new_test("a", "/repo/packages/a");
+		let projects = vec![
+			Project::new_test("a", "/repo/packages/a"),
+			Project::new_test("b", "/repo/packages/b"),
+		];
 		let mut files = HashSet::new();
 		files.insert("packages/b/src/lib.rs".to_string());
-		assert!(!project_has_changed_files(&project, &path, &files));
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, true]
+		);
 	}
 
 	#[test]
-	fn project_has_changed_files_no_prefix_match_without_separator() {
+	fn match_files_to_projects_no_prefix_match_without_separator() {
 		let path = AbsolutePath::new("/repo").unwrap();
-		let project = Project::new_test("a", "/repo/packages/a");
+		let projects = vec![
+			Project::new_test("a", "/repo/packages/a"),
+			Project::new_test("a-extra", "/repo/packages/a-extra"),
+		];
 		let mut files = HashSet::new();
 		files.insert("packages/a-extra/lib.rs".to_string());
-		assert!(!project_has_changed_files(&project, &path, &files));
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, true]
+		);
 	}
 
 	#[test]
-	fn project_has_changed_files_root_project_matches_any_file() {
+	fn match_files_to_projects_nested_file_goes_to_child() {
+		// A file inside the child project must only match the child, not the parent.
 		let path = AbsolutePath::new("/repo").unwrap();
-		let project = Project::new_test("root", "/repo");
+		let projects = vec![
+			Project::new_test("parent", "/repo/packages/a"),
+			Project::new_test("child", "/repo/packages/a/sub"),
+		];
+		let mut files = HashSet::new();
+		files.insert("packages/a/sub/src/lib.rs".to_string());
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, true]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_nested_parent_file_goes_to_parent() {
+		// A file inside the parent but outside the child must go to the parent.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("parent", "/repo/packages/a"),
+			Project::new_test("child", "/repo/packages/a/sub"),
+		];
+		let mut files = HashSet::new();
+		files.insert("packages/a/README.md".to_string());
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![true, false]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_root_project_matches_unowned_file() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("root", "/repo"),
+			Project::new_test("a", "/repo/packages/a"),
+		];
 		let mut files = HashSet::new();
 		files.insert("src/main.rs".to_string());
-		assert!(project_has_changed_files(&project, &path, &files));
+		// src/main.rs is not under packages/a, so root gets it.
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![true, false]
+		);
 	}
 
 	#[test]
-	fn project_has_changed_files_root_project_no_match_empty() {
+	fn match_files_to_projects_root_does_not_steal_from_subproject() {
 		let path = AbsolutePath::new("/repo").unwrap();
-		let project = Project::new_test("root", "/repo");
+		let projects = vec![
+			Project::new_test("root", "/repo"),
+			Project::new_test("a", "/repo/packages/a"),
+		];
+		let mut files = HashSet::new();
+		files.insert("packages/a/src/lib.rs".to_string());
+		// packages/a/src/lib.rs belongs to "a", not root.
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, true]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_empty_files() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![Project::new_test("root", "/repo")];
 		let files = HashSet::new();
-		assert!(!project_has_changed_files(&project, &path, &files));
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_outside_git_root_always_unchanged() {
+		// Git cannot track files outside the repo, so out-of-root projects are always unchanged.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![Project::new_test("outside", "/other/path")];
+		let files = HashSet::new();
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_outside_git_root_unchanged_even_with_files() {
+		// Out-of-root project is not attributed any files; in-repo project is still matched.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("outside", "/other/path"),
+			Project::new_test("a", "/repo/packages/a"),
+		];
+		let mut files = HashSet::new();
+		files.insert("packages/a/src/lib.rs".to_string());
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, true]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_unowned_file_with_no_root() {
+		// A file that doesn't fall under any project's path should not mark any project.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("a", "/repo/packages/a"),
+			Project::new_test("b", "/repo/packages/b"),
+		];
+		let mut files = HashSet::new();
+		files.insert("other/random.txt".to_string());
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, false]
+		);
 	}
 }
