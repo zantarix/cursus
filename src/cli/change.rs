@@ -201,12 +201,7 @@ fn write_auto_changeset(
 		.collect();
 	let changeset = Changeset::new(packages, Some(changeset_message.to_string()));
 	if dry_run {
-		let names: Vec<_> = matched.iter().map(|p| p.name()).collect();
-		info!(
-			"[dry-run] Would create {} changeset for: {}",
-			change_type,
-			names.join(", ")
-		);
+		println!("{}", changeset.format()?);
 		if commit_to_git {
 			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
 		}
@@ -285,6 +280,27 @@ fn cmd_change_auto(
 }
 
 /// Runs the `change` subcommand.
+fn resolve_non_interactive(
+	args: &ChangeArgs,
+	projects: &[crate::package_manager::Project],
+	project_indices: &Option<Vec<usize>>,
+) -> anyhow::Result<change::ChangeResult> {
+	let Some(ct) = args.change_type else {
+		bail!("--change-type is required in non-interactive mode");
+	};
+	if args.message.is_none() {
+		bail!("--message is required in non-interactive mode");
+	}
+	let selected: Vec<crate::package_manager::Project> = match project_indices {
+		Some(indices) => indices.iter().map(|&i| projects[i].clone()).collect(),
+		None => projects.to_vec(),
+	};
+	Ok(change::ChangeResult {
+		projects: selected.into_iter().map(|p| (p, ct)).collect(),
+		message: args.message.clone(),
+	})
+}
+
 pub(crate) fn cmd_change(
 	git: &git::GitWorkdir,
 	args: &ChangeArgs,
@@ -301,20 +317,7 @@ pub(crate) fn cmd_change(
 	let project_indices = resolve_project_indices(&projects, &args.projects)?;
 
 	let result = if global.no_interactive {
-		let Some(ct) = args.change_type else {
-			bail!("--change-type is required in non-interactive mode");
-		};
-		if args.message.is_none() {
-			bail!("--message is required in non-interactive mode");
-		}
-		let selected_projects: Vec<crate::package_manager::Project> = match &project_indices {
-			Some(indices) => indices.iter().map(|&i| projects[i].clone()).collect(),
-			None => projects.clone(),
-		};
-		change::ChangeResult {
-			projects: selected_projects.into_iter().map(|p| (p, ct)).collect(),
-			message: args.message.clone(),
-		}
+		resolve_non_interactive(args, &projects, &project_indices)?
 	} else {
 		let options = change::ChangeOptions {
 			change_type: args.change_type,
@@ -340,10 +343,13 @@ pub(crate) fn cmd_change(
 
 	let changeset = Changeset::new(packages, result.message.clone());
 
-	let path = changeset.write(git)?;
-
-	if result.message.is_none() {
-		env.run_editor_on(&path, git.path())?;
+	if global.dry_run {
+		println!("{}", changeset.format()?);
+	} else {
+		let path = changeset.write(git)?;
+		if result.message.is_none() {
+			env.run_editor_on(&path, git.path())?;
+		}
 	}
 
 	Ok(ExitCode::SUCCESS)
