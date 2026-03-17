@@ -1,5 +1,6 @@
-# [global]
+[global]
 # disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
+ignore = ["@zantarix/cursus-docs", "@zantarix/cursus-workspace"]
 
 [cargo]
 enabled = true
