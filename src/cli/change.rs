@@ -45,8 +45,10 @@ pub struct ChangeArgs {
 /// returning a boolean mask parallel to `projects`.
 ///
 /// When multiple projects share a prefix (e.g. nested projects), a file is attributed
-/// only to the most specific (deepest) project whose path contains it. The root project
-/// (at the git root) only receives files not claimed by any sub-project.
+/// only to the most specific (deepest) project(s) whose path contains it. If several
+/// projects share the same deepest path (e.g. Cargo and npm both at the repo root),
+/// all of them are marked. The root project (at the git root) only receives files
+/// not claimed by any sub-project.
 ///
 /// Projects whose path is outside the git root are always treated as unchanged — git
 /// cannot track files outside the repository, so there are no changed files to attribute.
@@ -69,9 +71,11 @@ fn match_files_to_projects(
 
 	let mut matched = vec![false; projects.len()];
 
-	// For each changed file, find the project with the longest matching prefix.
+	// For each changed file, find all projects that match with the longest prefix.
+	// When multiple projects share the same path (e.g. Cargo and npm both at the repo root),
+	// all of them are marked changed — not just the last one in the list.
 	for file in changed_files {
-		let best = rel_paths
+		let candidates: Vec<(usize, usize)> = rel_paths
 			.iter()
 			.enumerate()
 			.filter_map(|(i, rel_opt)| {
@@ -87,10 +91,13 @@ fn match_files_to_projects(
 					None
 				}
 			})
-			.max_by_key(|(_, len)| *len);
+			.collect();
 
-		if let Some((i, _)) = best {
-			matched[i] = true;
+		if let Some(&(_, best_len)) = candidates.iter().max_by_key(|(_, len)| *len) {
+			candidates
+				.iter()
+				.filter(|(_, len)| *len == best_len)
+				.for_each(|(i, _)| matched[*i] = true);
 		}
 	}
 
@@ -743,6 +750,44 @@ mod tests {
 		assert_eq!(
 			match_files_to_projects(&projects, &path, &files),
 			vec![false, false]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_multiple_at_same_path_all_marked() {
+		// When multiple projects share the same path (e.g. Cargo and npm at the repo root),
+		// all of them are marked changed when a file in their shared directory changes.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("npm-root", "/repo"),
+			Project::new_test("cargo-root", "/repo"),
+			Project::new_test("sub", "/repo/packages/sub"),
+		];
+		let mut files = HashSet::new();
+		files.insert("README.md".to_string());
+		// README.md is not under packages/sub, so only the two root projects match.
+		// Both share priority 0 (root), so both must be marked.
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![true, true, false]
+		);
+	}
+
+	#[test]
+	fn match_files_to_projects_multiple_at_same_path_subproject_wins() {
+		// When multiple projects share the same root path, a deeper subproject
+		// still wins for files inside it — the shared-root projects are not marked.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("npm-root", "/repo"),
+			Project::new_test("cargo-root", "/repo"),
+			Project::new_test("sub", "/repo/packages/sub"),
+		];
+		let mut files = HashSet::new();
+		files.insert("packages/sub/src/lib.rs".to_string());
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![false, false, true]
 		);
 	}
 }
