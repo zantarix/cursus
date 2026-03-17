@@ -200,6 +200,16 @@ mod tests {
 		Arc::new(RecordingCommandRunner::new(0))
 	}
 
+	/// Loads all Cargo projects from a temporary workspace directory.
+	fn load_projects_for_dir(dir: &tempfile::TempDir) -> Vec<crate::package_manager::Project> {
+		let runner = make_runner();
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env)
+			.unwrap()
+			.load_projects()
+			.unwrap()
+	}
+
 	/// Sets up a temporary Cargo workspace with `pkg-a` (0.1.0) and `pkg-b` (0.2.0).
 	fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
@@ -224,6 +234,37 @@ mod tests {
 		std::fs::write(
 			dir.path().join("pkg-b/Cargo.toml"),
 			"[package]\nname = \"pkg-b\"\nversion = \"0.2.0\"\nedition = \"2024\"\n",
+		)
+		.unwrap();
+		std::fs::write(dir.path().join("pkg-b/src/lib.rs"), "").unwrap();
+		dir
+	}
+
+	/// Sets up a temporary Cargo workspace where `pkg-b` (1.0.0) has an
+	/// intra-workspace dependency on `pkg-a` (1.0.0).
+	fn setup_workspace_with_dependency() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_cargo(crate::model::config::CargoConfig::enabled())
+			.save()
+			.unwrap();
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
+		)
+		.unwrap();
+		std::fs::create_dir_all(dir.path().join("pkg-a/src")).unwrap();
+		std::fs::write(
+			dir.path().join("pkg-a/Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
+		)
+		.unwrap();
+		std::fs::write(dir.path().join("pkg-a/src/lib.rs"), "").unwrap();
+		std::fs::create_dir_all(dir.path().join("pkg-b/src")).unwrap();
+		std::fs::write(
+			dir.path().join("pkg-b/Cargo.toml"),
+			"[package]\nname = \"pkg-b\"\nversion = \"1.0.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-a = { path = \"../pkg-a\", version = \"1.0.0\" }\n",
 		)
 		.unwrap();
 		std::fs::write(dir.path().join("pkg-b/src/lib.rs"), "").unwrap();
@@ -280,59 +321,19 @@ mod tests {
 	fn propagate_dependency_updates_returns_modified_manifest_paths() {
 		// Guards `additional_files.extend(paths)` mutation: verifies that when a dependency
 		// version is updated, the modified manifest path is included in the returned vec.
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg =
-			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
-		std::fs::write(
-			dir.path().join("Cargo.toml"),
-			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
-		)
-		.unwrap();
-		std::fs::create_dir_all(dir.path().join("pkg-a/src")).unwrap();
-		std::fs::write(
-			dir.path().join("pkg-a/Cargo.toml"),
-			"[package]\nname = \"pkg-a\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
-		)
-		.unwrap();
-		std::fs::write(dir.path().join("pkg-a/src/lib.rs"), "").unwrap();
-		std::fs::create_dir_all(dir.path().join("pkg-b/src")).unwrap();
-		std::fs::write(
-			dir.path().join("pkg-b/Cargo.toml"),
-			"[package]\nname = \"pkg-b\"\nversion = \"1.0.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-a = { path = \"../pkg-a\", version = \"1.0.0\" }\n",
-		)
-		.unwrap();
-		std::fs::write(dir.path().join("pkg-b/src/lib.rs"), "").unwrap();
-
-		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
-		let config =
-			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
-		let projects = config.load_projects().unwrap();
-
-		let new_version: semver::Version = "1.0.1".parse().unwrap();
+		let dir = setup_workspace_with_dependency();
+		let projects = load_projects_for_dir(&dir);
 		let release_infos = vec![super::ReleaseInfo {
 			package_name: "pkg-a".to_string(),
-			new_version: new_version.clone(),
+			new_version: "1.0.1".parse().unwrap(),
 			changelog_entry: String::new(),
 		}];
-
 		let modified_paths =
 			super::propagate_dependency_updates(&projects, &release_infos, false).unwrap();
-
-		// At least one path should be returned (pkg-b's Cargo.toml).
 		assert!(
-			!modified_paths.is_empty(),
-			"Expected modified paths when dependency version is updated, got: {modified_paths:?}"
-		);
-		// The updated path should contain "pkg-b".
-		let has_pkg_b = modified_paths
-			.iter()
-			.any(|p| p.to_string_lossy().contains("pkg-b"));
-		assert!(
-			has_pkg_b,
+			modified_paths
+				.iter()
+				.any(|p| p.to_string_lossy().contains("pkg-b")),
 			"Expected pkg-b manifest in modified paths, got: {modified_paths:?}"
 		);
 	}
