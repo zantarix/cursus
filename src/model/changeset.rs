@@ -145,6 +145,11 @@ impl Changeset {
 	///
 	/// Returns an error if the delimiters are missing or the TOML frontmatter is invalid.
 	pub fn parse(input: &str) -> anyhow::Result<Self> {
+		let input: std::borrow::Cow<str> = if input.contains('\r') {
+			input.replace("\r\n", "\n").into()
+		} else {
+			input.into()
+		};
 		let rest = input
 			.strip_prefix("+++\n")
 			.context("Missing opening +++ delimiter")?;
@@ -520,6 +525,14 @@ pkg = \"minor\"
 		let parsed = Changeset::parse(input).unwrap();
 		assert_eq!(parsed.packages["pkg"], ChangeType::Minor);
 		assert_eq!(parsed.message, None);
+	}
+
+	#[test]
+	fn parse_changeset_crlf_line_endings() {
+		let input = "+++\r\npkg = \"minor\"\r\n+++\r\n\r\nSome message\r\n";
+		let parsed = Changeset::parse(input).unwrap();
+		assert_eq!(parsed.packages["pkg"], ChangeType::Minor);
+		assert_eq!(parsed.message, Some("Some message".to_string()));
 	}
 
 	#[test]
