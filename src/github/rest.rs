@@ -460,6 +460,11 @@ mod tests {
 				result.is_err(),
 				"Expected error for release_id={bad_id:?}, but got Ok"
 			);
+			let msg = format!("{:#}", result.unwrap_err());
+			assert!(
+				msg.contains("Invalid GitHub release_id"),
+				"Error for release_id={bad_id:?} should mention 'Invalid GitHub release_id', got: {msg}"
+			);
 		}
 	}
 
@@ -510,6 +515,11 @@ mod tests {
 			assert!(
 				result.is_err(),
 				"Expected error for release_id={bad_id:?}, but got Ok"
+			);
+			let msg = format!("{:#}", result.unwrap_err());
+			assert!(
+				msg.contains("Invalid GitHub release_id"),
+				"Error for release_id={bad_id:?} should mention 'Invalid GitHub release_id', got: {msg}"
 			);
 		}
 	}
