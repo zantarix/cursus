@@ -78,6 +78,22 @@ fn change_succeeds_with_major() {
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	// Verify the changeset file was created with the correct change type.
+	let changeset_files: Vec<_> = std::fs::read_dir(dir.path().join(".cursus"))
+		.expect("Expected .cursus/ directory to exist")
+		.filter_map(|e| e.ok())
+		.filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+		.collect();
+	assert!(
+		!changeset_files.is_empty(),
+		"Expected a changeset file in .cursus/"
+	);
+	let content = std::fs::read_to_string(changeset_files[0].path()).unwrap();
+	assert!(
+		content.contains("major"),
+		"Changeset should record a major change, got: {content}"
+	);
 }
 
 #[test]
@@ -98,6 +114,22 @@ fn change_succeeds_with_minor() {
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+
+	// Verify the changeset file was created with the correct change type.
+	let changeset_files: Vec<_> = std::fs::read_dir(dir.path().join(".cursus"))
+		.expect("Expected .cursus/ directory to exist")
+		.filter_map(|e| e.ok())
+		.filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+		.collect();
+	assert!(
+		!changeset_files.is_empty(),
+		"Expected a changeset file in .cursus/"
+	);
+	let content = std::fs::read_to_string(changeset_files[0].path()).unwrap();
+	assert!(
+		content.contains("minor"),
+		"Changeset should record a minor change, got: {content}"
+	);
 }
 
 #[test]

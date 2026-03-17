@@ -218,6 +218,9 @@ fn ci_parses_from_cli() {
 /// Multi-package: `ci` uses all packages when determining tag presence.
 #[test]
 fn ci_multi_package_partial_tags_triggers_publish() {
+	init_test_logger();
+	let _ = take_logs();
+
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
@@ -236,6 +239,14 @@ fn ci_multi_package_partial_tags_triggers_publish() {
 		dir.path(),
 	);
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter().any(|(level, m)| *level == log::Level::Info
+			&& m.contains("unpublished tags detected")
+			&& m.contains("publish")),
+		"Expected 'unpublished tags detected, running publish' log, got: {logs:?}"
+	);
 }
 
 /// Multi-package: `ci` does nothing when ALL packages are tagged.

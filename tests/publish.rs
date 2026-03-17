@@ -63,6 +63,9 @@ fn publish_dry_run_with_unknown_package_fails() {
 
 #[test]
 fn publish_dry_run_basic() {
+	init_test_logger();
+	let _ = take_logs();
+
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -78,6 +81,9 @@ fn publish_dry_run_basic() {
 	)
 	.unwrap();
 
+	// CHANGELOG.md must exist for the package to be considered prepared.
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
+
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
@@ -85,10 +91,20 @@ fn publish_dry_run_basic() {
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("Would publish test-pkg@")),
+		"Expected 'Would publish test-pkg@...' log, got: {logs:?}"
+	);
 }
 
 #[test]
 fn publish_with_package_filter() {
+	init_test_logger();
+	let _ = take_logs();
+
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -108,6 +124,13 @@ fn publish_with_package_filter() {
 	std::fs::write(
 		dir.path().join("packages/pkg-a/package.json"),
 		r#"{"name": "pkg-a", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+
+	// CHANGELOG.md for pkg-a so it is considered prepared.
+	std::fs::write(
+		dir.path().join("packages/pkg-a/CHANGELOG.md"),
+		"# Changelog\n",
 	)
 	.unwrap();
 
@@ -132,6 +155,17 @@ fn publish_with_package_filter() {
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("Would publish pkg-a@")),
+		"Expected 'Would publish pkg-a@...' log, got: {logs:?}"
+	);
+	assert!(
+		!logs.iter().any(|(_, m)| m.contains("Would publish pkg-b@")),
+		"Expected pkg-b to be excluded by the package filter, got: {logs:?}"
+	);
 }
 
 #[test]
@@ -263,6 +297,9 @@ fn publish_cargo_dry_run() {
 
 #[test]
 fn publish_dry_run_npm_private_package_excluded() {
+	init_test_logger();
+	let _ = take_logs();
+
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -286,6 +323,19 @@ fn publish_dry_run_npm_private_package_excluded() {
 	// Should succeed with no output (package silently excluded)
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("Would publish private-pkg")),
+		"Private package should not appear in 'Would publish' output, got: {logs:?}"
+	);
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("0 would be published")),
+		"Expected summary to show 0 would be published, got: {logs:?}"
+	);
 }
 
 #[test]
@@ -331,6 +381,9 @@ fn publish_dry_run_npm_mixed_workspace() {
 
 #[test]
 fn publish_dry_run_cargo_publish_false_excluded() {
+	init_test_logger();
+	let _ = take_logs();
+
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -357,6 +410,19 @@ fn publish_dry_run_cargo_publish_false_excluded() {
 	// Should succeed with no output (crate silently excluded)
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
+
+	let logs = take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("Would publish private-crate")),
+		"Crate with publish=false should not appear in 'Would publish' output, got: {logs:?}"
+	);
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("0 would be published")),
+		"Expected summary to show 0 would be published, got: {logs:?}"
+	);
 }
 
 #[test]
