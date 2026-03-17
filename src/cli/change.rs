@@ -774,6 +774,21 @@ mod tests {
 	}
 
 	#[test]
+	fn match_files_to_projects_exact_path_length_match() {
+		// A changed file whose path is exactly equal to the project's relative path
+		// (e.g. "my-pkg" as a changed file, project at "/repo/my-pkg").
+		// Guards `==`→`!=` on `file.len() == rel.len()` boundary check.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![Project::new_test("my-pkg", "/repo/my-pkg")];
+		let mut files = HashSet::new();
+		files.insert("my-pkg".to_string()); // exactly matches rel path, no trailing /
+		assert_eq!(
+			match_files_to_projects(&projects, &path, &files),
+			vec![true]
+		);
+	}
+
+	#[test]
 	fn match_files_to_projects_multiple_at_same_path_subproject_wins() {
 		// When multiple projects share the same root path, a deeper subproject
 		// still wins for files inside it — the shared-root projects are not marked.
