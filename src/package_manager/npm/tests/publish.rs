@@ -296,6 +296,52 @@ fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
 	);
 }
 
+/// Catches the `&&`→`||` mutation at the override-warning guard: when only OIDC
+/// is active (no NODE_AUTH_TOKEN), no override warning should fire.
+#[test]
+fn publish_oidc_only_does_not_emit_override_warning() {
+	crate::test_logging::init_test_logger();
+	let dir = temp_dir();
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+		.with_oidc_environment(true)
+		.with_node_auth_token_present(false);
+	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
+	adapter
+		.publish(&project_info(dir.path(), "my-app", ""))
+		.unwrap();
+	let logs = crate::test_logging::take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, msg)| msg.contains("NODE_AUTH_TOKEN is set in an OIDC-capable CI")),
+		"Should NOT emit override warning when only OIDC is active: {logs:?}"
+	);
+}
+
+/// Catches the `&&`→`||` mutation at the no-auth-warning guard: when NODE_AUTH_TOKEN
+/// is present (no OIDC), no "no auth" warning should fire.
+#[test]
+fn publish_node_auth_only_does_not_emit_no_auth_warning() {
+	crate::test_logging::init_test_logger();
+	let dir = temp_dir();
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
+		.with_oidc_environment(false)
+		.with_node_auth_token_present(true);
+	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
+	adapter
+		.publish(&project_info(dir.path(), "my-app", ""))
+		.unwrap();
+	let logs = crate::test_logging::take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, msg)| msg.contains("no npm authentication detected")),
+		"Should NOT emit no-auth warning when NODE_AUTH_TOKEN is present: {logs:?}"
+	);
+}
+
 #[test]
 fn registry_name_is_npm() {
 	let dir = temp_dir();
