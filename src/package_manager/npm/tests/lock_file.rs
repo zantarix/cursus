@@ -356,3 +356,24 @@ fn update_lock_file_dry_run_yarn_lock_returns_path() {
 		Some(dir.path().join("yarn.lock"))
 	);
 }
+
+#[test]
+fn update_lock_file_yarn_version_failure_includes_stderr_in_error() {
+	let dir = temp_dir();
+	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
+	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stderr(
+		"yarn",
+		vec!["--version".into()],
+		1,
+		b"yarn: command not found".to_vec(),
+	));
+	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), runner);
+
+	let err = adapter.update_lock_file().unwrap_err();
+	assert!(
+		err.to_string().contains("yarn: command not found"),
+		"error should include stderr from failed yarn --version: {err}"
+	);
+}

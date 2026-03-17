@@ -326,6 +326,10 @@ fn yarn_major_version(env: &crate::Env, workspace_root: &AbsolutePath) -> anyhow
 	let output = env
 		.run("yarn", &["--version"], workspace_root)
 		.context("Failed to run 'yarn --version'")?;
+	if !output.status.success() {
+		let stderr = String::from_utf8_lossy(&output.stderr);
+		anyhow::bail!("'yarn --version' failed: {stderr}");
+	}
 	let stdout = String::from_utf8_lossy(&output.stdout);
 	let major = stdout
 		.trim()
