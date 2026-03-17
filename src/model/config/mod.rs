@@ -44,6 +44,13 @@ fn resolve_root(path: &Option<String>, git_workdir: &AbsolutePath) -> anyhow::Re
 pub struct GlobalConfig {
 	/// Disable warnings about circular dependencies in monorepos.
 	pub disable_dependency_cycle_warnings: bool,
+	/// Glob patterns matching package names to exclude from enumeration.
+	///
+	/// Any project whose name matches at least one pattern is silently dropped
+	/// before the project list is returned to callers.  Standard glob syntax
+	/// (e.g. `"example-*"`, `"internal-tool"`) is supported via the `glob` crate.
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub ignore: Vec<String>,
 }
 
 /// Supported package managers for project configuration.
@@ -226,21 +233,67 @@ impl Config {
 
 	/// Loads all projects for the given adapters.
 	///
-	/// Enumerates all projects from the provided adapters.
+	/// Enumerates all projects from the provided adapters, then filters out any
+	/// project whose name matches a pattern in `global.ignore`.
 	///
 	/// # Errors
 	///
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
-	/// - No projects are found
+	/// - An ignore pattern is not valid glob syntax
+	/// - No projects are found after filtering
 	pub fn load_projects_for_adapters(
 		&self,
 		adapters: &[Arc<dyn PackageManagerAdapter>],
 	) -> anyhow::Result<Vec<Project>> {
-		let projects = package_manager::enumerate_projects(adapters.to_vec())?;
+		let all_projects = package_manager::enumerate_projects(adapters.to_vec())?;
+
+		// Compile all ignore patterns upfront so we fail fast on invalid syntax.
+		let ignore_patterns = self
+			.global
+			.ignore
+			.iter()
+			.map(|p| {
+				glob::Pattern::new(p).with_context(|| format!("Invalid ignore glob pattern: {p:?}"))
+			})
+			.collect::<anyhow::Result<Vec<_>>>()?;
+
+		// Determine which patterns match at least one project (for warning purposes).
+		let pattern_matched: Vec<bool> = ignore_patterns
+			.iter()
+			.map(|pat| all_projects.iter().any(|p| pat.matches(p.name())))
+			.collect();
+
+		// Filter out any project whose name matches an ignore pattern.
+		let projects: Vec<Project> = all_projects
+			.iter()
+			.filter(|project| {
+				!ignore_patterns
+					.iter()
+					.any(|pat| pat.matches(project.name()))
+			})
+			.cloned()
+			.collect();
+
+		// Warn about ignore patterns that matched nothing.
+		for (matched, raw) in pattern_matched.iter().zip(self.global.ignore.iter()) {
+			if !matched {
+				log::warn!("Ignore pattern {raw:?} did not match any project");
+			}
+		}
 
 		if projects.is_empty() {
-			bail!("No projects found. Check that your package manager configuration is correct.");
+			if all_projects.is_empty() {
+				bail!(
+					"No projects found. Check that your package manager configuration is correct."
+				);
+			} else {
+				bail!(
+					"All {} project(s) were excluded by [global].ignore patterns. \
+					 Check that your ignore patterns are not too broad.",
+					all_projects.len()
+				);
+			}
 		}
 
 		Ok(projects)
@@ -1082,6 +1135,212 @@ enabled = true
 		assert!(
 			chain.contains("unknown field"),
 			"Expected 'unknown field' error for run_until, got: {chain}"
+		);
+	}
+
+	// --- ignore field tests ---
+
+	#[test]
+	fn global_config_defaults_to_empty_ignore() {
+		let global = GlobalConfig::default();
+		assert!(global.ignore.is_empty());
+	}
+
+	#[test]
+	fn config_deserializes_with_global_ignore() {
+		let toml_str = r#"
+[global]
+ignore = ["example-*", "internal-tool"]
+
+[npm]
+enabled = true
+"#;
+		let config: Config = toml::from_str(toml_str).unwrap();
+		assert_eq!(
+			config.global.ignore,
+			vec!["example-*".to_string(), "internal-tool".to_string()]
+		);
+	}
+
+	#[test]
+	fn config_roundtrip_with_global_ignore() {
+		let dir = temp_dir();
+		let mut global = GlobalConfig::default();
+		global.ignore = vec!["example-*".to_string(), "internal-tool".to_string()];
+		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_global(global)
+			.with_cargo(CargoConfig::enabled());
+		config.save().unwrap();
+		let loaded = load(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&make_env(),
+		)
+		.unwrap();
+		assert_eq!(
+			loaded.global.ignore,
+			vec!["example-*".to_string(), "internal-tool".to_string()]
+		);
+	}
+
+	#[test]
+	fn load_projects_filters_ignored_packages() {
+		// Set up a workspace with two packages; ignore one by exact name.
+		let dir = temp_dir();
+		let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let mut global = GlobalConfig::default();
+		global.ignore = vec!["internal-tool".to_string()];
+		let config = Config::new(&abs)
+			.with_global(global)
+			.with_cargo(CargoConfig::enabled())
+			.with_env(make_env());
+
+		// Create a workspace with two members.
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[workspace]\nmembers = [\"app\", \"internal-tool\"]\n",
+		)
+		.unwrap();
+		for (name, version) in [("app", "0.1.0"), ("internal-tool", "0.1.0")] {
+			let pkg_dir = dir.path().join(name);
+			std::fs::create_dir_all(pkg_dir.join("src")).unwrap();
+			std::fs::write(
+				pkg_dir.join("Cargo.toml"),
+				format!(
+					"[package]\nname = \"{name}\"\nversion = \"{version}\"\nedition = \"2024\"\n"
+				),
+			)
+			.unwrap();
+			std::fs::write(pkg_dir.join("src/lib.rs"), "").unwrap();
+		}
+
+		let adapters = config.create_adapters().unwrap();
+		let projects = config.load_projects_for_adapters(&adapters).unwrap();
+
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name(), "app");
+	}
+
+	#[test]
+	fn load_projects_filters_by_glob_pattern() {
+		// Wildcard pattern: ignore all packages matching "example-*".
+		let dir = temp_dir();
+		let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let mut global = GlobalConfig::default();
+		global.ignore = vec!["example-*".to_string()];
+		let config = Config::new(&abs)
+			.with_global(global)
+			.with_cargo(CargoConfig::enabled())
+			.with_env(make_env());
+
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[workspace]\nmembers = [\"core\", \"example-basic\", \"example-advanced\"]\n",
+		)
+		.unwrap();
+		for (name, version) in [
+			("core", "0.1.0"),
+			("example-basic", "0.1.0"),
+			("example-advanced", "0.1.0"),
+		] {
+			let pkg_dir = dir.path().join(name);
+			std::fs::create_dir_all(pkg_dir.join("src")).unwrap();
+			std::fs::write(
+				pkg_dir.join("Cargo.toml"),
+				format!(
+					"[package]\nname = \"{name}\"\nversion = \"{version}\"\nedition = \"2024\"\n"
+				),
+			)
+			.unwrap();
+			std::fs::write(pkg_dir.join("src/lib.rs"), "").unwrap();
+		}
+
+		let adapters = config.create_adapters().unwrap();
+		let projects = config.load_projects_for_adapters(&adapters).unwrap();
+
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name(), "core");
+	}
+
+	#[test]
+	fn load_projects_ignore_invalid_glob_fails() {
+		let dir = temp_dir();
+		let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let mut global = GlobalConfig::default();
+		global.ignore = vec!["[invalid".to_string()];
+		let config = Config::new(&abs)
+			.with_global(global)
+			.with_cargo(CargoConfig::enabled())
+			.with_env(make_env());
+
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let adapters = config.create_adapters().unwrap();
+		let result = config.load_projects_for_adapters(&adapters);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("Invalid ignore glob pattern"),
+			"Expected 'Invalid ignore glob pattern' error, got: {err}"
+		);
+	}
+
+	#[test]
+	fn load_projects_ignore_no_match_warns() {
+		// A pattern that matches nothing should succeed (just log a warning).
+		let dir = temp_dir();
+		let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let mut global = GlobalConfig::default();
+		global.ignore = vec!["nonexistent-package".to_string()];
+		let config = Config::new(&abs)
+			.with_global(global)
+			.with_cargo(CargoConfig::enabled())
+			.with_env(make_env());
+
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let adapters = config.create_adapters().unwrap();
+		let projects = config.load_projects_for_adapters(&adapters).unwrap();
+
+		// app is still returned; the no-match pattern just warns
+		assert_eq!(projects.len(), 1);
+		assert_eq!(projects[0].name(), "app");
+	}
+
+	#[test]
+	fn load_projects_ignoring_all_packages_fails_with_informative_error() {
+		// When all projects are filtered by ignore patterns, the error message
+		// should mention the ignore patterns rather than the package manager config.
+		let dir = temp_dir();
+		let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let mut global = GlobalConfig::default();
+		global.ignore = vec!["app".to_string()];
+		let config = Config::new(&abs)
+			.with_global(global)
+			.with_cargo(CargoConfig::enabled())
+			.with_env(make_env());
+
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+
+		let adapters = config.create_adapters().unwrap();
+		let result = config.load_projects_for_adapters(&adapters);
+
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("excluded by [global].ignore"),
+			"Expected informative error about ignore patterns, got: {err}"
 		);
 	}
 }

@@ -221,6 +221,10 @@ pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String
 		out,
 		"# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings"
 	)?;
+	writeln!(
+		out,
+		"# ignore = [\"example-*\"]                     # Glob patterns for packages to exclude from enumeration"
+	)?;
 	writeln!(out)?;
 	write_cargo_section(&mut out, result.cargo_enabled, &result.cargo_path)?;
 	write_npm_section(&mut out, result.npm_enabled, &result.npm_path)?;

@@ -4,6 +4,7 @@ expression: render(&both_pms_git_github_result())
 ---
 # [global]
 # disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
+# ignore = ["example-*"]                     # Glob patterns for packages to exclude from enumeration
 
 [cargo]
 enabled = true
