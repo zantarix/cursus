@@ -43,6 +43,7 @@ fn resolve_one_group(
 		);
 	}
 	let mut matched: Vec<String> = Vec::new();
+	let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
 	for pattern_str in &group.packages {
 		let pattern = glob::Pattern::new(pattern_str)
 			.with_context(|| format!("Invalid glob pattern: {pattern_str}"))?;
@@ -60,7 +61,7 @@ fn resolve_one_group(
 					group_idx + 1
 				);
 			}
-			if !assigned.contains_key(*name) {
+			if seen.insert(*name) {
 				matched.push(name.to_string());
 			}
 		}
@@ -262,6 +263,15 @@ mod tests {
 		let groups = c.resolve_groups(&["pkg-a"]).unwrap();
 		// Group with no matches is dropped from results
 		assert!(groups.is_empty());
+	}
+
+	#[test]
+	fn resolve_groups_duplicate_project_names_deduplicated() {
+		// project_names with duplicates should not produce duplicate entries
+		let c = make_config(None, vec![vec!["pkg-*"]]);
+		let groups = c.resolve_groups(&["pkg-a", "pkg-b", "pkg-a"]).unwrap();
+		assert_eq!(groups.len(), 1);
+		assert_eq!(groups[0], vec!["pkg-a", "pkg-b"]);
 	}
 
 	#[test]
