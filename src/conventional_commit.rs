@@ -294,6 +294,11 @@ mod tests {
 		assert_eq!(c.commit_type, "build-system");
 	}
 
+	#[test]
+	fn parse_invalid_char_in_type_is_error() {
+		assert!(parse("feat@scope: desc").is_err());
+	}
+
 	// --- change_type ---
 
 	#[test]

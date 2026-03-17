@@ -91,4 +91,10 @@ mod tests {
 		let pb: PathBuf = p.into_path_buf();
 		assert_eq!(pb, PathBuf::from("/foo/bar"));
 	}
+
+	#[test]
+	fn from_trait_gives_path_buf() {
+		let pb: PathBuf = AbsolutePath::new("/foo").unwrap().into();
+		assert_eq!(pb, PathBuf::from("/foo"));
+	}
 }

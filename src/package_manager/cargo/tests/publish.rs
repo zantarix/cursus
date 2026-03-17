@@ -175,3 +175,10 @@ fn registry_name_is_crates_io() {
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 	assert_eq!(adapter.registry_name(), "crates.io");
 }
+
+#[test]
+fn manifest_filename_is_cargo_toml() {
+	let dir = temp_dir();
+	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+	assert_eq!(adapter.manifest_filename(), "Cargo.toml");
+}

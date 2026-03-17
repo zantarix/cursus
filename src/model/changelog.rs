@@ -525,6 +525,25 @@ mod tests {
 	}
 
 	#[test]
+	fn format_sections_dependency_section_separated_by_blank_line() {
+		let changes = vec![(ChangeType::Minor, Some("Feature X".to_string()), None)];
+		let changelog = Changelog::new(
+			"1.0.0".parse().unwrap(),
+			"2024-01-01".to_string(),
+			changes,
+			AbsolutePath::new("/nonexistent").unwrap(),
+		)
+		.with_dependency_entries(vec!["`pkg-a` bumped to 1.0.0".to_string()]);
+		let sections = changelog.format_sections();
+		assert!(
+			sections.contains("\n\n### Dependencies"),
+			"Expected blank line before Dependencies section, got: {sections}"
+		);
+		assert!(sections.contains("### Features"));
+		assert!(sections.contains("### Dependencies"));
+	}
+
+	#[test]
 	fn format_sections_returns_empty_when_no_messages() {
 		let changes: Vec<(ChangeType, Option<String>, Option<CommitReference>)> =
 			vec![(ChangeType::Minor, None, None)];
