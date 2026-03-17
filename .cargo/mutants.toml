@@ -1,5 +1,6 @@
 exclude_globs = ["src/main.rs"]
 # Disable nix tests in mutants
 no_default_features = true
+features = ["test-support"]
 # Try to fail as fast as possible since pass/fail is all we care about
 additional_cargo_test_args = ["--", "-Zunstable-options", "--fail-fast"]
