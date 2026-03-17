@@ -50,9 +50,6 @@ jobs:
   lint-js:
     name: Lint JS
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: pkg
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -60,16 +57,18 @@ jobs:
         with:
           node-version: '24.14.0'
           cache: npm
-          cache-dependency-path: pkg/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build
         run: npm run build
+        working-directory: pkg
 
       - name: Lint
         run: npm test
+        working-directory: pkg
 
   nix-build:
     name: Nix build

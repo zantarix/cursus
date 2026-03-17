@@ -13,7 +13,7 @@
 /.cache/
 
 # npm compiled output, dependencies, and postinstall-downloaded binaries
-/pkg/node_modules/
+node_modules/
 /pkg/bin/download-binary.js
 /pkg/bin/cursus
 /pkg/bin/cursus.exe

@@ -7,7 +7,6 @@ enabled = true
 
 [npm]
 enabled = true
-path = "pkg/"
 # lock_command = "npm install"  # Custom command to update the lock file
 access = "public"               # Access level for scoped packages: "public" or "restricted" (default: "restricted")
 
