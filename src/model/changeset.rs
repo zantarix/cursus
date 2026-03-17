@@ -150,6 +150,7 @@ impl Changeset {
 			.context("Missing opening +++ delimiter")?;
 		let (toml_section, body) = rest
 			.split_once("+++\n")
+			.or_else(|| rest.strip_suffix("+++").map(|t| (t, "")))
 			.context("Missing closing +++ delimiter")?;
 		let packages: BTreeMap<String, ChangeType> =
 			toml::from_str(toml_section).context("Invalid TOML frontmatter")?;
@@ -508,6 +509,16 @@ mod tests {
 	fn parse_changeset_empty_body_is_none() {
 		let input = "+++\npkg = \"patch\"\n+++\n\n\n";
 		let parsed = Changeset::parse(input).unwrap();
+		assert_eq!(parsed.message, None);
+	}
+
+	#[test]
+	fn parse_changeset_closing_delimiter_no_trailing_newline() {
+		let input = "+++
+pkg = \"minor\"
++++";
+		let parsed = Changeset::parse(input).unwrap();
+		assert_eq!(parsed.packages["pkg"], ChangeType::Minor);
 		assert_eq!(parsed.message, None);
 	}
 
