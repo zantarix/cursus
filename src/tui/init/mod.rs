@@ -307,7 +307,6 @@ pub fn run(
 	dry_run: bool,
 ) -> anyhow::Result<Option<InitResult>> {
 	let (cargo_detected, npm_detected) = detect_package_managers(git_workdir.as_ref());
-	let initial_npm = npm_detected || !cargo_detected;
 
 	let git = GitWorkdir::new(env, git_workdir.clone());
 	let detected_github = crate::github::remote::GitHubRepo::detect_in(&git)
@@ -335,7 +334,7 @@ pub fn run(
 	} else {
 		Screen::SelectPackageManagers {
 			cargo: cargo_detected,
-			npm: initial_npm,
+			npm: npm_detected,
 			focus: PmFocus::Cargo,
 		}
 	};

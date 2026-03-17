@@ -53,8 +53,7 @@ impl ButtonScreen for ConfirmOverwriteButtons {
 		state: WizardState,
 	) -> anyhow::Result<KeyResult<(WizardState, Screen), InitResult>> {
 		if self.yes {
-			let (cargo, npm_detected) = detect_package_managers(state.git_workdir.as_path());
-			let npm = npm_detected || !cargo;
+			let (cargo, npm) = detect_package_managers(state.git_workdir.as_path());
 			Ok(KeyResult::Continue((
 				state,
 				Screen::SelectPackageManagers {
@@ -175,11 +174,8 @@ mod tests {
 		assert!(matches!(s, Screen::ConfirmOverwrite(false)));
 	}
 
-	/// Catches the `||`→`&&` mutation at line 57: when no manifests are present
-	/// cargo=false and npm_detected=false, so `npm = false || !false = true`.
-	/// With `&&`, `npm = false && true = false` — the wrong default.
 	#[test]
-	fn confirm_overwrite_yes_sets_npm_true_when_no_cargo_detected() {
+	fn confirm_overwrite_yes_with_no_manifests_selects_nothing() {
 		let dir = temp_dir(); // empty dir — no Cargo.toml, no package.json
 		let state = make_state(&dir);
 		let screen = Screen::ConfirmOverwrite(true);
@@ -187,7 +183,7 @@ mod tests {
 		match s {
 			Screen::SelectPackageManagers { cargo, npm, .. } => {
 				assert!(!cargo, "no Cargo.toml → cargo should be false");
-				assert!(npm, "no cargo → npm should default to true (|| !cargo)");
+				assert!(!npm, "no package.json → npm should be false");
 			}
 			other => panic!("Expected SelectPackageManagers, got {other:?}"),
 		}
