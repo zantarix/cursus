@@ -594,6 +594,265 @@ mod tests {
 		assert!(!blocked.contains("d"));
 	}
 
+	// ── log_summary_line tests ────────────────────────────────────────────────
+
+	fn make_empty_outcome() -> GitReleaseOutcome {
+		GitReleaseOutcome {
+			tags_created: 0,
+			tags_skipped: 0,
+			tags_push_failed: 0,
+			github_created: 0,
+			github_failed: false,
+		}
+	}
+
+	fn make_published_package() -> PublishedPackage {
+		PublishedPackage {
+			name: "pkg".to_string(),
+			version: "1.0.0".parse().unwrap(),
+			project_path: crate::path::AbsolutePath::new("/nonexistent").unwrap(),
+		}
+	}
+
+	#[test]
+	fn log_summary_line_non_dry_run_dep_skipped_note_in_log() {
+		// dep_skipped_note only appears in non-dry-run mode.
+		// Guards `> 0` → `> 1` on dep_skipped_count condition.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		state.dep_skipped_count = 1; // exactly 1, to catch "> 1" mutation
+		let flags = PublishFlags {
+			dry_run: false,
+			git_enabled: false,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("skipped (dependency failed)")),
+			"Expected dep-skipped note in log: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn log_summary_line_non_dry_run_unprepared_note_in_log() {
+		// unprepared_note appears in both dry-run (via tag_note path) and non-dry-run.
+		// Guards `> 0` → `> 1` on unprepared_count condition.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		state.unprepared_count = 1; // exactly 1, to catch "> 1" mutation
+		let flags = PublishFlags {
+			dry_run: false,
+			git_enabled: false,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("skipped (not yet prepared)")),
+			"Expected unprepared note in log: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn log_summary_line_dry_run_git_disabled_no_tag_note() {
+		// Guards &&→|| on `flags.git_enabled && !state.published.is_empty()` (tag_note guard).
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		state.published.push(make_published_package()); // non-empty published
+		let flags = PublishFlags {
+			dry_run: true,
+			git_enabled: false, // git disabled
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			!logs.iter().any(|(_, m)| m.contains("would be tagged")),
+			"Should NOT log 'would be tagged' when git is disabled: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn log_summary_line_dry_run_git_enabled_tag_note_present() {
+		// Guards &&→|| on `flags.git_enabled && !state.published.is_empty()` (tag_note guard).
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		state.published.push(make_published_package());
+		let flags = PublishFlags {
+			dry_run: true,
+			git_enabled: true, // git enabled
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter().any(|(_, m)| m.contains("would be tagged")),
+			"Should log 'would be tagged' when git is enabled: {logs:?}"
+		);
+	}
+
+	// ── log_publish_summary tests ─────────────────────────────────────────────
+
+	#[test]
+	fn log_publish_summary_tags_created_appears_in_log() {
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let state = PublishState::new();
+		let flags = PublishFlags {
+			dry_run: false,
+			git_enabled: true,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		let outcome = GitReleaseOutcome {
+			tags_created: 2,
+			tags_skipped: 0,
+			tags_push_failed: 0,
+			github_created: 0,
+			github_failed: false,
+		};
+		log_publish_summary(&state, &flags, &outcome);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("tag") && m.contains("created")),
+			"Expected 'tag(s) created' in logs: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn log_publish_summary_tags_push_failed_appears_in_log() {
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let state = PublishState::new();
+		let flags = PublishFlags {
+			dry_run: false,
+			git_enabled: true,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		let outcome = GitReleaseOutcome {
+			tags_created: 0,
+			tags_skipped: 0,
+			tags_push_failed: 1,
+			github_created: 0,
+			github_failed: false,
+		};
+		log_publish_summary(&state, &flags, &outcome);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("tag") && m.contains("failed")),
+			"Expected 'tag push(es) failed' in logs: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn log_publish_summary_dry_run_no_tag_log_lines() {
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let state = PublishState::new();
+		let flags = PublishFlags {
+			dry_run: true, // dry-run: no tag log lines expected
+			git_enabled: true,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		let outcome = GitReleaseOutcome {
+			tags_created: 3,
+			tags_skipped: 0,
+			tags_push_failed: 2,
+			github_created: 0,
+			github_failed: false,
+		};
+		log_publish_summary(&state, &flags, &outcome);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			!logs
+				.iter()
+				.any(|(_, m)| m.contains("created") && m.contains("tag")),
+			"Should NOT log tag created count in dry-run: {logs:?}"
+		);
+		assert!(
+			!logs
+				.iter()
+				.any(|(_, m)| m.contains("tag") && m.contains("failed")),
+			"Should NOT log tag push failed in dry-run: {logs:?}"
+		);
+	}
+
+	// ── log_github_releases_summary tests ─────────────────────────────────────
+
+	#[test]
+	fn log_github_releases_summary_no_failure_logs_created_count() {
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		log_github_releases_summary(3, 0, "", "", 2, false);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("3 published") && m.contains("2 GitHub Releases created")),
+			"Expected GitHub Release summary: {logs:?}"
+		);
+	}
+
+	#[test]
+	fn log_github_releases_summary_with_failure_logs_failed_count() {
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		log_github_releases_summary(3, 0, "", "", 2, true);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("GitHub Release") && m.contains("failed")),
+			"Expected GitHub Release failure count: {logs:?}"
+		);
+	}
+
+	// ── PublishState::record_outcome tests ────────────────────────────────────
+
+	#[test]
+	fn record_outcome_skipped_increments_skipped_count() {
+		// Guards the `Skipped => self.skipped_count += 1` branch in non-dry-run mode.
+		// Uses the NpmAdapter (default in new_test_with_runner) with EPUBLISHCONFLICT in
+		// stderr to trigger PublishOutcome::AlreadyPublished → PublishResult::Skipped.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		use std::sync::Arc;
+		let runner = Arc::new(
+			crate::command::test_support::RecordingCommandRunner::new(1)
+				.with_stderr(b"npm ERR! code EPUBLISHCONFLICT".to_vec()),
+		);
+		let project = crate::package_manager::Project::new_test_with_runner(
+			"pkg",
+			"/nonexistent",
+			Arc::clone(&runner),
+		);
+		let graph = make_graph(&[]);
+		let mut state = PublishState::new();
+		state.record_outcome(&project, &graph, false);
+		assert_eq!(state.skipped_count, 1, "Expected skipped_count == 1");
+		assert_eq!(state.published.len(), 0, "Expected no published packages");
+	}
+
 	#[test]
 	fn add_transitive_dependents_with_prepopulated_blocked_set() {
 		// a -> b -> c: if blocked already contains "a" and we add dependents of b,
