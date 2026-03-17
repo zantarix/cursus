@@ -192,6 +192,72 @@ pub fn wizard_layout(area: Rect, constraints: &[Constraint]) -> Rc<[Rect]> {
 		.split(area)
 }
 
+/// RAII guard that reverses terminal setup steps in the correct order on drop.
+///
+/// Each field is set to `true` immediately after the corresponding setup step
+/// succeeds, so a `?`-propagated error at any point still cleans up whatever
+/// was already done.
+struct TerminalGuard {
+	raw_mode: bool,
+	alt_screen: bool,
+	mouse_capture: bool,
+	kbd_enhancement: bool,
+}
+
+impl TerminalGuard {
+	fn new() -> Self {
+		Self {
+			raw_mode: false,
+			alt_screen: false,
+			mouse_capture: false,
+			kbd_enhancement: false,
+		}
+	}
+
+	fn enable_raw_mode(&mut self) -> io::Result<()> {
+		enable_raw_mode()?;
+		self.raw_mode = true;
+		Ok(())
+	}
+
+	fn enter_alternate_screen(&mut self) -> io::Result<()> {
+		io::stdout().execute(EnterAlternateScreen)?;
+		self.alt_screen = true;
+		Ok(())
+	}
+
+	fn enable_mouse_capture(&mut self) -> io::Result<()> {
+		io::stdout().execute(EnableMouseCapture)?;
+		self.mouse_capture = true;
+		Ok(())
+	}
+
+	fn push_keyboard_enhancement(&mut self) -> io::Result<()> {
+		io::stdout().execute(PushKeyboardEnhancementFlags(
+			KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+		))?;
+		self.kbd_enhancement = true;
+		Ok(())
+	}
+}
+
+impl Drop for TerminalGuard {
+	fn drop(&mut self) {
+		if self.kbd_enhancement {
+			io::stdout().execute(PopKeyboardEnhancementFlags).ok();
+		}
+		if self.mouse_capture {
+			io::stdout().execute(DisableMouseCapture).ok();
+		}
+		if self.alt_screen {
+			io::stdout().execute(LeaveAlternateScreen).ok();
+		}
+		if self.raw_mode {
+			disable_raw_mode().ok();
+		}
+	}
+}
+
 /// Runs the interactive TUI event loop with the given state and callbacks.
 ///
 /// Handles terminal setup (`enable_raw_mode`, `EnterAlternateScreen`), the
@@ -219,18 +285,16 @@ where
 	DrawFn: FnMut(&mut Frame, &S),
 	HandleFn: FnMut(S, Event, Rect) -> anyhow::Result<KeyResult<S, T>>,
 {
-	enable_raw_mode()?;
-	io::stdout().execute(EnterAlternateScreen)?;
-	io::stdout().execute(EnableMouseCapture)?;
+	let mut guard = TerminalGuard::new();
+	guard.enable_raw_mode()?;
+	guard.enter_alternate_screen()?;
+	guard.enable_mouse_capture()?;
 	// Enable DISAMBIGUATE_ESCAPE_CODES on terminals that support the kitty
 	// keyboard protocol so that Shift+Enter is distinguishable from Enter.
 	// Falls back gracefully on terminals that don't support it; those users
 	// can use Alt+Enter instead.
-	let kbd_enhancement = supports_keyboard_enhancement().unwrap_or(false);
-	if kbd_enhancement {
-		io::stdout().execute(PushKeyboardEnhancementFlags(
-			KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
-		))?;
+	if supports_keyboard_enhancement().unwrap_or(false) {
+		guard.push_keyboard_enhancement()?;
 	}
 	let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
@@ -258,15 +322,7 @@ where
 		}
 	};
 
-	// Always restore the terminal, even if the loop errored.
-	// Cleanup errors are suppressed to preserve the primary error.
-	if kbd_enhancement {
-		io::stdout().execute(PopKeyboardEnhancementFlags).ok();
-	}
-	disable_raw_mode().ok();
-	io::stdout().execute(DisableMouseCapture).ok();
-	io::stdout().execute(LeaveAlternateScreen).ok();
-
+	// `guard` drops here, restoring the terminal in all cases.
 	result
 }
 
