@@ -373,3 +373,32 @@ fn change_auto_conflicts_with_message() {
 		"Expected conflict error, got: {stderr}"
 	);
 }
+
+/// `--auto` with git disabled in config (no `--no-git` flag) must write changeset but not commit.
+///
+/// Guards `&&`→`||` on `commit_to_git = config.git.enabled() && !args.no_git`: if that
+/// becomes `||`, a disabled-git config with no `--no-git` flag would still commit
+/// (since `!args.no_git` is true), creating an unexpected commit.
+#[test]
+fn change_auto_git_disabled_in_config_no_commit() {
+	// setup_auto_repo uses temp_real_git_repo_with_project which saves config WITHOUT git enabled.
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+	make_conventional_commit(dir.path(), "src/lib.rs", "fix: small fix for config test");
+	let commits_before = git_log(dir.path()).len();
+
+	// No --no-git flag — git commit_to_git must still be false because config disables git.
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto"],
+		dir.path(),
+	);
+
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+	let changesets = find_changesets(dir.path());
+	assert_eq!(changesets.len(), 1, "Changeset should be written");
+
+	let commits_after = git_log(dir.path()).len();
+	assert_eq!(
+		commits_after, commits_before,
+		"Expected no new commit when git disabled in config (without --no-git flag)"
+	);
+}

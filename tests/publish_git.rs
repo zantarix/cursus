@@ -235,3 +235,30 @@ fn publish_github_disabled_dry_run_no_would_create_github_release() {
 		"Should NOT log GitHub Release messages when GitHub is disabled, got: {logs:?}"
 	);
 }
+
+/// Git disabled + CHANGELOG.md present (package is prepared): dry-run must NOT log "would be tagged".
+///
+/// Guards `&&`→`||` on the tag_note condition: with git disabled but published packages,
+/// a `||` mutation would produce a non-empty tag_note even though git is off.
+#[test]
+fn publish_git_disabled_with_changelog_dry_run_no_tag_note_in_summary() {
+	init_test_logger();
+	let _ = take_logs();
+	// Set up workspace with git-disabled config.
+	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	write_config(dir.path(), "[cargo]\nenabled = true\n");
+	// Write CHANGELOG.md so the package is "prepared" and would appear in published list.
+	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		!logs.iter().any(|(_, m)| m.contains("would be tagged")),
+		"Summary should NOT include 'would be tagged' when git is disabled, got: {logs:?}"
+	);
+}

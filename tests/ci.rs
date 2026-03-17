@@ -484,3 +484,63 @@ fn ci_changesets_present_but_package_filter_matches_no_changeset() {
 		"pkg-b version should not change when it has no changeset"
 	);
 }
+
+/// Git disabled in config, CHANGELOG.md present, no changesets: `ci` must report "nothing to do".
+///
+/// Guards `&&`→`||` on `config.git.enabled() && !args.no_git` (line 72): if that becomes `||`,
+/// the tag check would run even though git is disabled, find the tag missing (since we wrote
+/// CHANGELOG.md but no tag), and trigger publish instead of "nothing to do".
+#[test]
+fn ci_git_disabled_with_changelog_no_changesets_nothing_to_do() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	// Override config to disable git.
+	let config_dir = dir.path().join(".cursus");
+	std::fs::write(config_dir.join("config.toml"), "[cargo]\nenabled = true\n").unwrap();
+	// Write CHANGELOG.md so the package would be considered "prepared" for tag checking.
+	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
+
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("nothing to do")),
+		"Expected 'ci: nothing to do' when git is disabled, got: {logs:?}"
+	);
+}
+
+/// Single-package with CHANGELOG.md and tag present: `ci` must report "nothing to do".
+///
+/// Guards `>`→`>=` on `projects.len() > 1` (line 75) for `is_multi`: if that becomes `>=`,
+/// `is_multi` would be true for a single package, the tag format would change from `v1.0.0`
+/// to `my-app@1.0.0`, the tag check would fail to find the existing tag, and publish would
+/// be triggered instead of "nothing to do".
+#[test]
+fn ci_single_package_with_changelog_and_tag_nothing_to_do() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	// Write CHANGELOG.md so the package is "prepared" and tag checking applies.
+	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
+	// Tag the single package in single-package format.
+	git_tag(dir.path(), "v1.0.0");
+
+	let result = run_cursus(
+		["cursus", "--no-interactive", "ci", "--dry-run"],
+		dir.path(),
+	);
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Info && m.contains("nothing to do")),
+		"Expected 'ci: nothing to do' when tag exists, got: {logs:?}"
+	);
+}
