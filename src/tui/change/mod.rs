@@ -466,4 +466,40 @@ mod tests {
 		assert_eq!(proj[1].0.name(), "project-2");
 		assert_eq!(proj[1].1, ChangeType::Patch);
 	}
+
+	/// Catches the `== 1`→`!= 1` mutation at line 169: single project → `SinglePackage`.
+	#[test]
+	fn build_initial_screen_single_project_returns_single_package() {
+		let projects = dummy_projects(1);
+		let ro = reorder_projects(&projects, &[true]);
+		let screen = build_initial_screen(&ro, &[], false);
+		assert!(
+			matches!(screen, Screen::SinglePackage { .. }),
+			"Expected SinglePackage for one project"
+		);
+	}
+
+	/// Catches the `<`→`<=` mutation at line 188: projects[0] (index 0 < changed_count=1)
+	/// should be pre-selected; projects[1] (index 1 >= 1) should not be.
+	#[test]
+	fn build_initial_screen_no_pre_selection_selects_only_changed() {
+		let projects = dummy_projects(2);
+		let ro = reorder_projects(&projects, &[true, false]); // 1 changed
+		let screen = build_initial_screen(&ro, &[], false);
+		match screen {
+			Screen::SelectProjects(SelectProjectsState {
+				selected,
+				changed_count,
+				..
+			}) => {
+				assert_eq!(changed_count, 1);
+				assert!(selected[0], "first project (changed) should be selected");
+				assert!(
+					!selected[1],
+					"second project (unchanged) should not be selected"
+				);
+			}
+			_ => panic!("Expected SelectProjects"),
+		}
+	}
 }

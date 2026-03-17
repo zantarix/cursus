@@ -526,7 +526,7 @@ pub(super) fn render_select_projects(
 
 #[cfg(test)]
 mod tests {
-	use crossterm::event::KeyCode;
+	use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 	use ratatui::prelude::Rect;
 
 	use crate::model::changeset::ChangeType;
@@ -1110,6 +1110,34 @@ mod tests {
 			)) => {
 				assert_eq!(sel[0], true); // toggled on
 				assert_eq!(lvl[0], ChangeType::Patch); // level unchanged
+			}
+			_ => panic!("Expected Continue(SelectProjects)"),
+		}
+	}
+
+	/// Catches deletion of the `MouseButton::Left` guard at line 376: a right-click
+	/// must not trigger any selection change.
+	#[test]
+	fn right_click_is_ignored() {
+		let area = Rect::new(0, 0, 80, 24);
+		let right_click = Event::Mouse(MouseEvent {
+			kind: MouseEventKind::Down(MouseButton::Right),
+			column: 10,
+			row: 7,
+			modifiers: KeyModifiers::NONE,
+		});
+		let state = super::super::SelectProjectsState {
+			selected: vec![false, false],
+			levels: vec![ChangeType::Patch; 2],
+			cursor: 0,
+			error: false,
+			changed_count: 2,
+		};
+		let result = super::handle_event_select_projects(state, right_click, area, &[]);
+		match result {
+			super::super::KeyResult::Continue(Screen::SelectProjects(s)) => {
+				assert!(!s.selected[0], "right-click must not toggle selection");
+				assert!(!s.selected[1], "right-click must not toggle selection");
 			}
 			_ => panic!("Expected Continue(SelectProjects)"),
 		}

@@ -583,4 +583,54 @@ mod tests {
 		assert_eq!(result.github_repo, Some("my-app".to_string()));
 		assert!(result.open_editor);
 	}
+
+	/// Catches the `state.dry_run` guard deletion at line 209: when dry_run is set,
+	/// transitioning to OpenEditor should immediately Complete rather than Continue.
+	#[test]
+	fn dry_run_skips_open_editor_and_completes() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+		let mut state = make_state(&dir);
+		state.dry_run = true;
+		// EnableGit(false) + Enter → would normally give OpenEditor, but dry_run
+		// should intercept and immediately Complete.
+		let result = handle_key(state, Screen::EnableGit(false), key(KeyCode::Enter));
+		let init_result = unwrap_complete(result);
+		assert!(!init_result.open_editor, "dry_run must skip the editor");
+	}
+
+	/// Catches the `>= 72`→`> 72` or `>= 72`→`>= 73` mutation at line 242:
+	/// a terminal narrower than 72 columns must show the short label "Managers".
+	#[test]
+	fn narrow_terminal_uses_short_managers_label() {
+		use ratatui::Terminal;
+		use ratatui::backend::TestBackend;
+		// Width 71 is below the 72-column threshold
+		let backend = TestBackend::new(71, 24);
+		let mut terminal = Terminal::new(backend).unwrap();
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let screen = Screen::SelectPackageManagers {
+			cargo: true,
+			npm: false,
+			focus: PmFocus::Cargo,
+		};
+		terminal.draw(|frame| ui(frame, &state, &screen)).unwrap();
+		let content = crate::tui::test_utils::buffer_to_string(terminal.backend().buffer());
+		// Only inspect the tab bar (first TAB_HEIGHT rows); the screen body can say
+		// "Package Managers" independently of the tab label.
+		let tab_area: String = content
+			.lines()
+			.take(TAB_HEIGHT as usize)
+			.collect::<Vec<_>>()
+			.join("\n");
+		assert!(
+			tab_area.contains("Managers"),
+			"Short label must appear in tab on narrow terminal, got: {tab_area:?}"
+		);
+		assert!(
+			!tab_area.contains("Package Managers"),
+			"Long label must not appear in tab on narrow terminal, got: {tab_area:?}"
+		);
+	}
 }

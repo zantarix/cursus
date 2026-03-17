@@ -175,6 +175,24 @@ mod tests {
 		assert!(matches!(s, Screen::ConfirmOverwrite(false)));
 	}
 
+	/// Catches the `||`→`&&` mutation at line 57: when no manifests are present
+	/// cargo=false and npm_detected=false, so `npm = false || !false = true`.
+	/// With `&&`, `npm = false && true = false` — the wrong default.
+	#[test]
+	fn confirm_overwrite_yes_sets_npm_true_when_no_cargo_detected() {
+		let dir = temp_dir(); // empty dir — no Cargo.toml, no package.json
+		let state = make_state(&dir);
+		let screen = Screen::ConfirmOverwrite(true);
+		let (_, s) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
+		match s {
+			Screen::SelectPackageManagers { cargo, npm, .. } => {
+				assert!(!cargo, "no Cargo.toml → cargo should be false");
+				assert!(npm, "no cargo → npm should default to true (|| !cargo)");
+			}
+			other => panic!("Expected SelectPackageManagers, got {other:?}"),
+		}
+	}
+
 	#[test]
 	fn ui_renders_confirm_overwrite() {
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};

@@ -292,6 +292,22 @@ mod tests {
 		}
 	}
 
+	/// Catches `&&`→`||` mutation at line 57-58: Alt+Enter must NOT submit —
+	/// the guard requires BOTH ALT and SHIFT to be absent.
+	/// With `||`, `!ALT || !SHIFT` is true when only one is absent → submits (wrong).
+	#[test]
+	fn alt_enter_does_not_submit() {
+		let ta = initial_textarea();
+		let event = key_with_mods(KeyCode::Enter, KeyModifiers::ALT);
+		let result =
+			handle_event_enter_message(ta, projects_with_patch(), empty_back(), event).unwrap();
+		// Alt+Enter should fall through to the textarea (not Complete)
+		assert!(
+			matches!(result, KeyResult::Continue(Screen::EnterMessage { .. })),
+			"Alt+Enter must not submit"
+		);
+	}
+
 	#[test]
 	fn ui_renders_enter_message_screen() {
 		let mut terminal = create_test_terminal();

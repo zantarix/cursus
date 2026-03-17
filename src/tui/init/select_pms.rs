@@ -436,6 +436,28 @@ mod tests {
 		));
 	}
 
+	/// Catches the `&&`→`||` mutation at line 31:
+	/// `if npm && !package_json.exists()` — when package.json already exists,
+	/// npm must NOT be queued for manifest prompting.
+	/// With `||`, `npm || !exists()` = `true || false = true` → queued (wrong).
+	#[test]
+	fn select_pms_npm_with_existing_package_json_skips_manifest_prompt() {
+		let dir = temp_dir();
+		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+		let state = make_state(&dir);
+		let screen = Screen::SelectPackageManagers {
+			cargo: false,
+			npm: true,
+			focus: PmFocus::Npm,
+		};
+		let (_, s) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
+		// Should advance to EnableGit, not ManifestPath
+		assert!(
+			matches!(s, Screen::EnableGit(_)),
+			"package.json exists → no manifest prompt expected"
+		);
+	}
+
 	#[test]
 	fn ui_renders_select_pms() {
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
