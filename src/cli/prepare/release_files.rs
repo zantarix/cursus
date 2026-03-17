@@ -277,6 +277,67 @@ mod tests {
 	}
 
 	#[test]
+	fn propagate_dependency_updates_returns_modified_manifest_paths() {
+		// Guards `additional_files.extend(paths)` mutation: verifies that when a dependency
+		// version is updated, the modified manifest path is included in the returned vec.
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let cfg =
+			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+				.with_cargo(crate::model::config::CargoConfig::enabled());
+		cfg.save().unwrap();
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
+		)
+		.unwrap();
+		std::fs::create_dir_all(dir.path().join("pkg-a/src")).unwrap();
+		std::fs::write(
+			dir.path().join("pkg-a/Cargo.toml"),
+			"[package]\nname = \"pkg-a\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
+		)
+		.unwrap();
+		std::fs::write(dir.path().join("pkg-a/src/lib.rs"), "").unwrap();
+		std::fs::create_dir_all(dir.path().join("pkg-b/src")).unwrap();
+		std::fs::write(
+			dir.path().join("pkg-b/Cargo.toml"),
+			"[package]\nname = \"pkg-b\"\nversion = \"1.0.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-a = { path = \"../pkg-a\", version = \"1.0.0\" }\n",
+		)
+		.unwrap();
+		std::fs::write(dir.path().join("pkg-b/src/lib.rs"), "").unwrap();
+
+		let runner = make_runner();
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let config =
+			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let projects = config.load_projects().unwrap();
+
+		let new_version: semver::Version = "1.0.1".parse().unwrap();
+		let release_infos = vec![super::ReleaseInfo {
+			package_name: "pkg-a".to_string(),
+			new_version: new_version.clone(),
+			changelog_entry: String::new(),
+		}];
+
+		let modified_paths =
+			super::propagate_dependency_updates(&projects, &release_infos, false).unwrap();
+
+		// At least one path should be returned (pkg-b's Cargo.toml).
+		assert!(
+			!modified_paths.is_empty(),
+			"Expected modified paths when dependency version is updated, got: {modified_paths:?}"
+		);
+		// The updated path should contain "pkg-b".
+		let has_pkg_b = modified_paths
+			.iter()
+			.any(|p| p.to_string_lossy().contains("pkg-b"));
+		assert!(
+			has_pkg_b,
+			"Expected pkg-b manifest in modified paths, got: {modified_paths:?}"
+		);
+	}
+
+	#[test]
 	fn cmd_prepare_package_flag_with_dry_run_leaves_changeset_untouched() {
 		let dir = setup_two_package_workspace();
 

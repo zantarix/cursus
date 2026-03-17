@@ -341,6 +341,30 @@ mod tests {
 	}
 
 	#[test]
+	fn mark_propagation_bumps_equal_change_type_does_not_propagate() {
+		// pkg-b already has Minor; upstream pkg-a propagates Minor (same level).
+		// Guards `>=`→`>` on `current_ct.is_some_and(|c| c >= effective_ct)`:
+		// with `>`, an equal ct would NOT be skipped, adding a spurious dep entry.
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Minor);
+		aggregated.insert("pkg-b".to_string(), ChangeType::Minor);
+		let version_overrides = BTreeMap::new();
+		let mut reverse_deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+		reverse_deps.insert("pkg-a".to_string(), vec!["pkg-b".to_string()]);
+		let result = mark_propagation_bumps(
+			&aggregated,
+			&version_overrides,
+			&reverse_deps,
+			DependencyBump::Match, // Minor upstream → Minor propagation
+		);
+		// pkg-b already has Minor (≥ Minor propagation) → must not appear in result
+		assert!(
+			!result.contains_key("pkg-b"),
+			"Equal ct should not create a propagation entry: {result:?}"
+		);
+	}
+
+	#[test]
 	fn mark_propagation_bumps_only_upgrades_not_downgrades() {
 		let mut aggregated = BTreeMap::new();
 		aggregated.insert("pkg-a".to_string(), ChangeType::Patch);

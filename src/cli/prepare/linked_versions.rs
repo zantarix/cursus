@@ -440,6 +440,59 @@ mod tests {
 	}
 
 	#[test]
+	fn compute_group_final_version_unknown_member_is_skipped() {
+		// "unknown" is not in projects — it should be silently skipped.
+		let group = vec!["unknown".to_string(), "pkg-a".to_string()];
+		let mut aggregated = BTreeMap::new();
+		aggregated.insert("pkg-a".to_string(), ChangeType::Patch);
+		let projects = vec![make_project("pkg-a", "1.0.0")];
+		let result = compute_group_final_version(&group, &aggregated, &projects);
+		// unknown skipped; pkg-a has Patch → bump(1.0.0, Patch) = 1.0.1
+		assert_eq!(result, Some(v("1.0.1")));
+	}
+
+	#[test]
+	fn promote_package_to_final_unknown_project_is_skipped() {
+		// When the named package is not in projects, nothing should be mutated.
+		let mut aggregated: BTreeMap<String, ChangeType> = BTreeMap::new();
+		let mut changes: BTreeMap<String, PackageChanges> = BTreeMap::new();
+		let mut overrides: BTreeMap<String, Version> = BTreeMap::new();
+		promote_package_to_final(
+			"nonexistent",
+			&v("1.0.0"),
+			&mut aggregated,
+			&mut changes,
+			&mut overrides,
+			&[], // no projects
+		);
+		assert!(aggregated.is_empty(), "aggregated should be unchanged");
+		assert!(overrides.is_empty(), "overrides should be unchanged");
+	}
+
+	#[test]
+	fn sync_linked_groups_after_propagation_unknown_member_is_skipped() {
+		// Group contains "unknown" (not in projects) and "pkg-a".
+		// Should not panic and should still sync known members.
+		let group = vec!["unknown".to_string(), "pkg-a".to_string()];
+		let mut aggregated: BTreeMap<String, ChangeType> = BTreeMap::new();
+		let mut changes: BTreeMap<String, PackageChanges> = BTreeMap::new();
+		let mut overrides: BTreeMap<String, Version> = BTreeMap::new();
+		overrides.insert("pkg-a".to_string(), v("2.0.0"));
+		let projects = vec![make_project("pkg-a", "1.0.0")];
+
+		sync_linked_groups_after_propagation(
+			&mut aggregated,
+			&mut changes,
+			&mut overrides,
+			&[group],
+			&projects,
+		);
+		// pkg-a is at 2.0.0 (override), "unknown" skipped → max_effective = 2.0.0
+		// pkg-a is already at the target → no additional override changes expected
+		assert_eq!(overrides.get("pkg-a"), Some(&v("2.0.0")));
+	}
+
+	#[test]
 	fn reconcile_skips_packages_already_at_final_version() {
 		// Both packages at the same version, only A has a changeset
 		let group = vec!["pkg-a".to_string(), "pkg-b".to_string()];
