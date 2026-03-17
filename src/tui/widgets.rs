@@ -150,17 +150,17 @@ pub fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
 	}
 }
 
-/// Renders either/or buttons as equal-width blocks with one blank line of
+/// Renders a row of buttons as equal-width blocks with one blank line of
 /// padding above and below each label.
 ///
 /// Each button occupies an equal share of `area`. The selected button's style
 /// fills the entire button area. Unselected buttons have a dark grey background.
-pub fn render_yes_no_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef<'_>]) {
+pub fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef<'_>]) {
 	if buttons.is_empty() {
 		return;
 	}
-	let n = buttons.len() as u16;
-	let constraints: Vec<Constraint> = (0..n).map(|_| Constraint::Percentage(100 / n)).collect();
+	let n = buttons.len();
+	let constraints: Vec<Constraint> = (0..n).map(|_| Constraint::Fill(1)).collect();
 	let cells = Layout::horizontal(constraints).spacing(1).split(area);
 	for (btn, &cell) in buttons.iter().zip(cells.iter()) {
 		let style = if btn.selected {
@@ -275,7 +275,7 @@ where
 /// Uses the standard wizard layout (2-cell margin, question block, then
 /// a 3-row button row) to locate the button area and splits it into
 /// `n_buttons` equal-width cells with 1-cell spacing, matching
-/// [`render_yes_no_buttons`]. `question` must be the same text passed to
+/// [`render_buttons`]. `question` must be the same text passed to
 /// `render_question` on the same screen so that the height computation
 /// matches.
 pub fn button_click_index(
@@ -424,13 +424,13 @@ mod tests {
 		assert!(content.contains("Press Esc to cancel"));
 	}
 
-	// render_yes_no_buttons tests
+	// render_buttons tests
 	#[test]
-	fn render_yes_no_buttons_shows_labels() {
+	fn render_buttons_shows_labels() {
 		let backend = TestBackend::new(80, 5);
 		let mut terminal = Terminal::new(backend).unwrap();
 		let content = render_to_string(&mut terminal, |frame| {
-			render_yes_no_buttons(
+			render_buttons(
 				frame,
 				frame.area(),
 				&[
@@ -452,10 +452,10 @@ mod tests {
 	}
 
 	#[test]
-	fn render_yes_no_buttons_empty_does_not_panic() {
+	fn render_buttons_empty_does_not_panic() {
 		let mut terminal = make_terminal();
 		terminal
-			.draw(|frame| render_yes_no_buttons(frame, frame.area(), &[]))
+			.draw(|frame| render_buttons(frame, frame.area(), &[]))
 			.unwrap();
 	}
 

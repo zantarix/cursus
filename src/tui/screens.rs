@@ -4,8 +4,8 @@ use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::prelude::*;
 
 use super::widgets::{
-	ButtonDef, KeyResult, button_click_index, paragraph_height, render_help, render_question,
-	render_yes_no_buttons, wizard_layout,
+	ButtonDef, KeyResult, button_click_index, paragraph_height, render_buttons, render_help,
+	render_question, wizard_layout,
 };
 
 /// The [`KeyResult`] type for [`ButtonScreen`] event handlers.
@@ -129,7 +129,7 @@ pub trait ButtonScreen: Sized {
 			],
 		);
 		render_question(frame, chunks[0], Self::QUESTION, Self::QUESTION_COLOR);
-		render_yes_no_buttons(frame, chunks[1], &self.buttons());
+		render_buttons(frame, chunks[1], &self.buttons());
 		render_help(
 			frame,
 			chunks[3],
