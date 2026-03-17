@@ -533,3 +533,20 @@ mod dry_run_tests {
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+
+#[cfg(test)]
+mod real_command_tests {
+	use std::path::Path;
+
+	use super::*;
+
+	#[test]
+	fn real_runner_run_interactive_returns_success_for_true() {
+		// Exercises RealCommandRunner::run_interactive so the .status() call is
+		// covered — mutations that replace it with something else would break this.
+		let runner = RealCommandRunner;
+		let result = runner.run_interactive("true", &[], Path::new("/tmp"));
+		assert!(result.is_ok(), "run_interactive should succeed: {result:?}");
+		assert!(result.unwrap().success(), "'true' must exit with status 0");
+	}
+}
