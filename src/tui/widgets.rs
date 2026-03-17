@@ -305,9 +305,7 @@ pub fn button_click_index(
 	if col < buttons_area.x || col >= buttons_area.x + buttons_area.width {
 		return None;
 	}
-	let constraints: Vec<Constraint> = (0..n_buttons)
-		.map(|_| Constraint::Percentage(100 / n_buttons))
-		.collect();
+	let constraints: Vec<Constraint> = (0..n_buttons).map(|_| Constraint::Fill(1)).collect();
 	let cells = Layout::horizontal(constraints)
 		.spacing(1)
 		.split(buttons_area);
