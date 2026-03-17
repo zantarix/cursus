@@ -152,8 +152,8 @@ impl Project {
 	/// Returns whether this project is publishable (not marked as private).
 	///
 	/// The publishable status is cached from when the project was enumerated.
-	pub fn is_publishable(&self) -> anyhow::Result<bool> {
-		Ok(self.info.publishable)
+	pub fn is_publishable(&self) -> bool {
+		self.info.publishable
 	}
 
 	/// Returns the names of intra-workspace dependencies for this project.

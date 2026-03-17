@@ -383,7 +383,7 @@ fn publish_projects(
 			continue;
 		}
 		// Silently skip private packages (per ADR-007).
-		if !project.is_publishable()? {
+		if !project.is_publishable() {
 			continue;
 		}
 		// Skip public packages that have never been prepared (no CHANGELOG.md).
