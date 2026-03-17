@@ -60,7 +60,7 @@ fn change_auto_fix_commit_creates_patch_changeset() {
 	assert_eq!(changesets.len(), 1, "Expected one changeset file");
 	let content = std::fs::read_to_string(&changesets[0]).unwrap();
 	assert!(
-		content.contains("\"patch\"") || content.contains("patch"),
+		content.contains("test-project = \"patch\""),
 		"Expected patch changeset, got: {content}"
 	);
 	assert!(
@@ -84,7 +84,7 @@ fn change_auto_feat_commit_creates_minor_changeset() {
 	assert_eq!(changesets.len(), 1);
 	let content = std::fs::read_to_string(&changesets[0]).unwrap();
 	assert!(
-		content.contains("\"minor\"") || content.contains("minor"),
+		content.contains("test-project = \"minor\""),
 		"Expected minor changeset, got: {content}"
 	);
 }
@@ -104,7 +104,7 @@ fn change_auto_breaking_bang_creates_major_changeset() {
 	assert_eq!(changesets.len(), 1);
 	let content = std::fs::read_to_string(&changesets[0]).unwrap();
 	assert!(
-		content.contains("\"major\"") || content.contains("major"),
+		content.contains("test-project = \"major\""),
 		"Expected major changeset, got: {content}"
 	);
 }
