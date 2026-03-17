@@ -97,12 +97,21 @@ struct UploadAssetResponse {
 /// The underlying [`ureq::Agent`] is configured with `http_status_as_error(false)`
 /// so that non-2xx responses are returned normally and their bodies can be
 /// logged at trace level before the error is propagated.
-#[derive(Debug)]
 pub struct RestGitHubClient {
 	token: String,
 	api_base_url: String,
 	upload_base_url: String,
 	agent: ureq::Agent,
+}
+
+impl std::fmt::Debug for RestGitHubClient {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("RestGitHubClient")
+			.field("token", &"[REDACTED]")
+			.field("api_base_url", &self.api_base_url)
+			.field("upload_base_url", &self.upload_base_url)
+			.finish_non_exhaustive()
+	}
 }
 
 impl RestGitHubClient {
