@@ -427,10 +427,15 @@ fn enumerate_workspace_in_subfolder() {
 }
 
 #[test]
-fn enumerate_returns_empty_when_subfolder_missing() {
+fn enumerate_errors_when_subfolder_missing() {
 	let dir = temp_dir();
-	let projects = enumerate_with_path(dir.path(), "nonexistent").unwrap();
-	assert!(projects.is_empty());
+	let result = enumerate_with_path(dir.path(), "nonexistent");
+	assert!(result.is_err());
+	let msg = result.unwrap_err().to_string();
+	assert!(
+		msg.contains("does not exist or escapes repository root"),
+		"got: {msg}"
+	);
 }
 
 #[test]

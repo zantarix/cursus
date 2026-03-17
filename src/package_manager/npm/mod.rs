@@ -3,7 +3,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use glob::glob;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use log::warn;
@@ -229,20 +228,17 @@ fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<Projec
 /// Expands a workspace glob pattern and returns all matching projects.
 ///
 /// Globs are resolved relative to `pm_root`. Paths in the returned
-/// [`ProjectInfo`] are absolute paths to each workspace directory.
-fn expand_workspace_pattern(pm_root: &Path, pattern: &str) -> anyhow::Result<Vec<ProjectInfo>> {
-	let full_pattern = pm_root.join(pattern);
-	let pattern_str = full_pattern
-		.to_str()
-		.context("Invalid UTF-8 in workspace pattern")?;
-
-	glob(pattern_str)
-		.with_context(|| format!("Invalid glob pattern: {}", pattern))?
-		.map(|entry| {
-			let workspace_path = entry
-				.with_context(|| format!("Failed to read glob entry for pattern: {}", pattern))?;
-			read_workspace_project(&workspace_path)
-		})
+/// [`ProjectInfo`] are absolute paths to each workspace directory. Only paths
+/// that remain within `pm_root` are returned; paths that escape via `..` or
+/// symlinks are rejected with an error.
+fn expand_workspace_pattern(
+	pm_root: &AbsolutePath,
+	pattern: &str,
+) -> anyhow::Result<Vec<ProjectInfo>> {
+	pm_root
+		.safe_glob(pattern)?
+		.into_iter()
+		.map(|workspace_path| read_workspace_project(&workspace_path))
 		.filter_map(Result::transpose)
 		.collect()
 }

@@ -118,25 +118,22 @@ pub(super) fn stage_and_commit(
 
 	// Build the full staging list, validating that extra_files resolve inside the repo root.
 	let git_workdir = git.path();
-	let canonical_workdir = std::fs::canonicalize(git_workdir)
-		.with_context(|| format!("failed to canonicalize git workdir {:?}", git_workdir))?;
 	let mut all_files = modified_files.to_vec();
 	for f in extra_files {
-		let full_path = git_workdir.join(f);
-		let resolved = match std::fs::canonicalize(&full_path) {
-			Ok(p) => p,
-			Err(_) => {
+		match git_workdir.subpath(f) {
+			Ok(resolved) => all_files.push(resolved.into_path_buf()),
+			Err(_) if !git_workdir.join(f).exists() => {
 				log::warn!("extra_files entry {:?} does not exist, skipping", f);
-				continue;
 			}
-		};
-		if !resolved.starts_with(&canonical_workdir) {
-			anyhow::bail!(
-				"extra_files entry {:?} resolves outside the repository root",
-				f
-			);
+			Err(e) => {
+				return Err(e).with_context(|| {
+					format!(
+						"extra_files entry {:?} resolves outside the repository root",
+						f
+					)
+				});
+			}
 		}
-		all_files.push(resolved);
 	}
 
 	git.add(&all_files)

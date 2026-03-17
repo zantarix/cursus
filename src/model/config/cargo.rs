@@ -61,22 +61,45 @@ mod tests {
 			enabled: true,
 			path: None,
 		};
-		let git_workdir = AbsolutePath::new("/repo").unwrap();
+		let dir = tempfile::tempdir().unwrap();
+		let git_workdir = AbsolutePath::new(dir.path()).unwrap();
 		let resolved = config.resolve_root(&git_workdir).unwrap();
 		assert_eq!(resolved, git_workdir);
 	}
 
 	#[test]
 	fn cargo_config_resolve_root_with_path() {
+		let dir = tempfile::tempdir().unwrap();
+		let subdir = dir.path().join("rust-workspace");
+		std::fs::create_dir(&subdir).unwrap();
 		let config = CargoConfig {
 			enabled: true,
 			path: Some("rust-workspace".to_string()),
 		};
-		let git_workdir = AbsolutePath::new("/repo").unwrap();
+		let git_workdir = AbsolutePath::new(dir.path()).unwrap();
 		let resolved = config.resolve_root(&git_workdir).unwrap();
-		assert_eq!(
-			*resolved,
-			*AbsolutePath::new("/repo/rust-workspace").unwrap()
+		assert_eq!(*resolved, *AbsolutePath::new(&subdir).unwrap());
+	}
+
+	#[test]
+	fn cargo_config_resolve_root_rejects_traversal() {
+		let outer = tempfile::tempdir().unwrap();
+		let repo = outer.path().join("repo");
+		std::fs::create_dir(&repo).unwrap();
+		let config = CargoConfig {
+			enabled: true,
+			path: Some("../escape".to_string()),
+		};
+		let escape_dir = outer.path().join("escape");
+		std::fs::create_dir(&escape_dir).unwrap();
+		let git_workdir = AbsolutePath::new(&repo).unwrap();
+		let result = config.resolve_root(&git_workdir);
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("escapes repository root")
 		);
 	}
 }

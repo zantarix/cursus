@@ -32,8 +32,9 @@ use crate::path::AbsolutePath;
 /// Returns `git_workdir` unchanged when `path` is `None`.
 fn resolve_root(path: &Option<String>, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
 	match path {
-		Some(p) => AbsolutePath::new(git_workdir.join(p))
-			.with_context(|| format!("resolve_root: invalid path '{p}'")),
+		Some(p) => git_workdir.subpath(p).with_context(|| {
+			format!("resolve_root: path '{p}' does not exist or escapes repository root")
+		}),
 		None => Ok(git_workdir.clone()),
 	}
 }
