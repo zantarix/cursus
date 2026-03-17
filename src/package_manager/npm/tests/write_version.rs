@@ -43,6 +43,26 @@ fn write_version_updates_package_json() {
 }
 
 #[test]
+fn write_version_dry_run_does_not_write_file() {
+	let dir = temp_dir();
+	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
+	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+	let info = project_info(dir.path(), "my-app", "");
+	let new_version: semver::Version = "2.0.0".parse().unwrap();
+	adapter.write_version(&info, &new_version, true).unwrap();
+
+	let contents = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+	assert!(
+		contents.contains("\"1.0.0\""),
+		"dry-run should not modify the file, got: {contents}"
+	);
+	assert!(
+		!contents.contains("\"2.0.0\""),
+		"dry-run should not write new version, got: {contents}"
+	);
+}
+
+#[test]
 fn write_version_roundtrip() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "0.1.0"}"#);

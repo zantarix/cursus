@@ -298,6 +298,77 @@ fn update_dep_version_not_found_returns_empty() {
 }
 
 #[test]
+fn update_dep_version_dry_run_does_not_write_file() {
+	let dir = temp_dir();
+	let member_dir = dir.path().join("pkg-a");
+	std::fs::create_dir_all(&member_dir).unwrap();
+	std::fs::write(
+		member_dir.join("Cargo.toml"),
+		"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n[dependencies]\npkg-b = \"0.2.0\"\n",
+	)
+	.unwrap();
+
+	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+	let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+	let new_version: semver::Version = "0.3.0".parse().unwrap();
+
+	let modified = adapter
+		.update_dependency_version(&info, "pkg-b", &new_version, true)
+		.unwrap();
+
+	// Should still report the file as modified (would-be), but not write it
+	assert_eq!(
+		modified.len(),
+		1,
+		"dry-run should still report the modified path"
+	);
+	let content = std::fs::read_to_string(member_dir.join("Cargo.toml")).unwrap();
+	assert!(
+		content.contains("pkg-b = \"0.2.0\""),
+		"dry-run should not modify the file, got: {content}"
+	);
+	assert!(
+		!content.contains("pkg-b = \"0.3.0\""),
+		"dry-run should not write new version, got: {content}"
+	);
+}
+
+#[test]
+fn update_dep_version_workspace_dep_dry_run_does_not_write_file() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		"[workspace]\nmembers = [\"pkg-a\"]\n\n[workspace.dependencies]\npkg-b = \"0.2.0\"\n",
+	);
+	let member_dir = dir.path().join("pkg-a");
+	std::fs::create_dir_all(&member_dir).unwrap();
+	std::fs::write(
+		member_dir.join("Cargo.toml"),
+		"[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n",
+	)
+	.unwrap();
+
+	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+	let info = make_member_info(dir.path(), "pkg-a", "pkg-a");
+	let new_version: semver::Version = "0.3.0".parse().unwrap();
+
+	let modified = adapter
+		.update_dependency_version(&info, "pkg-b", &new_version, true)
+		.unwrap();
+
+	assert_eq!(
+		modified.len(),
+		1,
+		"dry-run should still report the modified path"
+	);
+	let content = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+	assert!(
+		content.contains("pkg-b = \"0.2.0\""),
+		"dry-run should not modify the workspace Cargo.toml, got: {content}"
+	);
+}
+
+#[test]
 fn semver_range_prefix_extracts_caret() {
 	assert_eq!(crate::package_manager::semver_range_prefix("^1.0.0"), "^");
 }

@@ -133,6 +133,34 @@ fn update_dep_version_in_dev_dependencies() {
 }
 
 #[test]
+fn update_dep_version_dry_run_does_not_write_file() {
+	let dir = temp_dir();
+	let info = make_project_with_deps(dir.path(), r#"{"pkg-b": "^1.0.0"}"#);
+	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
+	let new_version: Version = "2.0.0".parse().unwrap();
+
+	let modified = adapter
+		.update_dependency_version(&info, "pkg-b", &new_version, true)
+		.unwrap();
+
+	// Should still report the file as modified (would-be), but not write it
+	assert_eq!(
+		modified.len(),
+		1,
+		"dry-run should still report the modified path"
+	);
+	let content = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
+	assert!(
+		content.contains("\"pkg-b\": \"^1.0.0\""),
+		"dry-run should not modify the file, got: {content}"
+	);
+	assert!(
+		!content.contains("\"pkg-b\": \"^2.0.0\""),
+		"dry-run should not write new version, got: {content}"
+	);
+}
+
+#[test]
 fn semver_range_prefix_caret() {
 	assert_eq!(crate::package_manager::semver_range_prefix("^1.0.0"), "^");
 }
