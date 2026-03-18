@@ -16,12 +16,11 @@ fn read_version(dir: &std::path::Path, pkg: &str) -> String {
 		std::fs::read_to_string(dir.join(format!("{pkg}/Cargo.toml"))).unwrap_or_else(|_| {
 			std::fs::read_to_string(dir.join("Cargo.toml")).expect("Could not read Cargo.toml")
 		});
-	for line in cargo_toml.lines() {
-		if let Some(v) = line.strip_prefix("version = \"") {
-			return v.trim_end_matches('"').to_string();
-		}
-	}
-	panic!("version not found for package {pkg}");
+	let parsed: toml::Value = toml::from_str(&cargo_toml).expect("invalid Cargo.toml");
+	parsed["package"]["version"]
+		.as_str()
+		.unwrap_or_else(|| panic!("version not found for package {pkg}"))
+		.to_string()
 }
 
 fn make_env() -> cursus::Env {
