@@ -947,3 +947,57 @@ fn prepare_updates_npm_intra_workspace_dep_version() {
 		"Expected pkg-a to reference pkg-b ^0.3.0, got: {pkg_a_json}"
 	);
 }
+
+#[test]
+fn prepare_skips_workspace_protocol_dep_version() {
+	// pkg-a depends on pkg-b via workspace: protocol; that dep must NOT be rewritten
+	// (ADR-012: workspace: entries auto-resolve at publish time via the package manager)
+	let dir = temp_git_repo();
+	let config =
+		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
+			.with_npm(cursus::model::config::NpmConfig::enabled());
+	config.save().unwrap();
+
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "0.0.0", "private": true, "workspaces": ["pkg-a", "pkg-b"]}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("pkg-a")).unwrap();
+	std::fs::write(
+		dir.path().join("pkg-a/package.json"),
+		r#"{"name": "pkg-a", "version": "0.1.0", "dependencies": {"pkg-b": "workspace:*"}}"#,
+	)
+	.unwrap();
+
+	std::fs::create_dir_all(dir.path().join("pkg-b")).unwrap();
+	std::fs::write(
+		dir.path().join("pkg-b/package.json"),
+		r#"{"name": "pkg-b", "version": "0.2.0"}"#,
+	)
+	.unwrap();
+
+	write_changeset(
+		dir.path(),
+		"bump-b.md",
+		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
+	);
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "prepare failed: {:?}", result.unwrap_err());
+
+	// pkg-b version should be bumped normally
+	let pkg_b_json = std::fs::read_to_string(dir.path().join("pkg-b/package.json")).unwrap();
+	assert!(
+		pkg_b_json.contains("\"0.3.0\""),
+		"Expected pkg-b version 0.3.0, got: {pkg_b_json}"
+	);
+
+	// pkg-a's workspace: dep must remain untouched
+	let pkg_a_json = std::fs::read_to_string(dir.path().join("pkg-a/package.json")).unwrap();
+	assert!(
+		pkg_a_json.contains("\"pkg-b\": \"workspace:*\""),
+		"Expected workspace: dep to be preserved unchanged, got: {pkg_a_json}"
+	);
+}

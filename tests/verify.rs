@@ -213,6 +213,22 @@ fn verify_dry_run_behaves_identically() {
 }
 
 #[test]
+fn verify_exits_2_when_on_default_branch() {
+	// When verify runs from the default branch itself (HEAD == origin/HEAD),
+	// there can be no new changesets relative to origin, so it must exit 2.
+	let working = temp_real_git_repo();
+	let dir = working.path();
+
+	let _remote = add_local_remote(dir);
+	git_push_to_remote(dir);
+	git_set_remote_head(dir, "main");
+
+	// Remain on main — do NOT check out a feature branch.
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	assert_eq!(result, ExitCode::from(2));
+}
+
+#[test]
 fn verify_lists_multiple_changesets() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
