@@ -1,0 +1,43 @@
+name: Repo Management
+
+# Marks stale issues (30 days), closes them (7 days after stale label), and
+# locks closed threads after inactivity.  PRs are marked stale but never
+# auto-closed — a human must merge or close them.
+#
+# Only issues carrying a `bug` or `question` label are eligible for stale
+# marking; unlabelled or `enhancement`-only issues are left alone.
+#
+# Locking windows after close:
+#   issues:      14 days
+#   PRs:         28 days
+#   discussions: 365 days
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # daily at midnight UTC
+  workflow_dispatch:
+
+jobs:
+  stale:
+    name: Mark stale issues and PRs
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      discussions: write
+    steps:
+      - uses: actions/stale@b5d41d4e1d5dceea10e7104786b73624c18a190f # v10.2.0
+        with:
+          stale-issue-message: 'This issue is stale because it has been open 30 days with no activity. Remove the stale label or leave a comment otherwise this issue will be closed in 7 days.'
+          stale-pr-message: 'This PR is stale because it has been open 30 days with no activity.'
+          close-issue-message: 'This issue was closed because it has been stalled for 7 days with no activity.'
+          days-before-stale: 30
+          days-before-close: 7
+          days-before-pr-close: -1
+          any-of-labels: 'bug,question'
+
+      - uses: dessant/lock-threads@7266a7ce5c1df01b1c6db85bf8cd86c737dadbe7 # v6.0.0
+        with:
+          issue-inactive-days: '14'
+          pr-inactive-days: '28'
+          discussion-inactive-days: '365'
