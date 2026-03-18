@@ -94,15 +94,19 @@ fn write_git_section(out: &mut String, enabled: bool, strategy: Option<Strategy>
 	let prefix = if enabled { "" } else { "# " };
 	writeln!(
 		out,
-		"{prefix}# tag_format = \"auto\"                            # Tag format: \"auto\", \"prefixed\", or \"simple\""
+		"{prefix}# tag_format = \"auto\"                                       # Tag format: \"auto\", \"prefixed\", or \"simple\""
 	)?;
 	writeln!(
 		out,
-		"{prefix}# release_branch_prefix = \"cursus-release/\"      # Prefix for release branches (branch strategy)"
+		"{prefix}# release_branch_prefix = \"cursus-release/\"                 # Prefix for release branches (branch strategy)"
 	)?;
 	writeln!(
 		out,
-		"{prefix}# extra_files = []                               # Additional files to stage before committing"
+		"{prefix}# extra_files = []                                          # Additional files to stage before committing"
+	)?;
+	writeln!(
+		out,
+		"{prefix}# prepare_commit_message = \"ci(release): version packages\"  # Commit message for the prepare step"
 	)?;
 	writeln!(out)
 }

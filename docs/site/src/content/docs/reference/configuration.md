@@ -57,6 +57,7 @@ Git lifecycle management.
 | `release_branch_prefix` | string | `"cursus-release/"` | Prefix for release branch names (branch strategy only) |
 | `tag_format` | string | `"auto"` | Tag naming: `"auto"`, `"prefixed"`, or `"simple"` |
 | `extra_files` | list | `[]` | Additional file paths to stage before committing |
+| `prepare_commit_message` | string | `"ci(release): version packages"` | Commit message used for the prepare step |
 
 **Tag formats:**
 
