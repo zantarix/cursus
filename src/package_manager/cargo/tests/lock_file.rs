@@ -13,8 +13,8 @@ fn update_lock_file_command_failure_propagates_error() {
 	assert!(result.is_err());
 	let msg = result.unwrap_err().to_string();
 	assert!(
-		msg.contains("cargo generate-lockfile failed"),
-		"Expected 'cargo generate-lockfile failed', got: {msg}"
+		msg.contains("cargo update --workspace failed"),
+		"Expected 'cargo update --workspace failed', got: {msg}"
 	);
 }
 
@@ -32,7 +32,7 @@ fn update_lock_file_passes_correct_args() {
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "cargo");
-	assert_eq!(invocations[0].args, ["generate-lockfile"]);
+	assert_eq!(invocations[0].args, ["update", "--workspace"]);
 	assert_eq!(invocations[0].cwd, dir.path());
 }
 

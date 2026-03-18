@@ -412,10 +412,10 @@ impl PackageManagerAdapter for CargoAdapter {
 		// run_mut is a no-op when DryRunCommandRunner is active, so this is always safe to call.
 		let output = self
 			.env
-			.run_mut("cargo", &["generate-lockfile"], &workspace_root)
+			.run_mut("cargo", &["update", "--workspace"], &workspace_root)
 			.with_context(|| {
 				format!(
-					"Failed to execute cargo generate-lockfile in {}",
+					"Failed to execute cargo update --workspace in {}",
 					workspace_root.display()
 				)
 			})?;
@@ -423,7 +423,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		if !output.status.success() {
 			let stderr = String::from_utf8_lossy(&output.stderr);
 			anyhow::bail!(
-				"cargo generate-lockfile failed in {}: {}",
+				"cargo update --workspace failed in {}: {}",
 				workspace_root.display(),
 				stderr
 			);
