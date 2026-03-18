@@ -197,23 +197,25 @@ impl GitWorkdir {
 
 	/// Returns `true` if the given tag exists in the repository.
 	///
-	/// Runs `git tag -l <tag>` and checks whether the output is non-empty.
+	/// Runs `git rev-parse --verify refs/tags/<tag>` and checks the exit status.
+	/// A zero exit status means the ref exists; non-zero means it does not.
+	/// Using the full ref path avoids the glob interpretation that
+	/// `git tag -l <pattern>` applies to its argument.
 	///
 	/// # Errors
 	///
-	/// Returns an error if `git tag` exits with a non-zero status.
+	/// Returns an error only if the `git` binary cannot be executed. A non-zero
+	/// exit code — whether due to a missing ref, not being in a git repository,
+	/// or any other reason — is treated as the tag not existing and returns
+	/// `Ok(false)`.
 	pub(crate) fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
+		let ref_path = format!("refs/tags/{tag}");
 		let output = self
 			.env
-			.run("git", &["tag", "-l", tag], &self.path)
-			.context("Failed to run git tag -l")?;
+			.run("git", &["rev-parse", "--verify", &ref_path], &self.path)
+			.context("Failed to run git rev-parse")?;
 
-		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
-			bail!("git tag -l failed: {stderr}");
-		}
-
-		Ok(!output.stdout.is_empty())
+		Ok(output.status.success())
 	}
 
 	/// Returns the URL of the `origin` remote, or `None` if there is no origin.

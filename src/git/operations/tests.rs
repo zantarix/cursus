@@ -419,49 +419,51 @@ fn git_force_push_branch_failure_propagates() {
 #[test]
 fn git_tag_exists_passes_correct_args() {
 	let dir = temp_dir();
-	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
+	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"abc123\n".to_vec()));
 	let dir_abs = abs(&dir);
 	let (git, runner) = make_git(runner, dir_abs);
 	git.tag_exists("v1.0.0").unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "git");
-	assert_eq!(invocations[0].args, ["tag", "-l", "v1.0.0"]);
+	assert_eq!(
+		invocations[0].args,
+		["rev-parse", "--verify", "refs/tags/v1.0.0"]
+	);
 	assert_eq!(invocations[0].cwd, dir.path());
 }
 
 #[test]
-fn git_tag_exists_returns_true_when_output_nonempty() {
+fn git_tag_exists_returns_true_on_zero_exit() {
 	let dir = temp_dir();
-	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
+	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"abc123\n".to_vec()));
 	let dir_abs = abs(&dir);
 	let (git, _) = make_git(runner, dir_abs);
-	let result = git.tag_exists("v1.0.0").unwrap();
-	assert!(result);
+	assert!(git.tag_exists("v1.0.0").unwrap());
 }
 
 #[test]
-fn git_tag_exists_returns_false_when_output_empty() {
+fn git_tag_exists_returns_false_on_nonzero_exit() {
 	let dir = temp_dir();
-	let runner = recording(0);
+	let runner = recording(1);
 	let dir_abs = abs(&dir);
 	let (git, _) = make_git(runner, dir_abs);
-	let result = git.tag_exists("v1.0.0").unwrap();
-	assert!(!result);
+	assert!(!git.tag_exists("v1.0.0").unwrap());
 }
 
 #[test]
-fn git_tag_exists_failure_propagates() {
+fn git_tag_exists_passes_glob_chars_as_literal_ref() {
+	// Tag names containing glob metacharacters must be passed verbatim in the
+	// ref path so git treats them literally, not as a glob pattern.
 	let dir = temp_dir();
-	let runner = recording_with_stderr(1, b"fatal: not a git repo");
+	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"abc123\n".to_vec()));
 	let dir_abs = abs(&dir);
-	let (git, _) = make_git(runner, dir_abs);
-	let result = git.tag_exists("v1.0.0");
-	assert!(result.is_err());
-	let msg = result.unwrap_err().to_string();
-	assert!(
-		msg.contains("git tag -l failed"),
-		"Expected 'git tag -l failed', got: {msg}"
+	let (git, runner) = make_git(runner, dir_abs);
+	git.tag_exists("v1.0.0-rc[1]").unwrap();
+	let invocations = runner.invocations();
+	assert_eq!(
+		invocations[0].args,
+		["rev-parse", "--verify", "refs/tags/v1.0.0-rc[1]"]
 	);
 }
 

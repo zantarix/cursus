@@ -81,8 +81,13 @@ mod tests {
 	fn create_and_push_tags_creates_annotated_tags_and_pushes() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		// empty stdout → git_tag_exists returns false (no existing tag)
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		// rev-parse exits 1 → tag_exists returns false (no existing tag)
+		// all other git commands succeed via default exit 0
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
+			"git",
+			vec!["rev-parse".to_string(), "--verify".to_string()],
+			1,
+		));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
@@ -101,9 +106,9 @@ mod tests {
 		assert_eq!(skipped, 0);
 		assert_eq!(push_failed, 0);
 		let invocations = runner.invocations();
-		// tag -l (exists check), tag -a (create), push origin <tag>
+		// rev-parse (exists check), tag -a (create), push origin <tag>
 		assert_eq!(invocations.len(), 3);
-		assert!(invocations[0].args.contains(&"-l".to_string()));
+		assert!(invocations[0].args.contains(&"rev-parse".to_string()));
 		assert!(invocations[1].args.contains(&"-a".to_string()));
 		// Pushes the specific tag, not all tags
 		assert!(
@@ -121,8 +126,8 @@ mod tests {
 	fn create_and_push_tags_skips_existing_tag() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		// non-empty stdout → git_tag_exists returns true (tag already exists)
-		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"v1.0.0\n".to_vec()));
+		// rev-parse exits 0 → tag_exists returns true (tag already exists)
+		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
@@ -140,10 +145,10 @@ mod tests {
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 1);
 		assert_eq!(push_failed, 0);
-		// Only the tag -l check; no tag creation or push
+		// Only the rev-parse check; no tag creation or push
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
-		assert!(invocations[0].args.contains(&"-l".to_string()));
+		assert!(invocations[0].args.contains(&"rev-parse".to_string()));
 	}
 
 	#[test]
@@ -211,8 +216,12 @@ mod tests {
 
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		// Empty stdout → git_tag_exists returns false → tag gets created
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		// rev-parse exits 1 → tag_exists returns false → tag gets created
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
+			"git",
+			vec!["rev-parse".to_string(), "--verify".to_string()],
+			1,
+		));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
@@ -240,9 +249,16 @@ mod tests {
 
 	#[test]
 	fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
+		// Verifies that the `my-app@2.0.0` prefix format is used throughout
+		// the full create-and-push flow, not just the existence check.
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		// rev-parse exits 1 (tag absent) so tag creation and push are exercised.
+		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
+			"git",
+			vec!["rev-parse".to_string(), "--verify".to_string()],
+			1,
+		));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
@@ -257,11 +273,23 @@ mod tests {
 		create_and_push_tags(&published, &config, &git, true).unwrap();
 
 		let invocations = runner.invocations();
-		// The tag -l check should use the prefixed tag name
+		// rev-parse ref, tag -a create, push — all must use the prefixed name
 		assert!(
-			invocations[0].args.contains(&"my-app@2.0.0".to_string()),
-			"Expected monorepo tag name, got: {:?}",
+			invocations[0]
+				.args
+				.contains(&"refs/tags/my-app@2.0.0".to_string()),
+			"Expected monorepo ref in rev-parse, got: {:?}",
 			invocations[0].args
+		);
+		assert!(
+			invocations[1].args.contains(&"my-app@2.0.0".to_string()),
+			"Expected monorepo tag name in tag -a, got: {:?}",
+			invocations[1].args
+		);
+		assert!(
+			invocations[2].args.contains(&"my-app@2.0.0".to_string()),
+			"Expected monorepo tag name in push, got: {:?}",
+			invocations[2].args
 		);
 	}
 
@@ -269,17 +297,25 @@ mod tests {
 	fn create_and_push_tags_push_failure_deletes_local_tag_and_counts_failed() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		// All git commands succeed by default; push of v1.0.0 fails specifically.
-		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
-			"git",
-			vec![
-				"push".to_string(),
-				"origin".to_string(),
-				"tag".to_string(),
-				"v1.0.0".to_string(),
-			],
-			1,
-		));
+		// rev-parse exits 1 (tag absent); push of v1.0.0 also fails; all else succeeds.
+		let runner = Arc::new(
+			DispatchingCommandRunner::new(0)
+				.on_with_args(
+					"git",
+					vec!["rev-parse".to_string(), "--verify".to_string()],
+					1,
+				)
+				.on_with_args(
+					"git",
+					vec![
+						"push".to_string(),
+						"origin".to_string(),
+						"tag".to_string(),
+						"v1.0.0".to_string(),
+					],
+					1,
+				),
+		);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
@@ -299,9 +335,9 @@ mod tests {
 		assert_eq!(push_failed, 1);
 
 		let invocations = runner.invocations();
-		// tag -l (exists check), tag -a (create), push origin <tag> (fails), tag -d (cleanup)
+		// rev-parse (exists check), tag -a (create), push origin <tag> (fails), tag -d (cleanup)
 		assert_eq!(invocations.len(), 4);
-		assert!(invocations[0].args.contains(&"-l".to_string()));
+		assert!(invocations[0].args.contains(&"rev-parse".to_string()));
 		assert!(invocations[1].args.contains(&"-a".to_string()));
 		assert!(invocations[2].args.contains(&"push".to_string()));
 		// Cleanup: git tag -d
@@ -314,17 +350,25 @@ mod tests {
 	fn create_and_push_tags_push_failure_continues_to_next_package() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		// Only the first push (v1.0.0) fails; the second (v2.0.0) succeeds via default.
-		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
-			"git",
-			vec![
-				"push".to_string(),
-				"origin".to_string(),
-				"tag".to_string(),
-				"v1.0.0".to_string(),
-			],
-			1,
-		));
+		// rev-parse exits 1 (both tags absent); only the first push (v1.0.0) fails.
+		let runner = Arc::new(
+			DispatchingCommandRunner::new(0)
+				.on_with_args(
+					"git",
+					vec!["rev-parse".to_string(), "--verify".to_string()],
+					1,
+				)
+				.on_with_args(
+					"git",
+					vec![
+						"push".to_string(),
+						"origin".to_string(),
+						"tag".to_string(),
+						"v1.0.0".to_string(),
+					],
+					1,
+				),
+		);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
@@ -356,9 +400,14 @@ mod tests {
 	fn create_and_push_tags_delete_failure_after_push_failure_is_non_fatal() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		// Push fails; delete also fails.
+		// rev-parse exits 1 (tag absent); push and delete also fail.
 		let runner = Arc::new(
 			DispatchingCommandRunner::new(0)
+				.on_with_args(
+					"git",
+					vec!["rev-parse".to_string(), "--verify".to_string()],
+					1,
+				)
 				.on_with_args("git", vec!["push".to_string()], 1)
 				.on_with_args("git", vec!["tag".to_string(), "-d".to_string()], 1),
 		);
