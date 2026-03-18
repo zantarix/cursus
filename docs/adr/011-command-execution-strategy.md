@@ -158,3 +158,7 @@ This was rejected because it produces surprising behavior for users. A string th
 Command fields could accept either a TOML string (shell-interpreted) or a TOML array of strings (exec'd directly via `std::process::Command`), choosing the execution strategy based on the TOML value type. This provides maximum flexibility: shell features when needed, direct exec when simplicity and predictability are preferred.
 
 This was deferred rather than rejected. Many tools in the ecosystem support this pattern (e.g., Docker's `CMD`, GitHub Actions' `run` vs. step arguments) and it has clear utility. However, it doubles the implementation and testing surface for every command field and adds a format choice that must be documented and explained. For the current scope, the single-string shell format covers all use cases. The dual format can be introduced as a backward-compatible enhancement if demand arises.
+
+## Errata
+
+- **2026-03-18**: [ADR-033](033-windows-shell-execution.md) extends this decision to support Windows. The `/bin/sh -c` convention described above applies to Unix only; on Windows, `cmd.exe /C` is used instead. The supported platform list (originally Linux and macOS) now includes Windows as a cross-compilation target. See [ADR-033](033-windows-shell-execution.md) for the full decision and rationale.

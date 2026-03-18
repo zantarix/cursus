@@ -25,7 +25,7 @@ description: |-
    assistant: <commentary>User explicitly requested ADR creation. Use the Task tool to launch the adr-architect agent.</commentary>
    "I'll use the adr-architect agent to create that ADR."
    </example>
-tools: Glob, Grep, Read, WebFetch, WebSearch, ListMcpResourcesTool, ReadMcpResourceTool, Edit, Write
+tools: Glob, Grep, Read, WebFetch, WebSearch, ListMcpResourcesTool, ReadMcpResourceTool, Edit, Write, Bash
 model: opus
 color: purple
 memory: project

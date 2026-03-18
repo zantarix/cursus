@@ -23,6 +23,7 @@ serde-saphyr = "=0.0.21"
 toml = "=1.0.6"
 toml_edit = "=0.25.4"
 ureq = { version = "=3.2.0", features = ["json"] }
+shell-escape = "0.1.5"
 
 [features]
 default = ["nix-tests"]

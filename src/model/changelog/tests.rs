@@ -441,6 +441,7 @@ fn update_changelog_fails_when_cannot_read_existing() {
 	assert!(result.is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn update_changelog_fails_when_cannot_write() {
 	use std::os::unix::fs::PermissionsExt;

@@ -1,55 +1,98 @@
 //! Shell quoting utilities.
 //!
-//! Each function in this module has a platform-specific behaviour and should be
-//! updated (or swapped for a conditional implementation) when Windows support
-//! is added.
+//! Delegates to the [`shell_escape`] crate, which handles both Unix (POSIX
+//! single-quote wrapping) and Windows (`cmd.exe` double-quote wrapping).
 
-/// Wraps a string in POSIX single quotes, escaping any embedded single quotes.
+use std::borrow::Cow;
+
+/// Quotes a string for safe embedding in a platform shell command.
 ///
-/// The resulting value is safe to embed in a `/bin/sh -c` command string: the
-/// shell will treat the entire quoted span as a single token regardless of
-/// spaces, glob characters, or other metacharacters.
+/// Delegates to [`shell_escape::escape`], which selects the appropriate
+/// quoting strategy automatically: POSIX single-quote wrapping on Unix (and
+/// on MSYS2/Git Bash via the `MSYSTEM` env var), and `cmd.exe`-compatible
+/// double-quote wrapping on Windows.
 ///
-/// Existing single quotes are replaced using the `'\''` idiom: the surrounding
-/// quotes are closed, the literal quote is added unquoted, then quoting resumes.
-///
-/// # Example
-///
-/// ```
-/// # use cursus::shell::shell_quote;
-/// assert_eq!(shell_quote("hello world"), "'hello world'");
-/// assert_eq!(shell_quote("it's"), "'it'\\''s'");
-/// ```
+/// The resulting value is safe to embed in the platform shell command string
+/// (i.e. the argument passed to `run_shell`): the shell treats the entire
+/// quoted span as a single token regardless of spaces, glob characters, or
+/// other metacharacters. Strings that contain only shell-safe characters are
+/// returned unmodified (no unnecessary quoting).
 pub fn shell_quote(s: &str) -> String {
-	format!("'{}'", s.replace('\'', "'\\''"))
+	shell_escape::escape(Cow::Borrowed(s)).into_owned()
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	// --- Unix quoting ---
 
 	#[test]
-	fn shell_quote_wraps_in_single_quotes() {
-		assert_eq!(shell_quote("hello"), "'hello'");
+	fn unix_quote_safe_string_needs_no_quotes() {
+		let result = shell_escape::unix::escape(std::borrow::Cow::Borrowed("hello"));
+		assert_eq!(result, "hello");
 	}
 
 	#[test]
-	fn shell_quote_handles_spaces() {
-		assert_eq!(shell_quote("hello world"), "'hello world'");
+	fn unix_quote_handles_spaces() {
+		let result = shell_escape::unix::escape(std::borrow::Cow::Borrowed("hello world"));
+		assert_eq!(result, "'hello world'");
 	}
 
 	#[test]
-	fn shell_quote_escapes_single_quote() {
-		assert_eq!(shell_quote("it's"), "'it'\\''s'");
+	fn unix_quote_escapes_single_quote() {
+		let result = shell_escape::unix::escape(std::borrow::Cow::Borrowed("it's"));
+		assert_eq!(result, "'it'\\''s'");
 	}
 
 	#[test]
-	fn shell_quote_escapes_multiple_single_quotes() {
-		assert_eq!(shell_quote("it's a l'il"), "'it'\\''s a l'\\''il'");
+	fn unix_quote_handles_empty_string() {
+		let result = shell_escape::unix::escape(std::borrow::Cow::Borrowed(""));
+		assert_eq!(result, "''");
+	}
+
+	// --- Windows quoting ---
+
+	#[test]
+	fn windows_quote_handles_spaces() {
+		let result = shell_escape::windows::escape(std::borrow::Cow::Borrowed("hello world"));
+		assert!(result.starts_with('"'), "should be double-quoted: {result}");
+		assert!(result.ends_with('"'), "should be double-quoted: {result}");
+		assert!(
+			result.contains("hello world"),
+			"should preserve content: {result}"
+		);
 	}
 
 	#[test]
-	fn shell_quote_handles_empty_string() {
-		assert_eq!(shell_quote(""), "''");
+	fn windows_quote_handles_empty_string() {
+		let result = shell_escape::windows::escape(std::borrow::Cow::Borrowed(""));
+		assert_eq!(result, "\"\"");
+	}
+
+	// --- Public dispatch ---
+
+	#[cfg(unix)]
+	#[test]
+	fn shell_quote_safe_string_on_unix() {
+		assert_eq!(super::shell_quote("hello"), "hello");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn shell_quote_handles_spaces_on_unix() {
+		assert_eq!(super::shell_quote("hello world"), "'hello world'");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn shell_quote_escapes_single_quote_on_unix() {
+		assert_eq!(super::shell_quote("it's"), "'it'\\''s'");
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn shell_quote_handles_spaces_on_windows() {
+		let result = super::shell_quote("hello world");
+		assert!(result.starts_with('"'));
+		assert!(result.ends_with('"'));
 	}
 }

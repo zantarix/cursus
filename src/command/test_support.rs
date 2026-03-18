@@ -7,7 +7,7 @@ use std::sync::Mutex;
 /// A recorded command invocation.
 #[derive(Debug, Clone)]
 pub struct Invocation {
-	/// The program name (or `/bin/sh` for shell commands).
+	/// The program name (or the platform shell for shell commands).
 	pub program: String,
 	/// The arguments passed to the program.
 	pub args: Vec<String>,
@@ -116,8 +116,8 @@ impl CommandRunner for RecordingCommandRunner {
 
 	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		self.record(
-			"/bin/sh",
-			vec!["-c".to_string(), command.to_string()],
+			shell_program(),
+			vec![shell_flag().to_string(), command.to_string()],
 			cwd,
 			true,
 			false,
@@ -157,8 +157,8 @@ impl CommandRunner for RecordingCommandRunner {
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus> {
 		self.record(
-			"/bin/sh",
-			vec!["-c".to_string(), command.to_string()],
+			shell_program(),
+			vec![shell_flag().to_string(), command.to_string()],
 			cwd,
 			true,
 			true,
@@ -195,11 +195,11 @@ pub struct DispatchRule {
 ///
 /// # Shell commands
 ///
-/// `run_shell` / `run_shell_mut` record the invocation with program `/bin/sh` and
-/// args `["-c", <command>]`. Dispatch rules must therefore match against `/bin/sh`
-/// (with an appropriate args prefix) when targeting shell commands. For most test
-/// scenarios the commands of interest are invoked via `run` / `run_mut`; add an
-/// explicit `/bin/sh` rule only when you need to control `run_shell` output.
+/// `run_shell` / `run_shell_mut` record the invocation with the platform shell program
+/// (see [`shell_program`]) and args `[<shell_flag>, <command>]`. Dispatch rules must
+/// therefore match against the platform shell when targeting shell commands. For most
+/// test scenarios the commands of interest are invoked via `run` / `run_mut`; add an
+/// explicit shell rule only when you need to control `run_shell` output.
 #[derive(Debug)]
 pub struct DispatchingCommandRunner {
 	rules: Vec<DispatchRule>,
@@ -388,13 +388,13 @@ impl CommandRunner for DispatchingCommandRunner {
 
 	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		self.record(
-			"/bin/sh",
-			vec!["-c".to_string(), command.to_string()],
+			shell_program(),
+			vec![shell_flag().to_string(), command.to_string()],
 			cwd,
 			true,
 			false,
 		);
-		Ok(self.make_output_for("/bin/sh", &["-c", command]))
+		Ok(self.make_output_for(shell_program(), &[shell_flag(), command]))
 	}
 
 	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
@@ -427,13 +427,15 @@ impl CommandRunner for DispatchingCommandRunner {
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus> {
 		self.record(
-			"/bin/sh",
-			vec!["-c".to_string(), command.to_string()],
+			shell_program(),
+			vec![shell_flag().to_string(), command.to_string()],
 			cwd,
 			true,
 			true,
 		);
-		Ok(self.make_output_for("/bin/sh", &["-c", command]).status)
+		Ok(self
+			.make_output_for(shell_program(), &[shell_flag(), command])
+			.status)
 	}
 }
 
@@ -548,7 +550,7 @@ mod dispatching_tests {
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
-		assert_eq!(invocations[0].program, "/bin/sh");
+		assert_eq!(invocations[0].program, shell_program());
 	}
 
 	#[test]

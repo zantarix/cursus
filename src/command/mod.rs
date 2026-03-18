@@ -13,6 +13,16 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
+/// Returns the platform shell executable: `cmd.exe` on Windows, `/bin/sh` on Unix.
+pub(crate) fn shell_program() -> &'static str {
+	if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }
+}
+
+/// Returns the platform shell command flag: `/C` on Windows, `-c` on Unix.
+pub(crate) fn shell_flag() -> &'static str {
+	if cfg!(windows) { "/C" } else { "-c" }
+}
+
 /// Abstracts command execution to allow testing without real processes.
 ///
 /// All commands run with the specified working directory (`cwd`), removing
@@ -28,7 +38,7 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	/// Read-only — always executes, even in dry-run mode.
 	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
 
-	/// Runs a shell command via `/bin/sh -c` in the specified directory.
+	/// Runs a shell command via the platform shell in the specified directory.
 	///
 	/// Read-only — always executes, even in dry-run mode. Used for user-configurable
 	/// commands that may use shell features such as pipes, redirects, or variable
@@ -41,7 +51,7 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	/// modify state (e.g. `git add`, `git commit`, `cargo publish`).
 	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
 
-	/// Runs a shell command via `/bin/sh -c` and records it as a mutating operation.
+	/// Runs a shell command via the platform shell and records it as a mutating operation.
 	///
 	/// Mutating — skipped by [`DryRunCommandRunner`]. Use this for shell commands that
 	/// write files or modify state (e.g. custom lock file update commands).
@@ -59,7 +69,7 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus>;
 
-	/// Runs a shell command via `/bin/sh -c` with inherited stdin/stdout/stderr.
+	/// Runs a shell command via the platform shell with inherited stdin/stdout/stderr.
 	///
 	/// Mutating — skipped by [`DryRunCommandRunner`]. Combines the shell interpretation
 	/// of [`run_shell`] with the inherited terminal of [`run_interactive`]. Use this for
@@ -184,8 +194,8 @@ impl CommandRunner for RealCommandRunner {
 	}
 
 	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		std::process::Command::new("/bin/sh")
-			.args(["-c", command])
+		std::process::Command::new(shell_program())
+			.args([shell_flag(), command])
 			.current_dir(cwd)
 			.output()
 			.with_context(|| format!("Failed to run shell command: '{command}'"))
@@ -217,8 +227,8 @@ impl CommandRunner for RealCommandRunner {
 		command: &str,
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus> {
-		std::process::Command::new("/bin/sh")
-			.args(["-c", command])
+		std::process::Command::new(shell_program())
+			.args([shell_flag(), command])
 			.current_dir(cwd)
 			.status()
 			.with_context(|| format!("Failed to run shell command: '{command}'"))
@@ -641,30 +651,38 @@ pub mod test_support;
 
 #[cfg(test)]
 mod real_command_tests {
-	use std::path::Path;
-
 	use super::*;
 
 	#[test]
-	fn real_runner_run_interactive_returns_success_for_true() {
+	fn real_runner_run_interactive_returns_success() {
 		// Exercises RealCommandRunner::run_interactive so the .status() call is
 		// covered — mutations that replace it with something else would break this.
+		// git is a prerequisite on all platforms and is a real executable.
 		let runner = RealCommandRunner;
-		let result = runner.run_interactive("true", &[], Path::new("/tmp"));
+		let cwd = std::env::temp_dir();
+		let result = runner.run_interactive("git", &["--version"], &cwd);
 		assert!(result.is_ok(), "run_interactive should succeed: {result:?}");
-		assert!(result.unwrap().success(), "'true' must exit with status 0");
+		assert!(
+			result.unwrap().success(),
+			"'git --version' must exit with status 0"
+		);
 	}
 
 	#[test]
-	fn real_runner_run_shell_interactive_returns_success_for_true() {
+	fn real_runner_run_shell_interactive_returns_success() {
 		// Exercises RealCommandRunner::run_shell_interactive so the .status() call is
 		// covered — mutations that replace it with something else would break this.
+		// "echo ok" works on both /bin/sh and cmd.exe.
 		let runner = RealCommandRunner;
-		let result = runner.run_shell_interactive("true", Path::new("/tmp"));
+		let cwd = std::env::temp_dir();
+		let result = runner.run_shell_interactive("echo ok", &cwd);
 		assert!(
 			result.is_ok(),
 			"run_shell_interactive should succeed: {result:?}"
 		);
-		assert!(result.unwrap().success(), "'true' must exit with status 0");
+		assert!(
+			result.unwrap().success(),
+			"'echo ok' must exit with status 0"
+		);
 	}
 }

@@ -424,7 +424,11 @@ mod tests {
 		}
 
 		fn run_shell(&self, _command: &str, cwd: &Path) -> anyhow::Result<Output> {
-			self.run("sh", &["-c", ""], cwd)
+			self.run(
+				crate::command::shell_program(),
+				&[crate::command::shell_flag(), ""],
+				cwd,
+			)
 		}
 
 		fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {

@@ -140,12 +140,21 @@ impl Env {
 		self.cargo_registry_token_present
 	}
 
-	/// Finds a default editor by checking for `nano`, `vim`, then `vi` on the system PATH.
+	/// Finds a default editor by probing well-known editors on the system PATH.
+	///
+	/// On Windows, checks for `notepad` via `where.exe`. On Unix, checks for
+	/// `nano`, `vim`, `vi`, and `emacs` via `which`.
 	fn find_default_editor(&self, cwd: &Path) -> Option<String> {
-		["nano", "vim", "vi", "emacs"]
-			.into_iter()
+		let (probe_cmd, candidates): (&str, &[&str]) = if cfg!(windows) {
+			("where.exe", &["notepad"])
+		} else {
+			("which", &["nano", "vim", "vi", "emacs"])
+		};
+		candidates
+			.iter()
+			.copied()
 			.find(|cmd| {
-				self.run("which", &[cmd], cwd)
+				self.run(probe_cmd, &[cmd], cwd)
 					.is_ok_and(|o| o.status.success())
 			})
 			.map(String::from)
@@ -154,7 +163,8 @@ impl Env {
 	/// Opens the user's editor on the specified file.
 	///
 	/// Resolves the editor from `self.editor()`, falling back to the first
-	/// available editor from `nano`, `vim`, `vi`, or `emacs`. The working directory for
+	/// available platform-appropriate editor: `notepad` on Windows, or the first
+	/// of `nano`, `vim`, `vi`, `emacs` found on Unix. The working directory for
 	/// the editor process is `cwd`.
 	///
 	/// The editor string is passed to [`run_shell_interactive`][Self::run_shell_interactive]
@@ -191,7 +201,7 @@ impl Env {
 		self.runner.run(program, args, cwd)
 	}
 
-	/// Runs a shell command via `/bin/sh -c` in the specified directory.
+	/// Runs a shell command via the platform shell in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Read-only.
 	pub fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
@@ -205,7 +215,7 @@ impl Env {
 		self.runner.run_mut(program, args, cwd)
 	}
 
-	/// Runs a mutating shell command via `/bin/sh -c` in the specified directory.
+	/// Runs a mutating shell command via the platform shell in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
 	pub fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
@@ -224,7 +234,7 @@ impl Env {
 		self.runner.run_interactive(program, args, cwd)
 	}
 
-	/// Runs a shell command via `/bin/sh -c` with inherited stdin/stdout/stderr.
+	/// Runs a shell command via the platform shell with inherited stdin/stdout/stderr.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
 	pub fn run_shell_interactive(&self, command: &str, cwd: &Path) -> anyhow::Result<ExitStatus> {
@@ -237,8 +247,8 @@ mod tests {
 	use std::path::Path;
 	use std::sync::Arc;
 
-	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::command::{CommandRunner, shell_flag, shell_program};
 	use crate::github::client::GitHubClient;
 	use crate::github::client::test_support::RecordingGitHubClient;
 
@@ -358,8 +368,8 @@ mod tests {
 		let (runner, env) = recording_env(0);
 		env.run_shell("echo hello", Path::new(".")).unwrap();
 		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "/bin/sh");
-		assert_eq!(invocations[0].args, ["-c", "echo hello"]);
+		assert_eq!(invocations[0].program, shell_program());
+		assert_eq!(invocations[0].args, [shell_flag(), "echo hello"]);
 	}
 
 	#[test]
@@ -377,7 +387,7 @@ mod tests {
 		let (runner, env) = recording_env(0);
 		env.run_shell_mut("npm install", Path::new(".")).unwrap();
 		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "/bin/sh");
+		assert_eq!(invocations[0].program, shell_program());
 		assert!(invocations[0].is_shell);
 	}
 
