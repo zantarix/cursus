@@ -90,7 +90,8 @@ pub fn paragraph_height(text: &str, area_width: u16, border: u16) -> u16 {
 	let inner = area_width.saturating_sub(4 + border);
 	let lines = Paragraph::new(text)
 		.wrap(Wrap { trim: false })
-		.line_count(inner) as u16;
+		.line_count(inner);
+	let lines = u16::try_from(lines).unwrap_or(u16::MAX);
 	(lines + border).max(1 + border)
 }
 
