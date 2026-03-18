@@ -9,12 +9,18 @@ use std::fmt::{self, Write as _};
 use crate::model::config::Strategy;
 use crate::tui::init::InitResult;
 
+/// Returns a TOML-encoded quoted string (e.g. `"foo\"bar"`) using `toml_edit`
+/// so that any special characters in `s` are correctly escaped.
+fn toml_quoted(s: &str) -> toml_edit::Value {
+	toml_edit::Value::from(s)
+}
+
 fn write_cargo_section(out: &mut String, enabled: bool, path: &Option<String>) -> fmt::Result {
 	if enabled {
 		writeln!(out, "[cargo]")?;
 		writeln!(out, "enabled = true")?;
 		if let Some(p) = path {
-			writeln!(out, "path = \"{p}\"")?;
+			writeln!(out, "path = {}", toml_quoted(p))?;
 		} else {
 			writeln!(
 				out,
@@ -37,7 +43,7 @@ fn write_npm_section(out: &mut String, enabled: bool, path: &Option<String>) -> 
 		writeln!(out, "[npm]")?;
 		writeln!(out, "enabled = true")?;
 		if let Some(p) = path {
-			writeln!(out, "path = \"{p}\"")?;
+			writeln!(out, "path = {}", toml_quoted(p))?;
 		} else {
 			writeln!(
 				out,
@@ -152,7 +158,7 @@ fn write_github_advanced_comments(out: &mut String) -> fmt::Result {
 
 fn write_owner_comment(out: &mut String, detected: &Option<String>) -> fmt::Result {
 	match detected {
-		Some(v) => writeln!(out, "# owner = \"{v}\""),
+		Some(v) => writeln!(out, "# owner = {}", toml_quoted(v)),
 		None => writeln!(
 			out,
 			"# owner = \"\"                        # GitHub owner (auto-detected from remote if omitted)"
@@ -162,7 +168,7 @@ fn write_owner_comment(out: &mut String, detected: &Option<String>) -> fmt::Resu
 
 fn write_repo_comment(out: &mut String, detected: &Option<String>) -> fmt::Result {
 	match detected {
-		Some(v) => writeln!(out, "# repo = \"{v}\""),
+		Some(v) => writeln!(out, "# repo = {}", toml_quoted(v)),
 		None => writeln!(
 			out,
 			"# repo = \"\"                         # GitHub repo (auto-detected from remote if omitted)"
@@ -182,12 +188,12 @@ fn write_github_section(
 		writeln!(out, "[github]")?;
 		writeln!(out, "enabled = true")?;
 		if let Some(o) = owner {
-			writeln!(out, "owner = \"{o}\"")?;
+			writeln!(out, "owner = {}", toml_quoted(o))?;
 		} else {
 			write_owner_comment(out, detected_owner)?;
 		}
 		if let Some(r) = repo {
-			writeln!(out, "repo = \"{r}\"")?;
+			writeln!(out, "repo = {}", toml_quoted(r))?;
 		} else {
 			write_repo_comment(out, detected_repo)?;
 		}
@@ -420,5 +426,23 @@ mod tests {
 		let active = strip_comments(&render(&cargo_only_result()));
 		toml::from_str::<toml::Value>(&active)
 			.expect("Active TOML lines should parse as valid TOML");
+	}
+
+	/// Values containing `"` or `\` must be escaped so the output is valid TOML.
+	#[test]
+	fn special_chars_in_user_values_produce_valid_toml() {
+		let result = InitResult {
+			cargo_enabled: true,
+			cargo_path: Some("sub/\"evil\"\\ path/".to_string()),
+			npm_enabled: true,
+			npm_path: Some("front\"end\\".to_string()),
+			github_enabled: true,
+			github_owner: Some("ac\"me".to_string()),
+			github_repo: Some("my\\app".to_string()),
+			..both_pms_git_github_result()
+		};
+		let active = strip_comments(&render(&result));
+		toml::from_str::<toml::Value>(&active)
+			.expect("Special characters must be escaped so the TOML is still valid");
 	}
 }
