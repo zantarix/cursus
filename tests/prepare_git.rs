@@ -938,6 +938,35 @@ fn prepare_with_squash_merge_includes_pr_number() {
 }
 
 #[test]
+fn prepare_with_merge_commit_includes_pr_number() {
+	// A changeset introduced by a classic merge commit (subject starts with
+	// "Merge pull request #NNN") should include the PR number in the changelog entry.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature from PR\n",
+	);
+	git_commit_all(
+		dir.path(),
+		"Merge pull request #99 from user/feature-branch",
+	);
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "prepare failed: {result:?}");
+
+	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+	assert!(
+		changelog.contains("via #99"),
+		"Expected PR reference 'via #99' in changelog, got:\n{changelog}"
+	);
+}
+
+#[test]
 fn prepare_without_git_no_references() {
 	// When git is disabled, no commit references should appear in the changelog.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
