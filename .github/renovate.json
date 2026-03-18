@@ -1,0 +1,28 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": [
+		"github>mscharley/renovate-config",
+		":pinDependencies"
+	],
+	"nix": {
+		"enabled": true
+	},
+	"packageRules": [
+		{
+			"groupName": "serialisation dependencies",
+			"matchPackageNames": [
+				"jsonc-parser",
+				"toml",
+				"toml_edit",
+				"serde",
+				"serde_json",
+				"serde-saphyr"
+			]
+		},
+		{
+			"groupName": "docs site dependencies",
+			"matchFileNames": ["docs/site/package.json"],
+			"matchPackageNames": ["*"]
+		}
+	]
+}
