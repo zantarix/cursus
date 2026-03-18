@@ -13,9 +13,9 @@ pub struct Invocation {
 	pub args: Vec<String>,
 	/// The working directory.
 	pub cwd: PathBuf,
-	/// Whether this was a shell invocation (`run_shell` / `run_shell_mut`).
+	/// Whether this was a shell invocation (`run_shell` / `run_shell_mut` / `run_shell_interactive`).
 	pub is_shell: bool,
-	/// Whether this was an interactive invocation (`run_interactive`).
+	/// Whether this was an interactive invocation (`run_interactive` / `run_shell_interactive`).
 	pub is_interactive: bool,
 }
 
@@ -146,6 +146,21 @@ impl CommandRunner for RecordingCommandRunner {
 			args.iter().map(|s| s.to_string()).collect(),
 			cwd,
 			false,
+			true,
+		);
+		Ok(self.make_output().status)
+	}
+
+	fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		self.record(
+			"/bin/sh",
+			vec!["-c".to_string(), command.to_string()],
+			cwd,
+			true,
 			true,
 		);
 		Ok(self.make_output().status)
@@ -404,6 +419,21 @@ impl CommandRunner for DispatchingCommandRunner {
 			true,
 		);
 		Ok(self.make_output_for(program, args).status)
+	}
+
+	fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		self.record(
+			"/bin/sh",
+			vec!["-c".to_string(), command.to_string()],
+			cwd,
+			true,
+			true,
+		);
+		Ok(self.make_output_for("/bin/sh", &["-c", command]).status)
 	}
 }
 

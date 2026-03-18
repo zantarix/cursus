@@ -452,6 +452,23 @@ mod tests {
 				return Ok(std::process::ExitStatus::from_raw(0));
 			}
 		}
+
+		fn run_shell_interactive(
+			&self,
+			_command: &str,
+			_cwd: &Path,
+		) -> anyhow::Result<std::process::ExitStatus> {
+			#[cfg(unix)]
+			{
+				use std::os::unix::process::ExitStatusExt;
+				return Ok(std::process::ExitStatus::from_raw(0));
+			}
+			#[cfg(windows)]
+			{
+				use std::os::windows::process::ExitStatusExt;
+				return Ok(std::process::ExitStatus::from_raw(0));
+			}
+		}
 	}
 
 	fn make_git_sequenced(responses: Vec<(i32, Vec<u8>)>) -> git::GitWorkdir {

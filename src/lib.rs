@@ -15,6 +15,7 @@ pub mod package_manager;
 pub mod path;
 #[cfg(not(feature = "test-support"))]
 pub(crate) mod path;
+pub(crate) mod shell;
 pub mod tui;
 pub mod utils;
 

@@ -19,7 +19,7 @@ use anyhow::Context;
 /// the need for `-C` flags before execution.
 ///
 /// Methods are split into read-only (`run`, `run_shell`) and mutating
-/// (`run_mut`, `run_shell_mut`, `run_interactive`) variants. The
+/// (`run_mut`, `run_shell_mut`, `run_interactive`, `run_shell_interactive`) variants. The
 /// [`DryRunCommandRunner`] decorator intercepts mutating variants and
 /// suppresses them, while read-only variants always execute.
 pub trait CommandRunner: Send + Sync + std::fmt::Debug {
@@ -56,6 +56,18 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 		&self,
 		program: &str,
 		args: &[&str],
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus>;
+
+	/// Runs a shell command via `/bin/sh -c` with inherited stdin/stdout/stderr.
+	///
+	/// Mutating — skipped by [`DryRunCommandRunner`]. Combines the shell interpretation
+	/// of [`run_shell`] with the inherited terminal of [`run_interactive`]. Use this for
+	/// user-supplied commands that must be shell-interpreted (e.g. `EDITOR="code --wait"`)
+	/// and need to interact with the terminal directly.
+	fn run_shell_interactive(
+		&self,
+		command: &str,
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus>;
 }
@@ -141,6 +153,18 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 		);
 		self.inner.run_interactive(program, args, cwd)
 	}
+
+	fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		log::debug!(
+			"run_shell_interactive: {command:?} (cwd: {})",
+			cwd.display()
+		);
+		self.inner.run_shell_interactive(command, cwd)
+	}
 }
 
 /// A command runner that executes real system processes.
@@ -187,14 +211,26 @@ impl CommandRunner for RealCommandRunner {
 			.status()
 			.with_context(|| format!("Failed to run '{program}'"))
 	}
+
+	fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		std::process::Command::new("/bin/sh")
+			.args(["-c", command])
+			.current_dir(cwd)
+			.status()
+			.with_context(|| format!("Failed to run shell command: '{command}'"))
+	}
 }
 
 /// A command runner decorator that suppresses all mutating operations in dry-run mode.
 ///
-/// Wraps any [`CommandRunner`] and intercepts `run_mut`, `run_shell_mut`, and
-/// `run_interactive` calls, logging them at `info` level and returning a synthetic
-/// success result without running the actual command. Read-only operations (`run`,
-/// `run_shell`) are always forwarded to the inner runner.
+/// Wraps any [`CommandRunner`] and intercepts `run_mut`, `run_shell_mut`,
+/// `run_interactive`, and `run_shell_interactive` calls, logging them at `info` level
+/// and returning a synthetic success result without running the actual command.
+/// Read-only operations (`run`, `run_shell`) are always forwarded to the inner runner.
 ///
 /// Compose this at the outermost layer when dry-run mode is active.
 #[derive(Debug)]
@@ -241,6 +277,18 @@ impl CommandRunner for DryRunCommandRunner {
 		log::info!(
 			"[dry-run] would run (interactive): {program} {} (cwd: {})",
 			args.join(" "),
+			cwd.display()
+		);
+		Ok(make_success_exit_status())
+	}
+
+	fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		log::info!(
+			"[dry-run] would run (shell interactive): {command:?} (cwd: {})",
 			cwd.display()
 		);
 		Ok(make_success_exit_status())
@@ -392,6 +440,36 @@ mod verbose_tests {
 	}
 
 	#[test]
+	fn verbose_runner_delegates_run_shell_interactive_to_inner() {
+		init_test_logger();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/tmp");
+		let _ = runner.run_shell_interactive("code --wait file.txt", cwd);
+		let invocations = runner.inner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(invocations[0].is_shell);
+		assert!(invocations[0].is_interactive);
+	}
+
+	#[test]
+	fn verbose_runner_logs_run_shell_interactive_with_command_and_cwd() {
+		init_test_logger();
+		let _ = take_logs();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/edit");
+		let _ = runner.run_shell_interactive("code --wait CHANGELOG.md", cwd);
+		let logs = take_logs();
+		let msg = logs
+			.iter()
+			.find(|(_, m)| m.contains("code --wait"))
+			.map(|(_, m)| m.as_str())
+			.expect("expected a log message about code --wait");
+		assert!(msg.contains("/edit"), "log should contain cwd: {msg}");
+	}
+
+	#[test]
 	fn verbose_runner_logs_run_shell_mut_with_command_and_cwd() {
 		init_test_logger();
 		let _ = take_logs();
@@ -511,6 +589,33 @@ mod dry_run_tests {
 	}
 
 	#[test]
+	fn dry_run_runner_suppresses_run_shell_interactive() {
+		let inner = Arc::new(RecordingCommandRunner::new(0));
+		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
+		let cwd = Path::new("/tmp");
+		let result = runner.run_shell_interactive("code --wait file.txt", cwd);
+		assert!(result.is_ok());
+		assert!(result.unwrap().success());
+		assert!(inner.invocations().is_empty());
+	}
+
+	#[test]
+	fn dry_run_runner_logs_run_shell_interactive_at_info() {
+		init_test_logger();
+		let _ = take_logs();
+		let runner = make_dry_run_runner();
+		let cwd = Path::new("/edit");
+		let _ = runner.run_shell_interactive("code --wait README.md", cwd);
+		let logs = take_logs();
+		let (level, msg) = logs
+			.iter()
+			.find(|(_, m)| m.contains("code --wait"))
+			.expect("expected a log message about code --wait");
+		assert_eq!(*level, log::Level::Info, "should log at info level");
+		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
+	}
+
+	#[test]
 	fn dry_run_runner_logs_run_interactive_at_info() {
 		init_test_logger();
 		let _ = take_logs();
@@ -547,6 +652,19 @@ mod real_command_tests {
 		let runner = RealCommandRunner;
 		let result = runner.run_interactive("true", &[], Path::new("/tmp"));
 		assert!(result.is_ok(), "run_interactive should succeed: {result:?}");
+		assert!(result.unwrap().success(), "'true' must exit with status 0");
+	}
+
+	#[test]
+	fn real_runner_run_shell_interactive_returns_success_for_true() {
+		// Exercises RealCommandRunner::run_shell_interactive so the .status() call is
+		// covered — mutations that replace it with something else would break this.
+		let runner = RealCommandRunner;
+		let result = runner.run_shell_interactive("true", Path::new("/tmp"));
+		assert!(
+			result.is_ok(),
+			"run_shell_interactive should succeed: {result:?}"
+		);
 		assert!(result.unwrap().success(), "'true' must exit with status 0");
 	}
 }

@@ -157,6 +157,11 @@ impl Env {
 	/// available editor from `nano`, `vim`, `vi`, or `emacs`. The working directory for
 	/// the editor process is `cwd`.
 	///
+	/// The editor string is passed to [`run_shell_interactive`][Self::run_shell_interactive]
+	/// so that multi-word values such as `code --wait` are interpreted correctly by the
+	/// shell. The file path is quoted via [`crate::shell::shell_quote`] to prevent word
+	/// splitting on filenames that contain spaces or other special characters.
+	///
 	/// # Errors
 	///
 	/// Returns an error if no editor is found or the editor process fails.
@@ -169,8 +174,9 @@ impl Env {
 			.or_else(|| self.find_default_editor(cwd))
 			.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
 		let path_str = path.to_string_lossy();
+		let shell_cmd = format!("{editor} {}", crate::shell::shell_quote(&path_str));
 		let status = self
-			.run_interactive(&editor, &[path_str.as_ref()], cwd)
+			.run_shell_interactive(&shell_cmd, cwd)
 			.with_context(|| format!("Failed to open editor: {editor}"))?;
 		if !status.success() {
 			anyhow::bail!("Editor exited with status: {status}");
@@ -216,6 +222,13 @@ impl Env {
 		cwd: &Path,
 	) -> anyhow::Result<ExitStatus> {
 		self.runner.run_interactive(program, args, cwd)
+	}
+
+	/// Runs a shell command via `/bin/sh -c` with inherited stdin/stdout/stderr.
+	///
+	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
+	pub fn run_shell_interactive(&self, command: &str, cwd: &Path) -> anyhow::Result<ExitStatus> {
+		self.runner.run_shell_interactive(command, cwd)
 	}
 }
 
@@ -411,8 +424,12 @@ mod tests {
 		env.run_editor_on(&path, workdir.path()).unwrap();
 
 		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "vim");
-		assert!(invocations[0].is_interactive);
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive && i.is_shell)
+			.expect("Expected a shell interactive invocation");
+		let expected = format!("vim {}", crate::shell::shell_quote(&path.to_string_lossy()));
+		assert_eq!(editor_call.args[1], expected);
 	}
 
 	#[test]
@@ -427,11 +444,15 @@ mod tests {
 		env.run_editor_on(&path, workdir.path()).unwrap();
 
 		let invocations = runner.invocations();
-		let editor_call = invocations.last().unwrap();
-		assert_eq!(
-			editor_call.program, "nano",
-			"Should fall back to nano when editor is empty"
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive && i.is_shell)
+			.expect("Expected a shell interactive invocation");
+		let expected = format!(
+			"nano {}",
+			crate::shell::shell_quote(&path.to_string_lossy())
 		);
+		assert_eq!(editor_call.args[1], expected, "Should fall back to nano");
 	}
 
 	#[test]
@@ -464,8 +485,15 @@ mod tests {
 		env.run_editor_on(&path, workdir.path()).unwrap();
 
 		let invocations = runner.invocations();
-		let editor_call = invocations.last().unwrap();
-		assert_eq!(editor_call.program, "nano");
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive && i.is_shell)
+			.expect("Expected a shell interactive invocation");
+		let expected = format!(
+			"nano {}",
+			crate::shell::shell_quote(&path.to_string_lossy())
+		);
+		assert_eq!(editor_call.args[1], expected);
 	}
 
 	#[test]
@@ -497,12 +525,65 @@ mod tests {
 		let invocations = runner.invocations();
 		let editor_call = invocations
 			.iter()
-			.find(|i| i.is_interactive)
-			.expect("Expected an interactive editor invocation");
+			.find(|i| i.is_interactive && i.is_shell)
+			.expect("Expected a shell interactive editor invocation");
 		assert_eq!(
 			editor_call.cwd,
 			workdir.path(),
 			"Editor should be invoked with the provided cwd, not the file's parent"
 		);
+	}
+
+	#[test]
+	fn run_editor_on_handles_multi_word_editor() {
+		let workdir = tempfile::tempdir().unwrap();
+		let path = workdir.path().join("config.toml");
+		std::fs::write(&path, "").unwrap();
+
+		let (runner, env) = recording_env(0);
+		let env = env.with_editor("code --wait".to_string());
+		env.run_editor_on(&path, workdir.path()).unwrap();
+
+		let invocations = runner.invocations();
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive && i.is_shell)
+			.expect("Expected a shell interactive invocation");
+		let expected = format!(
+			"code --wait {}",
+			crate::shell::shell_quote(&path.to_string_lossy())
+		);
+		assert_eq!(editor_call.args[1], expected);
+	}
+
+	#[test]
+	fn run_editor_on_handles_path_with_single_quote() {
+		let workdir = tempfile::tempdir().unwrap();
+		// Path whose name contains a single quote — tests the '\\'' escaping logic.
+		let path = workdir.path().join("it's a file.toml");
+		std::fs::write(&path, "").unwrap();
+
+		let (runner, env) = recording_env(0);
+		let env = env.with_editor("vim".to_string());
+		env.run_editor_on(&path, workdir.path()).unwrap();
+
+		let invocations = runner.invocations();
+		let editor_call = invocations
+			.iter()
+			.find(|i| i.is_interactive && i.is_shell)
+			.expect("Expected a shell interactive invocation");
+		let expected = format!("vim {}", crate::shell::shell_quote(&path.to_string_lossy()));
+		assert_eq!(editor_call.args[1], expected);
+	}
+
+	#[test]
+	fn run_shell_interactive_delegates_to_runner() {
+		let (runner, env) = recording_env(0);
+		let cwd = tempfile::tempdir().unwrap();
+		env.run_shell_interactive("echo hello", cwd.path()).unwrap();
+		let invocations = runner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(invocations[0].is_shell);
+		assert!(invocations[0].is_interactive);
 	}
 }
