@@ -579,8 +579,9 @@ fn strongconnect_handles_corrupted_lowlinks() {
 	state.indices.insert("b".to_string(), 99);
 	state.on_stack.insert("b".to_string());
 
-	// Call strongconnect on "a" which depends on "b"
-	// The defensive check `if let Some(&w_lowlink) = state.lowlinks.get(w)` will fail for "b"
+	// Call strongconnect on "a" which depends on "b".
+	// "b" is a back edge (already in indices + on_stack), so its index is used, not its lowlink.
+	// The defensive `if let` in the back-edge branch handles the missing lowlink gracefully.
 	DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
 	// Should still complete without panic - defensive code skips the update
@@ -611,7 +612,7 @@ fn strongconnect_handles_already_visited_node() {
 
 #[test]
 fn strongconnect_handles_node_not_on_stack_in_second_visit() {
-	// Test: SecondVisit when dependency is not on stack (cross-edge case)
+	// Test: cross-edge case — a dependency is already in a completed SCC.
 	let mut adjacency = std::collections::HashMap::new();
 	adjacency.insert("a".to_string(), vec!["b".to_string(), "c".to_string()]);
 	adjacency.insert("b".to_string(), vec![]);
@@ -619,11 +620,11 @@ fn strongconnect_handles_node_not_on_stack_in_second_visit() {
 
 	let mut state = TarjanState::new();
 
-	// Process normally - "b" will be visited and removed from stack before "c"
+	// Process normally — "b" will be visited and extracted before "c" is scanned.
+	// When the inner loop reaches "c" it will already be in a completed SCC (not on_stack),
+	// exercising the cross-edge skip path.
 	DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
-	// Should handle cross-edges where dependency is already processed
-	// The `if !state.on_stack.contains(w)` branch is exercised
 	assert!(state.sccs.len() >= 1);
 }
 

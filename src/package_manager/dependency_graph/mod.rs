@@ -95,12 +95,16 @@ impl DependencyGraph {
 		state.sccs
 	}
 
-	/// Iterative helper for Tarjan's algorithm to avoid stack overflow.
+	/// Iterative Tarjan's SCC using a resume-index work stack.
 	///
-	/// This uses an explicit work stack to simulate the recursive call stack.
-	/// The iterative simulation requires tracking two phases per node (first-visit
-	/// and post-children), which creates inherent nesting that cannot be meaningfully
-	/// reduced without fragmenting the algorithm's logic.
+	/// Each frame is `(node, sorted_children, resume_index)`. A resume index of 0
+	/// means first visit; an index `i > 0` means we are returning from
+	/// `children[i-1]` and must propagate its lowlink before continuing.
+	/// Between those two cases we scan forward through the remaining children:
+	/// unvisited ones are pushed as new frames (tree edges), already-visited
+	/// on-stack ones update the lowlink immediately (back edges), and
+	/// already-completed ones are skipped (cross edges). This mirrors the
+	/// recursive formulation exactly, processing every edge exactly once.
 	#[allow(clippy::excessive_nesting)]
 	#[allow(clippy::too_many_lines)]
 	fn strongconnect(
@@ -108,89 +112,74 @@ impl DependencyGraph {
 		start: &str,
 		state: &mut TarjanState,
 	) {
-		// Work item: (node, phase)
-		// Phase 0 = first visit (initialize and push children)
-		// Phase 1 = second visit (update lowlinks and extract SCC)
-		enum Phase {
-			FirstVisit,
-			SecondVisit,
-		}
+		// Returns the sorted, internal-only children of a node.
+		let children_of = |node: &str| -> Vec<String> {
+			let Some(deps) = adjacency.get(node) else {
+				return Vec::new();
+			};
+			let mut kids: Vec<_> = deps
+				.iter()
+				.filter(|w| adjacency.contains_key(*w))
+				.cloned()
+				.collect();
+			kids.sort();
+			kids
+		};
 
-		let mut work_stack: Vec<(String, Phase)> = vec![(start.to_string(), Phase::FirstVisit)];
+		let mut work_stack = vec![(start.to_string(), children_of(start), 0usize)];
 
-		while let Some((v, phase)) = work_stack.pop() {
-			match phase {
-				Phase::FirstVisit => {
-					// Skip if already visited
-					if state.indices.contains_key(&v) {
-						continue;
-					}
+		while let Some((v, children, i)) = work_stack.pop() {
+			if i == 0 {
+				// First visit: skip if already visited (e.g. start was pre-visited).
+				if state.indices.contains_key(&v) {
+					continue;
+				}
+				let idx = state.index;
+				state.indices.insert(v.clone(), idx);
+				state.lowlinks.insert(v.clone(), idx);
+				state.index += 1;
+				state.stack.push(v.clone());
+				state.on_stack.insert(v.clone());
+			} else {
+				// Returning from children[i-1]: propagate tree-edge lowlink.
+				let w = &children[i - 1];
+				let w_lowlink = state.lowlinks.get(w).copied();
+				if let (Some(w_lowlink), Some(v_lowlink)) = (w_lowlink, state.lowlinks.get_mut(&v))
+				{
+					*v_lowlink = (*v_lowlink).min(w_lowlink);
+				}
+			}
 
-					// Initialize this node
-					let current_index = state.index;
-					state.indices.insert(v.clone(), current_index);
-					state.lowlinks.insert(v.clone(), current_index);
-					state.index += 1;
-					state.stack.push(v.clone());
-					state.on_stack.insert(v.clone());
-
-					// Schedule second visit for after children are processed
-					work_stack.push((v.clone(), Phase::SecondVisit));
-
-					// Push children onto work stack in reverse order for deterministic processing
-					if let Some(deps) = adjacency.get(&v) {
-						let mut sorted_deps: Vec<_> = deps.iter().collect();
-						sorted_deps.sort();
-
-						// Process in reverse so first child is processed first
-						for w in sorted_deps.into_iter().rev() {
-							// Skip external dependencies
-							if !adjacency.contains_key(w) {
-								continue;
-							}
-
-							if !state.indices.contains_key(w) {
-								// Not yet visited - schedule for processing
-								work_stack.push((w.clone(), Phase::FirstVisit));
-							} else if state.on_stack.contains(w) {
-								// Back edge - update lowlink immediately
-								if let Some(&w_index) = state.indices.get(w)
-									&& let Some(v_lowlink) = state.lowlinks.get_mut(&v)
-								{
-									*v_lowlink = (*v_lowlink).min(w_index);
-								}
-							}
-						}
+			// Advance through remaining children to find the next one to recurse into.
+			let mut next_i = i;
+			let mut recurse: Option<String> = None;
+			while next_i < children.len() {
+				let w = &children[next_i];
+				next_i += 1;
+				if !state.indices.contains_key(w) {
+					// Tree edge: recurse into w.
+					recurse = Some(w.clone());
+					break;
+				} else if state.on_stack.contains(w) {
+					// Back edge: tighten v's lowlink using w's discovery index.
+					if let (Some(&w_index), Some(v_lowlink)) =
+						(state.indices.get(w), state.lowlinks.get_mut(&v))
+					{
+						*v_lowlink = (*v_lowlink).min(w_index);
 					}
 				}
-				Phase::SecondVisit => {
-					// Update lowlinks from children
-					if let Some(deps) = adjacency.get(&v) {
-						for w in deps {
-							// Skip external dependencies
-							if !adjacency.contains_key(w) {
-								continue;
-							}
+				// Cross edge (w already in a completed SCC): skip.
+			}
 
-							// Update from child's lowlink (not a back edge)
-							if !state.on_stack.contains(w) {
-								continue;
-							}
-
-							// Propagate w's lowlink up to v
-							if let Some(&w_lowlink) = state.lowlinks.get(w)
-								&& let Some(v_lowlink) = state.lowlinks.get_mut(&v)
-							{
-								*v_lowlink = (*v_lowlink).min(w_lowlink);
-							}
-						}
-					}
-
-					// Check if v is a root of an SCC and extract if so
-					if state.is_scc_root(&v) {
-						let scc = state.extract_scc(&v);
-						state.sccs.push(scc);
-					}
+			if let Some(w) = recurse {
+				// Suspend v at next_i; process w first.
+				work_stack.push((v, children, next_i));
+				work_stack.push((w.clone(), children_of(&w), 0));
+			} else {
+				// All children processed: check if v is an SCC root.
+				if state.is_scc_root(&v) {
+					let scc = state.extract_scc(&v);
+					state.sccs.push(scc);
 				}
 			}
 		}
