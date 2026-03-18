@@ -160,7 +160,14 @@ pub(super) fn upload_release_artifacts(
 ) -> bool {
 	let mut any_failed = false;
 	for (display_name, artifact_path) in artifacts {
-		let full_path = git_root.join(artifact_path);
+		let full_path = match git_root.subpath(artifact_path) {
+			Ok(p) => p,
+			Err(e) => {
+				warn!("  Skipping '{display_name}': invalid artifact path: {e:#}");
+				any_failed = true;
+				continue;
+			}
+		};
 		match github_client.upload_asset(gh_repo, release_id, display_name, &full_path) {
 			Ok(()) => info!("  Attached: {display_name}"),
 			Err(e) => {
@@ -646,6 +653,32 @@ mod tests {
 		};
 		// Version not found returns empty string
 		assert_eq!(read_changelog_body(&pkg), "");
+	}
+
+	#[test]
+	fn upload_release_artifacts_rejects_path_traversal() {
+		let outer = tempfile::tempdir().unwrap();
+		let inner = outer.path().join("repo");
+		std::fs::create_dir(&inner).unwrap();
+		let secret = outer.path().join("secret.txt");
+		std::fs::write(&secret, b"sensitive").unwrap();
+
+		let mut artifacts = BTreeMap::new();
+		artifacts.insert("secret".to_string(), secret.to_string_lossy().into_owned());
+
+		let client = RecordingGitHubClient::new();
+		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
+		let git_root = AbsolutePath::new(&inner).unwrap();
+
+		let failed =
+			upload_release_artifacts(&client, &gh_repo, "release-1", &artifacts, &git_root);
+
+		assert!(failed, "Expected failure for path traversal");
+		// No upload should have been attempted
+		assert!(
+			client.invocations().is_empty(),
+			"Upload should not be called for invalid path"
+		);
 	}
 
 	// --- Tests for log_dry_run_github_releases ---
