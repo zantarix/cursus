@@ -126,7 +126,9 @@ pub fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
 	if tabs.is_empty() {
 		return;
 	}
-	let n = tabs.len() as u16;
+	let Ok(n) = u16::try_from(tabs.len()) else {
+		return;
+	};
 	let constraints: Vec<Constraint> = (0..n).map(|_| Constraint::Fill(1)).collect();
 	let cells = Layout::horizontal(constraints).split(area);
 	for ((label, status), &cell) in tabs.iter().zip(cells.iter()) {

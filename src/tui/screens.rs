@@ -99,7 +99,9 @@ pub trait ButtonScreen: Sized {
 				_ => Ok(KeyResult::Continue(self.into_continue(state))),
 			},
 			Event::Mouse(me) if matches!(me.kind, MouseEventKind::Down(MouseButton::Left)) => {
-				let n = self.buttons().len() as u16;
+				let Ok(n) = u16::try_from(self.buttons().len()) else {
+					return Ok(KeyResult::Continue(self.into_continue(state)));
+				};
 				if let Some(idx) =
 					button_click_index(content_area, Self::QUESTION, n, me.column, me.row)
 				{
