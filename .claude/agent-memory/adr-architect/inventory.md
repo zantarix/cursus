@@ -6,7 +6,7 @@
 - **ADR-003** (Accepted): Release Command. Errata: ADR-006 adds optional git hooks; ADR-015 adds branch management; ADR-016 renames subcommand to `prepare`.
 - **ADR-004** (Accepted): Publish Command. Errata: ADR-008 changes dry-run semantics; ADR-015 adds tag creation/pushing to publish and extends `--no-git`; ADR-016 renames `release` to `prepare`.
 - **ADR-005** (Accepted): GitHub Releases. Errata: ADR-011 is authoritative reference for `build_command` execution semantics; ADR-015 moves tag creation from release to publish and replaces `run_until` with `strategy`; ADR-016 renames subcommand.
-- **ADR-006** (Accepted): Git Lifecycle Hooks. Errata: ADR-015 replaces `run_until` with `strategy`, moves tags to publish, extends `--no-git` to publish; ADR-016 renames subcommand.
+- **ADR-006** (Accepted): Git Lifecycle Hooks. Errata: ADR-015 replaces `run_until` with `strategy`, moves tags to publish, extends `--no-git` to publish; ADR-016 renames subcommand; commit message changed from dynamic `chore(release): pkg@ver` format to static configurable `ci(release): version packages` via `[git].prepare_commit_message`.
 - **ADR-007** (Accepted): Honor Private Package Markers During Publish. Errata: ADR-016 renames `release` to `prepare`.
 - **ADR-008** (Accepted): Dry-Run Must Be Strictly Local-Only. Errata: ADR-015 expands dry-run scope to include tag operations; ADR-016 renames subcommand.
 - **ADR-009** (Accepted): JavaScript Package Manager Strategy for Lockfiles and Publishing. Errata: ADR-011 supersedes `lock_command` whitespace-splitting execution; now uses `/bin/sh -c`.

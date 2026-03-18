@@ -64,7 +64,7 @@ The `prepare` subcommand's help text will describe its purpose without using the
 The rename of the subcommand does not require renaming configuration fields or git concepts that use "release" in a broader sense:
 
 - **`release_branch_prefix`** (`[git]` config field): Retained as-is. The branch carries release changes, regardless of which subcommand created it. The prefix `cursus-release/` describes the branch's purpose (it is a release branch), not the subcommand that created it.
-- **`chore(release):` commit message** ([ADR-006](006-git-lifecycle-hooks.md)): Retained as-is. The commit message describes what the commit contains (release changes), not which subcommand produced it. This convention is well-established in the ecosystem (e.g., Lerna, Changesets, semantic-release all use `chore(release):` or similar).
+- **Prepare commit message** ([ADR-006](006-git-lifecycle-hooks.md)): Now a static configurable string via `[git].prepare_commit_message`, defaulting to `ci(release): version packages`. The previous dynamic format (`chore(release): <pkg1>@<version1>, ...`) has been replaced. No template interpolation is supported -- the configured value is used verbatim. The commit message still describes what the commit contains (release changes), not which subcommand produced it.
 - **`[github].pull_request_title`** ([ADR-015](015-ci-managed-release-workflow.md)): The default value `"chore: release"` is retained. PR titles describe the content of the PR (a release), not the CLI command.
 - **`Release {package} version {version}` tag message** ([ADR-006](006-git-lifecycle-hooks.md)): Retained. Tags describe releases.
 

@@ -97,6 +97,11 @@ pub struct GitConfig {
 	///
 	/// Defaults to an empty list.
 	pub extra_files: Vec<String>,
+	/// The commit message used for the prepare commit.
+	///
+	/// Defaults to `"ci(release): version packages"` when not set.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	prepare_commit_message: Option<String>,
 }
 
 impl GitConfig {
@@ -178,6 +183,21 @@ impl GitConfig {
 	/// Sets the extra files list (builder pattern).
 	pub fn with_extra_files(mut self, extra_files: Vec<String>) -> Self {
 		self.extra_files = extra_files;
+		self
+	}
+
+	/// Returns the commit message used for the prepare commit.
+	///
+	/// Returns `"ci(release): version packages"` when not set in config.
+	pub fn prepare_commit_message(&self) -> &str {
+		self.prepare_commit_message
+			.as_deref()
+			.unwrap_or("ci(release): version packages")
+	}
+
+	/// Sets the prepare commit message (builder pattern).
+	pub fn with_prepare_commit_message(mut self, message: String) -> Self {
+		self.prepare_commit_message = Some(message);
 		self
 	}
 }
@@ -288,7 +308,8 @@ mod tests {
 			.with_strategy(Strategy::Branch)
 			.with_release_branch_prefix("release/".to_string())
 			.with_tag_format(TagFormat::Prefixed)
-			.with_extra_files(vec!["custom.lock".to_string()]);
+			.with_extra_files(vec!["custom.lock".to_string()])
+			.with_prepare_commit_message("chore: bump versions".to_string());
 		let toml_str = toml::to_string(&config).unwrap();
 		let deserialized: GitConfig = toml::from_str(&toml_str).unwrap();
 		assert_eq!(config, deserialized);
@@ -403,6 +424,49 @@ mod tests {
 			config.extra_files, files,
 			"with_extra_files should set extra_files on self"
 		);
+	}
+
+	#[test]
+	fn prepare_commit_message_defaults_to_constant() {
+		let config = GitConfig::default();
+		assert_eq!(
+			config.prepare_commit_message(),
+			"ci(release): version packages"
+		);
+	}
+
+	#[test]
+	fn prepare_commit_message_respects_config_value() {
+		let config =
+			GitConfig::default().with_prepare_commit_message("chore: bump versions".to_string());
+		assert_eq!(config.prepare_commit_message(), "chore: bump versions");
+	}
+
+	#[test]
+	fn prepare_commit_message_serializes_when_set() {
+		let config =
+			GitConfig::default().with_prepare_commit_message("chore: bump versions".to_string());
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			toml_str.contains("prepare_commit_message = \"chore: bump versions\""),
+			"Custom message should be serialized, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn prepare_commit_message_omitted_when_not_set() {
+		let config = GitConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("prepare_commit_message"),
+			"Default message should not be serialized, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn prepare_commit_message_deserializes() {
+		let config: GitConfig = toml::from_str("prepare_commit_message = \"ci: release\"").unwrap();
+		assert_eq!(config.prepare_commit_message(), "ci: release");
 	}
 
 	#[test]

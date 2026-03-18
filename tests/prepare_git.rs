@@ -87,12 +87,38 @@ fn prepare_git_creates_commit() {
 
 	let log = git_log(dir.path());
 	assert!(
-		log.iter().any(|msg| msg.contains("chore(release):")),
+		log.iter().any(|msg| msg.contains("ci(release):")),
 		"Expected a release commit, got log: {log:?}"
 	);
 	assert!(
-		log[0].contains("my-pkg@0.2.0"),
-		"Latest commit should mention my-pkg@0.2.0, got: {}",
+		log[0].contains("ci(release): version packages"),
+		"Latest commit should be the release commit, got: {}",
+		log[0]
+	);
+}
+
+#[test]
+fn prepare_git_custom_commit_message() {
+	let config = git_enabled_config()
+		.with_prepare_commit_message("chore(ci): bump package versions".to_string());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
+	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"patch\"\n+++\n\nA fix\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	assert!(result.is_ok(), "release failed: {result:?}");
+
+	let log = git_log(dir.path());
+	assert!(
+		log[0].contains("chore(ci): bump package versions"),
+		"Commit should use the configured message, got: {}",
 		log[0]
 	);
 }
@@ -168,8 +194,8 @@ fn prepare_git_multi_package_creates_single_commit() {
 
 	let log = git_log(dir.path());
 	assert!(
-		log[0].contains("pkg-a") && log[0].contains("pkg-b"),
-		"Release commit should mention both packages, got: {}",
+		log[0].contains("ci(release): version packages"),
+		"Release commit should use the standard message, got: {}",
 		log[0]
 	);
 	// No tags at release time
@@ -199,7 +225,7 @@ fn prepare_no_git_flag_skips_git() {
 
 	let log = git_log(dir.path());
 	assert!(
-		!log.iter().any(|msg| msg.contains("chore(release):")),
+		!log.iter().any(|msg| msg.contains("ci(release):")),
 		"--no-git should skip git operations, got log: {log:?}"
 	);
 	assert!(
@@ -289,7 +315,7 @@ fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 
 	let log = git_log(dir.path());
 	assert!(
-		!log.iter().any(|msg| msg.contains("chore(release):")),
+		!log.iter().any(|msg| msg.contains("ci(release):")),
 		"Dry run should not create a commit, got log: {log:?}"
 	);
 	assert!(
@@ -434,7 +460,7 @@ fn prepare_push_strategy_commits_and_pushes() {
 		.expect("Failed to run git log");
 	let log = String::from_utf8(output.stdout).expect("log not UTF-8");
 	assert!(
-		log.lines().any(|l| l.contains("chore(release):")),
+		log.lines().any(|l| l.contains("ci(release):")),
 		"Expected release commit on origin/{initial_branch}, got: {log}"
 	);
 }
@@ -461,7 +487,7 @@ fn prepare_push_strategy_dry_run_does_not_push() {
 	// No release commit
 	let log = git_log(dir.path());
 	assert!(
-		!log.iter().any(|m| m.contains("chore(release):")),
+		!log.iter().any(|m| m.contains("ci(release):")),
 		"Dry-run should not create a commit, got log: {log:?}"
 	);
 }
@@ -508,7 +534,7 @@ fn prepare_branch_strategy_creates_branch_and_returns() {
 		.expect("Failed to run git log");
 	let log = String::from_utf8(output.stdout).expect("log not UTF-8");
 	assert!(
-		log.lines().any(|l| l.contains("chore(release):")),
+		log.lines().any(|l| l.contains("ci(release):")),
 		"Release branch should contain the release commit, got: {log}"
 	);
 }
@@ -543,7 +569,7 @@ fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	assert!(
 		!git_log(dir.path())
 			.iter()
-			.any(|m| m.contains("chore(release):")),
+			.any(|m| m.contains("ci(release):")),
 		"Dry-run should not create a commit"
 	);
 }
@@ -710,7 +736,7 @@ fn prepare_branch_strategy_rerun_is_idempotent() {
 		.expect("Failed to run git log");
 	let log = String::from_utf8(output.stdout).expect("log not UTF-8");
 	assert!(
-		log.lines().any(|l| l.contains("chore(release):")),
+		log.lines().any(|l| l.contains("ci(release):")),
 		"Release branch should contain the release commit after second run, got: {log}"
 	);
 

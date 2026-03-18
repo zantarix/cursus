@@ -67,24 +67,6 @@ pub(super) fn compute_release_branch(
 	Ok(format!("{config_prefix}{base}"))
 }
 
-/// Formats the git commit message for a prepare run.
-///
-/// Produces `chore(release): pkg1@1.0.0, pkg2@2.0.0` for the given releases.
-///
-/// # Note
-///
-/// `release_infos` must be non-empty; passing an empty slice produces the
-/// malformed string `"chore(release): "`. This is guaranteed by the early
-/// return in [`stage_and_commit`] which skips all git operations when there
-/// are no releases.
-pub(super) fn format_commit_message(release_infos: &[ReleaseInfo]) -> String {
-	let parts: Vec<String> = release_infos
-		.iter()
-		.map(|r| format!("{}@{}", r.package_name, r.new_version))
-		.collect();
-	format!("chore(release): {}", parts.join(", "))
-}
-
 /// Stages files and creates a commit for the prepare step.
 ///
 /// This is the core git operation for `prepare` — it only commits.
@@ -99,7 +81,7 @@ pub(super) fn format_commit_message(release_infos: &[ReleaseInfo]) -> String {
 /// * `extra_files` - Additional files to unconditionally stage, relative to the git root.
 /// * `release_infos` - The packages that were prepared for release.
 /// * `modified_files` - Files to stage before committing.
-/// * `dry_run` - If `true`, only print a summary; do not modify git state.
+/// * `commit_message` - The commit message to use, from [`GitConfig::prepare_commit_message`].
 ///
 /// # Errors
 ///
@@ -109,12 +91,11 @@ pub(super) fn stage_and_commit(
 	extra_files: &[String],
 	release_infos: &[ReleaseInfo],
 	modified_files: &[PathBuf],
+	commit_message: &str,
 ) -> anyhow::Result<()> {
 	if release_infos.is_empty() {
 		return Ok(());
 	}
-
-	let commit_message = format_commit_message(release_infos);
 
 	// Build the full staging list, validating that extra_files resolve inside the repo root.
 	let git_workdir = git.path();
@@ -138,7 +119,7 @@ pub(super) fn stage_and_commit(
 
 	git.add(&all_files)
 		.context("Failed to stage files for git commit")?;
-	git.commit(&commit_message)
+	git.commit(commit_message)
 		.context("Failed to create git commit")?;
 
 	Ok(())
@@ -219,6 +200,7 @@ pub(super) fn finalize_git_lifecycle(
 		&config.git.extra_files,
 		&output.release_infos,
 		&output.modified_files,
+		config.git.prepare_commit_message(),
 	)?;
 	match git_ctx.strategy {
 		Strategy::Push => {
@@ -281,46 +263,6 @@ mod tests {
 
 	use super::*;
 
-	// ── format_commit_message ─────────────────────────────────────────────────
-
-	#[test]
-	fn format_commit_message_single_package() {
-		let infos = vec![ReleaseInfo {
-			package_name: "my-pkg".to_string(),
-			new_version: "1.0.0".parse().unwrap(),
-			changelog_entry: String::new(),
-		}];
-		assert_eq!(
-			format_commit_message(&infos),
-			"chore(release): my-pkg@1.0.0"
-		);
-	}
-
-	#[test]
-	fn format_commit_message_multiple_packages() {
-		let infos = vec![
-			ReleaseInfo {
-				package_name: "pkg-a".to_string(),
-				new_version: "1.0.0".parse().unwrap(),
-				changelog_entry: String::new(),
-			},
-			ReleaseInfo {
-				package_name: "pkg-b".to_string(),
-				new_version: "2.1.0".parse().unwrap(),
-				changelog_entry: String::new(),
-			},
-		];
-		assert_eq!(
-			format_commit_message(&infos),
-			"chore(release): pkg-a@1.0.0, pkg-b@2.1.0"
-		);
-	}
-
-	#[test]
-	fn format_commit_message_empty() {
-		assert_eq!(format_commit_message(&[]), "chore(release): ");
-	}
-
 	// ── stage_and_commit ──────────────────────────────────────────────────────
 
 	#[test]
@@ -332,7 +274,7 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &[], &[], &[]);
+		let result = stage_and_commit(&git, &[], &[], &[], "ci(release): version packages");
 		assert!(result.is_ok());
 	}
 
@@ -352,7 +294,13 @@ mod tests {
 			&crate::Env::new(Arc::new(dry_run_runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &[], &release_infos, &[]);
+		let result = stage_and_commit(
+			&git,
+			&[],
+			&release_infos,
+			&[],
+			"ci(release): version packages",
+		);
 		assert!(result.is_ok());
 		// DryRunCommandRunner suppresses run_mut calls — the inner recorder receives nothing.
 		assert!(inner.invocations().is_empty());
@@ -379,7 +327,13 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		let result = stage_and_commit(
+			&git,
+			&extra_files,
+			&release_infos,
+			&[],
+			"ci(release): version packages",
+		);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -408,7 +362,13 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		let result = stage_and_commit(
+			&git,
+			&extra_files,
+			&release_infos,
+			&[],
+			"ci(release): version packages",
+		);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -434,7 +394,13 @@ mod tests {
 			dir_abs.clone(),
 		);
 		// Should succeed (non-existent file is a warning, not an error).
-		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		let result = stage_and_commit(
+			&git,
+			&extra_files,
+			&release_infos,
+			&[],
+			"ci(release): version packages",
+		);
 		assert!(result.is_ok());
 	}
 
@@ -453,7 +419,13 @@ mod tests {
 			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &extra_files, &release_infos, &[]);
+		let result = stage_and_commit(
+			&git,
+			&extra_files,
+			&release_infos,
+			&[],
+			"ci(release): version packages",
+		);
 		assert!(result.is_err());
 		assert!(
 			result
