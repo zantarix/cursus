@@ -1,0 +1,35 @@
+name: Release Artifacts
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  macos:
+    name: Build macOS artifacts
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: nix develop -c bash -e {0}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+        with:
+          use-flakehub: false
+
+      - name: Build macOS artifacts
+        run: cargo make release-macos
+
+      - name: Upload artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "target/x86_64-apple-darwin/release/cursus#cursus-osx-x86_64" \
+            "target/aarch64-apple-darwin/release/cursus#cursus-osx-aarch64"
+

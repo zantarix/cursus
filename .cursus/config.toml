@@ -34,15 +34,14 @@ strategy = "branch"
 enabled = true
 # owner = "zantarix"
 # repo = "cursus"
-build_command = "cargo make release"
+build_command = "cargo make release-cross"
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 
 [github.artifacts]
-# Map of display name -> file path for release assets
 cursus-linux-x86_64          = "target/x86_64-unknown-linux-musl/release/cursus"
 cursus-linux-aarch64         = "target/aarch64-unknown-linux-musl/release/cursus"
 cursus-linux-riscv64gc       = "target/riscv64gc-unknown-linux-musl/release/cursus"
-cursus-osx-x86_64            = "target/x86_64-apple-darwin/release/cursus"
-cursus-osx-aarch64           = "target/aarch64-apple-darwin/release/cursus"
 "cursus-windows-x86_64.exe"  = "target/x86_64-pc-windows-gnullvm/release/cursus.exe"
 "cursus-windows-aarch64.exe" = "target/aarch64-pc-windows-gnullvm/release/cursus.exe"
+# OSX artifacts are built separately as they can't be cross-compiled for library compatibility reasons.
+# See .github/workflows/release-artifacts.yml for more.

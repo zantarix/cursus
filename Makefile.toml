@@ -25,6 +25,9 @@ args = ["zigbuild", "--release", "--target", "aarch64-unknown-linux-musl"]
 command = "cargo"
 args = ["zigbuild", "--release", "--target", "riscv64gc-unknown-linux-musl"]
 
+[tasks.release-linux]
+dependencies = ["release-linux-x86_64", "release-linux-aarch64", "release-linux-riscv64"]
+
 [tasks.release-macos-x86_64]
 command = "cargo"
 args = ["zigbuild", "--release", "--target", "x86_64-apple-darwin"]
@@ -32,6 +35,9 @@ args = ["zigbuild", "--release", "--target", "x86_64-apple-darwin"]
 [tasks.release-macos-aarch64]
 command = "cargo"
 args = ["zigbuild", "--release", "--target", "aarch64-apple-darwin"]
+
+[tasks.release-macos]
+dependencies = ["release-macos-x86_64", "release-macos-aarch64"]
 
 [tasks.release-windows-x86_64]
 command = "cargo"
@@ -41,5 +47,11 @@ args = ["zigbuild", "--release", "--target", "x86_64-pc-windows-gnullvm"]
 command = "cargo"
 args = ["zigbuild", "--release", "--target", "aarch64-pc-windows-gnullvm"]
 
+[tasks.release-windows]
+dependencies = ["release-windows-x86_64", "release-windows-aarch64"]
+
+[tasks.release-cross]
+dependencies = ["release-linux", "release-windows"]
+
 [tasks.release]
-dependencies = ["release-linux-x86_64", "release-linux-aarch64", "release-linux-riscv64", "release-macos-x86_64", "release-macos-aarch64", "release-windows-x86_64", "release-windows-aarch64"]
+dependencies = ["release-linux", "release-macos", "release-windows"]
