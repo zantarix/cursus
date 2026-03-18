@@ -95,6 +95,22 @@ fn determine_log_level(global: &cursus::cli::GlobalArgs) -> log::LevelFilter {
 	}
 }
 
+/// Resolves the BCP 47 locale tag for user-visible messages.
+///
+/// Priority order:
+/// 1. `CURSUS_LOCALE` environment variable (explicit override)
+/// 2. System locale via `sys_locale::get_locale()` (cross-platform)
+/// 3. `"en"` fallback
+#[coverage(off)]
+#[mutants::skip]
+fn detect_locale() -> String {
+	std::env::var("CURSUS_LOCALE")
+		.ok()
+		.filter(|s| !s.is_empty())
+		.or_else(sys_locale::get_locale)
+		.unwrap_or_else(|| cursus::locale::DEFAULT_LOCALE.to_string())
+}
+
 #[coverage(off)]
 #[mutants::skip]
 fn main() -> ExitCode {
@@ -156,12 +172,14 @@ fn main() -> ExitCode {
 		.ok()
 		.filter(|s| !s.is_empty())
 		.is_some();
+	let locale = detect_locale();
 	let env = cursus::Env::new(runner)
 		.with_editor_opt(editor)
 		.with_github_client_opt(github_client)
 		.with_oidc_environment(oidc_environment)
 		.with_node_auth_token_present(node_auth_token_present)
-		.with_cargo_registry_token_present(cargo_registry_token_present);
+		.with_cargo_registry_token_present(cargo_registry_token_present)
+		.with_locale(locale);
 	match cursus::run_with(cli, &cwd, env) {
 		Ok(code) => code,
 		Err(e) => {

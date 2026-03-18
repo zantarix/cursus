@@ -10,9 +10,6 @@ use crate::tui::widgets::{self, KeyResult, button_style};
 
 use super::{BackState, HandleResult, Screen, SelectProjectsState, enter_message};
 
-const HELP: &str = "↑/↓/j/k: navigate | Space: toggle | ←/→: change level | ,/.: set all levels | a: all | c: changed | u: unchanged | Enter: confirm | Esc: cancel";
-const QUESTION: &str = "Which projects does this change apply to?";
-const QUESTION_ERROR: &str = "Select at least one project to continue.";
 const QUESTION_HEIGHT: u16 = 3;
 
 fn new_screen(
@@ -284,7 +281,8 @@ fn click_level_at(col: u16, inner_x_start: u16, name_col_width: usize) -> Option
 /// Returns `(inner_y_start, inner_y_end, inner_x_start, inner_x_end)` for the
 /// project-list block inside the wizard layout.
 fn project_block_inner_bounds(content_area: Rect) -> (u16, u16, u16, u16) {
-	let help_h = widgets::paragraph_height(HELP, content_area.width, 0);
+	let help = crate::t!("select-projects-help");
+	let help_h = widgets::paragraph_height(&help, content_area.width, 0);
 	let chunks = widgets::wizard_layout(
 		content_area,
 		&[
@@ -489,16 +487,17 @@ pub(super) fn render_select_projects(
 	state: &SelectProjectsState,
 ) {
 	let question_text = if state.error {
-		QUESTION_ERROR
+		crate::t!("select-projects-error")
 	} else {
-		QUESTION
+		crate::t!("select-projects-question")
 	};
 	let question_color = if state.error {
 		Color::Red
 	} else {
 		Color::Yellow
 	};
-	let help_h = widgets::paragraph_height(HELP, area.width, 0);
+	let help = crate::t!("select-projects-help");
+	let help_h = widgets::paragraph_height(&help, area.width, 0);
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
@@ -507,7 +506,7 @@ pub(super) fn render_select_projects(
 			Constraint::Length(help_h),
 		],
 	);
-	widgets::render_question(frame, chunks[0], question_text, question_color);
+	widgets::render_question(frame, chunks[0], &question_text, question_color);
 	let lines = build_project_lines(
 		project_names,
 		&state.selected,
@@ -521,7 +520,7 @@ pub(super) fn render_select_projects(
 			.title("Select Projects"),
 	);
 	frame.render_widget(para, chunks[1]);
-	widgets::render_help(frame, chunks[2], HELP);
+	widgets::render_help(frame, chunks[2], &help);
 }
 
 #[cfg(test)]

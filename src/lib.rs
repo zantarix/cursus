@@ -9,6 +9,7 @@ pub(crate) mod conventional_commit;
 pub(crate) mod env;
 pub mod git;
 pub mod github;
+pub mod locale;
 pub mod model;
 pub mod package_manager;
 #[cfg(feature = "test-support")]
@@ -84,6 +85,9 @@ where
 pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode> {
 	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
 	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
+
+	// Set the process-global locale from the environment before any output.
+	locale::set_locale(env.locale());
 
 	// Wrap the runner with DryRunCommandRunner when --dry-run is active so that
 	// all mutating subprocess calls are silently suppressed.

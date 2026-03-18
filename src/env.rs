@@ -32,6 +32,12 @@ pub struct Env {
 	node_auth_token_present: bool,
 	/// Whether `CARGO_REGISTRY_TOKEN` is set in the environment.
 	cargo_registry_token_present: bool,
+	/// The BCP 47 locale tag to use for all user-visible messages.
+	///
+	/// Resolved from `CURSUS_LOCALE`, then the system locale, then `"en"` by
+	/// the binary entry point. The library never reads locale environment
+	/// variables directly.
+	locale: String,
 }
 
 impl Env {
@@ -47,6 +53,7 @@ impl Env {
 			oidc_environment: false,
 			node_auth_token_present: false,
 			cargo_registry_token_present: false,
+			locale: crate::locale::DEFAULT_LOCALE.to_string(),
 		}
 	}
 
@@ -96,6 +103,15 @@ impl Env {
 		self
 	}
 
+	/// Sets the locale for all user-visible messages.
+	///
+	/// The `locale` string should be a BCP 47 tag (e.g. `"en"`, `"en-US"`,
+	/// `"pt-BR"`). Defaults to `"en"`.
+	pub fn with_locale(mut self, locale: String) -> Self {
+		self.locale = locale;
+		self
+	}
+
 	/// Wraps the current command runner in a [`DryRunCommandRunner`] that suppresses
 	/// all mutating operations.
 	///
@@ -112,6 +128,7 @@ impl Env {
 			oidc_environment: self.oidc_environment,
 			node_auth_token_present: self.node_auth_token_present,
 			cargo_registry_token_present: self.cargo_registry_token_present,
+			locale: self.locale,
 		}
 	}
 
@@ -138,6 +155,11 @@ impl Env {
 	/// Returns `true` when `CARGO_REGISTRY_TOKEN` is present in the environment.
 	pub(crate) fn cargo_registry_token_present(&self) -> bool {
 		self.cargo_registry_token_present
+	}
+
+	/// Returns the BCP 47 locale tag for user-visible messages.
+	pub(crate) fn locale(&self) -> &str {
+		&self.locale
 	}
 
 	/// Finds a default editor by probing well-known editors on the system PATH.
@@ -297,6 +319,19 @@ mod tests {
 	}
 
 	#[test]
+	fn new_has_default_locale() {
+		let (_, env) = recording_env(0);
+		assert_eq!(env.locale(), crate::locale::DEFAULT_LOCALE);
+	}
+
+	#[test]
+	fn with_locale_sets_locale() {
+		let (_, env) = recording_env(0);
+		let env = env.with_locale("pt-BR".to_string());
+		assert_eq!(env.locale(), "pt-BR");
+	}
+
+	#[test]
 	fn with_dry_run_runner_preserves_auth_flags() {
 		let (_, env) = recording_env(0);
 		let env = env
@@ -307,6 +342,14 @@ mod tests {
 		assert!(dry_env.oidc_environment());
 		assert!(dry_env.node_auth_token_present());
 		assert!(dry_env.cargo_registry_token_present());
+	}
+
+	#[test]
+	fn with_dry_run_runner_preserves_locale() {
+		let (_, env) = recording_env(0);
+		let env = env.with_locale("fr".to_string());
+		let dry_env = env.with_dry_run_runner();
+		assert_eq!(dry_env.locale(), "fr");
 	}
 
 	#[test]

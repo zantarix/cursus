@@ -58,8 +58,7 @@ pub(super) fn render_manifest_path(
 		PackageManager::Cargo => "Cargo.toml",
 		PackageManager::Npm => "package.json",
 	};
-	let question =
-		format!("{pm_name} not found at repo root. Enter subdirectory path (or leave empty):");
+	let question = crate::t!("manifest-path-question", "manifest" => pm_name);
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
@@ -70,7 +69,7 @@ pub(super) fn render_manifest_path(
 	);
 	widgets::render_question(frame, chunks[0], &question, Color::Yellow);
 	frame.render_widget(textarea, chunks[1]);
-	widgets::render_help(frame, chunks[2], "Enter: confirm | Esc: cancel");
+	widgets::render_help(frame, chunks[2], &crate::t!("manifest-path-help"));
 }
 
 #[cfg(test)]
@@ -154,6 +153,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_manifest_path() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();

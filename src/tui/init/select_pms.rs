@@ -7,10 +7,6 @@ use crate::tui::widgets::{self, KeyResult};
 
 use super::{HandleResult, PmFocus, Screen, WizardState, advance_from_manifest_queue};
 
-const QUESTION: &str = "Which package managers does this project use?";
-const HELP: &str =
-	"↑/↓/Tab: move focus | Space/Click: toggle | Enter: confirm (≥1 required) | Esc: cancel";
-
 /// Commits the selected package managers to state and advances to the next screen.
 ///
 /// For each selected PM whose manifest file is absent at the git root, a
@@ -106,13 +102,15 @@ fn handle_mouse_select_pms(
 	row: u16,
 	content_area: Rect,
 ) -> HandleResult {
-	let q_height = widgets::paragraph_height(QUESTION, content_area.width, 2);
+	let question = crate::t!("select-pms-question");
+	let help = crate::t!("select-pms-help");
+	let q_height = widgets::paragraph_height(&question, content_area.width, 2);
 	let chunks = widgets::wizard_layout(
 		content_area,
 		&[
 			Constraint::Length(q_height),
 			Constraint::Min(1),
-			Constraint::Length(widgets::paragraph_height(HELP, content_area.width, 0)),
+			Constraint::Length(widgets::paragraph_height(&help, content_area.width, 0)),
 		],
 	);
 	let checkbox_area = chunks[1];
@@ -176,16 +174,18 @@ pub(super) fn render_select_pms(
 	npm: bool,
 	focus: PmFocus,
 ) {
-	let help_h = widgets::paragraph_height(HELP, area.width, 0);
+	let question = crate::t!("select-pms-question");
+	let help = crate::t!("select-pms-help");
+	let help_h = widgets::paragraph_height(&help, area.width, 0);
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::paragraph_height(QUESTION, area.width, 2)),
+			Constraint::Length(widgets::paragraph_height(&question, area.width, 2)),
 			Constraint::Min(1),
 			Constraint::Length(help_h),
 		],
 	);
-	widgets::render_question(frame, chunks[0], QUESTION, Color::Yellow);
+	widgets::render_question(frame, chunks[0], &question, Color::Yellow);
 
 	let cargo_style = if focus == PmFocus::Cargo {
 		Style::default()
@@ -204,17 +204,23 @@ pub(super) fn render_select_pms(
 	let cargo_check = if cargo { "[x]" } else { "[ ]" };
 	let npm_check = if npm { "[x]" } else { "[ ]" };
 	let content = vec![
-		Line::from(Span::styled(format!("  {cargo_check} Cargo"), cargo_style)),
-		Line::from(Span::styled(format!("  {npm_check} NPM"), npm_style)),
+		Line::from(Span::styled(
+			format!("  {cargo_check} {}", crate::t!("cargo-label")),
+			cargo_style,
+		)),
+		Line::from(Span::styled(
+			format!("  {npm_check} {}", crate::t!("npm-label")),
+			npm_style,
+		)),
 	];
 	let list = Paragraph::new(content).block(
 		Block::default()
 			.borders(Borders::ALL)
-			.title("Package Managers"),
+			.title(crate::t!("select-pms-title")),
 	);
 	frame.render_widget(list, chunks[1]);
 
-	widgets::render_help(frame, chunks[2], HELP);
+	widgets::render_help(frame, chunks[2], &help);
 }
 
 #[cfg(test)]
@@ -460,6 +466,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_select_pms() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();

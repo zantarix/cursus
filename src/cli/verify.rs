@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use clap::Args;
-use log::{debug, info, warn};
+use log::{debug, info};
 
 use crate::git::GitWorkdir;
 use crate::model::changeset::is_changeset_filename;
@@ -49,15 +49,14 @@ pub(crate) fn cmd_verify(git: &GitWorkdir, args: &VerifyArgs) -> anyhow::Result<
 		.collect();
 
 	if changesets.is_empty() {
-		warn!(
-			"No changeset files found on this branch compared to {}. \
-			Run `cursus change` to record your changes.",
-			args.base
-		);
+		log::warn!("{}", crate::t!("verify-no-changeset", "base" => &args.base));
 		return Ok(ExitCode::from(2));
 	}
 
-	info!("Found {} changeset(s) on this branch:", changesets.len());
+	log::info!(
+		"{}",
+		crate::t!("verify-found-changesets", "count" => changesets.len())
+	);
 	for name in &changesets {
 		info!("  {name}");
 	}

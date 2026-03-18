@@ -28,16 +28,13 @@ pub trait ButtonScreen: Sized {
 	type FullScreen;
 
 	/// The question text displayed at the top of the screen.
-	///
-	/// Defined as a `const` to avoid borrow-after-move: mouse handling reads
-	/// the question text and then consumes `self` for `on_confirm`.
-	const QUESTION: &'static str;
+	fn question(&self) -> String;
 
 	/// Foreground color for the question text. Defaults to [`Color::Yellow`].
 	const QUESTION_COLOR: Color = Color::Yellow;
 
 	/// Returns the button definitions for the current selection state.
-	fn buttons(&self) -> Vec<ButtonDef<'_>>;
+	fn buttons(&self) -> Vec<ButtonDef>;
 
 	/// Returns a copy of `self` with the selection advanced to the next option.
 	fn next(self) -> Self;
@@ -86,6 +83,7 @@ pub trait ButtonScreen: Sized {
 		event: Event,
 		content_area: Rect,
 	) -> anyhow::Result<ButtonKeyResult<Self::State, Self::FullScreen, Self::Result>> {
+		let question = self.question();
 		match event {
 			Event::Key(KeyEvent { code, .. }) => match code {
 				KeyCode::Left | KeyCode::Char('h') => {
@@ -102,8 +100,7 @@ pub trait ButtonScreen: Sized {
 				let Ok(n) = u16::try_from(self.buttons().len()) else {
 					return Ok(KeyResult::Continue(self.into_continue(state)));
 				};
-				if let Some(idx) =
-					button_click_index(content_area, Self::QUESTION, n, me.column, me.row)
+				if let Some(idx) = button_click_index(content_area, &question, n, me.column, me.row)
 				{
 					self.with_index(idx).on_confirm(state)
 				} else {
@@ -121,22 +118,19 @@ pub trait ButtonScreen: Sized {
 	/// rendered in [`Self::QUESTION_COLOR`] inside a bordered block, followed
 	/// by the buttons and a help line at the bottom.
 	fn render(&self, frame: &mut Frame, area: Rect) {
+		let question = self.question();
 		let chunks = wizard_layout(
 			area,
 			&[
-				Constraint::Length(paragraph_height(Self::QUESTION, area.width, 2)),
+				Constraint::Length(paragraph_height(&question, area.width, 2)),
 				Constraint::Length(3),
 				Constraint::Length(1),
 				Constraint::Min(1),
 			],
 		);
-		render_question(frame, chunks[0], Self::QUESTION, Self::QUESTION_COLOR);
+		render_question(frame, chunks[0], &question, Self::QUESTION_COLOR);
 		render_buttons(frame, chunks[1], &self.buttons());
-		render_help(
-			frame,
-			chunks[3],
-			"←/→ or click to switch, Enter or click to confirm, Esc to cancel",
-		);
+		render_help(frame, chunks[3], &crate::t!("button-screen-help"));
 	}
 }
 
@@ -169,17 +163,19 @@ mod tests {
 		type Result = TestResult;
 		type FullScreen = TestScreen;
 
-		const QUESTION: &'static str = "Test question?";
+		fn question(&self) -> String {
+			"Test question?".to_string()
+		}
 
-		fn buttons(&self) -> Vec<ButtonDef<'_>> {
+		fn buttons(&self) -> Vec<ButtonDef> {
 			vec![
 				ButtonDef {
-					label: "Yes",
+					label: "Yes".to_string(),
 					selected: self.yes,
 					color: None,
 				},
 				ButtonDef {
-					label: "No",
+					label: "No".to_string(),
 					selected: !self.yes,
 					color: None,
 				},
@@ -378,6 +374,7 @@ mod tests {
 
 	#[test]
 	fn button_screen_render_shows_question_and_buttons() {
+		crate::locale::set_locale("en");
 		let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 		let buttons = TestButtons { yes: true };
 		let content = render_to_string(&mut terminal, |frame| {

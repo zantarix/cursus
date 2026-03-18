@@ -45,9 +45,9 @@ pub enum KeyResult<S, T> {
 }
 
 /// Definition of a single button in a button row widget.
-pub struct ButtonDef<'a> {
+pub struct ButtonDef {
 	/// The text label displayed inside the button.
-	pub label: &'a str,
+	pub label: String,
 	/// Whether this button is currently selected/highlighted.
 	pub selected: bool,
 	/// Optional foreground color override for the selected state.
@@ -158,7 +158,7 @@ pub fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
 ///
 /// Each button occupies an equal share of `area`. The selected button's style
 /// fills the entire button area. Unselected buttons have a dark grey background.
-pub fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef<'_>]) {
+pub fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef]) {
 	if buttons.is_empty() {
 		return;
 	}
@@ -174,7 +174,11 @@ pub fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef<'_>]) 
 		} else {
 			Style::default().fg(Color::Gray).bg(Color::DarkGray)
 		};
-		let content = Text::from(vec![Line::from(""), Line::from(btn.label), Line::from("")]);
+		let content = Text::from(vec![
+			Line::from(""),
+			Line::from(btn.label.as_str()),
+			Line::from(""),
+		]);
 		let para = Paragraph::new(content)
 			.alignment(Alignment::Center)
 			.style(style);
@@ -492,12 +496,12 @@ mod tests {
 				frame.area(),
 				&[
 					ButtonDef {
-						label: "Yes",
+						label: "Yes".to_string(),
 						selected: true,
 						color: None,
 					},
 					ButtonDef {
-						label: "No",
+						label: "No".to_string(),
 						selected: false,
 						color: Some(Color::Red),
 					},

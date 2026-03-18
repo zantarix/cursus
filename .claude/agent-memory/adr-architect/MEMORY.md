@@ -67,7 +67,8 @@ Key differences from old style:
 - ADR-031: Accepted (CHANGELOG.md guard for unprepared packages)
 - ADR-032: Accepted (verify changeset on feature branch)
 - ADR-033: Accepted (Windows shell execution)
-- Next ADR number: 034
+- ADR-034: Accepted (compile-time embedded localisation via fluent-templates)
+- Next ADR number: 035
 
 ## Project ADR Rules (from CLAUDE.md)
 

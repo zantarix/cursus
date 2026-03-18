@@ -15,17 +15,19 @@ impl ButtonScreen for ConfirmOverwriteButtons {
 	type Result = InitResult;
 	type FullScreen = Screen;
 
-	const QUESTION: &'static str = "Config already exists. Overwrite?";
+	fn question(&self) -> String {
+		crate::t!("confirm-overwrite-question")
+	}
 
-	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+	fn buttons(&self) -> Vec<ButtonDef> {
 		vec![
 			ButtonDef {
-				label: "Yes",
+				label: crate::t!("button-yes"),
 				selected: self.yes,
 				color: Some(Color::Red),
 			},
 			ButtonDef {
-				label: "No",
+				label: crate::t!("button-no"),
 				selected: !self.yes,
 				color: None,
 			},
@@ -191,6 +193,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_confirm_overwrite() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();

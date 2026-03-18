@@ -97,22 +97,22 @@ pub(super) fn render_edit_github(
 	error: bool,
 ) {
 	let question = if error {
-		"Invalid format. Enter owner/repo (e.g. acme/my-app), or leave empty:"
+		crate::t!("edit-github-invalid-question")
 	} else {
-		"GitHub repository (owner/repo, e.g. acme/my-app, or leave empty):"
+		crate::t!("edit-github-question")
 	};
 	let color = if error { Color::Red } else { Color::Yellow };
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::paragraph_height(question, area.width, 2)),
+			Constraint::Length(widgets::paragraph_height(&question, area.width, 2)),
 			Constraint::Length(3),
 			Constraint::Min(1),
 		],
 	);
-	widgets::render_question(frame, chunks[0], question, color);
+	widgets::render_question(frame, chunks[0], &question, color);
 	frame.render_widget(textarea, chunks[1]);
-	widgets::render_help(frame, chunks[2], "Enter: confirm | Esc: cancel");
+	widgets::render_help(frame, chunks[2], &crate::t!("edit-github-help"));
 }
 
 #[cfg(test)]
@@ -247,6 +247,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_edit_github() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();
@@ -269,6 +270,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_edit_github_error() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();

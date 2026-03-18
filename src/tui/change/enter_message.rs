@@ -17,17 +17,17 @@ use crate::tui::widgets::{self, KeyResult};
 
 use super::{BackState, ChangeResult, HandleResult, Screen};
 
-const QUESTION: &str = "Describe this change:";
-const HELP: &str =
-	"Enter: submit | Alt+Enter (or Shift+Enter): newline | Ctrl+E: open editor | Esc: back";
-
 /// Creates a new blank [`TextArea`] with standard wizard styling.
 ///
 /// Returns a [`Box`] because `TextArea` is large (reducing `Screen` variant
 /// size) and does not implement `Clone` or `PartialEq`.
 pub(super) fn initial_textarea() -> Box<TextArea<'static>> {
 	let mut textarea = TextArea::default();
-	textarea.set_block(Block::default().borders(Borders::ALL).title("Message"));
+	textarea.set_block(
+		Block::default()
+			.borders(Borders::ALL)
+			.title(crate::t!("enter-message-title")),
+	);
 	Box::new(textarea)
 }
 
@@ -90,17 +90,19 @@ pub(super) fn handle_event_enter_message(
 
 /// Renders the [`Screen::EnterMessage`] screen.
 pub(super) fn render_enter_message(frame: &mut Frame, area: Rect, textarea: &TextArea<'static>) {
+	let question = crate::t!("enter-message-question");
+	let help = crate::t!("enter-message-help");
 	let chunks = widgets::wizard_layout(
 		area,
 		&[
-			Constraint::Length(widgets::paragraph_height(QUESTION, area.width, 2)),
+			Constraint::Length(widgets::paragraph_height(&question, area.width, 2)),
 			Constraint::Min(3),
 			Constraint::Length(1),
 		],
 	);
-	widgets::render_question(frame, chunks[0], QUESTION, Color::Yellow);
+	widgets::render_question(frame, chunks[0], &question, Color::Yellow);
 	frame.render_widget(textarea, chunks[1]);
-	widgets::render_help(frame, chunks[2], HELP);
+	widgets::render_help(frame, chunks[2], &help);
 }
 
 #[cfg(test)]
@@ -310,6 +312,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_enter_message_screen() {
+		crate::locale::set_locale("en");
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(1);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();

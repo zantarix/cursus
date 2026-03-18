@@ -14,18 +14,19 @@ impl ButtonScreen for GitStrategyButtons {
 	type Result = InitResult;
 	type FullScreen = Screen;
 
-	const QUESTION: &'static str =
-		"Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).";
+	fn question(&self) -> String {
+		crate::t!("git-strategy-question")
+	}
 
-	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+	fn buttons(&self) -> Vec<ButtonDef> {
 		vec![
 			ButtonDef {
-				label: "Push",
+				label: crate::t!("button-push"),
 				selected: self.strategy == Strategy::Push,
 				color: None,
 			},
 			ButtonDef {
-				label: "Branch",
+				label: crate::t!("button-branch"),
 				selected: self.strategy == Strategy::Branch,
 				color: None,
 			},
@@ -184,6 +185,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_git_strategy() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();

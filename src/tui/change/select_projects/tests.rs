@@ -663,6 +663,7 @@ fn row_to_project_index_all_changed() {
 
 #[test]
 fn ui_renders_select_projects_screen() {
+	crate::locale::set_locale("en");
 	let mut terminal = create_test_terminal();
 	let projects = dummy_projects(2);
 	let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
@@ -686,6 +687,7 @@ fn ui_renders_select_projects_screen() {
 
 #[test]
 fn ui_renders_selected_project_with_level() {
+	crate::locale::set_locale("en");
 	let mut terminal = create_test_terminal();
 	let projects = dummy_projects(1);
 	let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
@@ -705,6 +707,7 @@ fn ui_renders_selected_project_with_level() {
 
 #[test]
 fn ui_renders_group_headers() {
+	crate::locale::set_locale("en");
 	let mut terminal = create_test_terminal();
 	let projects = dummy_projects(2);
 	let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
@@ -725,6 +728,7 @@ fn ui_renders_group_headers() {
 
 #[test]
 fn ui_renders_group_headers_with_none_when_empty() {
+	crate::locale::set_locale("en");
 	let mut terminal = create_test_terminal();
 	let projects = dummy_projects(1);
 	let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();

@@ -232,23 +232,35 @@ fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 
 const TAB_HEIGHT: u16 = 3;
 
-fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
+fn render_tab_bar(frame: &mut Frame, tab_area: Rect, screen: &Screen) {
 	let [managers, git, github] = tab_states(screen);
+	let managers_label_long = crate::t!("select-pms-tab-long");
+	let managers_label_short = crate::t!("select-pms-tab-short");
+	let managers_label = if tab_area.width >= 72 {
+		managers_label_long.as_str()
+	} else {
+		managers_label_short.as_str()
+	};
+	let tab_git = crate::t!("tab-git");
+	let tab_github = crate::t!("tab-github");
+	widgets::render_tabs(
+		frame,
+		tab_area,
+		&[
+			(managers_label, managers),
+			(tab_git.as_str(), git),
+			(tab_github.as_str(), github),
+		],
+	);
+}
+
+fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 	let full = frame.area();
 	let tab_area = Rect {
 		height: TAB_HEIGHT,
 		..full
 	};
-	let managers_label = if full.width >= 72 {
-		"Package Managers"
-	} else {
-		"Managers"
-	};
-	widgets::render_tabs(
-		frame,
-		tab_area,
-		&[(managers_label, managers), ("Git", git), ("GitHub", github)],
-	);
+	render_tab_bar(frame, tab_area, screen);
 	let content_area = Rect {
 		y: full.y + TAB_HEIGHT,
 		height: full.height.saturating_sub(TAB_HEIGHT),

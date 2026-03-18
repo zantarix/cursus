@@ -20,22 +20,24 @@ impl ButtonScreen for SinglePackageButtons {
 	type Result = ChangeResult;
 	type FullScreen = Screen;
 
-	const QUESTION: &'static str = "What type of change is this?";
+	fn question(&self) -> String {
+		crate::t!("single-package-question")
+	}
 
-	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+	fn buttons(&self) -> Vec<ButtonDef> {
 		vec![
 			ButtonDef {
-				label: "Major",
+				label: crate::t!("button-major"),
 				selected: self.level == ChangeType::Major,
 				color: None,
 			},
 			ButtonDef {
-				label: "Minor",
+				label: crate::t!("button-minor"),
 				selected: self.level == ChangeType::Minor,
 				color: None,
 			},
 			ButtonDef {
-				label: "Patch",
+				label: crate::t!("button-patch"),
 				selected: self.level == ChangeType::Patch,
 				color: None,
 			},
@@ -266,6 +268,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_single_package_screen() {
+		crate::locale::set_locale("en");
 		let mut terminal = create_test_terminal();
 		let projects = dummy_projects(1);
 		let names: Vec<&str> = projects.iter().map(|p| p.name()).collect();

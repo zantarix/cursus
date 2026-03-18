@@ -24,7 +24,8 @@ fn write_cargo_section(out: &mut String, enabled: bool, path: &Option<String>) -
 		} else {
 			writeln!(
 				out,
-				"# path = \"subdir/\"              # Subdirectory for Cargo.toml (relative to git root)"
+				"# path = \"subdir/\"              # {}",
+				crate::t!("cargo-path-comment")
 			)?;
 		}
 	} else {
@@ -32,7 +33,8 @@ fn write_cargo_section(out: &mut String, enabled: bool, path: &Option<String>) -
 		writeln!(out, "# enabled = false")?;
 		writeln!(
 			out,
-			"# path = \"subdir/\"              # Subdirectory for Cargo.toml (relative to git root)"
+			"# path = \"subdir/\"              # {}",
+			crate::t!("cargo-path-comment")
 		)?;
 	}
 	writeln!(out)
@@ -47,31 +49,37 @@ fn write_npm_section(out: &mut String, enabled: bool, path: &Option<String>) -> 
 		} else {
 			writeln!(
 				out,
-				"# path = \"subdir/\"              # Subdirectory for package.json (relative to git root)"
+				"# path = \"subdir/\"              # {}",
+				crate::t!("npm-path-comment")
 			)?;
 		}
 		writeln!(
 			out,
-			"# lock_command = \"npm install\"  # Custom command to update the lock file"
+			"# lock_command = \"npm install\"  # {}",
+			crate::t!("npm-lock-command-comment")
 		)?;
 		writeln!(
 			out,
-			"# access = \"restricted\"         # Access level for scoped packages: \"public\" or \"restricted\" (default: \"restricted\")"
+			"# access = \"restricted\"         # {}",
+			crate::t!("npm-access-comment")
 		)?;
 	} else {
 		writeln!(out, "# [npm]")?;
 		writeln!(out, "# enabled = false")?;
 		writeln!(
 			out,
-			"# path = \"subdir/\"              # Subdirectory for package.json (relative to git root)"
+			"# path = \"subdir/\"              # {}",
+			crate::t!("npm-path-comment")
 		)?;
 		writeln!(
 			out,
-			"# lock_command = \"npm install\"  # Custom command to update the lock file"
+			"# lock_command = \"npm install\"  # {}",
+			crate::t!("npm-lock-command-comment")
 		)?;
 		writeln!(
 			out,
-			"# access = \"restricted\"         # Access level for scoped packages: \"public\" or \"restricted\" (default: \"restricted\")"
+			"# access = \"restricted\"         # {}",
+			crate::t!("npm-access-comment")
 		)?;
 	}
 	writeln!(out)
@@ -94,19 +102,23 @@ fn write_git_section(out: &mut String, enabled: bool, strategy: Option<Strategy>
 	let prefix = if enabled { "" } else { "# " };
 	writeln!(
 		out,
-		"{prefix}# tag_format = \"auto\"                                       # Tag format: \"auto\", \"prefixed\", or \"simple\""
+		"{prefix}# tag_format = \"auto\"                                       # {}",
+		crate::t!("git-tag-format-comment")
 	)?;
 	writeln!(
 		out,
-		"{prefix}# release_branch_prefix = \"cursus-release/\"                 # Prefix for release branches (branch strategy)"
+		"{prefix}# release_branch_prefix = \"cursus-release/\"                 # {}",
+		crate::t!("git-release-branch-prefix-comment")
 	)?;
 	writeln!(
 		out,
-		"{prefix}# extra_files = []                                          # Additional files to stage before committing"
+		"{prefix}# extra_files = []                                          # {}",
+		crate::t!("git-extra-files-comment")
 	)?;
 	writeln!(
 		out,
-		"{prefix}# prepare_commit_message = \"ci(release): version packages\"  # Commit message for the prepare step"
+		"{prefix}# prepare_commit_message = \"ci(release): version packages\"  # {}",
+		crate::t!("git-prepare-commit-message-comment")
 	)?;
 	writeln!(out)
 }
@@ -119,7 +131,8 @@ fn write_prepare_section(out: &mut String) -> fmt::Result {
 	writeln!(out, "# [prepare]")?;
 	writeln!(
 		out,
-		"# dependency_bump = \"auto\"      # Bump level for dependents: \"auto\" (default), \"match\", \"patch\", \"minor\", or \"major\""
+		"# dependency_bump = \"auto\"      # {}",
+		crate::t!("prepare-dependency-bump-comment")
 	)?;
 	writeln!(out)
 }
@@ -130,16 +143,10 @@ fn write_prepare_section(out: &mut String) -> fmt::Result {
 /// consulting documentation; it is never enabled by the init wizard.
 fn write_linked_versions_section(out: &mut String) -> fmt::Result {
 	writeln!(out, "# [linked-versions]")?;
-	writeln!(
-		out,
-		"# Keep all packages at the same version (global linking)."
-	)?;
+	writeln!(out, "# {}", crate::t!("linked-versions-global-comment"))?;
 	writeln!(out, "# enabled = true")?;
 	writeln!(out)?;
-	writeln!(
-		out,
-		"# Or define groups of packages that should share a version:"
-	)?;
+	writeln!(out, "# {}", crate::t!("linked-versions-groups-comment"))?;
 	writeln!(out, "# [[linked-versions.groups]]")?;
 	writeln!(out, "# packages = [\"@org/prefix-*\", \"@org/other\"]")?;
 	writeln!(out)
@@ -148,15 +155,18 @@ fn write_linked_versions_section(out: &mut String) -> fmt::Result {
 fn write_github_advanced_comments(out: &mut String) -> fmt::Result {
 	writeln!(
 		out,
-		"# build_command = \"\"                # Shell command to build release artifacts"
+		"# build_command = \"\"                # {}",
+		crate::t!("github-build-command-comment")
 	)?;
 	writeln!(
 		out,
-		"# pull_request_title = \"\"           # Custom PR title (default: \"Release updates\")"
+		"# pull_request_title = \"\"           # {}",
+		crate::t!("github-pr-title-comment")
 	)?;
 	writeln!(
 		out,
-		"# [github.artifacts]                # Map of display name -> file path for release assets"
+		"# [github.artifacts]                # {}",
+		crate::t!("github-artifacts-comment")
 	)
 }
 
@@ -165,7 +175,8 @@ fn write_owner_comment(out: &mut String, detected: &Option<String>) -> fmt::Resu
 		Some(v) => writeln!(out, "# owner = {}", toml_quoted(v)),
 		None => writeln!(
 			out,
-			"# owner = \"\"                        # GitHub owner (auto-detected from remote if omitted)"
+			"# owner = \"\"                        # {}",
+			crate::t!("github-owner-auto-detect-comment")
 		),
 	}
 }
@@ -175,7 +186,8 @@ fn write_repo_comment(out: &mut String, detected: &Option<String>) -> fmt::Resul
 		Some(v) => writeln!(out, "# repo = {}", toml_quoted(v)),
 		None => writeln!(
 			out,
-			"# repo = \"\"                         # GitHub repo (auto-detected from remote if omitted)"
+			"# repo = \"\"                         # {}",
+			crate::t!("github-repo-auto-detect-comment")
 		),
 	}
 }
@@ -229,11 +241,13 @@ pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String
 	writeln!(out, "# [global]")?;
 	writeln!(
 		out,
-		"# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings"
+		"# disable_dependency_cycle_warnings = false  # {}",
+		crate::t!("global-disable-dep-cycle-comment")
 	)?;
 	writeln!(
 		out,
-		"# ignore = [\"example-*\"]                     # Glob patterns for packages to exclude from enumeration"
+		"# ignore = [\"example-*\"]                     # {}",
+		crate::t!("global-ignore-comment")
 	)?;
 	writeln!(out)?;
 	write_cargo_section(&mut out, result.cargo_enabled, &result.cargo_path)?;

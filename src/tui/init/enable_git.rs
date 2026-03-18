@@ -16,18 +16,19 @@ impl ButtonScreen for EnableGitButtons {
 	type Result = InitResult;
 	type FullScreen = Screen;
 
-	const QUESTION: &'static str =
-		"Enable git automation? (commits, tags, push/branch on prepare and publish)";
+	fn question(&self) -> String {
+		crate::t!("enable-git-question")
+	}
 
-	fn buttons(&self) -> Vec<ButtonDef<'_>> {
+	fn buttons(&self) -> Vec<ButtonDef> {
 		vec![
 			ButtonDef {
-				label: "Yes",
+				label: crate::t!("button-yes"),
 				selected: self.yes,
 				color: None,
 			},
 			ButtonDef {
-				label: "No",
+				label: crate::t!("button-no"),
 				selected: !self.yes,
 				color: Some(Color::Red),
 			},
@@ -168,6 +169,7 @@ mod tests {
 
 	#[test]
 	fn ui_renders_enable_git() {
+		crate::locale::set_locale("en");
 		use crate::tui::test_utils::{buffer_to_string, create_test_terminal};
 		let mut terminal = create_test_terminal();
 		let dir = temp_dir();
