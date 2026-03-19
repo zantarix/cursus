@@ -1,0 +1,45 @@
+name: Bug report
+description: If you're having an issue then this is where to start.
+labels: ['bug']
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: '## Bug description'
+  - type: textarea
+    attributes:
+      label: Describe the bug.
+      placeholder: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      value: |-
+        1. Run '...'
+        2. See error
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behaviour
+      placeholder: A clear and concise description of what you expected to happen.
+  - type: markdown
+    attributes:
+      value: '## Versions'
+  - type: input
+    attributes:
+      label: Cursus
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Operating system
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: '## Additional context'
+  - type: textarea
+    attributes:
+      label: Add any other context about the problem here.
