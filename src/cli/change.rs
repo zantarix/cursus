@@ -201,6 +201,9 @@ fn write_auto_changeset(
 		.collect();
 	let changeset = Changeset::new(packages, Some(changeset_message.to_string()));
 	if dry_run {
+		// Intentionally use println! instead of log::info! so that --silent
+		// suppresses all other output and stdout contains only the changeset
+		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
 		println!("{}", changeset.format()?);
 		if commit_to_git {
 			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
@@ -344,6 +347,9 @@ pub(crate) fn cmd_change(
 	let changeset = Changeset::new(packages, result.message.clone());
 
 	if global.dry_run {
+		// Intentionally use println! instead of log::info! so that --silent
+		// suppresses all other output and stdout contains only the changeset
+		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
 		println!("{}", changeset.format()?);
 	} else {
 		let path = changeset.write(git)?;
