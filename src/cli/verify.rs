@@ -34,6 +34,16 @@ impl Default for VerifyArgs {
 pub(crate) fn cmd_verify(git: &GitWorkdir, args: &VerifyArgs) -> anyhow::Result<ExitCode> {
 	debug!("Verifying changesets against base ref: {}", args.base);
 
+	if args.base.is_empty() {
+		anyhow::bail!("Invalid base ref: base ref must not be empty");
+	}
+	if args.base.starts_with('-') {
+		anyhow::bail!(
+			"Invalid base ref '{}': base refs must not start with '-'",
+			args.base
+		);
+	}
+
 	let range = format!("{}..HEAD", args.base);
 	let names = git.diff_names(&["--diff-filter=A", &range, "--", ".cursus/"])?;
 
@@ -65,10 +75,25 @@ pub(crate) fn cmd_verify(git: &GitWorkdir, args: &VerifyArgs) -> anyhow::Result<
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
 	use clap::Parser;
+	use tempfile::TempDir;
 
 	use super::*;
 	use crate::cli::Cli;
+	use crate::command::CommandRunner;
+	use crate::command::test_support::RecordingCommandRunner;
+	use crate::path::AbsolutePath;
+
+	fn make_git() -> (crate::git::GitWorkdir, TempDir) {
+		let dir = tempfile::tempdir().expect("Failed to create temp dir");
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let path = AbsolutePath::new(dir.path()).unwrap();
+		let git = crate::git::GitWorkdir::new(&env, path);
+		(git, dir)
+	}
 
 	#[test]
 	fn verify_args_default() {
@@ -97,5 +122,31 @@ mod tests {
 			}
 			_ => panic!("Expected Verify command"),
 		}
+	}
+
+	#[test]
+	fn verify_rejects_dash_prefix_base() {
+		let (git, _dir) = make_git();
+		let args = VerifyArgs {
+			base: "--output=/tmp/pwned".to_string(),
+		};
+		let err = cmd_verify(&git, &args).unwrap_err();
+		assert!(
+			err.to_string().contains("must not start with '-'"),
+			"unexpected error: {err}"
+		);
+	}
+
+	#[test]
+	fn verify_rejects_empty_base() {
+		let (git, _dir) = make_git();
+		let args = VerifyArgs {
+			base: String::new(),
+		};
+		let err = cmd_verify(&git, &args).unwrap_err();
+		assert!(
+			err.to_string().contains("must not be empty"),
+			"unexpected error: {err}"
+		);
 	}
 }
