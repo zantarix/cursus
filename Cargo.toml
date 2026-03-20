@@ -41,5 +41,9 @@ jsonschema = "=0.45.0"
 proptest = "=1.10.0"
 tempfile = "=3.27.0"
 
+[lints.clippy]
+too_many_lines = "warn"
+excessive_nesting = "warn"
+
 [build-dependencies]
 ureq = "=3.2.0"

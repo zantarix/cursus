@@ -113,6 +113,7 @@ fn detect_locale() -> String {
 
 #[coverage(off)]
 #[mutants::skip]
+#[allow(clippy::too_many_lines)]
 fn main() -> ExitCode {
 	// Parse args exactly once. Logging is initialised immediately after so
 	// that every subsequent operation benefits from the user-requested level.
