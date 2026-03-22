@@ -278,13 +278,7 @@ mod tests {
 				.with_stdout(b"https://github.com/acme/app.git\n".to_vec()),
 		);
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 		let invocations = runner.invocations();
@@ -299,13 +293,7 @@ mod tests {
 			RecordingCommandRunner::new(0).with_stdout(b"git@github.com:acme/app.git\n".to_vec()),
 		);
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, Some(GitHubRepo::new("acme", "app").unwrap()));
 	}
@@ -314,13 +302,7 @@ mod tests {
 	fn detect_returns_none_when_git_fails() {
 		let runner = Arc::new(RecordingCommandRunner::new(1));
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, None);
 	}
@@ -332,13 +314,7 @@ mod tests {
 				.with_stdout(b"https://gitlab.com/owner/repo.git\n".to_vec()),
 		);
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let result = GitHubRepo::detect_in(&git).unwrap();
 		assert_eq!(result, None);
 	}
@@ -361,13 +337,7 @@ mod tests {
 		let config = make_github_config(Some("acme"), Some("app"));
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let gh_repo = GitHubRepo::resolve(&config, &git).unwrap();
 		assert_eq!(gh_repo.owner, "acme");
@@ -384,13 +354,7 @@ mod tests {
 				.with_stdout(b"https://github.com/myorg/myapp.git\n".to_vec()),
 		);
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let gh_repo = GitHubRepo::resolve(&config, &git).unwrap();
 		assert_eq!(gh_repo.owner, "myorg");
@@ -402,13 +366,7 @@ mod tests {
 		let config = make_github_config(None, None);
 		let runner = Arc::new(RecordingCommandRunner::new(1)); // no origin remote
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
@@ -424,13 +382,7 @@ mod tests {
 		let config = make_github_config(Some("acme"), None);
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());
@@ -446,13 +398,7 @@ mod tests {
 		let config = make_github_config(None, Some("app"));
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
-		let git = GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
-			wd.clone(),
-		);
+		let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
 		let result = GitHubRepo::resolve(&config, &git);
 		assert!(result.is_err());

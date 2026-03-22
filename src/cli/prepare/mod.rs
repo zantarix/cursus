@@ -198,7 +198,13 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
@@ -215,10 +221,7 @@ mod tests {
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = cmd_prepare(&git, &args, false, config).unwrap();
@@ -232,7 +235,13 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
@@ -256,10 +265,7 @@ mod tests {
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = cmd_prepare(&git, &args, false, config);
@@ -279,7 +285,13 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"real-project\"\nversion = \"0.1.0\"\n",
@@ -307,10 +319,7 @@ mod tests {
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = cmd_prepare(&git, &args, false, config);

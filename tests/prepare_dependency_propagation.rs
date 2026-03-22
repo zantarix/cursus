@@ -37,7 +37,7 @@ fn set_prepare_config(dir: &std::path::Path, prepare: PrepareConfig) {
 	let abs = AbsolutePath::new(dir).unwrap();
 	let mut config = cursus::model::config::load(&abs, &make_env()).unwrap();
 	config.prepare = prepare;
-	config.save().unwrap();
+	config.with_env(common::test_env()).save().unwrap();
 }
 
 /// Creates a Cargo workspace with pkg-a at 1.0.0 and pkg-b depending on pkg-a.
@@ -473,7 +473,7 @@ fn npm_workspace_with_cycle() -> tempfile::TempDir {
 	let dir = temp_git_repo();
 	let config =
 		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled());
-	config.save().unwrap();
+	config.with_env(common::test_env()).save().unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),

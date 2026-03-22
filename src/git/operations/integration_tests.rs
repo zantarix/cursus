@@ -39,7 +39,7 @@ fn make_workdir(dir: &TempDir) -> super::GitWorkdir {
 		Arc::new(RealCommandRunner) as Arc<dyn CommandRunner>,
 		Arc::new(LocalFilesystem),
 	);
-	super::GitWorkdir::new(&env, path)
+	super::GitWorkdir::new(env.runner(), path)
 }
 
 /// Returns the current branch name for a repository directory using a raw git call.

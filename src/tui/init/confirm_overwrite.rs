@@ -55,10 +55,8 @@ impl ButtonScreen for ConfirmOverwriteButtons {
 		state: WizardState,
 	) -> anyhow::Result<KeyResult<(WizardState, Screen), InitResult>> {
 		if self.yes {
-			let git_workdir_abs = crate::path::AbsolutePath::new(&state.git_workdir)
-				.expect("git_workdir is absolute");
 			let (cargo, npm) =
-				detect_package_managers(&git_workdir_abs, &crate::filesystem::LocalFilesystem);
+				detect_package_managers(&state.git_workdir, &crate::filesystem::LocalFilesystem);
 			Ok(KeyResult::Continue((
 				state,
 				Screen::SelectPackageManagers {

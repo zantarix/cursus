@@ -22,18 +22,10 @@ pub(super) fn advance_from_select_pms(
 	state.npm_enabled = npm;
 
 	let mut remaining = Vec::new();
-	if cargo
-		&& !fs.exists(
-			&crate::path::AbsolutePath::new(state.git_workdir.join("Cargo.toml"))
-				.expect("git_workdir is absolute"),
-		) {
+	if cargo && !fs.exists(&state.git_workdir.child("Cargo.toml")) {
 		remaining.push(PackageManager::Cargo);
 	}
-	if npm
-		&& !fs.exists(
-			&crate::path::AbsolutePath::new(state.git_workdir.join("package.json"))
-				.expect("git_workdir is absolute"),
-		) {
+	if npm && !fs.exists(&state.git_workdir.child("package.json")) {
 		remaining.push(PackageManager::Npm);
 	}
 	state.remaining_manifest_pms = remaining;

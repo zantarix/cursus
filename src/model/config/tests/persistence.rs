@@ -13,6 +13,7 @@ fn exists_returns_false_when_no_config() {
 fn exists_returns_true_when_config_exists() {
 	let dir = temp_dir();
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+		.with_env(make_env())
 		.with_cargo(CargoConfig::enabled());
 	config.save().unwrap();
 	assert!(exists(
@@ -25,6 +26,7 @@ fn exists_returns_true_when_config_exists() {
 fn create_creates_config_file() {
 	let dir = temp_dir();
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+		.with_env(make_env())
 		.with_npm(NpmConfig::enabled());
 	let path = config.save().unwrap();
 	assert!(path.exists());
@@ -35,6 +37,7 @@ fn create_creates_config_file() {
 fn create_creates_directory_if_needed() {
 	let dir = temp_dir();
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+		.with_env(make_env())
 		.with_cargo(CargoConfig::enabled());
 	config.save().unwrap();
 	assert!(dir.path().join(".cursus").is_dir());
@@ -44,6 +47,7 @@ fn create_creates_directory_if_needed() {
 fn load_reads_config_file() {
 	let dir = temp_dir();
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+		.with_env(make_env())
 		.with_npm(NpmConfig::enabled());
 	config.save().unwrap();
 
@@ -112,6 +116,7 @@ fn load_fails_with_empty_config() {
 fn load_succeeds_with_one_package_manager() {
 	let dir = temp_dir();
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+		.with_env(make_env())
 		.with_cargo(CargoConfig::enabled());
 	config.save().unwrap();
 

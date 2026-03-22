@@ -176,7 +176,7 @@ fn main() -> ExitCode {
 	let locale = detect_locale();
 	let filesystem: Arc<dyn cursus::filesystem::Filesystem> =
 		Arc::new(cursus::filesystem::LocalFilesystem);
-	let mut env = cursus::Env::new(runner, filesystem)
+	let env = cursus::Env::new(runner, filesystem)
 		.with_editor_opt(editor)
 		.with_github_client_opt(github_client)
 		.with_oidc_environment(oidc_environment)
@@ -184,31 +184,15 @@ fn main() -> ExitCode {
 		.with_cargo_registry_token_present(cargo_registry_token_present)
 		.with_locale(locale);
 
-	// Apply dry-run wrapping BEFORE creating GitWorkdir so it gets the
-	// wrapped CommandRunner (per ADR-035 construction order).
-	if cli.global.dry_run {
-		env = env.with_dry_run_runner();
-	}
-
-	// Git discovery and GitWorkdir creation.
-	let cwd_abs = match cursus::path::AbsolutePath::new(&cwd) {
-		Ok(p) => p,
+	let env = match env.apply_global(&cli.global).local(&cwd) {
+		Ok(env) => env,
 		Err(e) => {
 			log::error!("{e:#}");
 			return ExitCode::FAILURE;
 		}
 	};
-	let git_workdir = match cursus::find_git_workdir(&cwd_abs, env.fs()) {
-		Some(p) => p,
-		None => {
-			log::error!("No git repository found");
-			return ExitCode::FAILURE;
-		}
-	};
-	let git = Arc::new(cursus::git::GitWorkdir::new(&env, git_workdir));
-	let env = env.with_git(git as Arc<dyn cursus::git::Git>);
 
-	match cursus::run_with(cli, env) {
+	match cursus::run(cli, env) {
 		Ok(code) => code,
 		Err(e) => {
 			log::error!("{e:#}");

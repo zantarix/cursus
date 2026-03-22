@@ -39,12 +39,11 @@ impl AbsolutePath {
 	/// component. Use this for well-known filenames (e.g. `"Cargo.toml"`,
 	/// `"CHANGELOG.md"`) where escaping is not a concern.
 	///
-	/// # Panics
-	///
-	/// Panics if the result is not absolute (should be impossible when
-	/// `sub` is relative).
+	/// **Note:** If `sub` is an absolute path, `PathBuf::join` will discard
+	/// the base and return `sub` unchanged. Only pass relative components.
 	pub fn child(&self, sub: impl AsRef<Path>) -> AbsolutePath {
 		let joined = self.0.join(sub);
+		debug_assert!(joined.is_absolute(), "child() produced a non-absolute path");
 		AbsolutePath(joined)
 	}
 
@@ -60,7 +59,13 @@ impl AbsolutePath {
 		let canonical_base = fs
 			.canonicalize(self)
 			.with_context(|| format!("failed to canonicalize base path: {}", self.0.display()))?;
-		let canonical_joined = std::fs::canonicalize(&joined).with_context(|| {
+		let joined_abs = AbsolutePath::new(&joined).with_context(|| {
+			format!(
+				"path does not exist or cannot be resolved: {}",
+				joined.display()
+			)
+		})?;
+		let canonical_joined = fs.canonicalize(&joined_abs).with_context(|| {
 			format!(
 				"path does not exist or cannot be resolved: {}",
 				joined.display()
@@ -90,7 +95,9 @@ impl AbsolutePath {
 
 		let mut results = Vec::new();
 		for path in fs.glob(pattern_str)? {
-			let canonical = std::fs::canonicalize(&path).with_context(|| {
+			let abs_path = AbsolutePath::new(&path)
+				.with_context(|| format!("glob result is not absolute: {}", path.display()))?;
+			let canonical = fs.canonicalize(&abs_path).with_context(|| {
 				format!("failed to canonicalize glob result: {}", path.display())
 			})?;
 			if !canonical.starts_with(&canonical_base) {
@@ -155,6 +162,20 @@ mod tests {
 		let p = AbsolutePath::new("/foo").unwrap();
 		let joined = p.join("bar");
 		assert_eq!(joined, Path::new("/foo/bar"));
+	}
+
+	#[test]
+	fn child_produces_expected_path() {
+		let p = AbsolutePath::new("/repo").unwrap();
+		let child = p.child("Cargo.toml");
+		assert_eq!(child.as_path(), Path::new("/repo/Cargo.toml"));
+	}
+
+	#[test]
+	fn child_with_nested_relative_path() {
+		let p = AbsolutePath::new("/repo").unwrap();
+		let child = p.child(".cursus/config.toml");
+		assert_eq!(child.as_path(), Path::new("/repo/.cursus/config.toml"));
 	}
 
 	#[test]

@@ -134,10 +134,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 
@@ -164,10 +161,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 
@@ -189,10 +183,7 @@ mod tests {
 			Arc::new(RecordingCommandRunner::new(1).with_stderr(b"fatal: not a git repo".to_vec()));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 
@@ -259,7 +250,13 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"my-pkg\"\nversion = \"0.1.0\"\n",
@@ -293,7 +290,13 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 
 		let path = PathBuf::from("test.md");
 		let mut pkgs = std::collections::BTreeMap::new();

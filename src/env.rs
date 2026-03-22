@@ -4,6 +4,8 @@ use std::path::Path;
 use std::process::{ExitStatus, Output};
 use std::sync::Arc;
 
+use anyhow::Context as _;
+
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::Filesystem;
 use crate::git::Git;
@@ -146,6 +148,34 @@ impl Env {
 		}
 	}
 
+	/// Applies global CLI flags to this environment.
+	///
+	/// Currently handles `--dry-run` by wrapping the command runner in a
+	/// [`DryRunCommandRunner`]. Must be called **before** [`local`][Self::local]
+	/// so that the [`GitWorkdir`][crate::git::GitWorkdir] receives the wrapped runner.
+	pub fn apply_global(self, global: &crate::cli::GlobalArgs) -> Self {
+		if global.dry_run {
+			self.with_dry_run_runner()
+		} else {
+			self
+		}
+	}
+
+	/// Performs local git discovery and sets up a [`GitWorkdir`][crate::git::GitWorkdir]
+	/// for the repository containing `cwd`.
+	///
+	/// This is the standard setup for running against a local filesystem. Callers
+	/// providing a remote [`Git`] implementation should use [`with_git`][Self::with_git]
+	/// directly instead.
+	pub fn local(self, cwd: &std::path::Path) -> anyhow::Result<Self> {
+		let cwd_abs = crate::path::AbsolutePath::new(cwd)
+			.context("current working directory is not absolute")?;
+		let git_workdir =
+			crate::find_git_workdir(&cwd_abs, self.fs()).context("No git repository found")?;
+		let git = Arc::new(crate::git::GitWorkdir::new(self.runner(), git_workdir));
+		Ok(self.with_git(git))
+	}
+
 	/// Returns the configured editor, if one was set.
 	pub(crate) fn editor(&self) -> Option<&str> {
 		self.editor.as_deref()
@@ -154,6 +184,11 @@ impl Env {
 	/// Returns the filesystem implementation.
 	pub fn fs(&self) -> &dyn Filesystem {
 		&*self.filesystem
+	}
+
+	/// Returns the command runner.
+	pub fn runner(&self) -> Arc<dyn CommandRunner> {
+		Arc::clone(&self.runner)
 	}
 
 	/// Sets the git implementation for repository operations.
@@ -397,7 +432,7 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let (_, env) = recording_env(0);
 		let git = Arc::new(crate::git::GitWorkdir::new(
-			&env,
+			env.runner(),
 			crate::path::AbsolutePath::new(dir.path()).unwrap(),
 		));
 		let env = env.with_git(git as Arc<dyn crate::git::Git>);
@@ -412,7 +447,7 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let (_, env) = recording_env(0);
 		let git = Arc::new(crate::git::GitWorkdir::new(
-			&env,
+			env.runner(),
 			crate::path::AbsolutePath::new(dir.path()).unwrap(),
 		));
 		let env = env.with_git(git as Arc<dyn crate::git::Git>);

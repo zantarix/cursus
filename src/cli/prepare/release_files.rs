@@ -225,7 +225,13 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
@@ -255,6 +261,11 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_cargo(crate::model::config::CargoConfig::enabled())
+			.with_env(crate::Env::new(
+				Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+					as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			))
 			.save()
 			.unwrap();
 		std::fs::write(
@@ -306,10 +317,7 @@ mod tests {
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = super::super::cmd_prepare(&git, &args, false, config);
@@ -376,10 +384,7 @@ mod tests {
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = super::super::cmd_prepare(&git, &args, true, config);

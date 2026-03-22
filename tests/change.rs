@@ -390,7 +390,7 @@ fn change_interactive_with_message_does_not_open_editor() {
 		Arc::new(LocalFilesystem),
 	)
 	.with_editor("__cursus_test_nonexistent_editor__".to_string());
-	let result = cursus::run(
+	let result = cursus::run_local(
 		["cursus", "change", "-t", "minor", "-m", "bump"],
 		dir.path(),
 		env,

@@ -105,7 +105,7 @@ fn config_roundtrip_with_path() {
 	let mut config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 		.with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
-	config.save().unwrap();
+	config.with_env(make_env()).save().unwrap();
 	let loaded = load(
 		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
 		&make_env(),
@@ -129,7 +129,7 @@ fn config_roundtrip() {
 					.with_cargo(CargoConfig::enabled())
 			}
 		};
-		config.save().unwrap();
+		config.with_env(make_env()).save().unwrap();
 		let loaded = load(
 			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
 			&make_env(),
@@ -175,7 +175,7 @@ fn config_roundtrip_with_global() {
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 		.with_global(global)
 		.with_npm(NpmConfig::enabled());
-	config.save().unwrap();
+	config.with_env(make_env()).save().unwrap();
 	let loaded = load(
 		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
 		&make_env(),

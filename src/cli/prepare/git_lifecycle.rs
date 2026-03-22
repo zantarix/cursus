@@ -274,10 +274,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -304,10 +301,7 @@ mod tests {
 			crate::command::DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::new(dry_run_runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::new(dry_run_runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -341,10 +335,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(&repo_dir).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -380,10 +371,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -415,10 +403,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		// Should succeed (non-existent file is a warning, not an error).
@@ -445,10 +430,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -542,10 +524,7 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout → clean
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = check_dirty_tree(&git);
@@ -559,10 +538,7 @@ mod tests {
 			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(
-				Arc::clone(&runner) as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
 		let result = check_dirty_tree(&git);
@@ -590,7 +566,13 @@ mod tests {
 						.with_repo("app".to_string())
 						.with_pull_request_title("My Release PR".to_string()),
 				);
-		cfg.save().unwrap();
+		cfg.with_env(crate::Env::new(
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		))
+		.save()
+		.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test-pkg\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
@@ -633,7 +615,7 @@ mod tests {
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(&env, dir_abs.clone());
+		let git = crate::git::GitWorkdir::new(env.runner(), dir_abs.clone());
 		let result = super::super::cmd_prepare(&git, &args, false, config);
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
@@ -675,7 +657,7 @@ mod tests {
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(&env, dir_abs.clone());
+		let git = crate::git::GitWorkdir::new(env.runner(), dir_abs.clone());
 		let result = super::super::cmd_prepare(&git, &args, false, config);
 		assert!(
 			result.is_err(),
@@ -697,7 +679,7 @@ mod tests {
 		let args = PrepareArgs::default();
 
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(&env, dir_abs.clone());
+		let git = crate::git::GitWorkdir::new(env.runner(), dir_abs.clone());
 		let result = super::super::cmd_prepare(&git, &args, false, config);
 		assert!(result.is_err(), "Expected Err without github client");
 		let msg = format!("{:#}", result.unwrap_err());

@@ -15,7 +15,7 @@ fn add_linked_versions_to_config(dir: &std::path::Path, lv: LinkedVersionsConfig
 	let abs = AbsolutePath::new(dir).unwrap();
 	let mut config = cursus::model::config::load(&abs, &make_env()).unwrap();
 	config.linked_versions = lv;
-	config.save().unwrap();
+	config.with_env(common::test_env()).save().unwrap();
 }
 
 fn make_env() -> cursus::Env {

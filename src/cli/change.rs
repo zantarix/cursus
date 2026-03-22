@@ -236,7 +236,7 @@ fn cmd_change_auto(
 			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
 		}
 	} else {
-		let path = changeset.write(git, config.env().expect("env not set").fs())?;
+		let path = changeset.write(git, config.env().context("env not set")?.fs())?;
 		if config.git.enabled() && !args.no_git {
 			git.add(&[path])?;
 		}
@@ -318,7 +318,7 @@ pub(crate) fn cmd_change(
 		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
 		println!("{}", changeset.format()?);
 	} else {
-		let path = changeset.write(git, config.env().expect("env not set").fs())?;
+		let path = changeset.write(git, config.env().context("env not set")?.fs())?;
 		if result.message.is_none() {
 			env.run_editor_on(&path, git.path())?;
 		}
@@ -347,7 +347,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		crate::git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
+		crate::git::GitWorkdir::new(env.runner(), AbsolutePath::new("/nonexistent").unwrap())
 	}
 
 	fn make_git_failing() -> crate::git::GitWorkdir {
@@ -356,7 +356,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		crate::git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
+		crate::git::GitWorkdir::new(env.runner(), AbsolutePath::new("/nonexistent").unwrap())
 	}
 
 	/// A command runner that returns a sequence of responses, one per call.
@@ -460,7 +460,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		crate::git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
+		crate::git::GitWorkdir::new(env.runner(), AbsolutePath::new("/nonexistent").unwrap())
 	}
 
 	#[test]

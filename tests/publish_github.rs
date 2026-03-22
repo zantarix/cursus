@@ -23,7 +23,7 @@ fn run_cursus_with_token(
 		Arc::new(LocalFilesystem),
 	)
 	.with_github_client(github_client);
-	cursus::run(args, cwd, env)
+	cursus::run_local(args, cwd, env)
 }
 
 /// Helper: write a config file with the given TOML content under `.cursus/`.

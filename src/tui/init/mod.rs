@@ -62,7 +62,7 @@ pub struct InitResult {
 /// Internal state accumulated as the wizard progresses.
 #[derive(Debug, Clone)]
 struct WizardState {
-	git_workdir: std::path::PathBuf,
+	git_workdir: crate::path::AbsolutePath,
 	dry_run: bool,
 	cargo_enabled: bool,
 	npm_enabled: bool,
@@ -321,13 +321,13 @@ pub fn run(
 ) -> anyhow::Result<Option<InitResult>> {
 	let (cargo_detected, npm_detected) = detect_package_managers(git_workdir, env.fs());
 
-	let git = GitWorkdir::new(env, git_workdir.clone());
+	let git = GitWorkdir::new(env.runner(), git_workdir.clone());
 	let detected_github = crate::github::remote::GitHubRepo::detect_in(&git)
 		.ok()
 		.flatten();
 
 	let initial_state = WizardState {
-		git_workdir: git_workdir.as_ref().to_path_buf(),
+		git_workdir: git_workdir.clone(),
 		dry_run,
 		cargo_enabled: false,
 		npm_enabled: false,
@@ -402,7 +402,7 @@ pub(super) mod test_helpers {
 
 	pub(super) fn make_state(dir: &TempDir) -> WizardState {
 		WizardState {
-			git_workdir: dir.path().to_path_buf(),
+			git_workdir: crate::path::AbsolutePath::new(dir.path()).unwrap(),
 			dry_run: false,
 			cargo_enabled: false,
 			npm_enabled: false,

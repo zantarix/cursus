@@ -783,6 +783,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 				.with_owner("acme".into())
 				.with_repo("app".into()),
 		)
+		.with_env(common::test_env())
 		.save()
 		.unwrap();
 
@@ -832,7 +833,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
 	});
 
-	let result = cursus::run(
+	let result = cursus::run_local(
 		["cursus", "--no-interactive", "prepare"],
 		dir.path(),
 		make_env(),
@@ -862,7 +863,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
 	});
 
-	let result = cursus::run(
+	let result = cursus::run_local(
 		["cursus", "--no-interactive", "prepare"],
 		dir.path(),
 		make_env(),

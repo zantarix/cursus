@@ -495,7 +495,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let changeset = single_package_changeset();
 		let path = changeset
 			.write(&git, &crate::filesystem::LocalFilesystem)
@@ -513,7 +513,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let changeset = single_package_changeset();
 		changeset
 			.write(&git, &crate::filesystem::LocalFilesystem)
@@ -532,7 +532,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
 		let path = changeset
@@ -658,7 +658,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert!(result.is_empty());
 	}
@@ -671,7 +671,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("config.toml"), "").unwrap();
@@ -687,7 +687,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(
@@ -710,7 +710,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
@@ -728,7 +728,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("bad.md"), "not a valid changeset").unwrap();
@@ -745,7 +745,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(
@@ -768,7 +768,7 @@ pkg = \"minor\"
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		let git = GitWorkdir::new(&env, abs.clone());
+		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("readme.md"), "not a changeset").unwrap();

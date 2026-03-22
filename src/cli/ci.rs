@@ -2,6 +2,7 @@
 
 use std::process::ExitCode;
 
+use anyhow::Context as _;
 use clap::Args;
 use log::{debug, info};
 
@@ -56,7 +57,7 @@ pub(crate) fn cmd_ci(
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	// Step 1: check for pending changesets.
-	let changesets = Changeset::read_all(git, config.env().expect("env not set").fs())?;
+	let changesets = Changeset::read_all(git, config.env().context("env not set")?.fs())?;
 	if !changesets.is_empty() {
 		info!("ci: pending changesets found, running prepare");
 		let prepare_args = PrepareArgs {

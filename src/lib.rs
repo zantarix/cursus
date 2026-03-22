@@ -23,7 +23,6 @@ pub mod test_logging;
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
@@ -46,15 +45,15 @@ pub fn find_git_workdir(
 	.and_then(|p| AbsolutePath::new(p).ok())
 }
 
-/// Main entry point for the cursus application.
+/// Convenience entry point for local filesystem usage.
 ///
-/// Parses CLI arguments from the provided iterator, performs git discovery
-/// and dry-run setup, then delegates to [`run_with`].
+/// Parses CLI arguments, performs git discovery and dry-run setup via
+/// [`Env::apply_global`] and [`Env::local`], then delegates to [`run`].
 ///
-/// Use [`run_with`] directly when the caller has already parsed the arguments
+/// Use [`run`] directly when the caller has already parsed the arguments
 /// and set up git on the environment (e.g., from `main` or when providing a
 /// custom [`git::Git`] implementation).
-pub fn run<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
+pub fn run_local<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
@@ -74,30 +73,16 @@ where
 		}
 	};
 
-	// Apply dry-run wrapping BEFORE creating GitWorkdir so it gets the
-	// wrapped CommandRunner (per ADR-035 construction order).
-	let dry_run = cli.global.dry_run;
-	let env = if dry_run {
-		env.with_dry_run_runner()
-	} else {
-		env
-	};
-
-	// Git discovery and GitWorkdir creation.
-	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
-	let git_workdir = find_git_workdir(&cwd_abs, env.fs()).context("No git repository found")?;
-	let git_impl = Arc::new(git::GitWorkdir::new(&env, git_workdir));
-	let env = env.with_git(git_impl);
-
-	run_with(cli, env)
+	let env = env.apply_global(&cli.global).local(cwd)?;
+	run(cli, env)
 }
 
 /// Dispatches a pre-parsed CLI to the appropriate subcommand.
 ///
 /// The environment must have git already configured via
-/// [`Env::with_git`] before calling this function. Use [`run`] for the
+/// [`Env::with_git`] before calling this function. Use [`run_local`] for the
 /// convenience entry point that handles git discovery automatically.
-pub fn run_with(cli: cli::Cli, env: Env) -> anyhow::Result<ExitCode> {
+pub fn run(cli: cli::Cli, env: Env) -> anyhow::Result<ExitCode> {
 	// Set the process-global locale from the environment before any output.
 	locale::set_locale(env.locale());
 

@@ -7,7 +7,6 @@ use tempfile::TempDir;
 use crate::command::CommandRunner;
 use crate::command::test_support::RecordingCommandRunner;
 use crate::filesystem::LocalFilesystem;
-use crate::git::Git as _;
 use crate::path::AbsolutePath;
 
 fn temp_dir() -> TempDir {
@@ -34,7 +33,7 @@ fn make_git(
 		Arc::clone(&runner) as Arc<dyn CommandRunner>,
 		Arc::new(LocalFilesystem),
 	);
-	let git = GitWorkdir::new(&env, dir_abs);
+	let git = GitWorkdir::new(env.runner(), dir_abs);
 	(git, runner)
 }
 

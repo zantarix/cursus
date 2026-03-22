@@ -86,7 +86,7 @@ mod tests {
 			Arc::new(LocalFilesystem),
 		);
 		let path = AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(&env, path);
+		let git = crate::git::GitWorkdir::new(env.runner(), path);
 		(git, dir)
 	}
 

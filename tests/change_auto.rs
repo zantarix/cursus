@@ -330,7 +330,7 @@ fn change_auto_with_git_commits_and_pushes() {
 		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_cargo(CargoConfig::enabled())
 			.with_git(GitConfig::enabled_config());
-	config.save().unwrap();
+	config.with_env(common::test_env()).save().unwrap();
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto"],

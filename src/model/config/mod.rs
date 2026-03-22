@@ -167,6 +167,8 @@ impl Config {
 	}
 
 	/// Sets the runtime environment (builder pattern).
+	///
+	/// Required for [`save`][Self::save] to access the filesystem.
 	pub fn with_env(mut self, env: crate::Env) -> Self {
 		self.env = Some(env);
 		self
@@ -329,11 +331,11 @@ impl Config {
 		let workdir = self.git_workdir.as_ref().context(
 			"git_workdir not set — Config must be constructed via Config::new() or config::load()",
 		)?;
-		let local_fs = crate::filesystem::LocalFilesystem;
-		let fs: &dyn crate::filesystem::Filesystem = self
+		let env = self
 			.env
 			.as_ref()
-			.map_or(&local_fs as &dyn crate::filesystem::Filesystem, |e| e.fs());
+			.context("env not set — Config must be constructed via config::load()")?;
+		let fs = env.fs();
 		let config_path = config_path(workdir);
 		let parent = workdir.child(".cursus");
 		fs.create_dir_all(&parent)

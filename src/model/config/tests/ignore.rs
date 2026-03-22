@@ -32,7 +32,7 @@ fn config_roundtrip_with_global_ignore() {
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.with_env(make_env()).save().unwrap();
 	let loaded = load(
 		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
 		&make_env(),
