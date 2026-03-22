@@ -86,3 +86,7 @@ The library could call `std::env::var()` wherever it needs environment state, av
 ### Passing individual parameters instead of an `Env` struct
 
 Instead of bundling capabilities into `Env`, each function could accept the specific dependencies it needs (a runner here, a GitHub client there). This was rejected because it would result in long parameter lists threaded through many call sites, and adding a new capability would require updating every function signature in the call chain. `Env` provides a single stable carrier that grows gracefully.
+
+## Errata
+
+- **2026-03-22:** The "Full trait abstraction for filesystem access" alternative, rejected above for testing-only benefit, is revisited and adopted in [ADR-036](036-filesystem-trait-abstraction.md) to support non-local backends (remote code forges, in-memory filesystems). The core decision of this ADR (environment injection via `Env`) is preserved and extended with the new `Filesystem` trait on `Env`.

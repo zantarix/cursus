@@ -68,7 +68,9 @@ Key differences from old style:
 - ADR-032: Accepted (verify changeset on feature branch)
 - ADR-033: Accepted (Windows shell execution)
 - ADR-034: Accepted (compile-time embedded localisation via fluent-templates)
-- Next ADR number: 035
+- ADR-035: Proposed (Git trait abstraction for all git operations)
+- ADR-036: Proposed (Filesystem trait for file I/O abstraction)
+- Next ADR number: 037
 
 ## Project ADR Rules (from CLAUDE.md)
 
