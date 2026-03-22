@@ -99,6 +99,7 @@ fn compute_version_plan(
 	projects: &[Project],
 	git_ctx: &GitContext,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<VersionPlan> {
 	let commit_refs = resolve_commit_references(changesets, git, git_ctx.enabled);
 	let (mut aggregated, mut changes_per_package) =
@@ -119,6 +120,7 @@ fn compute_version_plan(
 		config.prepare.dependency_bump,
 		git,
 		dry_run,
+		fs,
 	)?;
 	// Second pass: propagated bumps may have raised a linked member's version, so
 	// re-sync to bring the rest of each group up to the new target.
@@ -148,7 +150,7 @@ pub(crate) fn cmd_prepare(
 	let env = config.env().context("env not set")?;
 	let adapters = config.create_adapters()?;
 	let projects = config.load_projects_for_adapters(&adapters)?;
-	let changesets = Changeset::read_all(git)?;
+	let changesets = Changeset::read_all(git, env.fs())?;
 
 	if changesets.is_empty() {
 		info!("No pending changesets found. Nothing to prepare.");
@@ -164,9 +166,10 @@ pub(crate) fn cmd_prepare(
 		&projects,
 		&git_ctx,
 		dry_run,
+		env.fs(),
 	)?;
 	let branches = preflight_checks(git, &config, env, args, &git_ctx, dry_run)?;
-	let output = prepare_release_files(&adapters, &projects, &changesets, plan, dry_run)?;
+	let output = prepare_release_files(&adapters, &projects, &changesets, plan, dry_run, env.fs())?;
 
 	finalize_git_lifecycle(git, &config, env, &output, &branches, &git_ctx, dry_run)?;
 

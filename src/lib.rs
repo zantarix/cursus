@@ -35,11 +35,14 @@ use crate::path::AbsolutePath;
 /// Finds the git working directory by walking up from the given path.
 ///
 /// Returns `Some(path)` if a `.git` directory is found, `None` otherwise.
-pub fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
+pub fn find_git_workdir(
+	start: &AbsolutePath,
+	fs: &dyn filesystem::Filesystem,
+) -> Option<AbsolutePath> {
 	std::iter::successors(Some(start.to_path_buf()), |dir| {
 		dir.parent().map(Path::to_path_buf)
 	})
-	.find(|dir| dir.join(".git").exists())
+	.find(|dir| AbsolutePath::new(dir.join(".git")).is_ok_and(|p| fs.exists(&p)))
 	.and_then(|p| AbsolutePath::new(p).ok())
 }
 
@@ -82,7 +85,7 @@ where
 
 	// Git discovery and GitWorkdir creation.
 	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
-	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
+	let git_workdir = find_git_workdir(&cwd_abs, env.fs()).context("No git repository found")?;
 	let git_impl = Arc::new(git::GitWorkdir::new(&env, git_workdir));
 	let env = env.with_git(git_impl);
 
@@ -138,49 +141,54 @@ mod tests {
 	#[test]
 	fn find_git_workdir_returns_none_when_no_git() {
 		let dir = temp_dir();
-		assert!(find_git_workdir(&AbsolutePath::new(dir.path()).unwrap()).is_none());
+		let fs = crate::filesystem::LocalFilesystem;
+		assert!(find_git_workdir(&AbsolutePath::new(dir.path()).unwrap(), &fs).is_none());
 	}
 
 	#[test]
 	fn find_git_workdir_finds_git_in_current_dir() {
 		let dir = temp_dir();
+		let fs = crate::filesystem::LocalFilesystem;
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let result = find_git_workdir(&AbsolutePath::new(dir.path()).unwrap());
+		let result = find_git_workdir(&AbsolutePath::new(dir.path()).unwrap(), &fs);
 		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
 	}
 
 	#[test]
 	fn find_git_workdir_finds_git_in_parent_dir() {
 		let dir = temp_dir();
+		let fs = crate::filesystem::LocalFilesystem;
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let subdir = dir.path().join("subdir");
 		std::fs::create_dir(&subdir).unwrap();
 
-		let result = find_git_workdir(&AbsolutePath::new(&subdir).unwrap());
+		let result = find_git_workdir(&AbsolutePath::new(&subdir).unwrap(), &fs);
 		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
 	}
 
 	#[test]
 	fn find_git_workdir_finds_git_in_nested_parent() {
 		let dir = temp_dir();
+		let fs = crate::filesystem::LocalFilesystem;
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let nested = dir.path().join("a/b/c");
 		std::fs::create_dir_all(&nested).unwrap();
 
-		let result = find_git_workdir(&AbsolutePath::new(&nested).unwrap());
+		let result = find_git_workdir(&AbsolutePath::new(&nested).unwrap(), &fs);
 		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
 	}
 
 	#[test]
 	fn find_git_workdir_stops_at_first_git() {
 		let dir = temp_dir();
+		let fs = crate::filesystem::LocalFilesystem;
 		// Create nested git repos
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		let inner = dir.path().join("inner");
 		std::fs::create_dir_all(inner.join(".git")).unwrap();
 
 		// From inner, should find inner's .git
-		let result = find_git_workdir(&AbsolutePath::new(&inner).unwrap());
+		let result = find_git_workdir(&AbsolutePath::new(&inner).unwrap(), &fs);
 		assert_eq!(result, Some(AbsolutePath::new(inner).unwrap()));
 	}
 }

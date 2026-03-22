@@ -1,7 +1,5 @@
 //! TUI wizard for initialising a Cursus configuration.
 
-use std::path::Path;
-
 use crossterm::event::Event;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
@@ -166,9 +164,12 @@ fn complete(state: WizardState, open_editor: bool) -> InitResult {
 /// Detects which package managers have manifest files at the git root.
 ///
 /// Returns `(cargo_detected, npm_detected)`.
-fn detect_package_managers(git_workdir: &Path) -> (bool, bool) {
-	let cargo = git_workdir.join("Cargo.toml").exists();
-	let npm = git_workdir.join("package.json").exists();
+fn detect_package_managers(
+	git_workdir: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> (bool, bool) {
+	let cargo = fs.exists(&git_workdir.child("Cargo.toml"));
+	let npm = fs.exists(&git_workdir.child("package.json"));
 	(cargo, npm)
 }
 
@@ -318,7 +319,7 @@ pub fn run(
 	env: &Env,
 	dry_run: bool,
 ) -> anyhow::Result<Option<InitResult>> {
-	let (cargo_detected, npm_detected) = detect_package_managers(git_workdir.as_ref());
+	let (cargo_detected, npm_detected) = detect_package_managers(git_workdir, env.fs());
 
 	let git = GitWorkdir::new(env, git_workdir.clone());
 	let detected_github = crate::github::remote::GitHubRepo::detect_in(&git)
@@ -341,7 +342,7 @@ pub fn run(
 		remaining_manifest_pms: Vec::new(),
 	};
 
-	let initial_screen = if !dry_run && config_exists(git_workdir.as_ref()) {
+	let initial_screen = if !dry_run && config_exists(git_workdir, env.fs()) {
 		Screen::ConfirmOverwrite(false)
 	} else {
 		Screen::SelectPackageManagers {
@@ -481,7 +482,10 @@ mod tests {
 	#[test]
 	fn detect_package_managers_defaults_to_neither() {
 		let dir = temp_dir();
-		let (cargo, npm) = detect_package_managers(dir.path());
+		let (cargo, npm) = detect_package_managers(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(!cargo);
 		assert!(!npm);
 	}
@@ -490,7 +494,10 @@ mod tests {
 	fn detect_package_managers_detects_cargo() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let (cargo, npm) = detect_package_managers(dir.path());
+		let (cargo, npm) = detect_package_managers(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(cargo);
 		assert!(!npm);
 	}
@@ -499,7 +506,10 @@ mod tests {
 	fn detect_package_managers_detects_npm() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-		let (cargo, npm) = detect_package_managers(dir.path());
+		let (cargo, npm) = detect_package_managers(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(!cargo);
 		assert!(npm);
 	}
@@ -509,7 +519,10 @@ mod tests {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
 		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-		let (cargo, npm) = detect_package_managers(dir.path());
+		let (cargo, npm) = detect_package_managers(
+			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(cargo);
 		assert!(npm);
 	}

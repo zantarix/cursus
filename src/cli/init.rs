@@ -40,15 +40,15 @@ pub(crate) fn cmd_init(
 		return Ok(ExitCode::SUCCESS);
 	}
 
-	let cursus_dir = git_workdir.as_ref().join(".cursus");
-	std::fs::create_dir_all(&cursus_dir)?;
+	let cursus_dir = git_workdir.child(".cursus");
+	env.fs().create_dir_all(&cursus_dir)?;
 
-	let config_path = cursus_dir.join("config.toml");
-	std::fs::write(&config_path, &config_toml)?;
+	let config_path = cursus_dir.child("config.toml");
+	env.fs().write(&config_path, config_toml.as_bytes())?;
 	info!("Created {}", config_path.display());
 
 	if result.open_editor {
-		env.run_editor_on(&config_path, git_workdir.as_ref())?;
+		env.run_editor_on(config_path.as_ref(), git_workdir.as_ref())?;
 	}
 
 	Ok(ExitCode::SUCCESS)

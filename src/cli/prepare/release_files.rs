@@ -24,6 +24,7 @@ pub(super) fn prepare_release_files(
 	changesets: &[(PathBuf, Changeset)],
 	plan: VersionPlan,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<PrepareOutput> {
 	let (release_infos, mut files) = bump_versions_and_generate_changelogs(
 		&plan.aggregated,
@@ -32,6 +33,7 @@ pub(super) fn prepare_release_files(
 		&plan.version_overrides,
 		&plan.dep_entries,
 		dry_run,
+		fs,
 	)?;
 	files.extend(propagate_dependency_updates(
 		projects,
@@ -40,7 +42,7 @@ pub(super) fn prepare_release_files(
 	)?);
 	files.extend(update_lock_files(adapters)?);
 	let released: BTreeSet<String> = plan.aggregated.keys().cloned().collect();
-	files.extend(consume_changesets(changesets, &released, dry_run)?);
+	files.extend(consume_changesets(changesets, &released, dry_run, fs)?);
 	files.extend(plan.propagation_changeset_paths);
 	files.sort();
 	files.dedup();
@@ -64,6 +66,7 @@ pub(super) fn bump_versions_and_generate_changelogs(
 	version_overrides: &BTreeMap<String, semver::Version>,
 	dep_entries: &BTreeMap<String, Vec<String>>,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<(Vec<ReleaseInfo>, Vec<PathBuf>)> {
 	let mut release_infos: Vec<ReleaseInfo> = Vec::new();
 	let mut modified_files: Vec<PathBuf> = Vec::new();
@@ -95,7 +98,7 @@ pub(super) fn bump_versions_and_generate_changelogs(
 		.with_dependency_entries(pkg_dep_entries);
 		let changelog_entry = changelog.format_sections();
 		project.write_version(&new_version, dry_run)?;
-		changelog.update(dry_run)?;
+		changelog.update(dry_run, fs)?;
 		info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		release_infos.push(ReleaseInfo {
 			package_name: pkg_name.clone(),
@@ -161,6 +164,7 @@ pub(super) fn consume_changesets(
 	changesets: &[(PathBuf, Changeset)],
 	released: &BTreeSet<String>,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Vec<PathBuf>> {
 	let mut additional_files: Vec<PathBuf> = Vec::new();
 	for (path, cs) in changesets {
@@ -182,7 +186,7 @@ pub(super) fn consume_changesets(
 				info!("Would consume changeset {}: {pkg_list}", path.display());
 			}
 		} else {
-			cs.consume(path, released)?;
+			cs.consume(path, released, fs)?;
 		}
 	}
 	Ok(additional_files)

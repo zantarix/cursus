@@ -3,7 +3,10 @@ use super::*;
 #[test]
 fn exists_returns_false_when_no_config() {
 	let dir = temp_dir();
-	assert!(!exists(dir.path()));
+	assert!(!exists(
+		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+		&crate::filesystem::LocalFilesystem
+	));
 }
 
 #[test]
@@ -12,7 +15,10 @@ fn exists_returns_true_when_config_exists() {
 	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 		.with_cargo(CargoConfig::enabled());
 	config.save().unwrap();
-	assert!(exists(dir.path()));
+	assert!(exists(
+		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
+		&crate::filesystem::LocalFilesystem
+	));
 }
 
 #[test]

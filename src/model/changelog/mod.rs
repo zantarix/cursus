@@ -180,11 +180,16 @@ impl Changelog {
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be read or written.
-	pub fn update(&self, dry_run: bool) -> anyhow::Result<()> {
-		let changelog_path = self.project_path.join("CHANGELOG.md");
+	pub fn update(
+		&self,
+		dry_run: bool,
+		fs: &dyn crate::filesystem::Filesystem,
+	) -> anyhow::Result<()> {
+		let changelog_path = self.project_path.child("CHANGELOG.md");
 		let entry = self.format_entry();
-		let content = if changelog_path.exists() {
-			let existing = std::fs::read_to_string(&changelog_path)
+		let content = if fs.exists(&changelog_path) {
+			let existing = fs
+				.read_to_string(&changelog_path)
 				.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
 			let (preamble, rest) = split_at_first_h2(&existing);
 			format!("{preamble}{entry}\n{rest}")
@@ -192,7 +197,7 @@ impl Changelog {
 			format!("# Changelog\n\n{entry}\n")
 		};
 		if !dry_run {
-			std::fs::write(&changelog_path, content)
+			fs.write(&changelog_path, content.as_bytes())
 				.with_context(|| format!("Failed to write {}", changelog_path.display()))?;
 		}
 		Ok(())
@@ -214,8 +219,16 @@ impl Changelog {
 pub fn extract_version_body(
 	changelog_path: &Path,
 	version: &semver::Version,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<String> {
-	let content = std::fs::read_to_string(changelog_path)
+	let abs_path = crate::path::AbsolutePath::new(changelog_path).with_context(|| {
+		format!(
+			"changelog path is not absolute: {}",
+			changelog_path.display()
+		)
+	})?;
+	let content = fs
+		.read_to_string(&abs_path)
 		.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
 
 	let version_str = version.to_string();

@@ -3,6 +3,7 @@
 use anyhow::Context;
 use log::{error, info, warn};
 
+use crate::filesystem::Filesystem as _;
 use crate::git::Git;
 use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
@@ -59,11 +60,15 @@ pub(super) fn run_github_build_command(
 
 /// Reads the changelog body for a published package, returning an empty string on any error.
 pub(super) fn read_changelog_body(pkg: &PublishedPackage) -> String {
-	let changelog_path = pkg.project_path.join("CHANGELOG.md");
-	if !changelog_path.exists() {
+	let changelog_path = pkg.project_path.child("CHANGELOG.md");
+	if !crate::filesystem::LocalFilesystem.exists(&changelog_path) {
 		return String::new();
 	}
-	match extract_version_body(&changelog_path, &pkg.version) {
+	match extract_version_body(
+		&changelog_path,
+		&pkg.version,
+		&crate::filesystem::LocalFilesystem,
+	) {
 		Ok(text) => text,
 		Err(e) => {
 			warn!("could not read changelog for {}: {e:#}", pkg.name);

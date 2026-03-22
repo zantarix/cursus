@@ -96,12 +96,16 @@ struct PnpmWorkspace {
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(package))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_package_json(dir: &Path) -> anyhow::Result<Option<PackageJson>> {
-	let path = dir.join("package.json");
-	if !path.exists() {
+fn read_package_json(
+	dir: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<Option<PackageJson>> {
+	let path = dir.child("package.json");
+	if !fs.exists(&path) {
 		return Ok(None);
 	}
-	let contents = std::fs::read_to_string(&path)
+	let contents = fs
+		.read_to_string(&path)
 		.with_context(|| format!("Failed to read {}", path.display()))?;
 	let package: PackageJson = serde_json::from_str(&contents)
 		.with_context(|| format!("Failed to parse {}", path.display()))?;
@@ -112,12 +116,16 @@ fn read_package_json(dir: &Path) -> anyhow::Result<Option<PackageJson>> {
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(workspace))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_pnpm_workspace(git_workdir: &Path) -> anyhow::Result<Option<PnpmWorkspace>> {
-	let path = git_workdir.join("pnpm-workspace.yaml");
-	if !path.exists() {
+fn read_pnpm_workspace(
+	dir: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<Option<PnpmWorkspace>> {
+	let path = dir.child("pnpm-workspace.yaml");
+	if !fs.exists(&path) {
 		return Ok(None);
 	}
-	let contents = std::fs::read_to_string(&path)
+	let contents = fs
+		.read_to_string(&path)
 		.with_context(|| format!("Failed to read {}", path.display()))?;
 	let workspace: PnpmWorkspace = serde_saphyr::from_str(&contents)
 		.with_context(|| format!("Failed to parse {}", path.display()))?;
@@ -186,25 +194,23 @@ fn extract_project_metadata(
 /// Attempts to create a ProjectInfo from a workspace directory path.
 ///
 /// Returns `Ok(None)` if the path is not a valid workspace (not a directory or no package.json).
-fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<ProjectInfo>> {
-	if !workspace_path.is_dir() {
+fn read_workspace_project(
+	workspace_path: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<Option<ProjectInfo>> {
+	if !fs.is_dir(workspace_path) {
 		return Ok(None);
 	}
 
-	let Some(package) = read_package_json(workspace_path)? else {
+	let Some(package) = read_package_json(workspace_path, fs)? else {
 		return Ok(None);
 	};
 
 	let name = package.name.clone().with_context(|| {
-		let manifest_path = workspace_path.join("package.json");
+		let manifest_path = workspace_path.child("package.json");
 		format!("Missing name in {}", manifest_path.display())
 	})?;
-	let path = AbsolutePath::new(workspace_path.to_path_buf()).with_context(|| {
-		format!(
-			"workspace path is not absolute: {}",
-			workspace_path.display()
-		)
-	})?;
+	let path = workspace_path.clone();
 
 	let (version, publishable, dependency_names, publishconfig_provenance) =
 		extract_project_metadata(&package).with_context(|| {
@@ -239,7 +245,7 @@ fn expand_workspace_pattern(
 	pm_root
 		.safe_glob(pattern, fs)?
 		.into_iter()
-		.map(|workspace_path| read_workspace_project(&workspace_path))
+		.map(|workspace_path| read_workspace_project(&workspace_path, fs))
 		.filter_map(Result::transpose)
 		.collect()
 }
@@ -288,8 +294,8 @@ fn run_lock_update(
 	workspace_root: &AbsolutePath,
 	lock_filename: &str,
 ) -> anyhow::Result<Option<PathBuf>> {
-	let lock_path = workspace_root.join(lock_filename);
-	if !lock_path.exists() {
+	let lock_path = workspace_root.child(lock_filename);
+	if !env.fs().exists(&lock_path) {
 		return Ok(None);
 	}
 	let output = env
@@ -312,7 +318,7 @@ fn run_lock_update(
 			stderr
 		);
 	}
-	Ok(Some(lock_path))
+	Ok(Some(lock_path.into_path_buf()))
 }
 
 /// Detects the installed yarn major version by running `yarn --version`.
@@ -352,8 +358,8 @@ fn run_yarn_lock_update(
 	env: &crate::Env,
 	workspace_root: &AbsolutePath,
 ) -> anyhow::Result<Option<PathBuf>> {
-	let lock_path = workspace_root.join("yarn.lock");
-	if !lock_path.exists() {
+	let lock_path = workspace_root.child("yarn.lock");
+	if !env.fs().exists(&lock_path) {
 		return Ok(None);
 	}
 	let major = yarn_major_version(env, workspace_root)?;
@@ -378,7 +384,7 @@ fn run_yarn_lock_update(
 			stderr
 		);
 	}
-	Ok(Some(lock_path))
+	Ok(Some(lock_path.into_path_buf()))
 }
 
 /// Executes a custom lock file command via the shell.
@@ -465,8 +471,11 @@ impl PackageManagerAdapter for NpmAdapter {
 		version: &Version,
 		dry_run: bool,
 	) -> anyhow::Result<()> {
-		let manifest_path = project.path.join("package.json");
-		let contents = std::fs::read_to_string(&manifest_path)
+		let manifest_path = project.path.child("package.json");
+		let contents = self
+			.env
+			.fs()
+			.read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let root = CstRootNode::parse(&contents, &ParseOptions::default())
 			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
@@ -480,7 +489,9 @@ impl PackageManagerAdapter for NpmAdapter {
 		if !dry_run {
 			// Ensure the file always ends with exactly one newline.
 			let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
-			std::fs::write(&manifest_path, output)
+			self.env
+				.fs()
+				.write(&manifest_path, output.as_bytes())
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		}
 		Ok(())
@@ -488,12 +499,13 @@ impl PackageManagerAdapter for NpmAdapter {
 
 	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
 		let pm_root = self.resolve_root()?;
-		let Some(root_package) = read_package_json(&pm_root)? else {
+		let fs = self.env.fs();
+		let Some(root_package) = read_package_json(&pm_root, fs)? else {
 			return Ok(Vec::new());
 		};
-		let pnpm_workspace = read_pnpm_workspace(&pm_root)?;
+		let pnpm_workspace = read_pnpm_workspace(&pm_root, fs)?;
 
-		let root_manifest_path = pm_root.join("package.json");
+		let root_manifest_path = pm_root.child("package.json");
 
 		let Some(workspace_patterns) =
 			get_workspace_patterns(pnpm_workspace.as_ref(), &root_package)
@@ -631,12 +643,14 @@ impl PackageManagerAdapter for NpmAdapter {
 		new_version: &Version,
 		dry_run: bool,
 	) -> anyhow::Result<Vec<PathBuf>> {
-		let manifest_path = project.path.join("package.json");
-		if !manifest_path.exists() {
+		let fs = self.env.fs();
+		let manifest_path = project.path.child("package.json");
+		if !fs.exists(&manifest_path) {
 			return Ok(Vec::new());
 		}
 
-		let contents = std::fs::read_to_string(&manifest_path)
+		let contents = fs
+			.read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let root = CstRootNode::parse(&contents, &ParseOptions::default())
 			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
@@ -659,10 +673,10 @@ impl PackageManagerAdapter for NpmAdapter {
 		if modified {
 			if !dry_run {
 				let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
-				std::fs::write(&manifest_path, output)
+				fs.write(&manifest_path, output.as_bytes())
 					.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 			}
-			return Ok(vec![manifest_path]);
+			return Ok(vec![manifest_path.into_path_buf()]);
 		}
 
 		Ok(Vec::new())

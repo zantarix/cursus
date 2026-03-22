@@ -32,6 +32,22 @@ impl AbsolutePath {
 		self.0
 	}
 
+	/// Joins a relative child onto this path, returning a new `AbsolutePath`.
+	///
+	/// Unlike [`subpath`][Self::subpath], this does **not** canonicalize or
+	/// verify that the result stays within the base — it simply appends the
+	/// component. Use this for well-known filenames (e.g. `"Cargo.toml"`,
+	/// `"CHANGELOG.md"`) where escaping is not a concern.
+	///
+	/// # Panics
+	///
+	/// Panics if the result is not absolute (should be impossible when
+	/// `sub` is relative).
+	pub fn child(&self, sub: impl AsRef<Path>) -> AbsolutePath {
+		let joined = self.0.join(sub);
+		AbsolutePath(joined)
+	}
+
 	/// Joins `sub` onto this path, canonicalizes the result, and verifies it
 	/// remains within this path. Returns an error if the resolved path escapes
 	/// the base directory (e.g. via `..` components or symlinks).

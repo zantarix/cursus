@@ -86,6 +86,7 @@ pub(super) fn write_out_of_scope_changeset(
 	dep_msgs: &[String],
 	git: &dyn Git,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Option<PathBuf>> {
 	let message = format!("Dependency updates: {}", dep_msgs.join(", "));
 	let mut packages = BTreeMap::new();
@@ -99,7 +100,7 @@ pub(super) fn write_out_of_scope_changeset(
 		return Ok(None);
 	}
 	let path = changeset
-		.write(git)
+		.write(git, fs)
 		.with_context(|| format!("Failed to write propagation changeset for '{pkg_name}'"))?;
 	info!(
 		"Wrote dependency propagation changeset for '{pkg_name}': {}",
@@ -130,6 +131,7 @@ pub(super) fn apply_dependency_propagation(
 	dep_bump: DependencyBump,
 	git: &dyn Git,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<PropagationResult> {
 	let reverse_deps = build_reverse_dep_graph(projects);
 	let propagation_map =
@@ -173,7 +175,7 @@ pub(super) fn apply_dependency_propagation(
 				);
 			}
 		} else if let Some(path) =
-			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, git, dry_run)?
+			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, git, dry_run, fs)?
 		{
 			new_changeset_paths.push(path);
 		}

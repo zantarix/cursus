@@ -56,7 +56,7 @@ pub(crate) fn cmd_ci(
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	// Step 1: check for pending changesets.
-	let changesets = Changeset::read_all(git)?;
+	let changesets = Changeset::read_all(git, config.env().expect("env not set").fs())?;
 	if !changesets.is_empty() {
 		info!("ci: pending changesets found, running prepare");
 		let prepare_args = PrepareArgs {
@@ -75,7 +75,12 @@ pub(crate) fn cmd_ci(
 		let is_multi = projects.len() > 1;
 
 		let any_tag_missing = selected.iter().any(|project| {
-			if !project.path().join("CHANGELOG.md").exists() {
+			if !config
+				.env()
+				.expect("env not set")
+				.fs()
+				.exists(&project.path().child("CHANGELOG.md"))
+			{
 				debug!("skipping tag check for {}", project.name());
 				return false;
 			}

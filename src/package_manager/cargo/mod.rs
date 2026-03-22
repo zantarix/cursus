@@ -79,12 +79,16 @@ struct Workspace {
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(cargo))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_cargo_toml(dir: &Path) -> anyhow::Result<Option<CargoToml>> {
-	let path = dir.join("Cargo.toml");
-	if !path.exists() {
+fn read_cargo_toml(
+	dir: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<Option<CargoToml>> {
+	let path = dir.child("Cargo.toml");
+	if !fs.exists(&path) {
 		return Ok(None);
 	}
-	let contents = std::fs::read_to_string(&path)
+	let contents = fs
+		.read_to_string(&path)
 		.with_context(|| format!("Failed to read {}", path.display()))?;
 	let cargo: CargoToml =
 		toml::from_str(&contents).with_context(|| format!("Failed to parse {}", path.display()))?;
@@ -133,12 +137,15 @@ fn extract_project_metadata(
 /// Attempts to create a ProjectInfo from a workspace member directory.
 ///
 /// Returns `Ok(None)` if the path is not a valid crate (not a directory or no Cargo.toml).
-fn read_workspace_member(member_path: &Path) -> anyhow::Result<Option<ProjectInfo>> {
-	if !member_path.is_dir() {
+fn read_workspace_member(
+	member_path: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<Option<ProjectInfo>> {
+	if !fs.is_dir(member_path) {
 		return Ok(None);
 	}
 
-	let Some(cargo) = read_cargo_toml(member_path)? else {
+	let Some(cargo) = read_cargo_toml(member_path, fs)? else {
 		return Ok(None);
 	};
 
@@ -147,14 +154,9 @@ fn read_workspace_member(member_path: &Path) -> anyhow::Result<Option<ProjectInf
 		return Ok(None);
 	};
 
-	let path = AbsolutePath::new(member_path.to_path_buf()).with_context(|| {
-		format!(
-			"workspace member path is not absolute: {}",
-			member_path.display()
-		)
-	})?;
+	let path = member_path.clone();
 
-	let manifest_path = member_path.join("Cargo.toml");
+	let manifest_path = member_path.child("Cargo.toml");
 	let (version, publishable, dependency_names) = extract_project_metadata(&cargo, package)
 		.with_context(|| {
 			format!(
@@ -187,7 +189,7 @@ fn expand_member_pattern(
 	pm_root
 		.safe_glob(pattern, fs)?
 		.into_iter()
-		.map(|member_path| read_workspace_member(&member_path))
+		.map(|member_path| read_workspace_member(&member_path, fs))
 		.filter_map(Result::transpose)
 		.collect()
 }
@@ -228,15 +230,17 @@ fn update_dep_item_version(item: &mut toml_edit::Item, new_version: &str) -> boo
 /// `workspace.dependencies`, updates its version, and writes the file back.
 /// Returns `true` if the file was modified.
 fn update_workspace_dep(
-	workspace_toml_path: &Path,
+	workspace_toml_path: &AbsolutePath,
 	dependency_name: &str,
 	new_version: &str,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<bool> {
-	if !workspace_toml_path.exists() {
+	if !fs.exists(workspace_toml_path) {
 		return Ok(false);
 	}
-	let contents = std::fs::read_to_string(workspace_toml_path)
+	let contents = fs
+		.read_to_string(workspace_toml_path)
 		.with_context(|| format!("Failed to read {}", workspace_toml_path.display()))?;
 	let mut doc = contents
 		.parse::<toml_edit::DocumentMut>()
@@ -251,7 +255,7 @@ fn update_workspace_dep(
 		&& update_dep_item_version(dep_item, new_version)
 	{
 		if !dry_run {
-			std::fs::write(workspace_toml_path, doc.to_string())
+			fs.write(workspace_toml_path, doc.to_string().as_bytes())
 				.with_context(|| format!("Failed to write {}", workspace_toml_path.display()))?;
 		}
 		return Ok(true);
@@ -266,15 +270,17 @@ fn update_workspace_dep(
 /// workspace root). Writes the file if any entry was modified (skipped when
 /// `dry_run` is `true`). Returns `true` if the file was (or would be) modified.
 fn update_member_dep(
-	member_toml_path: &Path,
+	member_toml_path: &AbsolutePath,
 	dependency_name: &str,
 	new_version: &str,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<bool> {
-	if !member_toml_path.exists() {
+	if !fs.exists(member_toml_path) {
 		return Ok(false);
 	}
-	let contents = std::fs::read_to_string(member_toml_path)
+	let contents = fs
+		.read_to_string(member_toml_path)
 		.with_context(|| format!("Failed to read {}", member_toml_path.display()))?;
 	let mut doc = contents
 		.parse::<toml_edit::DocumentMut>()
@@ -300,7 +306,7 @@ fn update_member_dep(
 	}
 
 	if changed && !dry_run {
-		std::fs::write(member_toml_path, doc.to_string())
+		fs.write(member_toml_path, doc.to_string().as_bytes())
 			.with_context(|| format!("Failed to write {}", member_toml_path.display()))?;
 	}
 	Ok(changed)
@@ -339,8 +345,11 @@ impl PackageManagerAdapter for CargoAdapter {
 		version: &Version,
 		dry_run: bool,
 	) -> anyhow::Result<()> {
-		let manifest_path = project.path.join("Cargo.toml");
-		let contents = std::fs::read_to_string(&manifest_path)
+		let manifest_path = project.path.child("Cargo.toml");
+		let contents = self
+			.env
+			.fs()
+			.read_to_string(&manifest_path)
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let mut doc = contents
 			.parse::<toml_edit::DocumentMut>()
@@ -351,7 +360,9 @@ impl PackageManagerAdapter for CargoAdapter {
 			.with_context(|| format!("No [package] table in {}", manifest_path.display()))?;
 		package.insert("version", toml_edit::value(version.to_string()));
 		if !dry_run {
-			std::fs::write(&manifest_path, doc.to_string())
+			self.env
+				.fs()
+				.write(&manifest_path, doc.to_string().as_bytes())
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		}
 		Ok(())
@@ -359,7 +370,7 @@ impl PackageManagerAdapter for CargoAdapter {
 
 	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
 		let pm_root = self.resolve_root()?;
-		let Some(root_cargo) = read_cargo_toml(&pm_root)? else {
+		let Some(root_cargo) = read_cargo_toml(&pm_root, self.env.fs())? else {
 			return Ok(Vec::new());
 		};
 
@@ -496,17 +507,29 @@ impl PackageManagerAdapter for CargoAdapter {
 		let version_str = new_version.to_string();
 		let mut modified = Vec::new();
 
-		let workspace_toml_path = pm_root.join("Cargo.toml");
-		if update_workspace_dep(&workspace_toml_path, dependency_name, &version_str, dry_run)? {
-			modified.push(workspace_toml_path.clone());
+		let fs = self.env.fs();
+		let workspace_toml_path = pm_root.child("Cargo.toml");
+		if update_workspace_dep(
+			&workspace_toml_path,
+			dependency_name,
+			&version_str,
+			dry_run,
+			fs,
+		)? {
+			modified.push(workspace_toml_path.clone().into_path_buf());
 		}
 
 		// Skip member update when the member IS the workspace root (already handled above)
-		let member_toml_path = project.path.join("Cargo.toml");
-		if member_toml_path != workspace_toml_path
-			&& update_member_dep(&member_toml_path, dependency_name, &version_str, dry_run)?
-		{
-			modified.push(member_toml_path);
+		let member_toml_path = project.path.child("Cargo.toml");
+		if *member_toml_path != *workspace_toml_path
+			&& update_member_dep(
+				&member_toml_path,
+				dependency_name,
+				&version_str,
+				dry_run,
+				fs,
+			)? {
+			modified.push(member_toml_path.into_path_buf());
 		}
 
 		Ok(modified)

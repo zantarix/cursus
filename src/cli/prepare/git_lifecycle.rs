@@ -104,7 +104,7 @@ pub(super) fn stage_and_commit(
 	for f in extra_files {
 		match git_workdir.subpath(f, fs) {
 			Ok(resolved) => all_files.push(resolved.into_path_buf()),
-			Err(_) if !git_workdir.join(f).exists() => {
+			Err(_) if !fs.exists(&git_workdir.child(f)) => {
 				log::warn!("extra_files entry {:?} does not exist, skipping", f);
 			}
 			Err(e) => {

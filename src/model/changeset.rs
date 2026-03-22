@@ -222,17 +222,21 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub(crate) fn write(&self, git: &dyn Git) -> anyhow::Result<PathBuf> {
-		let cursus_dir = git.path().join(".cursus");
-		std::fs::create_dir_all(&cursus_dir)
+	pub(crate) fn write(
+		&self,
+		git: &dyn Git,
+		fs: &dyn crate::filesystem::Filesystem,
+	) -> anyhow::Result<PathBuf> {
+		let cursus_dir = git.path().child(".cursus");
+		fs.create_dir_all(&cursus_dir)
 			.with_context(|| format!("Failed to create directory: {}", cursus_dir.display()))?;
 
 		let filename = Self::generate_filename();
-		let path = cursus_dir.join(filename);
+		let path = cursus_dir.child(filename);
 		let content = self.format()?;
-		std::fs::write(&path, &content)
+		fs.write(&path, content.as_bytes())
 			.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
-		Ok(path)
+		Ok(path.into_path_buf())
 	}
 
 	/// Reads all changeset files from the `.cursus/` directory.
@@ -244,9 +248,12 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub(crate) fn read_all(git: &dyn Git) -> anyhow::Result<Vec<(PathBuf, Self)>> {
-		let cursus_dir = git.path().join(".cursus");
-		if !cursus_dir.is_dir() {
+	pub(crate) fn read_all(
+		git: &dyn Git,
+		fs: &dyn crate::filesystem::Filesystem,
+	) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+		let cursus_dir = git.path().child(".cursus");
+		if !fs.is_dir(&cursus_dir) {
 			return Ok(Vec::new());
 		}
 
@@ -256,18 +263,19 @@ impl Changeset {
 			.context("Invalid UTF-8 in .cursus path")?
 			.to_string();
 
-		glob::glob(&pattern)
-			.context("Invalid glob pattern")?
-			.filter_map(|entry| {
-				let path = match entry.context("Failed to read glob entry") {
-					Ok(p) => p,
-					Err(e) => return Some(Err(e)),
-				};
+		fs.glob(&pattern)?
+			.into_iter()
+			.filter_map(|path| {
 				let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 				if !is_changeset_filename(filename) {
 					return None;
 				}
-				let contents = match std::fs::read_to_string(&path)
+				let abs_path = match crate::path::AbsolutePath::new(&path) {
+					Ok(p) => p,
+					Err(e) => return Some(Err(e)),
+				};
+				let contents = match fs
+					.read_to_string(&abs_path)
 					.with_context(|| format!("Failed to read changeset: {}", path.display()))
 				{
 					Ok(c) => c,
@@ -294,7 +302,12 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be deleted or rewritten.
-	pub fn consume(&self, path: &Path, released_packages: &BTreeSet<String>) -> anyhow::Result<()> {
+	pub fn consume(
+		&self,
+		path: &Path,
+		released_packages: &BTreeSet<String>,
+		fs: &dyn crate::filesystem::Filesystem,
+	) -> anyhow::Result<()> {
 		let remaining: BTreeMap<String, ChangeType> = self
 			.packages
 			.iter()
@@ -309,13 +322,17 @@ impl Changeset {
 
 		if remaining.is_empty() {
 			// All packages consumed — delete the file.
-			std::fs::remove_file(path)
+			let abs_path = crate::path::AbsolutePath::new(path)
+				.with_context(|| format!("changeset path is not absolute: {}", path.display()))?;
+			fs.remove_file(&abs_path)
 				.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
 		} else {
 			// Partially consumed — rewrite with remaining packages only.
 			let rewritten = Self::new(remaining, self.message.clone());
 			let content = rewritten.format()?;
-			std::fs::write(path, content)
+			let abs_path = crate::path::AbsolutePath::new(path)
+				.with_context(|| format!("changeset path is not absolute: {}", path.display()))?;
+			fs.write(&abs_path, content.as_bytes())
 				.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
 		}
 
@@ -480,7 +497,9 @@ mod tests {
 		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let changeset = single_package_changeset();
-		let path = changeset.write(&git).unwrap();
+		let path = changeset
+			.write(&git, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 		assert!(path.exists(), "Changeset file should exist");
 		assert!(path.starts_with(dir.path().join(".cursus")));
 		assert!(path.extension().is_some_and(|ext| ext == "md"));
@@ -496,7 +515,9 @@ mod tests {
 		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let changeset = single_package_changeset();
-		changeset.write(&git).unwrap();
+		changeset
+			.write(&git, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 		assert!(
 			dir.path().join(".cursus").is_dir(),
 			".cursus directory should exist"
@@ -514,7 +535,9 @@ mod tests {
 		let git = GitWorkdir::new(&env, abs.clone());
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
-		let path = changeset.write(&git).unwrap();
+		let path = changeset
+			.write(&git, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 		let content = std::fs::read_to_string(path).unwrap();
 		assert!(content.starts_with("+++\n"));
 		assert!(
@@ -636,7 +659,7 @@ pkg = \"minor\"
 			Arc::new(LocalFilesystem),
 		);
 		let git = GitWorkdir::new(&env, abs.clone());
-		let result = Changeset::read_all(&git).unwrap();
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert!(result.is_empty());
 	}
 
@@ -652,7 +675,7 @@ pkg = \"minor\"
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("config.toml"), "").unwrap();
-		let result = Changeset::read_all(&git).unwrap();
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert!(result.is_empty());
 	}
 
@@ -673,7 +696,7 @@ pkg = \"minor\"
 		)
 		.unwrap();
 
-		let result = Changeset::read_all(&git).unwrap();
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert_eq!(result.len(), 1);
 		assert_eq!(result[0].1.packages["my-app"], ChangeType::Minor);
 		assert_eq!(result[0].1.message, Some("A change".to_string()));
@@ -693,7 +716,7 @@ pkg = \"minor\"
 		std::fs::write(cursus_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 		std::fs::write(cursus_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(&git).unwrap();
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert_eq!(result.len(), 2);
 	}
 
@@ -710,7 +733,7 @@ pkg = \"minor\"
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("bad.md"), "not a valid changeset").unwrap();
 
-		let result = Changeset::read_all(&git);
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem);
 		assert!(result.is_err());
 	}
 
@@ -732,7 +755,7 @@ pkg = \"minor\"
 		.unwrap();
 		std::fs::write(cursus_dir.join("valid.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(&git).unwrap();
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert_eq!(result.len(), 1, "README.md should be skipped");
 		assert_eq!(result[0].1.packages["app"], ChangeType::Minor);
 	}
@@ -750,7 +773,7 @@ pkg = \"minor\"
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("readme.md"), "not a changeset").unwrap();
 
-		let result = Changeset::read_all(&git).unwrap();
+		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
 		assert!(result.is_empty(), "readme.md (lowercase) should be skipped");
 	}
 
@@ -842,7 +865,8 @@ pkg = \"minor\"
 			"+++\npkg-a = \"patch\"\n+++\n\nSome message\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		cs.consume(&path, &released).unwrap();
+		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 		assert!(!path.exists(), "File should be deleted when fully consumed");
 	}
 
@@ -855,7 +879,8 @@ pkg = \"minor\"
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome message\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		cs.consume(&path, &released).unwrap();
+		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 
 		assert!(
 			path.exists(),
@@ -882,7 +907,8 @@ pkg = \"minor\"
 		let original = "+++\npkg-b = \"minor\"\n+++\n\nUnrelated change\n";
 		let (path, cs) = make_path_and_changeset(dir.path(), "change.md", original);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		cs.consume(&path, &released).unwrap();
+		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 
 		assert!(path.exists(), "File should be untouched");
 		let content = std::fs::read_to_string(&path).unwrap();
@@ -898,7 +924,8 @@ pkg = \"minor\"
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\npkg-c = \"major\"\n+++\n\nMulti-package change\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string(), "pkg-c".to_string()].into();
-		cs.consume(&path, &released).unwrap();
+		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 
 		let content = std::fs::read_to_string(&path).unwrap();
 		let reparsed = Changeset::parse(&content).unwrap();
@@ -916,7 +943,7 @@ pkg = \"minor\"
 		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// File doesn't exist, so remove_file should fail
-		let result = cs.consume(&path, &released);
+		let result = cs.consume(&path, &released, &crate::filesystem::LocalFilesystem);
 		assert!(result.is_err(), "Should fail when file cannot be deleted");
 	}
 
@@ -931,7 +958,7 @@ pkg = \"minor\"
 		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// Partially consumed → rewrite branch triggered, but parent dir missing.
-		let result = cs.consume(&path, &released);
+		let result = cs.consume(&path, &released, &crate::filesystem::LocalFilesystem);
 		assert!(result.is_err(), "Should fail when file cannot be rewritten");
 	}
 

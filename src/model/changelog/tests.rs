@@ -160,7 +160,9 @@ fn update_changelog_preserves_custom_preamble() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	changelog.update(false).unwrap();
+	changelog
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	insta::assert_snapshot!(content);
@@ -317,7 +319,9 @@ fn update_changelog_creates_new_file() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	changelog.update(false).unwrap();
+	changelog
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	assert!(content.contains("# Changelog"));
@@ -339,7 +343,9 @@ fn update_changelog_prepends_to_existing() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	changelog.update(false).unwrap();
+	changelog
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	assert!(content.contains("## 0.2.0 - 2024-06-01"));
@@ -365,9 +371,15 @@ fn update_changelog_successive_releases_snapshot() {
 		)
 	};
 
-	make("1.0.0", "Initial release").update(false).unwrap();
-	make("1.0.1", "Second release").update(false).unwrap();
-	make("1.0.2", "Third release").update(false).unwrap();
+	make("1.0.0", "Initial release")
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
+	make("1.0.1", "Second release")
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
+	make("1.0.2", "Third release")
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	insta::assert_snapshot!(content);
@@ -386,9 +398,15 @@ fn update_changelog_no_duplicate_header_on_successive_releases() {
 		)
 	};
 
-	make("1.0.0", "Initial release").update(false).unwrap();
-	make("1.0.1", "Second release").update(false).unwrap();
-	make("1.0.2", "Third release").update(false).unwrap();
+	make("1.0.0", "Initial release")
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
+	make("1.0.1", "Second release")
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
+	make("1.0.2", "Third release")
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	assert_eq!(content.matches("# Changelog").count(), 1);
@@ -415,7 +433,9 @@ fn update_changelog_in_subdir() {
 		changes,
 		AbsolutePath::new(sub.clone()).unwrap(),
 	);
-	changelog.update(false).unwrap();
+	changelog
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.unwrap();
 
 	let content = std::fs::read_to_string(sub.join("CHANGELOG.md")).unwrap();
 	assert!(content.contains("## 1.0.0 - 2024-01-15"));
@@ -435,7 +455,7 @@ fn update_changelog_fails_when_cannot_read_existing() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	let result = changelog.update(false);
+	let result = changelog.update(false, &crate::filesystem::LocalFilesystem);
 
 	// Should fail because CHANGELOG.md is a directory, not a file
 	assert!(result.is_err());
@@ -458,7 +478,7 @@ fn update_changelog_fails_when_cannot_write() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	let result = changelog.update(false);
+	let result = changelog.update(false, &crate::filesystem::LocalFilesystem);
 
 	// Restore permissions before assertions for cleanup
 	let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
@@ -497,7 +517,12 @@ fn extract_version_body_finds_middle_version() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
 
-	let body = extract_version_body(&path, &"1.1.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.1.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(body.contains("### Bug Fixes"));
 	assert!(body.contains("- Fixed thing"));
 	assert!(!body.contains("### Features"));
@@ -509,7 +534,12 @@ fn extract_version_body_finds_first_version() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
 
-	let body = extract_version_body(&path, &"1.2.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.2.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(body.contains("### Features"));
 	assert!(body.contains("- Added widget"));
 }
@@ -520,7 +550,12 @@ fn extract_version_body_finds_version_at_eof() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
 
-	let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.0.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert_eq!(body.trim(), "Initial release");
 }
 
@@ -530,7 +565,12 @@ fn extract_version_body_returns_empty_for_missing_version() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
 
-	let body = extract_version_body(&path, &"9.9.9".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"9.9.9".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(body.is_empty());
 }
 
@@ -539,7 +579,11 @@ fn extract_version_body_returns_error_for_missing_file() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
 
-	let result = extract_version_body(&path, &"1.0.0".parse().unwrap());
+	let result = extract_version_body(
+		&path,
+		&"1.0.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	);
 	assert!(result.is_err());
 }
 
@@ -550,7 +594,12 @@ fn extract_version_body_does_not_match_version_prefix() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, changelog).unwrap();
 
-	let body = extract_version_body(&path, &"1.2.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.2.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(body.contains("stable content"));
 	assert!(!body.contains("beta content"));
 }
@@ -562,7 +611,12 @@ fn extract_version_body_with_date_suffix() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, changelog).unwrap();
 
-	let body = extract_version_body(&path, &"2.0.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"2.0.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(body.contains("Major release"));
 }
 
@@ -573,7 +627,12 @@ fn extract_version_body_empty_body() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, changelog).unwrap();
 
-	let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.0.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(body.is_empty());
 }
 
@@ -585,7 +644,12 @@ fn extract_version_body_strips_leading_blank_lines() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, changelog).unwrap();
 
-	let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.0.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(
 		!body.starts_with('\n'),
 		"body should not start with blank line, got: {body:?}"
@@ -601,7 +665,12 @@ fn extract_version_body_strips_trailing_blank_lines() {
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, changelog).unwrap();
 
-	let body = extract_version_body(&path, &"1.0.0".parse().unwrap()).unwrap();
+	let body = extract_version_body(
+		&path,
+		&"1.0.0".parse().unwrap(),
+		&crate::filesystem::LocalFilesystem,
+	)
+	.unwrap();
 	assert!(
 		!body.ends_with('\n'),
 		"body should not end with blank line, got: {body:?}"

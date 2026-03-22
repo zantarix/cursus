@@ -276,7 +276,7 @@ pub(crate) fn cmd_publish(
 		no_git: args.no_git,
 		is_multi_package: projects.len() > 1,
 	};
-	let publish = publish_projects(&sorted_projects, &graph, dry_run)?;
+	let publish = publish_projects(&sorted_projects, &graph, dry_run, env.fs())?;
 	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags)?;
 	log_publish_summary(&publish, &flags, &outcome);
 
@@ -370,6 +370,7 @@ fn publish_projects(
 	projects: &[package_manager::Project],
 	graph: &DependencyGraph,
 	dry_run: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<PublishState> {
 	let mut state = PublishState::new();
 
@@ -388,7 +389,7 @@ fn publish_projects(
 		}
 		// Skip public packages that have never been prepared (no CHANGELOG.md).
 		// Not added to `blocked` — dependents may be independently publishable.
-		if !project.path().join("CHANGELOG.md").exists() {
+		if !fs.exists(&project.path().child("CHANGELOG.md")) {
 			warn!(
 				"Skipping {}: no CHANGELOG.md found (run 'cursus prepare' first, with an appropriate changeset)",
 				project.name()

@@ -1,6 +1,6 @@
 //! Cursus configuration types and persistence.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
@@ -329,36 +329,42 @@ impl Config {
 		let workdir = self.git_workdir.as_ref().context(
 			"git_workdir not set — Config must be constructed via Config::new() or config::load()",
 		)?;
-		let path = path(workdir);
-		if let Some(parent) = path.parent() {
-			std::fs::create_dir_all(parent)
-				.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
-		}
+		let local_fs = crate::filesystem::LocalFilesystem;
+		let fs: &dyn crate::filesystem::Filesystem = self
+			.env
+			.as_ref()
+			.map_or(&local_fs as &dyn crate::filesystem::Filesystem, |e| e.fs());
+		let config_path = config_path(workdir);
+		let parent = workdir.child(".cursus");
+		fs.create_dir_all(&parent)
+			.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
 		let contents = toml::to_string_pretty(self).context("Failed to serialize config")?;
-		std::fs::write(&path, contents)
-			.with_context(|| format!("Failed to create config: {}", path.display()))?;
-		Ok(path)
+		fs.write(&config_path, contents.as_bytes())
+			.with_context(|| format!("Failed to create config: {}", config_path.display()))?;
+		Ok(config_path.into_path_buf())
 	}
 }
 
-fn path(git_workdir: &Path) -> PathBuf {
-	git_workdir.join(".cursus/config.toml")
+fn config_path(git_workdir: &AbsolutePath) -> AbsolutePath {
+	git_workdir.child(".cursus/config.toml")
 }
 
 /// Checks if a Cursus configuration file exists in the repository.
 ///
 /// Returns `true` if `.cursus/config.toml` exists at the given git root.
-pub fn exists(git_workdir: &Path) -> bool {
-	path(git_workdir).exists()
+pub fn exists(git_workdir: &AbsolutePath, fs: &dyn crate::filesystem::Filesystem) -> bool {
+	fs.exists(&config_path(git_workdir))
 }
 
 fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
-	if !exists(git_workdir) {
+	if !exists(git_workdir, env.fs()) {
 		bail!("No configuration found. Run 'cursus init' to create one.");
 	}
 
-	let path = path(git_workdir);
-	let contents = std::fs::read_to_string(&path)
+	let path = config_path(git_workdir);
+	let contents = env
+		.fs()
+		.read_to_string(&path)
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
 	let mut config: Config =
 		toml::from_str(&contents).with_context(|| "Failed to parse config.toml")?;
