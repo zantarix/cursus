@@ -2,7 +2,7 @@
 
 use anyhow::bail;
 
-use crate::git::{Git as _, GitWorkdir};
+use crate::git::Git;
 use crate::model::config::GitHubConfig;
 
 /// A parsed GitHub repository owner and name.
@@ -84,7 +84,7 @@ impl GitHubRepo {
 	/// # Errors
 	///
 	/// Returns an error if the git command cannot be executed.
-	pub(crate) fn detect_in(git: &GitWorkdir) -> anyhow::Result<Option<Self>> {
+	pub(crate) fn detect_in(git: &dyn Git) -> anyhow::Result<Option<Self>> {
 		match git.remote_origin_url()? {
 			Some(url) => Ok(Self::parse_url(&url)),
 			None => Ok(None),
@@ -100,7 +100,7 @@ impl GitHubRepo {
 	///
 	/// Returns an error if both config fields are partially set (one set, one not),
 	/// or if neither config nor remote detection can determine the repository.
-	pub(crate) fn resolve(github_config: &GitHubConfig, git: &GitWorkdir) -> anyhow::Result<Self> {
+	pub(crate) fn resolve(github_config: &GitHubConfig, git: &dyn Git) -> anyhow::Result<Self> {
 		match (github_config.owner(), github_config.repo()) {
 			(Some(owner), Some(repo)) => {
 				return GitHubRepo::new(owner, repo);

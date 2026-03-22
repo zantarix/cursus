@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::Args;
 use log::{debug, info};
 
-use crate::git::{self, Git as _};
+use crate::git::Git;
 use crate::model::changeset::Changeset;
 use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
@@ -50,7 +50,7 @@ pub struct CiArgs {
 /// already-published registry step and only retry the tag. Checking registry state directly
 /// would add network dependencies and is not necessary for correctness.
 pub(crate) fn cmd_ci(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	args: &CiArgs,
 	dry_run: bool,
 	config: Config,

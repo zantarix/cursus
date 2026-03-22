@@ -12,10 +12,7 @@ pub mod github;
 pub mod locale;
 pub mod model;
 pub mod package_manager;
-#[cfg(feature = "test-support")]
 pub mod path;
-#[cfg(not(feature = "test-support"))]
-pub(crate) mod path;
 pub(crate) mod shell;
 pub mod tui;
 pub mod utils;
@@ -26,6 +23,7 @@ pub mod test_logging;
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
@@ -37,7 +35,7 @@ use crate::path::AbsolutePath;
 /// Finds the git working directory by walking up from the given path.
 ///
 /// Returns `Some(path)` if a `.git` directory is found, `None` otherwise.
-fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
+pub fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
 	std::iter::successors(Some(start.to_path_buf()), |dir| {
 		dir.parent().map(Path::to_path_buf)
 	})
@@ -47,9 +45,12 @@ fn find_git_workdir(start: &AbsolutePath) -> Option<AbsolutePath> {
 
 /// Main entry point for the cursus application.
 ///
-/// Parses CLI arguments from the provided iterator, then delegates to
-/// [`run_with`]. Use [`run_with`] directly when the arguments have already
-/// been parsed (e.g., to initialise logging from the flags before running).
+/// Parses CLI arguments from the provided iterator, performs git discovery
+/// and dry-run setup, then delegates to [`run_with`].
+///
+/// Use [`run_with`] directly when the caller has already parsed the arguments
+/// and set up git on the environment (e.g., from `main` or when providing a
+/// custom [`git::Git`] implementation).
 pub fn run<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
@@ -69,28 +70,9 @@ where
 			return Ok(exit_code);
 		}
 	};
-	run_with(cli, cwd, env)
-}
 
-/// Dispatches a pre-parsed CLI to the appropriate subcommand.
-///
-/// Prefer this over [`run`] when the caller has already parsed the arguments
-/// (for example, to read the verbose/silent flags and initialise logging before
-/// any library code runs).
-///
-/// When `--dry-run` is set, the environment's command runner is automatically
-/// wrapped in a [`crate::command::DryRunCommandRunner`] so that mutating
-/// subprocess calls (git commits, cargo publish, etc.) are suppressed across
-/// all code paths — both the binary and integration tests.
-pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode> {
-	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
-	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
-
-	// Set the process-global locale from the environment before any output.
-	locale::set_locale(env.locale());
-
-	// Wrap the runner with DryRunCommandRunner when --dry-run is active so that
-	// all mutating subprocess calls are silently suppressed.
+	// Apply dry-run wrapping BEFORE creating GitWorkdir so it gets the
+	// wrapped CommandRunner (per ADR-035 construction order).
 	let dry_run = cli.global.dry_run;
 	let env = if dry_run {
 		env.with_dry_run_runner()
@@ -98,21 +80,41 @@ pub fn run_with(cli: cli::Cli, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
 		env
 	};
 
-	let git = git::GitWorkdir::new(&env, git_workdir.clone());
+	// Git discovery and GitWorkdir creation.
+	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
+	let git_workdir = find_git_workdir(&cwd_abs).context("No git repository found")?;
+	let git_impl = Arc::new(git::GitWorkdir::new(&env, git_workdir));
+	let env = env.with_git(git_impl);
+
+	run_with(cli, env)
+}
+
+/// Dispatches a pre-parsed CLI to the appropriate subcommand.
+///
+/// The environment must have git already configured via
+/// [`Env::with_git`] before calling this function. Use [`run`] for the
+/// convenience entry point that handles git discovery automatically.
+pub fn run_with(cli: cli::Cli, env: Env) -> anyhow::Result<ExitCode> {
+	// Set the process-global locale from the environment before any output.
+	locale::set_locale(env.locale());
+
+	let dry_run = cli.global.dry_run;
+	let git = env.git().context("No git implementation set on Env")?;
+	let git_workdir = git.path().clone();
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global, &env),
-		Some(cli::Command::Verify(args)) => cli::cmd_verify(&git, &args),
+		Some(cli::Command::Verify(args)) => cli::cmd_verify(git, &args),
 		command => {
 			let config = model::config::load(&git_workdir, &env)?;
 			match command {
 				Some(cli::Command::Change(args)) => {
-					cli::cmd_change(&git, &args, &cli.global, config)
+					cli::cmd_change(git, &args, &cli.global, config)
 				}
-				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&git, &args, dry_run, config),
-				Some(cli::Command::Publish(args)) => cli::cmd_publish(&git, &args, dry_run, config),
-				Some(cli::Command::Ci(args)) => cli::cmd_ci(&git, &args, dry_run, config),
-				None => cli::cmd_change(&git, &cli::ChangeArgs::default(), &cli.global, config),
+				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(git, &args, dry_run, config),
+				Some(cli::Command::Publish(args)) => cli::cmd_publish(git, &args, dry_run, config),
+				Some(cli::Command::Ci(args)) => cli::cmd_ci(git, &args, dry_run, config),
+				None => cli::cmd_change(git, &cli::ChangeArgs::default(), &cli.global, config),
 				Some(cli::Command::Init(_)) | Some(cli::Command::Verify(_)) => {
 					// The outer match arms already handle Init and Verify; these arms cannot be reached.
 					anyhow::bail!(

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use log::info;
 
-use crate::git;
+use crate::git::Git;
 use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
 use crate::model::config::Config;
@@ -66,7 +66,7 @@ pub(super) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> Stri
 /// short-circuit is intentional per ADR-017: the PR upsert is the side-effecting
 /// operation being guarded, so the check lives here rather than at the call site.
 pub(super) fn upsert_release_pull_request(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
 	release_infos: &[ReleaseInfo],

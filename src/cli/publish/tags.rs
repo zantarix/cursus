@@ -2,7 +2,7 @@
 
 use log::{info, warn};
 
-use crate::git::{self, Git as _};
+use crate::git::Git;
 use crate::model::config::Config;
 
 use super::PublishedPackage;
@@ -17,7 +17,7 @@ use super::PublishedPackage;
 pub(super) fn create_and_push_tags(
 	published: &[PublishedPackage],
 	config: &Config,
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	is_multi_package: bool,
 ) -> anyhow::Result<(usize, usize, usize)> {
 	let mut created = 0;
@@ -90,7 +90,7 @@ mod tests {
 			1,
 		));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -133,7 +133,7 @@ mod tests {
 		// rev-parse exits 0 → tag_exists returns true (tag already exists)
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -164,7 +164,7 @@ mod tests {
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -194,7 +194,7 @@ mod tests {
 		let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -236,7 +236,7 @@ mod tests {
 			1,
 		));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -276,7 +276,7 @@ mod tests {
 			1,
 		));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -336,7 +336,7 @@ mod tests {
 				),
 		);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -392,7 +392,7 @@ mod tests {
 				),
 		);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -437,7 +437,7 @@ mod tests {
 				.on_with_args("git", vec!["tag".to_string(), "-d".to_string()], 1),
 		);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),

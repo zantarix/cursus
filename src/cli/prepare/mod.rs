@@ -92,7 +92,7 @@ pub(super) struct VersionPlan {
 ///
 /// Returns the full version plan for the prepare run.
 fn compute_version_plan(
-	git: &git::GitWorkdir,
+	git: &dyn git::Git,
 	changesets: &[(PathBuf, Changeset)],
 	args: &PrepareArgs,
 	config: &Config,
@@ -140,7 +140,7 @@ fn compute_version_plan(
 
 /// Runs the `prepare` subcommand.
 pub(crate) fn cmd_prepare(
-	git: &git::GitWorkdir,
+	git: &dyn git::Git,
 	args: &PrepareArgs,
 	dry_run: bool,
 	config: Config,
@@ -211,7 +211,7 @@ mod tests {
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -252,7 +252,7 @@ mod tests {
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),
@@ -303,7 +303,7 @@ mod tests {
 			..PrepareArgs::default()
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = git::GitWorkdir::new(
+		let git = crate::git::GitWorkdir::new(
 			&crate::Env::new(
 				Arc::clone(&runner) as Arc<dyn CommandRunner>,
 				Arc::new(LocalFilesystem),

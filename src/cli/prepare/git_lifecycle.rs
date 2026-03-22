@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use log::info;
 
-use crate::git::{self, Git as _};
+use crate::git::Git;
 use crate::model::config::{Config, Strategy};
 
 use super::{PrepareArgs, PrepareOutput, ReleaseInfo};
@@ -27,7 +27,7 @@ pub(super) struct BranchState {
 /// # Errors
 ///
 /// Returns an error if the working tree has uncommitted changes.
-pub(super) fn check_dirty_tree(git: &git::GitWorkdir) -> anyhow::Result<()> {
+pub(super) fn check_dirty_tree(git: &dyn Git) -> anyhow::Result<()> {
 	let status = git.status_porcelain()?;
 	if !status.trim().is_empty() {
 		anyhow::bail!(
@@ -87,7 +87,7 @@ pub(super) fn compute_release_branch(
 ///
 /// Returns an error if any git command fails.
 pub(super) fn stage_and_commit(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	extra_files: &[String],
 	release_infos: &[ReleaseInfo],
 	modified_files: &[PathBuf],
@@ -131,7 +131,7 @@ pub(super) fn stage_and_commit(
 /// tree, and checks out the release branch for the branch strategy.
 /// Returns a [`BranchState`] with the original and release branch names.
 pub(super) fn preflight_checks(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
 	args: &PrepareArgs,
@@ -184,7 +184,7 @@ pub(super) fn preflight_checks(
 
 /// Stages, commits, and pushes release changes according to the configured git strategy.
 pub(super) fn finalize_git_lifecycle(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
 	output: &PrepareOutput,

@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 use clap::Args;
 use log::{error, info, warn};
 
-use crate::git;
+use crate::git::Git;
 use crate::model::config::Config;
 use crate::package_manager::{self, DependencyGraph, PublishOutcome, filter_projects_by_name};
 use crate::path::AbsolutePath;
@@ -143,7 +143,7 @@ fn add_transitive_dependents(
 ///
 /// Returns a [`GitReleaseOutcome`] with tag and GitHub Release counts.
 fn run_git_release_operations(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
 	published_packages: &[PublishedPackage],
@@ -181,7 +181,7 @@ fn run_git_release_operations(
 fn maybe_create_tags(
 	published_packages: &[PublishedPackage],
 	config: &Config,
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	dry_run: bool,
 	git_enabled: bool,
 	is_multi_package: bool,
@@ -206,7 +206,7 @@ fn maybe_create_tags(
 ///
 /// Returns `(releases_created, any_failed)`.
 fn maybe_orchestrate_github_releases(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
 	published_packages: &[PublishedPackage],
@@ -235,7 +235,7 @@ fn maybe_orchestrate_github_releases(
 fn run_pre_publish_github_checks(
 	env: &crate::Env,
 	config: &Config,
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	no_git: bool,
 	dry_run: bool,
 ) -> anyhow::Result<bool> {
@@ -253,7 +253,7 @@ fn run_pre_publish_github_checks(
 
 /// Execute the publish command.
 pub(crate) fn cmd_publish(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	args: &PublishArgs,
 	dry_run: bool,
 	config: Config,

@@ -130,7 +130,7 @@ impl Env {
 	/// This is called automatically by [`crate::run_with`] when `--dry-run` is set,
 	/// so all code paths (both the binary and integration tests) benefit from the
 	/// dry-run protection without any manual composition.
-	pub(crate) fn with_dry_run_runner(self) -> Self {
+	pub fn with_dry_run_runner(self) -> Self {
 		let dry_runner: Arc<dyn CommandRunner> =
 			Arc::new(DryRunCommandRunner::new(Arc::clone(&self.runner)));
 		Self {

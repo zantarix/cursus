@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use clap::Args;
 use log::info;
 
-use crate::git::{self, Git as _};
+use crate::git::Git;
 use crate::model::changeset::{ChangeType, Changeset, derive_changeset};
 use crate::model::config::Config;
 use crate::package_manager::Project;
@@ -113,7 +113,7 @@ fn match_files_to_projects(
 /// Falls back to `vec![true; projects.len()]` if all three diff sources fail
 /// (e.g. no git repo or a completely uninitialised environment).
 fn classify_changed_projects(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	projects: &[crate::package_manager::Project],
 ) -> Vec<bool> {
 	// Collect changed file paths from committed, staged, and unstaged sources.
@@ -165,7 +165,7 @@ fn resolve_project_indices(
 /// Returns `Ok(Some(message))` when exactly one commit is ahead.
 /// Returns `Ok(None)` when more than one commit is ahead (caller should skip).
 /// Returns an error when zero commits are ahead.
-fn validate_single_commit(git: &git::GitWorkdir) -> anyhow::Result<Option<String>> {
+fn validate_single_commit(git: &dyn Git) -> anyhow::Result<Option<String>> {
 	let count = git.rev_list_count("origin/HEAD..HEAD")?;
 	if count == 0 {
 		bail!("No commits ahead of origin/HEAD — nothing to derive a changeset from");
@@ -192,7 +192,7 @@ fn validate_single_commit(git: &git::GitWorkdir) -> anyhow::Result<Option<String
 ///
 /// Returns an error when zero commits are ahead or the message is invalid.
 fn cmd_change_auto(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	config: Config,
@@ -271,7 +271,7 @@ fn resolve_non_interactive(
 }
 
 pub(crate) fn cmd_change(
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	config: Config,
@@ -341,22 +341,22 @@ mod tests {
 
 	use super::*;
 
-	fn make_git_with_diff_output(stdout: &[u8]) -> git::GitWorkdir {
+	fn make_git_with_diff_output(stdout: &[u8]) -> crate::git::GitWorkdir {
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(stdout.to_vec()));
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
+		crate::git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
 	}
 
-	fn make_git_failing() -> git::GitWorkdir {
+	fn make_git_failing() -> crate::git::GitWorkdir {
 		let runner = Arc::new(RecordingCommandRunner::new(1));
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
+		crate::git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
 	}
 
 	/// A command runner that returns a sequence of responses, one per call.
@@ -454,13 +454,13 @@ mod tests {
 		}
 	}
 
-	fn make_git_sequenced(responses: Vec<(i32, Vec<u8>)>) -> git::GitWorkdir {
+	fn make_git_sequenced(responses: Vec<(i32, Vec<u8>)>) -> crate::git::GitWorkdir {
 		let runner = Arc::new(SequencedRunner::new(responses));
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
 		);
-		git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
+		crate::git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
 	}
 
 	#[test]

@@ -11,7 +11,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 use crate::conventional_commit;
-use crate::git::{Git as _, GitWorkdir};
+use crate::git::Git;
 
 /// Derives a changeset from a conventional commit message.
 ///
@@ -222,7 +222,7 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub(crate) fn write(&self, git: &GitWorkdir) -> anyhow::Result<PathBuf> {
+	pub(crate) fn write(&self, git: &dyn Git) -> anyhow::Result<PathBuf> {
 		let cursus_dir = git.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir)
 			.with_context(|| format!("Failed to create directory: {}", cursus_dir.display()))?;
@@ -244,7 +244,7 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub(crate) fn read_all(git: &GitWorkdir) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+	pub(crate) fn read_all(git: &dyn Git) -> anyhow::Result<Vec<(PathBuf, Self)>> {
 		let cursus_dir = git.path().join(".cursus");
 		if !cursus_dir.is_dir() {
 			return Ok(Vec::new());

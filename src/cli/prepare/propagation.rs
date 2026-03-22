@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use log::info;
 
-use crate::git;
+use crate::git::Git;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config::DependencyBump;
 use crate::package_manager::Project;
@@ -84,7 +84,7 @@ pub(super) fn write_out_of_scope_changeset(
 	pkg_name: &str,
 	effective_ct: ChangeType,
 	dep_msgs: &[String],
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	dry_run: bool,
 ) -> anyhow::Result<Option<PathBuf>> {
 	let message = format!("Dependency updates: {}", dep_msgs.join(", "));
@@ -128,7 +128,7 @@ pub(super) fn apply_dependency_propagation(
 	version_overrides: &BTreeMap<String, semver::Version>,
 	package_filter: &[String],
 	dep_bump: DependencyBump,
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	dry_run: bool,
 ) -> anyhow::Result<PropagationResult> {
 	let reverse_deps = build_reverse_dep_graph(projects);

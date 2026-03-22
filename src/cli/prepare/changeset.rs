@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::git::{self, Git as _};
+use crate::git::Git;
 use crate::model::changelog::CommitReference;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::package_manager::validate_package_names;
@@ -59,7 +59,7 @@ pub(super) fn aggregate_changesets(
 /// Never fails — always returns a map entry (possibly `None`) for every path.
 pub(super) fn resolve_commit_references(
 	changesets: &[(PathBuf, Changeset)],
-	git: &git::GitWorkdir,
+	git: &dyn Git,
 	git_enabled: bool,
 ) -> BTreeMap<PathBuf, Option<CommitReference>> {
 	if !git_enabled {
@@ -80,10 +80,7 @@ pub(super) fn resolve_commit_references(
 ///
 /// Returns `None` on any failure or when the commit cannot be found,
 /// logging warnings for unexpected errors.
-pub(super) fn resolve_one_commit_reference(
-	path: &Path,
-	git: &git::GitWorkdir,
-) -> Option<CommitReference> {
+pub(super) fn resolve_one_commit_reference(path: &Path, git: &dyn Git) -> Option<CommitReference> {
 	// Make the path relative to the git root for the git log command.
 	let repo_root = git.path();
 	let rel_path = path.strip_prefix(repo_root).unwrap_or(path);

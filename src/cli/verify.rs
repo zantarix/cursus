@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::Args;
 use log::{debug, info};
 
-use crate::git::{Git as _, GitWorkdir};
+use crate::git::Git;
 use crate::model::changeset::filter_changeset_paths;
 
 /// Arguments for the `verify` subcommand.
@@ -31,7 +31,7 @@ impl Default for VerifyArgs {
 /// - `ExitCode::SUCCESS` (0) if at least one changeset was added.
 /// - `ExitCode::from(2)` if no changeset was added.
 /// - Propagates errors as `Err` (exit code 1 from the caller).
-pub(crate) fn cmd_verify(git: &GitWorkdir, args: &VerifyArgs) -> anyhow::Result<ExitCode> {
+pub(crate) fn cmd_verify(git: &dyn Git, args: &VerifyArgs) -> anyhow::Result<ExitCode> {
 	debug!("Verifying changesets against base ref: {}", args.base);
 
 	if args.base.is_empty() {
