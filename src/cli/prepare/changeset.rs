@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::git;
+use crate::git::{self, Git as _};
 use crate::model::changelog::CommitReference;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::package_manager::validate_package_names;

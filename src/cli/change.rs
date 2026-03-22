@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use clap::Args;
 use log::info;
 
-use crate::git;
+use crate::git::{self, Git as _};
 use crate::model::changeset::{ChangeType, Changeset, derive_changeset};
 use crate::model::config::Config;
 use crate::package_manager::Project;

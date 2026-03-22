@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::Args;
 use log::{debug, info};
 
-use crate::git::GitWorkdir;
+use crate::git::{Git as _, GitWorkdir};
 use crate::model::changeset::filter_changeset_paths;
 
 /// Arguments for the `verify` subcommand.

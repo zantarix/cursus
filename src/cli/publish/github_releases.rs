@@ -3,7 +3,7 @@
 use anyhow::Context;
 use log::{error, info, warn};
 
-use crate::git;
+use crate::git::{self, Git as _};
 use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
 use crate::model::changelog::extract_version_body;

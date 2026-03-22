@@ -2,7 +2,7 @@
 
 use anyhow::bail;
 
-use crate::git::GitWorkdir;
+use crate::git::{Git as _, GitWorkdir};
 use crate::model::config::GitHubConfig;
 
 /// A parsed GitHub repository owner and name.

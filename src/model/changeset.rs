@@ -11,7 +11,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 use crate::conventional_commit;
-use crate::git::GitWorkdir;
+use crate::git::{Git as _, GitWorkdir};
 
 /// Derives a changeset from a conventional commit message.
 ///

@@ -2,7 +2,7 @@
 
 use log::{info, warn};
 
-use crate::git;
+use crate::git::{self, Git as _};
 use crate::model::config::Config;
 
 use super::PublishedPackage;

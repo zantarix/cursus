@@ -6,14 +6,15 @@ use std::sync::Arc;
 
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::Filesystem;
+use crate::git::Git;
 use crate::github::client::GitHubClient;
 
 /// Environment variables and runtime dependencies used by Cursus.
 ///
 /// Populated from the process environment at the binary boundary and threaded
 /// into the library so that internal functions never read `std::env` directly.
-/// Carries the [`CommandRunner`], [`Filesystem`], and optional [`GitHubClient`]
-/// so that all I/O can be intercepted or replaced.
+/// Carries the [`CommandRunner`], [`Filesystem`], optional [`Git`], and
+/// optional [`GitHubClient`] so that all I/O can be intercepted or replaced.
 #[derive(Debug, Clone)]
 pub struct Env {
 	/// The configured editor for opening changeset files.
@@ -24,6 +25,12 @@ pub struct Env {
 	runner: Arc<dyn CommandRunner>,
 	/// The filesystem implementation used for all file I/O.
 	filesystem: Arc<dyn Filesystem>,
+	/// The git implementation, if a repository has been discovered.
+	///
+	/// Set via [`with_git`][Self::with_git] after git discovery. Must be
+	/// set after dry-run wrapping so that [`GitWorkdir`] receives the
+	/// wrapped [`CommandRunner`].
+	git: Option<Arc<dyn Git>>,
 	/// The GitHub client for API operations, if a token was provided.
 	github_client: Option<Arc<dyn GitHubClient>>,
 	/// Whether an OIDC-capable CI environment is detected.
@@ -53,6 +60,7 @@ impl Env {
 			runner,
 			filesystem,
 			editor: None,
+			git: None,
 			github_client: None,
 			oidc_environment: false,
 			node_auth_token_present: false,
@@ -129,6 +137,7 @@ impl Env {
 			runner: dry_runner,
 			filesystem: self.filesystem,
 			editor: self.editor,
+			git: self.git,
 			github_client: self.github_client,
 			oidc_environment: self.oidc_environment,
 			node_auth_token_present: self.node_auth_token_present,
@@ -145,6 +154,21 @@ impl Env {
 	/// Returns the filesystem implementation.
 	pub fn fs(&self) -> &dyn Filesystem {
 		&*self.filesystem
+	}
+
+	/// Sets the git implementation for repository operations.
+	///
+	/// Must be called **after** [`with_dry_run_runner`][Self::with_dry_run_runner]
+	/// so that the [`GitWorkdir`][crate::git::GitWorkdir] receives the wrapped
+	/// [`CommandRunner`].
+	pub fn with_git(mut self, git: Arc<dyn Git>) -> Self {
+		self.git = Some(git);
+		self
+	}
+
+	/// Returns the git implementation, if one was configured.
+	pub fn git(&self) -> Option<&dyn Git> {
+		self.git.as_deref()
 	}
 
 	/// Returns the GitHub client, if one was configured.
@@ -297,10 +321,11 @@ mod tests {
 	}
 
 	#[test]
-	fn new_has_no_editor_or_github_client() {
+	fn new_has_no_editor_or_github_client_or_git() {
 		let (_, env) = recording_env(0);
 		assert!(env.editor().is_none());
 		assert!(env.github_client().is_none());
+		assert!(env.git().is_none());
 	}
 
 	#[test]
@@ -364,6 +389,34 @@ mod tests {
 		let env = env.with_locale("fr".to_string());
 		let dry_env = env.with_dry_run_runner();
 		assert_eq!(dry_env.locale(), "fr");
+	}
+
+	#[test]
+	fn with_dry_run_runner_preserves_git() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let (_, env) = recording_env(0);
+		let git = Arc::new(crate::git::GitWorkdir::new(
+			&env,
+			crate::path::AbsolutePath::new(dir.path()).unwrap(),
+		));
+		let env = env.with_git(git as Arc<dyn crate::git::Git>);
+		assert!(env.git().is_some());
+		let dry_env = env.with_dry_run_runner();
+		assert!(dry_env.git().is_some());
+	}
+
+	#[test]
+	fn with_git_sets_git() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let (_, env) = recording_env(0);
+		let git = Arc::new(crate::git::GitWorkdir::new(
+			&env,
+			crate::path::AbsolutePath::new(dir.path()).unwrap(),
+		));
+		let env = env.with_git(git as Arc<dyn crate::git::Git>);
+		assert!(env.git().is_some());
 	}
 
 	#[test]

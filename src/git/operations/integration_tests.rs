@@ -12,6 +12,7 @@ use tempfile::TempDir;
 
 use crate::command::{CommandRunner, RealCommandRunner};
 use crate::filesystem::LocalFilesystem;
+use crate::git::Git as _;
 use crate::path::AbsolutePath;
 
 // --- helpers ---

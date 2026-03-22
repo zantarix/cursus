@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use log::info;
 
-use crate::git;
+use crate::git::{self, Git as _};
 use crate::model::config::{Config, Strategy};
 
 use super::{PrepareArgs, PrepareOutput, ReleaseInfo};

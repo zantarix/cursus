@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::Args;
 use log::{debug, info};
 
-use crate::git;
+use crate::git::{self, Git as _};
 use crate::model::changeset::Changeset;
 use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
