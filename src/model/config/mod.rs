@@ -30,9 +30,13 @@ use crate::path::AbsolutePath;
 ///
 /// Used by package manager config types to locate their workspace root.
 /// Returns `git_workdir` unchanged when `path` is `None`.
-fn resolve_root(path: &Option<String>, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
+fn resolve_root(
+	path: &Option<String>,
+	git_workdir: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<AbsolutePath> {
 	match path {
-		Some(p) => git_workdir.subpath(p).with_context(|| {
+		Some(p) => git_workdir.subpath(p, fs).with_context(|| {
 			format!("resolve_root: path '{p}' does not exist or escapes repository root")
 		}),
 		None => Ok(git_workdir.clone()),

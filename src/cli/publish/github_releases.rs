@@ -82,8 +82,9 @@ pub(super) fn publish_draft_release(
 	release_id: &str,
 	artifacts: &std::collections::BTreeMap<String, String>,
 	git_root: &crate::path::AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> bool {
-	if upload_release_artifacts(github_client, gh_repo, release_id, artifacts, git_root) {
+	if upload_release_artifacts(github_client, gh_repo, release_id, artifacts, git_root, fs) {
 		warn!("Artifact uploads failed for {tag}; leaving release as a draft");
 		return true;
 	}
@@ -133,6 +134,10 @@ pub(super) fn orchestrate_github_releases(
 					&release_id,
 					&config.github.artifacts,
 					git.path(),
+					config
+						.env()
+						.map(|e| e.fs())
+						.unwrap_or(&crate::filesystem::LocalFilesystem),
 				) {
 					github_failed = true;
 				} else {
@@ -157,10 +162,11 @@ pub(super) fn upload_release_artifacts(
 	release_id: &str,
 	artifacts: &std::collections::BTreeMap<String, String>,
 	git_root: &crate::path::AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> bool {
 	let mut any_failed = false;
 	for (display_name, artifact_path) in artifacts {
-		let full_path = match git_root.subpath(artifact_path) {
+		let full_path = match git_root.subpath(artifact_path, fs) {
 			Ok(p) => p,
 			Err(e) => {
 				warn!("  Skipping '{display_name}': invalid artifact path: {e:#}");
@@ -568,6 +574,7 @@ mod tests {
 			"release-1",
 			&BTreeMap::new(),
 			&workdir(),
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(!failed);
 		let invocations = client.invocations();
@@ -600,6 +607,7 @@ mod tests {
 			"release-1",
 			&artifacts,
 			&dir_abs,
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(failed);
 		// Upload was attempted; publish must NOT be called
@@ -627,6 +635,7 @@ mod tests {
 			"release-1",
 			&BTreeMap::new(),
 			&workdir(),
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(failed);
 		assert!(matches!(
@@ -695,8 +704,14 @@ mod tests {
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let git_root = AbsolutePath::new(&inner).unwrap();
 
-		let failed =
-			upload_release_artifacts(&client, &gh_repo, "release-1", &artifacts, &git_root);
+		let failed = upload_release_artifacts(
+			&client,
+			&gh_repo,
+			"release-1",
+			&artifacts,
+			&git_root,
+			&crate::filesystem::LocalFilesystem,
+		);
 
 		assert!(failed, "Expected failure for path traversal");
 		// No upload should have been attempted

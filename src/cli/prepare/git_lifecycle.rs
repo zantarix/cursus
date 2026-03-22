@@ -92,6 +92,7 @@ pub(super) fn stage_and_commit(
 	release_infos: &[ReleaseInfo],
 	modified_files: &[PathBuf],
 	commit_message: &str,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<()> {
 	if release_infos.is_empty() {
 		return Ok(());
@@ -101,7 +102,7 @@ pub(super) fn stage_and_commit(
 	let git_workdir = git.path();
 	let mut all_files = modified_files.to_vec();
 	for f in extra_files {
-		match git_workdir.subpath(f) {
+		match git_workdir.subpath(f, fs) {
 			Ok(resolved) => all_files.push(resolved.into_path_buf()),
 			Err(_) if !git_workdir.join(f).exists() => {
 				log::warn!("extra_files entry {:?} does not exist, skipping", f);
@@ -201,6 +202,7 @@ pub(super) fn finalize_git_lifecycle(
 		&output.release_infos,
 		&output.modified_files,
 		config.git.prepare_commit_message(),
+		env.fs(),
 	)?;
 	match git_ctx.strategy {
 		Strategy::Push => {
@@ -278,7 +280,14 @@ mod tests {
 			),
 			dir_abs.clone(),
 		);
-		let result = stage_and_commit(&git, &[], &[], &[], "ci(release): version packages");
+		let result = stage_and_commit(
+			&git,
+			&[],
+			&[],
+			&[],
+			"ci(release): version packages",
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(result.is_ok());
 	}
 
@@ -307,6 +316,7 @@ mod tests {
 			&release_infos,
 			&[],
 			"ci(release): version packages",
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(result.is_ok());
 		// DryRunCommandRunner suppresses run_mut calls — the inner recorder receives nothing.
@@ -343,6 +353,7 @@ mod tests {
 			&release_infos,
 			&[],
 			"ci(release): version packages",
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(result.is_err());
 		assert!(
@@ -381,6 +392,7 @@ mod tests {
 			&release_infos,
 			&[],
 			"ci(release): version packages",
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(result.is_err());
 		assert!(
@@ -416,6 +428,7 @@ mod tests {
 			&release_infos,
 			&[],
 			"ci(release): version packages",
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(result.is_ok());
 	}
@@ -444,6 +457,7 @@ mod tests {
 			&release_infos,
 			&[],
 			"ci(release): version packages",
+			&crate::filesystem::LocalFilesystem,
 		);
 		assert!(result.is_err());
 		assert!(

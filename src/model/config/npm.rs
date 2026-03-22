@@ -90,8 +90,12 @@ impl NpmConfig {
 	///
 	/// If a `path` is configured, returns `adapter_root` joined with that path.
 	/// Otherwise, returns a copy of `adapter_root`.
-	pub(crate) fn resolve_root(&self, git_workdir: &AbsolutePath) -> anyhow::Result<AbsolutePath> {
-		super::resolve_root(&self.path, git_workdir)
+	pub(crate) fn resolve_root(
+		&self,
+		git_workdir: &AbsolutePath,
+		fs: &dyn crate::filesystem::Filesystem,
+	) -> anyhow::Result<AbsolutePath> {
+		super::resolve_root(&self.path, git_workdir, fs)
 	}
 }
 
@@ -127,7 +131,9 @@ mod tests {
 		};
 		let dir = tempfile::tempdir().unwrap();
 		let git_workdir = AbsolutePath::new(dir.path()).unwrap();
-		let resolved = config.resolve_root(&git_workdir).unwrap();
+		let resolved = config
+			.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 		assert_eq!(resolved, git_workdir);
 	}
 
@@ -143,7 +149,9 @@ mod tests {
 			access: None,
 		};
 		let git_workdir = AbsolutePath::new(dir.path()).unwrap();
-		let resolved = config.resolve_root(&git_workdir).unwrap();
+		let resolved = config
+			.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem)
+			.unwrap();
 		assert_eq!(*resolved, *AbsolutePath::new(&subdir).unwrap());
 	}
 
@@ -161,7 +169,7 @@ mod tests {
 			access: None,
 		};
 		let git_workdir = AbsolutePath::new(&repo).unwrap();
-		let result = config.resolve_root(&git_workdir);
+		let result = config.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem);
 		assert!(result.is_err());
 		assert!(
 			result

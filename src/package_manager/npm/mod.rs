@@ -38,7 +38,7 @@ impl NpmAdapter {
 
 	/// Returns the resolved root directory for this package manager.
 	fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
-		self.config.resolve_root(&self.adapter_root)
+		self.config.resolve_root(&self.adapter_root, self.env.fs())
 	}
 }
 
@@ -234,9 +234,10 @@ fn read_workspace_project(workspace_path: &Path) -> anyhow::Result<Option<Projec
 fn expand_workspace_pattern(
 	pm_root: &AbsolutePath,
 	pattern: &str,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
 	pm_root
-		.safe_glob(pattern)?
+		.safe_glob(pattern, fs)?
 		.into_iter()
 		.map(|workspace_path| read_workspace_project(&workspace_path))
 		.filter_map(Result::transpose)
@@ -511,7 +512,7 @@ impl PackageManagerAdapter for NpmAdapter {
 			.chain(
 				workspace_patterns
 					.iter()
-					.map(|pattern| expand_workspace_pattern(&pm_root, pattern))
+					.map(|pattern| expand_workspace_pattern(&pm_root, pattern, self.env.fs()))
 					.collect::<anyhow::Result<Vec<_>>>()?
 					.into_iter()
 					.flatten(),
