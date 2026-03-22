@@ -9,6 +9,7 @@ use common::{
 	git_push_to_remote, git_tags, temp_git_repo_with_project,
 	temp_real_git_repo_with_cargo_workspace, temp_real_git_repo_with_config, write_changeset,
 };
+use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::PackageManager;
 use cursus::model::config::{GitConfig, Strategy, TagFormat};
 
@@ -807,8 +808,11 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			RestGitHubClient::new("test-token".to_string())
 				.with_base_urls(api_url.clone(), api_url.clone()),
 		) as Arc<dyn GitHubClient>;
-		cursus::Env::new(Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>)
-			.with_github_client(client)
+		cursus::Env::new(
+			Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>,
+			Arc::new(LocalFilesystem),
+		)
+		.with_github_client(client)
 	};
 
 	// ── First run: no existing PR → find returns empty → create PR ───────────

@@ -174,7 +174,9 @@ fn main() -> ExitCode {
 		.filter(|s| !s.is_empty())
 		.is_some();
 	let locale = detect_locale();
-	let env = cursus::Env::new(runner)
+	let filesystem: Arc<dyn cursus::filesystem::Filesystem> =
+		Arc::new(cursus::filesystem::LocalFilesystem);
+	let env = cursus::Env::new(runner, filesystem)
 		.with_editor_opt(editor)
 		.with_github_client_opt(github_client)
 		.with_oidc_environment(oidc_environment)

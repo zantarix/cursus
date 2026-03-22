@@ -2,6 +2,7 @@ use super::*;
 use std::sync::Arc;
 
 use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
+use crate::filesystem::LocalFilesystem;
 
 #[test]
 fn update_lock_file_no_op_when_no_lock_file() {
@@ -286,7 +287,7 @@ fn dry_run_adapter(config: NpmConfig, dir: &std::path::Path) -> NpmAdapter {
 	let inner: Arc<dyn CommandRunner> =
 		Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
 	let dry_runner: Arc<dyn CommandRunner> = Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
-	let env = crate::Env::new(dry_runner);
+	let env = crate::Env::new(dry_runner, Arc::new(LocalFilesystem));
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
@@ -345,7 +346,7 @@ fn update_lock_file_dry_run_yarn_lock_returns_path() {
 		));
 	let dry_runner: Arc<dyn crate::command::CommandRunner> =
 		Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
-	let env = crate::Env::new(dry_runner);
+	let env = crate::Env::new(dry_runner, Arc::new(LocalFilesystem));
 	let adapter = NpmAdapter::new(
 		NpmConfig::default(),
 		crate::path::AbsolutePath::new(dir.path()).unwrap(),

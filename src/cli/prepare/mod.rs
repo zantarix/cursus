@@ -179,6 +179,7 @@ mod tests {
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::filesystem::LocalFilesystem;
 	use crate::model::config;
 
 	use super::*;
@@ -203,12 +204,18 @@ mod tests {
 
 		let args = PrepareArgs::default();
 		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = cmd_prepare(&git, &args, false, config).unwrap();
@@ -238,12 +245,18 @@ mod tests {
 
 		let args = PrepareArgs::default();
 		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = cmd_prepare(&git, &args, false, config);
@@ -278,7 +291,10 @@ mod tests {
 		.unwrap();
 
 		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs {
@@ -288,7 +304,10 @@ mod tests {
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = cmd_prepare(&git, &args, false, config);

@@ -75,12 +75,16 @@ mod tests {
 	use crate::cli::Cli;
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::filesystem::LocalFilesystem;
 	use crate::path::AbsolutePath;
 
 	fn make_git() -> (crate::git::GitWorkdir, TempDir) {
 		let dir = tempfile::tempdir().expect("Failed to create temp dir");
 		let runner = Arc::new(RecordingCommandRunner::new(0));
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let path = AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(&env, path);
 		(git, dir)

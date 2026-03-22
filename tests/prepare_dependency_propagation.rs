@@ -5,6 +5,7 @@ mod common;
 use std::process::ExitCode;
 
 use common::{temp_git_repo, temp_git_repo_with_cargo_workspace, write_changeset};
+use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::Config;
 use cursus::model::config::{DependencyBump, NpmConfig, PrepareConfig};
 use cursus::path::AbsolutePath;
@@ -24,8 +25,11 @@ fn read_version(dir: &std::path::Path, pkg: &str) -> String {
 }
 
 fn make_env() -> cursus::Env {
-	cursus::Env::new(std::sync::Arc::new(cursus::command::RealCommandRunner)
-		as std::sync::Arc<dyn cursus::command::CommandRunner>)
+	cursus::Env::new(
+		std::sync::Arc::new(cursus::command::RealCommandRunner)
+			as std::sync::Arc<dyn cursus::command::CommandRunner>,
+		std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
+	)
 }
 
 /// Saves a `[prepare]` config section to an existing cursus config.

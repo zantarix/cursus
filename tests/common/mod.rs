@@ -6,6 +6,7 @@
 
 use std::process::Command;
 
+use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageManager};
 use cursus::path::AbsolutePath;
 use tempfile::TempDir;
@@ -22,8 +23,11 @@ pub fn run_cursus(
 	cursus::run(
 		args,
 		cwd,
-		cursus::Env::new(std::sync::Arc::new(cursus::command::RealCommandRunner)
-			as std::sync::Arc<dyn cursus::command::CommandRunner>),
+		cursus::Env::new(
+			std::sync::Arc::new(cursus::command::RealCommandRunner)
+				as std::sync::Arc<dyn cursus::command::CommandRunner>,
+			std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
+		),
 	)
 }
 

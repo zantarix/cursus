@@ -10,6 +10,7 @@ use common::{
 	temp_git_repo_with_project_in_subfolder,
 };
 use cursus::command::RealCommandRunner;
+use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::PackageManager;
 
 #[test]
@@ -384,9 +385,11 @@ fn change_interactive_with_message_does_not_open_editor() {
 	// call to open_editor returns an error — this catches mutations that would
 	// cause the editor to be opened unnecessarily.
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let env =
-		cursus::Env::new(Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>)
-			.with_editor("__cursus_test_nonexistent_editor__".to_string());
+	let env = cursus::Env::new(
+		Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_editor("__cursus_test_nonexistent_editor__".to_string());
 	let result = cursus::run(
 		["cursus", "change", "-t", "minor", "-m", "bump"],
 		dir.path(),

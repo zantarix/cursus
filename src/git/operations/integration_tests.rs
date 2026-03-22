@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use crate::command::{CommandRunner, RealCommandRunner};
+use crate::filesystem::LocalFilesystem;
 use crate::path::AbsolutePath;
 
 // --- helpers ---
@@ -33,7 +34,10 @@ fn git_cmd(dir: &Path, args: &[&str]) {
 
 fn make_workdir(dir: &TempDir) -> super::GitWorkdir {
 	let path = AbsolutePath::new(dir.path()).unwrap();
-	let env = crate::Env::new(Arc::new(RealCommandRunner) as Arc<dyn CommandRunner>);
+	let env = crate::Env::new(
+		Arc::new(RealCommandRunner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	);
 	super::GitWorkdir::new(&env, path)
 }
 

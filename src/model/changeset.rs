@@ -329,6 +329,7 @@ mod tests {
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::filesystem::LocalFilesystem;
 	use crate::git::GitWorkdir;
 	use crate::path::AbsolutePath;
 
@@ -473,7 +474,10 @@ mod tests {
 	fn write_changeset_creates_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let changeset = single_package_changeset();
 		let path = changeset.write(&git).unwrap();
@@ -486,7 +490,10 @@ mod tests {
 	fn write_changeset_creates_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let changeset = single_package_changeset();
 		changeset.write(&git).unwrap();
@@ -500,7 +507,10 @@ mod tests {
 	fn write_changeset_file_has_correct_content() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
@@ -621,7 +631,10 @@ pkg = \"minor\"
 	fn read_all_changesets_empty_when_no_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let result = Changeset::read_all(&git).unwrap();
 		assert!(result.is_empty());
@@ -631,7 +644,10 @@ pkg = \"minor\"
 	fn read_all_changesets_empty_when_no_md_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -644,7 +660,10 @@ pkg = \"minor\"
 	fn read_all_changesets_single_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -664,7 +683,10 @@ pkg = \"minor\"
 	fn read_all_changesets_multiple_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -679,7 +701,10 @@ pkg = \"minor\"
 	fn read_all_changesets_invalid_file_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -693,7 +718,10 @@ pkg = \"minor\"
 	fn read_all_changesets_skips_readme() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -713,7 +741,10 @@ pkg = \"minor\"
 	fn read_all_changesets_skips_readme_case_insensitive() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let git = GitWorkdir::new(&env, abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();

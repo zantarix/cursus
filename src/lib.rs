@@ -6,6 +6,7 @@ pub mod cli;
 pub mod command;
 pub mod conventional_commit;
 pub(crate) mod env;
+pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod locale;

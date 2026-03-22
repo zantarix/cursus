@@ -206,7 +206,10 @@ impl Project {
 		use crate::command::test_support::RecordingCommandRunner;
 		use crate::model::config::NpmConfig;
 		let runner = Arc::new(RecordingCommandRunner::new(0));
-		let env = crate::Env::new(runner as Arc<dyn crate::command::CommandRunner>);
+		let env = crate::Env::new(
+			runner as Arc<dyn crate::command::CommandRunner>,
+			Arc::new(crate::filesystem::LocalFilesystem),
+		);
 		let path = format!("/nonexistent/packages/{name}");
 		Self {
 			info: ProjectInfo {
@@ -234,7 +237,10 @@ impl Project {
 	) -> Self {
 		use crate::command::CommandRunner;
 		use crate::model::config::NpmConfig;
-		let env = crate::Env::new(runner as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			runner as Arc<dyn CommandRunner>,
+			Arc::new(crate::filesystem::LocalFilesystem),
+		);
 		Self {
 			info: ProjectInfo::for_test(name, AbsolutePath::new(path).unwrap()),
 			adapter: Arc::new(NpmAdapter::new(
@@ -546,7 +552,10 @@ mod tests {
 		let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
+			crate::Env::new(
+				Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
+				Arc::new(crate::filesystem::LocalFilesystem),
+			),
 		));
 		let projects = enumerate_projects([adapter.clone()]).unwrap();
 
@@ -569,12 +578,18 @@ mod tests {
 		let adapter1: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
+			crate::Env::new(
+				Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
+				Arc::new(crate::filesystem::LocalFilesystem),
+			),
 		));
 		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 			NpmConfig::default(),
 			AbsolutePath::new(dir.path()).unwrap(),
-			crate::Env::new(Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>),
+			crate::Env::new(
+				Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
+				Arc::new(crate::filesystem::LocalFilesystem),
+			),
 		));
 
 		let projects = enumerate_projects([adapter1, adapter2]).unwrap();

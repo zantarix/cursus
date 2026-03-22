@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use common::{run_cursus, temp_git_repo};
 use cursus::command::RealCommandRunner;
+use cursus::filesystem::LocalFilesystem;
 use cursus::test_logging::{init_test_logger, take_logs};
 
 /// Runs cursus in-process with a fake GitHub token configured.
@@ -17,9 +18,11 @@ fn run_cursus_with_token(
 ) -> anyhow::Result<std::process::ExitCode> {
 	let github_client = Arc::new(cursus::github::RestGitHubClient::new(token.to_string()))
 		as Arc<dyn cursus::github::client::GitHubClient>;
-	let env =
-		cursus::Env::new(Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>)
-			.with_github_client(github_client);
+	let env = cursus::Env::new(
+		Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_github_client(github_client);
 	cursus::run(args, cwd, env)
 }
 

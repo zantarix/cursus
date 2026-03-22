@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::command::CommandRunner;
 use crate::command::test_support::RecordingCommandRunner;
+use crate::filesystem::LocalFilesystem;
 
 fn project_info(dir: &std::path::Path, name: &str, path: &str) -> ProjectInfo {
 	ProjectInfo::for_test(name, AbsolutePath::new(dir.join(path)).unwrap())
@@ -133,9 +134,12 @@ fn publish_non_scoped_package_omits_access_flag() {
 fn publish_no_auth_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(false)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(false)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	let info = project_info(dir.path(), "my-app", "");
 	let result = adapter.publish(&info).unwrap();
@@ -148,9 +152,12 @@ fn publish_no_auth_emits_no_auth_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(false)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(false)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
@@ -172,9 +179,12 @@ fn publish_no_auth_emits_no_auth_warning() {
 fn publish_oidc_with_node_auth_token_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(true);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(true);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	let info = project_info(dir.path(), "my-app", "");
 	let result = adapter.publish(&info).unwrap();
@@ -187,9 +197,12 @@ fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(true);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(true);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
@@ -211,9 +224,12 @@ fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
 fn publish_oidc_without_provenance_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(
 		NpmConfig::enabled().with_access(NpmAccess::Public),
 		dir.path(),
@@ -231,9 +247,12 @@ fn publish_oidc_public_without_provenance_emits_provenance_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(
 		NpmConfig::enabled().with_access(NpmAccess::Public),
 		dir.path(),
@@ -258,9 +277,12 @@ fn publish_oidc_public_without_provenance_emits_provenance_warning() {
 fn publish_oidc_with_provenance_true_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(
 		NpmConfig::enabled().with_access(NpmAccess::Public),
 		dir.path(),
@@ -277,9 +299,12 @@ fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(
 		NpmConfig::enabled().with_access(NpmAccess::Public),
 		dir.path(),
@@ -303,9 +328,12 @@ fn publish_oidc_only_does_not_emit_override_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(true)
-		.with_node_auth_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(true)
+	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
@@ -326,9 +354,12 @@ fn publish_node_auth_only_does_not_emit_no_auth_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_oidc_environment(false)
-		.with_node_auth_token_present(true);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_oidc_environment(false)
+	.with_node_auth_token_present(true);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))

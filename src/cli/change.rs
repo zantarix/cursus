@@ -335,6 +335,7 @@ mod tests {
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::filesystem::LocalFilesystem;
 	use crate::package_manager::Project;
 	use crate::path::AbsolutePath;
 
@@ -342,13 +343,19 @@ mod tests {
 
 	fn make_git_with_diff_output(stdout: &[u8]) -> git::GitWorkdir {
 		let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(stdout.to_vec()));
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
 	}
 
 	fn make_git_failing() -> git::GitWorkdir {
 		let runner = Arc::new(RecordingCommandRunner::new(1));
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
 	}
 
@@ -449,7 +456,10 @@ mod tests {
 
 	fn make_git_sequenced(responses: Vec<(i32, Vec<u8>)>) -> git::GitWorkdir {
 		let runner = Arc::new(SequencedRunner::new(responses));
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		git::GitWorkdir::new(&env, AbsolutePath::new("/nonexistent").unwrap())
 	}
 

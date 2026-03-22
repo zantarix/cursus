@@ -5,14 +5,15 @@ use std::process::{ExitStatus, Output};
 use std::sync::Arc;
 
 use crate::command::{CommandRunner, DryRunCommandRunner};
+use crate::filesystem::Filesystem;
 use crate::github::client::GitHubClient;
 
 /// Environment variables and runtime dependencies used by Cursus.
 ///
 /// Populated from the process environment at the binary boundary and threaded
 /// into the library so that internal functions never read `std::env` directly.
-/// Also carries the [`CommandRunner`] so that all I/O can be intercepted in tests,
-/// and an optional [`GitHubClient`] for GitHub operations.
+/// Carries the [`CommandRunner`], [`Filesystem`], and optional [`GitHubClient`]
+/// so that all I/O can be intercepted or replaced.
 #[derive(Debug, Clone)]
 pub struct Env {
 	/// The configured editor for opening changeset files.
@@ -21,6 +22,8 @@ pub struct Env {
 	editor: Option<String>,
 	/// The command runner used for all external process invocations.
 	runner: Arc<dyn CommandRunner>,
+	/// The filesystem implementation used for all file I/O.
+	filesystem: Arc<dyn Filesystem>,
 	/// The GitHub client for API operations, if a token was provided.
 	github_client: Option<Arc<dyn GitHubClient>>,
 	/// Whether an OIDC-capable CI environment is detected.
@@ -41,13 +44,14 @@ pub struct Env {
 }
 
 impl Env {
-	/// Creates an `Env` with the given command runner.
+	/// Creates an `Env` with the given command runner and filesystem.
 	///
 	/// Use the builder methods ([`with_editor`][Self::with_editor],
 	/// [`with_github_client`][Self::with_github_client]) to add optional configuration.
-	pub fn new(runner: Arc<dyn CommandRunner>) -> Self {
+	pub fn new(runner: Arc<dyn CommandRunner>, filesystem: Arc<dyn Filesystem>) -> Self {
 		Self {
 			runner,
+			filesystem,
 			editor: None,
 			github_client: None,
 			oidc_environment: false,
@@ -123,6 +127,7 @@ impl Env {
 			Arc::new(DryRunCommandRunner::new(Arc::clone(&self.runner)));
 		Self {
 			runner: dry_runner,
+			filesystem: self.filesystem,
 			editor: self.editor,
 			github_client: self.github_client,
 			oidc_environment: self.oidc_environment,
@@ -135,6 +140,11 @@ impl Env {
 	/// Returns the configured editor, if one was set.
 	pub(crate) fn editor(&self) -> Option<&str> {
 		self.editor.as_deref()
+	}
+
+	/// Returns the filesystem implementation.
+	pub fn fs(&self) -> &dyn Filesystem {
+		&*self.filesystem
 	}
 
 	/// Returns the GitHub client, if one was configured.
@@ -271,6 +281,7 @@ mod tests {
 
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::command::{CommandRunner, shell_flag, shell_program};
+	use crate::filesystem::LocalFilesystem;
 	use crate::github::client::GitHubClient;
 	use crate::github::client::test_support::RecordingGitHubClient;
 
@@ -278,7 +289,10 @@ mod tests {
 
 	fn recording_env(exit_code: i32) -> (Arc<RecordingCommandRunner>, Env) {
 		let runner = Arc::new(RecordingCommandRunner::new(exit_code));
-		let env = Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		(runner, env)
 	}
 

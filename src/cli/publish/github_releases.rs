@@ -188,6 +188,7 @@ mod tests {
 	use crate::cli::publish::tests_common::{make_github_config, workdir};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::filesystem::LocalFilesystem;
 	use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 	use crate::model::config::{Config, GitHubConfig};
 	use crate::path::AbsolutePath;
@@ -201,7 +202,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			wd.clone(),
 		);
 
@@ -227,7 +231,10 @@ mod tests {
 
 		let wd = workdir();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			wd.clone(),
 		);
 		let (created, failed) =
@@ -262,7 +269,10 @@ mod tests {
 
 		let wd = workdir();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			wd.clone(),
 		);
 		let (created, failed) = orchestrate_github_releases(
@@ -305,7 +315,10 @@ mod tests {
 
 		let wd = workdir();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			wd.clone(),
 		);
 		let (created, failed) =
@@ -355,7 +368,10 @@ mod tests {
 		}];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 
@@ -419,7 +435,10 @@ mod tests {
 		];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 
@@ -452,7 +471,10 @@ mod tests {
 
 		let wd = workdir();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			wd.clone(),
 		);
 		let (created, failed) =
@@ -503,7 +525,10 @@ mod tests {
 		}];
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 

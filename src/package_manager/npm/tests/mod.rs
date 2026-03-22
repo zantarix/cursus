@@ -4,6 +4,7 @@ use tempfile::TempDir;
 
 use crate::command::CommandRunner;
 use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
+use crate::filesystem::LocalFilesystem;
 
 pub(super) fn temp_dir() -> TempDir {
 	tempfile::tempdir().expect("Failed to create temp dir")
@@ -19,8 +20,10 @@ pub(super) fn recording_adapter_default(
 	dir: &std::path::Path,
 	exit_code: i32,
 ) -> NpmAdapter {
-	let env =
-		crate::Env::new(Arc::new(RecordingCommandRunner::new(exit_code)) as Arc<dyn CommandRunner>);
+	let env = crate::Env::new(
+		Arc::new(RecordingCommandRunner::new(exit_code)) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
@@ -30,7 +33,10 @@ pub(super) fn recording_adapter(
 	dir: &std::path::Path,
 	runner: Arc<RecordingCommandRunner>,
 ) -> NpmAdapter {
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
@@ -40,7 +46,10 @@ pub(super) fn dispatching_adapter(
 	dir: &std::path::Path,
 	runner: Arc<DispatchingCommandRunner>,
 ) -> NpmAdapter {
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 

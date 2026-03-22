@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::command::CommandRunner;
 use crate::command::test_support::RecordingCommandRunner;
+use crate::filesystem::LocalFilesystem;
 
 fn setup_publish_project(dir: &std::path::Path) -> ProjectInfo {
 	write_cargo_toml(
@@ -104,8 +105,11 @@ fn publish_without_cargo_token_still_executes_publish() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_cargo_registry_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_cargo_registry_token_present(false);
 	let adapter = recording_adapter_with_env(dir.path(), env);
 	let result = adapter.publish(&info).unwrap();
 	assert_eq!(result, PublishOutcome::Published);
@@ -120,8 +124,11 @@ fn publish_without_cargo_token_emits_warning() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_cargo_registry_token_present(false);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_cargo_registry_token_present(false);
 	let adapter = recording_adapter_with_env(dir.path(), env);
 	adapter.publish(&info).unwrap();
 	let logs = crate::test_logging::take_logs();
@@ -143,8 +150,11 @@ fn publish_with_cargo_token_no_warning() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_cargo_registry_token_present(true);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_cargo_registry_token_present(true);
 	let adapter = recording_adapter_with_env(dir.path(), env);
 	adapter.publish(&info).unwrap();
 	let logs = crate::test_logging::take_logs();
@@ -161,8 +171,11 @@ fn publish_with_cargo_token_executes_publish() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-		.with_cargo_registry_token_present(true);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+	)
+	.with_cargo_registry_token_present(true);
 	let adapter = recording_adapter_with_env(dir.path(), env);
 	let result = adapter.publish(&info).unwrap();
 	assert_eq!(result, PublishOutcome::Published);

@@ -259,6 +259,7 @@ mod tests {
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
+	use crate::filesystem::LocalFilesystem;
 	use crate::model::config;
 
 	use super::*;
@@ -271,7 +272,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(&git, &[], &[], &[], "ci(release): version packages");
@@ -291,7 +295,10 @@ mod tests {
 			crate::command::DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::new(dry_run_runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::new(dry_run_runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -324,7 +331,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(&repo_dir).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -359,7 +369,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -390,7 +403,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		// Should succeed (non-existent file is a warning, not an error).
@@ -416,7 +432,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = stage_and_commit(
@@ -509,7 +528,10 @@ mod tests {
 		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout → clean
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = check_dirty_tree(&git);
@@ -523,7 +545,10 @@ mod tests {
 			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = check_dirty_tree(&git);
@@ -584,8 +609,11 @@ mod tests {
 			b"main\n".to_vec(),
 		));
 		let client = Arc::new(RecordingGitHubClient::new());
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		)
+		.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs::default();
@@ -623,8 +651,11 @@ mod tests {
 			b"main\n".to_vec(),
 		));
 		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>)
-			.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		)
+		.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs::default();
@@ -643,7 +674,10 @@ mod tests {
 		let dir = setup_branch_strategy_with_github();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		// No github client — pre-flight check should error
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = PrepareArgs::default();

@@ -194,6 +194,7 @@ mod tests {
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
+	use crate::filesystem::LocalFilesystem;
 	use crate::model::config;
 
 	fn make_runner() -> Arc<dyn CommandRunner> {
@@ -203,7 +204,10 @@ mod tests {
 	/// Loads all Cargo projects from a temporary workspace directory.
 	fn load_projects_for_dir(dir: &tempfile::TempDir) -> Vec<crate::package_manager::Project> {
 		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env)
 			.unwrap()
 			.load_projects()
@@ -285,7 +289,10 @@ mod tests {
 		.unwrap();
 
 		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = super::super::PrepareArgs {
@@ -295,7 +302,10 @@ mod tests {
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = super::super::cmd_prepare(&git, &args, false, config);
@@ -349,7 +359,10 @@ mod tests {
 		std::fs::write(&changeset_path, original).unwrap();
 
 		let runner = make_runner();
-		let env = crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+		let env = crate::Env::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			Arc::new(LocalFilesystem),
+		);
 		let config =
 			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
 		let args = super::super::PrepareArgs {
@@ -359,7 +372,10 @@ mod tests {
 		};
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
-			&crate::Env::new(Arc::clone(&runner) as Arc<dyn CommandRunner>),
+			&crate::Env::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				Arc::new(LocalFilesystem),
+			),
 			dir_abs.clone(),
 		);
 		let result = super::super::cmd_prepare(&git, &args, true, config);
