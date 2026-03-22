@@ -4,7 +4,7 @@
 
 pub mod cli;
 pub mod command;
-pub(crate) mod conventional_commit;
+pub mod conventional_commit;
 pub(crate) mod env;
 pub mod git;
 pub mod github;

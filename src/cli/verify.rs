@@ -6,7 +6,7 @@ use clap::Args;
 use log::{debug, info};
 
 use crate::git::GitWorkdir;
-use crate::model::changeset::is_changeset_filename;
+use crate::model::changeset::filter_changeset_paths;
 
 /// Arguments for the `verify` subcommand.
 #[derive(Args, Debug, Clone)]
@@ -47,16 +47,7 @@ pub(crate) fn cmd_verify(git: &GitWorkdir, args: &VerifyArgs) -> anyhow::Result<
 	let range = format!("{}..HEAD", args.base);
 	let names = git.diff_names(&["--diff-filter=A", &range, "--", ".cursus/"])?;
 
-	let changesets: Vec<String> = names
-		.into_iter()
-		.filter(|name| {
-			let filename = std::path::Path::new(name)
-				.file_name()
-				.and_then(|n| n.to_str())
-				.unwrap_or(name.as_str());
-			is_changeset_filename(filename)
-		})
-		.collect();
+	let changesets: Vec<&str> = filter_changeset_paths(&names);
 
 	if changesets.is_empty() {
 		log::warn!("{}", crate::t!("verify-no-changeset", "base" => &args.base));

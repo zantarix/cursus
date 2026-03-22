@@ -10,7 +10,53 @@ use anyhow::Context;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+use crate::conventional_commit;
 use crate::git::GitWorkdir;
+
+/// Derives a changeset from a conventional commit message.
+///
+/// Returns `Ok(None)` when the commit has no semver significance (e.g. `chore:`).
+/// `project_names` are the projects to include in the changeset.
+///
+/// # Errors
+///
+/// Returns an error if the commit message does not conform to the
+/// Conventional Commits specification.
+pub fn derive_changeset(
+	commit_message: &str,
+	project_names: &[&str],
+) -> anyhow::Result<Option<Changeset>> {
+	let commit = conventional_commit::parse(commit_message)?;
+	let Some(change_type) = commit.change_type() else {
+		return Ok(None);
+	};
+	let message = match &commit.body {
+		Some(body) => format!("{}\n\n{body}", commit.description),
+		None => commit.description.clone(),
+	};
+	let packages: BTreeMap<String, ChangeType> = project_names
+		.iter()
+		.map(|name| ((*name).to_string(), change_type))
+		.collect();
+	Ok(Some(Changeset::new(packages, Some(message))))
+}
+
+/// Filters a list of file paths to only those that are changeset files.
+///
+/// Strips directory prefixes and checks each filename against changeset
+/// naming rules (`.md` extension, not `README.md`).
+pub fn filter_changeset_paths(paths: &[String]) -> Vec<&str> {
+	paths
+		.iter()
+		.filter(|path| {
+			Path::new(path.as_str())
+				.file_name()
+				.and_then(|n| n.to_str())
+				.is_some_and(is_changeset_filename)
+		})
+		.map(|s| s.as_str())
+		.collect()
+}
 
 /// Returns `true` if `filename` looks like a changeset file name
 /// (ends with `.md`, case-insensitive, and is not `README.md`).
@@ -104,7 +150,7 @@ impl Changeset {
 	/// Generates a random filename for a changeset using petname.
 	///
 	/// Returns a filename like `evidently-uptown-primate.md`.
-	fn generate_filename() -> String {
+	pub fn generate_filename() -> String {
 		let name = petname::petname(3, "-").unwrap_or_else(|| "unnamed-changeset".to_string());
 		format!("{name}.md")
 	}
@@ -856,5 +902,106 @@ pkg = \"minor\"
 		// Partially consumed → rewrite branch triggered, but parent dir missing.
 		let result = cs.consume(&path, &released);
 		assert!(result.is_err(), "Should fail when file cannot be rewritten");
+	}
+
+	// --- derive_changeset ---
+
+	#[test]
+	fn derive_changeset_feat_produces_minor() {
+		let result = derive_changeset("feat: add new widget", &["my-app"]).unwrap();
+		let cs = result.expect("should produce a changeset");
+		assert_eq!(cs.packages["my-app"], ChangeType::Minor);
+		assert_eq!(cs.message, Some("add new widget".to_string()));
+	}
+
+	#[test]
+	fn derive_changeset_fix_produces_patch() {
+		let result = derive_changeset("fix: correct off-by-one", &["my-app"]).unwrap();
+		let cs = result.expect("should produce a changeset");
+		assert_eq!(cs.packages["my-app"], ChangeType::Patch);
+	}
+
+	#[test]
+	fn derive_changeset_breaking_produces_major() {
+		let result = derive_changeset("feat!: remove deprecated API", &["my-app"]).unwrap();
+		let cs = result.expect("should produce a changeset");
+		assert_eq!(cs.packages["my-app"], ChangeType::Major);
+	}
+
+	#[test]
+	fn derive_changeset_chore_returns_none() {
+		let result = derive_changeset("chore: update deps", &["my-app"]).unwrap();
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn derive_changeset_invalid_message_returns_error() {
+		assert!(derive_changeset("not a valid commit", &["my-app"]).is_err());
+	}
+
+	#[test]
+	fn derive_changeset_multiple_projects() {
+		let result = derive_changeset("feat: shared change", &["app-a", "app-b"]).unwrap();
+		let cs = result.expect("should produce a changeset");
+		assert_eq!(cs.packages.len(), 2);
+		assert_eq!(cs.packages["app-a"], ChangeType::Minor);
+		assert_eq!(cs.packages["app-b"], ChangeType::Minor);
+	}
+
+	#[test]
+	fn derive_changeset_includes_body_in_message() {
+		let msg = "feat: add widget\n\nThis adds a comprehensive widget system.";
+		let result = derive_changeset(msg, &["my-app"]).unwrap();
+		let cs = result.expect("should produce a changeset");
+		assert_eq!(
+			cs.message,
+			Some("add widget\n\nThis adds a comprehensive widget system.".to_string())
+		);
+	}
+
+	// --- filter_changeset_paths ---
+
+	#[test]
+	fn filter_changeset_paths_keeps_md_files() {
+		let paths = vec![
+			".cursus/some-change.md".to_string(),
+			".cursus/another.md".to_string(),
+		];
+		let result = filter_changeset_paths(&paths);
+		assert_eq!(result, vec![".cursus/some-change.md", ".cursus/another.md"]);
+	}
+
+	#[test]
+	fn filter_changeset_paths_excludes_readme() {
+		let paths = vec![
+			".cursus/README.md".to_string(),
+			".cursus/valid.md".to_string(),
+		];
+		let result = filter_changeset_paths(&paths);
+		assert_eq!(result, vec![".cursus/valid.md"]);
+	}
+
+	#[test]
+	fn filter_changeset_paths_excludes_non_md() {
+		let paths = vec![
+			".cursus/config.toml".to_string(),
+			".cursus/valid.md".to_string(),
+		];
+		let result = filter_changeset_paths(&paths);
+		assert_eq!(result, vec![".cursus/valid.md"]);
+	}
+
+	#[test]
+	fn filter_changeset_paths_bare_filename_no_directory() {
+		let paths = vec!["some-change.md".to_string()];
+		let result = filter_changeset_paths(&paths);
+		assert_eq!(result, vec!["some-change.md"]);
+	}
+
+	#[test]
+	fn filter_changeset_paths_empty_input() {
+		let paths: Vec<String> = vec![];
+		let result = filter_changeset_paths(&paths);
+		assert!(result.is_empty());
 	}
 }

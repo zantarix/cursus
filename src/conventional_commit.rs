@@ -11,7 +11,7 @@ use crate::model::changeset::ChangeType;
 
 /// A parsed Conventional Commit message.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ConventionalCommit {
+pub struct ConventionalCommit {
 	/// The commit type (e.g., `feat`, `fix`, `chore`).
 	pub commit_type: String,
 	/// The optional scope (e.g., `auth`, `api`).
@@ -31,7 +31,7 @@ impl ConventionalCommit {
 	/// - `feat` → [`ChangeType::Minor`]
 	/// - `fix` → [`ChangeType::Patch`]
 	/// - Anything else → `None`
-	pub(crate) fn change_type(&self) -> Option<ChangeType> {
+	pub fn change_type(&self) -> Option<ChangeType> {
 		if self.breaking {
 			return Some(ChangeType::Major);
 		}
@@ -116,7 +116,7 @@ fn parse_header(header: &str) -> anyhow::Result<(String, Option<String>, bool, S
 ///
 /// Returns an error if the commit message does not conform to the
 /// Conventional Commits specification.
-pub(crate) fn parse(message: &str) -> anyhow::Result<ConventionalCommit> {
+pub fn parse(message: &str) -> anyhow::Result<ConventionalCommit> {
 	let (header, rest) = match message.split_once("\n\n") {
 		Some((h, r)) => (h, Some(r)),
 		None => (message, None),

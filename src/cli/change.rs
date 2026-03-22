@@ -7,9 +7,8 @@ use anyhow::{Context, bail};
 use clap::Args;
 use log::info;
 
-use crate::conventional_commit;
 use crate::git;
-use crate::model::changeset::{ChangeType, Changeset};
+use crate::model::changeset::{ChangeType, Changeset, derive_changeset};
 use crate::model::config::Config;
 use crate::package_manager::Project;
 use crate::path::AbsolutePath;
@@ -181,46 +180,6 @@ fn validate_single_commit(git: &git::GitWorkdir) -> anyhow::Result<Option<String
 	Ok(Some(git.log_message("HEAD")?))
 }
 
-/// Writes the auto-derived changeset and optionally commits and pushes it.
-///
-/// When `dry_run` is true the filesystem write is skipped and an info message
-/// is logged instead. Git operations (`commit`, `push`) still execute but are
-/// suppressed by the [`DryRunCommandRunner`](crate::command::DryRunCommandRunner).
-fn write_auto_changeset(
-	git: &git::GitWorkdir,
-	dry_run: bool,
-	commit_to_git: bool,
-	matched: &[&Project],
-	change_type: ChangeType,
-	changeset_message: &str,
-	description: &str,
-) -> anyhow::Result<()> {
-	let packages: BTreeMap<String, ChangeType> = matched
-		.iter()
-		.map(|p| (p.name().to_string(), change_type))
-		.collect();
-	let changeset = Changeset::new(packages, Some(changeset_message.to_string()));
-	if dry_run {
-		// Intentionally use println! instead of log::info! so that --silent
-		// suppresses all other output and stdout contains only the changeset
-		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
-		println!("{}", changeset.format()?);
-		if commit_to_git {
-			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
-		}
-	} else {
-		let path = changeset.write(git)?;
-		if commit_to_git {
-			git.add(&[path])?;
-		}
-	}
-	if commit_to_git {
-		git.commit(&format!("chore: add changeset for {description}"))?;
-		git.push()?;
-	}
-	Ok(())
-}
-
 /// Runs `cursus change --auto`: derives a changeset from the single
 /// Conventional Commit on the current branch.
 ///
@@ -242,15 +201,6 @@ fn cmd_change_auto(
 		return Ok(ExitCode::SUCCESS);
 	};
 
-	let commit = conventional_commit::parse(&message)?;
-	let Some(change_type) = commit.change_type() else {
-		info!(
-			"Commit '{}' has no semver significance — skipping changeset",
-			commit.commit_type
-		);
-		return Ok(ExitCode::SUCCESS);
-	};
-
 	let projects = config.load_projects()?;
 	let changed_files: HashSet<String> = git.diff_tree_names("HEAD")?.into_iter().collect();
 	let matched_flags = match_files_to_projects(&projects, git.path(), &changed_files);
@@ -265,20 +215,36 @@ fn cmd_change_auto(
 		return Ok(ExitCode::SUCCESS);
 	}
 
-	let changeset_message = match &commit.body {
-		Some(body) => format!("{}\n\n{body}", commit.description),
-		None => commit.description.clone(),
+	let project_names: Vec<&str> = matched.iter().map(|p| p.name()).collect();
+	let Some(changeset) = derive_changeset(&message, &project_names)? else {
+		info!("Commit has no semver significance — skipping changeset");
+		return Ok(ExitCode::SUCCESS);
 	};
 
-	write_auto_changeset(
-		git,
-		global.dry_run,
-		config.git.enabled() && !args.no_git,
-		&matched,
-		change_type,
-		&changeset_message,
-		&commit.description,
-	)?;
+	let description = changeset
+		.message
+		.as_deref()
+		.and_then(|m| m.lines().next())
+		.unwrap_or("auto-derived changeset");
+
+	if global.dry_run {
+		// Intentionally use println! instead of log::info! so that --silent
+		// suppresses all other output and stdout contains only the changeset
+		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
+		println!("{}", changeset.format()?);
+		if config.git.enabled() && !args.no_git {
+			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
+		}
+	} else {
+		let path = changeset.write(git)?;
+		if config.git.enabled() && !args.no_git {
+			git.add(&[path])?;
+		}
+	}
+	if config.git.enabled() && !args.no_git {
+		git.commit(&format!("chore: add changeset for {description}"))?;
+		git.push()?;
+	}
 	Ok(ExitCode::SUCCESS)
 }
 
