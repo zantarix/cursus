@@ -97,3 +97,71 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 mod operations;
 
 pub use operations::GitWorkdir;
+
+/// Finds the git working directory by walking up from the given path.
+///
+/// Returns `Some(path)` if a `.git` directory is found, `None` otherwise.
+pub fn find_workdir(
+	start: &AbsolutePath,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> Option<AbsolutePath> {
+	std::iter::successors(Some(start.to_path_buf()), |dir| {
+		dir.parent().map(std::path::Path::to_path_buf)
+	})
+	.find(|dir| AbsolutePath::new(dir.join(".git")).is_ok_and(|p| fs.exists(&p)))
+	.and_then(|p| AbsolutePath::new(p).ok())
+}
+
+#[cfg(test)]
+mod find_workdir_tests {
+	use super::*;
+	use crate::filesystem::LocalFilesystem;
+
+	fn fs() -> LocalFilesystem {
+		LocalFilesystem
+	}
+
+	#[test]
+	fn returns_none_when_no_git() {
+		let dir = tempfile::tempdir().unwrap();
+		assert!(find_workdir(&AbsolutePath::new(dir.path()).unwrap(), &fs()).is_none());
+	}
+
+	#[test]
+	fn finds_git_in_current_dir() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let result = find_workdir(&AbsolutePath::new(dir.path()).unwrap(), &fs());
+		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
+	}
+
+	#[test]
+	fn finds_git_in_parent_dir() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let subdir = dir.path().join("subdir");
+		std::fs::create_dir(&subdir).unwrap();
+		let result = find_workdir(&AbsolutePath::new(&subdir).unwrap(), &fs());
+		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
+	}
+
+	#[test]
+	fn finds_git_in_nested_parent() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let nested = dir.path().join("a/b/c");
+		std::fs::create_dir_all(&nested).unwrap();
+		let result = find_workdir(&AbsolutePath::new(&nested).unwrap(), &fs());
+		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
+	}
+
+	#[test]
+	fn stops_at_first_git() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let inner = dir.path().join("inner");
+		std::fs::create_dir_all(inner.join(".git")).unwrap();
+		let result = find_workdir(&AbsolutePath::new(&inner).unwrap(), &fs());
+		assert_eq!(result, Some(AbsolutePath::new(inner).unwrap()));
+	}
+}

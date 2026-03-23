@@ -193,7 +193,7 @@ fn main() -> ExitCode {
 			return ExitCode::FAILURE;
 		}
 	};
-	let git_workdir = match cursus::find_git_workdir(&cwd_abs, &*filesystem) {
+	let git_workdir = match cursus::git::find_workdir(&cwd_abs, &*filesystem) {
 		Some(p) => p,
 		None => {
 			log::error!("No git repository found");

@@ -50,7 +50,7 @@ pub fn run_cursus(
 	};
 
 	let cwd_abs = AbsolutePath::new(cwd)?;
-	let git_workdir = cursus::find_git_workdir(&cwd_abs, &*filesystem)
+	let git_workdir = cursus::git::find_workdir(&cwd_abs, &*filesystem)
 		.ok_or_else(|| anyhow::anyhow!("No git repository found"))?;
 	let git = Arc::new(cursus::git::GitWorkdir::new(
 		Arc::clone(&runner),
