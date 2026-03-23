@@ -62,7 +62,7 @@ pub struct InitResult {
 /// Internal state accumulated as the wizard progresses.
 #[derive(Debug, Clone)]
 struct WizardState {
-	git_workdir: crate::path::AbsolutePath,
+	env: crate::Env,
 	dry_run: bool,
 	cargo_enabled: bool,
 	npm_enabled: bool,
@@ -327,7 +327,7 @@ pub fn run(
 		.flatten();
 
 	let initial_state = WizardState {
-		git_workdir: git_workdir.clone(),
+		env: env.clone(),
 		dry_run,
 		cargo_enabled: false,
 		npm_enabled: false,
@@ -401,8 +401,14 @@ pub(super) mod test_helpers {
 	}
 
 	pub(super) fn make_state(dir: &TempDir) -> WizardState {
+		use std::sync::Arc;
+		let path = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		let runner: Arc<dyn crate::command::CommandRunner> =
+			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0));
+		let git = Arc::new(crate::git::GitWorkdir::new(Arc::clone(&runner), path));
+		let env = crate::Env::new(runner, Arc::new(crate::filesystem::LocalFilesystem), git);
 		WizardState {
-			git_workdir: crate::path::AbsolutePath::new(dir.path()).unwrap(),
+			env,
 			dry_run: false,
 			cargo_enabled: false,
 			npm_enabled: false,

@@ -225,7 +225,14 @@ fn maybe_orchestrate_github_releases(
 		Some(c) => c,
 		None => bail!("GitHub client not available despite token being set"),
 	};
-	orchestrate_github_releases(git, config, client, published_packages, is_multi_package)
+	orchestrate_github_releases(
+		git,
+		config,
+		client,
+		published_packages,
+		is_multi_package,
+		env.fs(),
+	)
 }
 
 /// Runs pre-publish GitHub checks: validates token presence and runs the build command.

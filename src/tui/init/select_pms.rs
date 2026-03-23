@@ -16,16 +16,16 @@ pub(super) fn advance_from_select_pms(
 	mut state: WizardState,
 	cargo: bool,
 	npm: bool,
-	fs: &dyn crate::filesystem::Filesystem,
 ) -> (WizardState, Screen) {
 	state.cargo_enabled = cargo;
 	state.npm_enabled = npm;
 
+	let fs = state.env.fs();
 	let mut remaining = Vec::new();
-	if cargo && !fs.exists(&state.git_workdir.child("Cargo.toml")) {
+	if cargo && !fs.exists(&state.env.git().path().child("Cargo.toml")) {
 		remaining.push(PackageManager::Cargo);
 	}
-	if npm && !fs.exists(&state.git_workdir.child("package.json")) {
+	if npm && !fs.exists(&state.env.git().path().child("package.json")) {
 		remaining.push(PackageManager::Npm);
 	}
 	state.remaining_manifest_pms = remaining;
@@ -82,8 +82,7 @@ fn handle_key_select_pms(
 					Screen::SelectPackageManagers { cargo, npm, focus },
 				)))
 			} else {
-				let (new_state, next_screen) =
-					advance_from_select_pms(state, cargo, npm, &crate::filesystem::LocalFilesystem);
+				let (new_state, next_screen) = advance_from_select_pms(state, cargo, npm);
 				Ok(KeyResult::Continue((new_state, next_screen)))
 			}
 		}

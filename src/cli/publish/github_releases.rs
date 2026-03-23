@@ -3,7 +3,6 @@
 use anyhow::Context;
 use log::{error, info, warn};
 
-use crate::filesystem::Filesystem as _;
 use crate::git::Git;
 use crate::github::GitHubRepo;
 use crate::github::client::GitHubClient;
@@ -59,16 +58,15 @@ pub(super) fn run_github_build_command(
 }
 
 /// Reads the changelog body for a published package, returning an empty string on any error.
-pub(super) fn read_changelog_body(pkg: &PublishedPackage) -> String {
+pub(super) fn read_changelog_body(
+	pkg: &PublishedPackage,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> String {
 	let changelog_path = pkg.project_path.child("CHANGELOG.md");
-	if !crate::filesystem::LocalFilesystem.exists(&changelog_path) {
+	if !fs.exists(&changelog_path) {
 		return String::new();
 	}
-	match extract_version_body(
-		&changelog_path,
-		&pkg.version,
-		&crate::filesystem::LocalFilesystem,
-	) {
+	match extract_version_body(&changelog_path, &pkg.version, fs) {
 		Ok(text) => text,
 		Err(e) => {
 			warn!("could not read changelog for {}: {e:#}", pkg.name);
@@ -117,6 +115,7 @@ pub(super) fn orchestrate_github_releases(
 	github_client: &dyn GitHubClient,
 	published_packages: &[PublishedPackage],
 	is_multi_package: bool,
+	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<(usize, bool)> {
 	if published_packages.is_empty() {
 		return Ok((0, false));
@@ -129,7 +128,7 @@ pub(super) fn orchestrate_github_releases(
 			.git
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
-		let body = read_changelog_body(pkg);
+		let body = read_changelog_body(pkg, fs);
 		match github_client.create_release(&gh_repo, &tag, &tag, &body) {
 			Ok(release_id) => {
 				if publish_draft_release(
@@ -139,7 +138,7 @@ pub(super) fn orchestrate_github_releases(
 					&release_id,
 					&config.github.artifacts,
 					git.path(),
-					config.env().fs(),
+					fs,
 				) {
 					github_failed = true;
 				} else {
@@ -214,8 +213,15 @@ mod tests {
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &[], false).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&[],
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(!failed);
@@ -238,8 +244,15 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &packages, false).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert_eq!(created, 1);
 		assert!(!failed);
@@ -273,7 +286,12 @@ mod tests {
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 		let (created, failed) = orchestrate_github_releases(
-			&git, &config, &client, &packages, true, // is_multi_package
+			&git,
+			&config,
+			&client,
+			&packages,
+			true,
+			&crate::filesystem::LocalFilesystem,
 		)
 		.unwrap();
 
@@ -314,8 +332,15 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &packages, true).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			true,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert_eq!(created, 0);
 		assert!(failed);
@@ -364,8 +389,15 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &packages, false).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		// Draft was created but upload failed — not counted as created (left as draft)
 		assert_eq!(created, 0);
@@ -427,8 +459,15 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &packages, true).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			true,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert_eq!(created, 2);
 		assert!(!failed);
@@ -458,8 +497,15 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &packages, false).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		// Draft was created but publish failed — not counted as created
 		assert_eq!(created, 0);
@@ -509,8 +555,15 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, failed) =
-			orchestrate_github_releases(&git, &config, &client, &packages, false).unwrap();
+		let (created, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert_eq!(created, 1);
 		assert!(!failed);
@@ -624,7 +677,10 @@ mod tests {
 			version: "1.0.0".parse().unwrap(),
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		};
-		assert_eq!(read_changelog_body(&pkg), "");
+		assert_eq!(
+			read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem),
+			""
+		);
 	}
 
 	#[test]
@@ -640,7 +696,7 @@ mod tests {
 			version: "1.0.0".parse().unwrap(),
 			project_path: AbsolutePath::new(dir.path()).unwrap(),
 		};
-		let body = read_changelog_body(&pkg);
+		let body = read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem);
 		assert!(
 			body.contains("Fix a bug"),
 			"Expected changelog body, got: {body}"
@@ -657,7 +713,10 @@ mod tests {
 			project_path: AbsolutePath::new(dir.path()).unwrap(),
 		};
 		// Version not found returns empty string
-		assert_eq!(read_changelog_body(&pkg), "");
+		assert_eq!(
+			read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem),
+			""
+		);
 	}
 
 	#[test]

@@ -72,11 +72,7 @@ pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Re
 		let is_multi = projects.len() > 1;
 
 		let any_tag_missing = selected.iter().any(|project| {
-			if !config
-				.env()
-				.fs()
-				.exists(&project.path().child("CHANGELOG.md"))
-			{
+			if !env.fs().exists(&project.path().child("CHANGELOG.md")) {
 				debug!("skipping tag check for {}", project.name());
 				return false;
 			}
