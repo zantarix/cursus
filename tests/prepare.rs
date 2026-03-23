@@ -901,7 +901,10 @@ fn prepare_updates_npm_intra_workspace_dep_version() {
 	let config =
 		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_npm(cursus::model::config::NpmConfig::enabled());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 
 	// Root package.json with workspace config
 	std::fs::write(
@@ -956,7 +959,10 @@ fn prepare_skips_workspace_protocol_dep_version() {
 	let config =
 		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_npm(cursus::model::config::NpmConfig::enabled());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),

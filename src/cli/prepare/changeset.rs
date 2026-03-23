@@ -250,11 +250,18 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env(crate::Env::new(
-			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		))
+		cfg.with_env({
+			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				)),
+			)
+		})
 		.save()
 		.unwrap();
 		std::fs::write(
@@ -264,13 +271,13 @@ mod tests {
 		.unwrap();
 
 		let runner = make_runner();
+		let path = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		let config =
-			crate::model::config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env)
-				.unwrap();
+		let config = crate::model::config::load(&env).unwrap();
 		let adapters = config.create_adapters().unwrap();
 		let projects = config.load_projects_for_adapters(&adapters).unwrap();
 
@@ -290,11 +297,18 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env(crate::Env::new(
-			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		))
+		cfg.with_env({
+			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				)),
+			)
+		})
 		.save()
 		.unwrap();
 
@@ -312,13 +326,13 @@ mod tests {
 		let commit_refs = BTreeMap::new(); // empty refs → all None
 
 		let runner = make_runner();
+		let path = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		let config =
-			crate::model::config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env)
-				.unwrap();
+		let config = crate::model::config::load(&env).unwrap();
 		let adapters = config.create_adapters().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),

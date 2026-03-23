@@ -248,10 +248,9 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub(crate) fn read_all(
-		git: &dyn Git,
-		fs: &dyn crate::filesystem::Filesystem,
-	) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+	pub(crate) fn read_all(env: &crate::Env) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+		let git = env.git();
+		let fs = env.fs();
 		let cursus_dir = git.path().child(".cursus");
 		if !fs.is_dir(&cursus_dir) {
 			return Ok(Vec::new());
@@ -494,12 +493,13 @@ mod tests {
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let changeset = single_package_changeset();
-		let path = changeset
-			.write(&git, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		let path = changeset.write(env.git(), env.fs()).unwrap();
 		assert!(path.exists(), "Changeset file should exist");
 		assert!(path.starts_with(dir.path().join(".cursus")));
 		assert!(path.extension().is_some_and(|ext| ext == "md"));
@@ -512,12 +512,13 @@ mod tests {
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let changeset = single_package_changeset();
-		changeset
-			.write(&git, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		changeset.write(env.git(), env.fs()).unwrap();
 		assert!(
 			dir.path().join(".cursus").is_dir(),
 			".cursus directory should exist"
@@ -531,13 +532,14 @@ mod tests {
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
-		let path = changeset
-			.write(&git, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		let path = changeset.write(env.git(), env.fs()).unwrap();
 		let content = std::fs::read_to_string(path).unwrap();
 		assert!(content.starts_with("+++\n"));
 		assert!(
@@ -657,9 +659,12 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
+		let result = Changeset::read_all(&env).unwrap();
 		assert!(result.is_empty());
 	}
 
@@ -670,12 +675,15 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("config.toml"), "").unwrap();
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
+		let result = Changeset::read_all(&env).unwrap();
 		assert!(result.is_empty());
 	}
 
@@ -686,8 +694,11 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(
@@ -696,7 +707,7 @@ pkg = \"minor\"
 		)
 		.unwrap();
 
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
+		let result = Changeset::read_all(&env).unwrap();
 		assert_eq!(result.len(), 1);
 		assert_eq!(result[0].1.packages["my-app"], ChangeType::Minor);
 		assert_eq!(result[0].1.message, Some("A change".to_string()));
@@ -709,14 +720,17 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 		std::fs::write(cursus_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
+		let result = Changeset::read_all(&env).unwrap();
 		assert_eq!(result.len(), 2);
 	}
 
@@ -727,13 +741,16 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("bad.md"), "not a valid changeset").unwrap();
 
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem);
+		let result = Changeset::read_all(&env);
 		assert!(result.is_err());
 	}
 
@@ -744,8 +761,11 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(
@@ -755,7 +775,7 @@ pkg = \"minor\"
 		.unwrap();
 		std::fs::write(cursus_dir.join("valid.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
+		let result = Changeset::read_all(&env).unwrap();
 		assert_eq!(result.len(), 1, "README.md should be skipped");
 		assert_eq!(result[0].1.packages["app"], ChangeType::Minor);
 	}
@@ -767,13 +787,16 @@ pkg = \"minor\"
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			std::sync::Arc::new(GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				abs.clone(),
+			)),
 		);
-		let git = GitWorkdir::new(env.runner(), abs.clone());
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("readme.md"), "not a changeset").unwrap();
 
-		let result = Changeset::read_all(&git, &crate::filesystem::LocalFilesystem).unwrap();
+		let result = Changeset::read_all(&env).unwrap();
 		assert!(result.is_empty(), "readme.md (lowercase) should be skipped");
 	}
 

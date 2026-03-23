@@ -28,11 +28,8 @@ fn load_fails_on_unknown_top_level_field() {
 	std::fs::create_dir_all(&config_dir).unwrap();
 	std::fs::write(config_dir.join("config.toml"), "[rust]\nenabled = true").unwrap();
 
-	let err = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap_err();
+	let env = make_env_with_git(dir.path());
+	let err = load(&env).unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -51,11 +48,8 @@ fn load_fails_on_unknown_package_manager_field() {
 	)
 	.unwrap();
 
-	let err = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap_err();
+	let env = make_env_with_git(dir.path());
+	let err = load(&env).unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -106,11 +100,8 @@ fn config_roundtrip_with_path() {
 		.with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
 	config.with_env(make_env()).save().unwrap();
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert_eq!(loaded.npm.path, Some("frontend".to_string()));
 }
 
@@ -130,11 +121,8 @@ fn config_roundtrip() {
 			}
 		};
 		config.with_env(make_env()).save().unwrap();
-		let loaded = load(
-			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-			&make_env(),
-		)
-		.unwrap();
+		let env = make_env_with_git(dir.path());
+		let loaded = load(&env).unwrap();
 		let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![pm]);
 	}
@@ -176,11 +164,8 @@ fn config_roundtrip_with_global() {
 		.with_global(global)
 		.with_npm(NpmConfig::enabled());
 	config.with_env(make_env()).save().unwrap();
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert!(loaded.global.disable_dependency_cycle_warnings);
 }
 
@@ -195,11 +180,8 @@ fn global_config_unknown_field_fails() {
 	)
 	.unwrap();
 
-	let err = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap_err();
+	let env = make_env_with_git(dir.path());
+	let err = load(&env).unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -240,11 +222,8 @@ fn load_github_enabled_derives_git_enabled() {
 	)
 	.unwrap();
 
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert!(loaded.github.enabled);
 	assert!(
 		loaded.git.enabled(),
@@ -263,11 +242,8 @@ fn load_explicit_git_disabled_overrides_derived_default() {
 	)
 	.unwrap();
 
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert!(loaded.github.enabled);
 	assert!(
 		!loaded.git.enabled(),
@@ -286,11 +262,8 @@ fn load_derives_branch_strategy_when_github_enabled() {
 	)
 	.unwrap();
 
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Branch,
@@ -309,11 +282,8 @@ fn load_derives_push_strategy_when_github_disabled() {
 	)
 	.unwrap();
 
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Push,
@@ -332,11 +302,8 @@ fn load_explicit_strategy_overrides_derived_default() {
 	)
 	.unwrap();
 
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Push,

@@ -18,12 +18,13 @@ fn run_cursus_with_token(
 ) -> anyhow::Result<std::process::ExitCode> {
 	let github_client = Arc::new(cursus::github::RestGitHubClient::new(token.to_string()))
 		as Arc<dyn cursus::github::client::GitHubClient>;
-	let env = cursus::Env::new(
-		Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>,
-		Arc::new(LocalFilesystem),
-	)
-	.with_github_client(github_client);
-	cursus::run_local(args, cwd, env)
+	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
+	let path = cursus::path::AbsolutePath::new(cwd).unwrap();
+	let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
+	let env =
+		cursus::Env::new(runner, Arc::new(LocalFilesystem), git).with_github_client(github_client);
+	let cli: cursus::cli::Cli = clap::Parser::parse_from(args);
+	cursus::run(cli, env)
 }
 
 /// Helper: write a config file with the given TOML content under `.cursus/`.

@@ -12,11 +12,8 @@ fn load_projects_succeeds_with_cargo_manifest() {
 	)
 	.unwrap();
 
-	let config = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let config = load(&env).unwrap();
 	let projects = config.load_projects().unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "test-package");
@@ -34,11 +31,8 @@ fn load_projects_succeeds_with_npm_manifest() {
 	)
 	.unwrap();
 
-	let config = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let config = load(&env).unwrap();
 	let projects = config.load_projects().unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "test-package");
@@ -52,11 +46,8 @@ fn load_projects_fails_when_no_projects_found() {
 	config.with_env(make_env()).save().unwrap();
 	// No Cargo.toml file, so no projects will be found
 
-	let config = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let config = load(&env).unwrap();
 	let result = config.load_projects();
 	assert!(result.is_err());
 	assert!(

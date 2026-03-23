@@ -342,7 +342,7 @@ pub fn run(
 		remaining_manifest_pms: Vec::new(),
 	};
 
-	let initial_screen = if !dry_run && config_exists(git_workdir, env.fs()) {
+	let initial_screen = if !dry_run && config_exists(env) {
 		Screen::ConfirmOverwrite(false)
 	} else {
 		Screen::SelectPackageManagers {

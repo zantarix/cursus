@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::Parser as _;
-use cursus::command::{RealCommandRunner, VerboseCommandRunner};
+use cursus::command::{DryRunCommandRunner, RealCommandRunner, VerboseCommandRunner};
 
 /// A minimal `log::Log` implementation that splits output by level.
 ///
@@ -176,21 +176,42 @@ fn main() -> ExitCode {
 	let locale = detect_locale();
 	let filesystem: Arc<dyn cursus::filesystem::Filesystem> =
 		Arc::new(cursus::filesystem::LocalFilesystem);
-	let env = cursus::Env::new(runner, filesystem)
+
+	// Wrap the runner for dry-run BEFORE creating GitWorkdir so it
+	// receives the wrapped runner.
+	let runner = if cli.global.dry_run {
+		Arc::new(DryRunCommandRunner::new(runner)) as Arc<dyn cursus::command::CommandRunner>
+	} else {
+		runner
+	};
+
+	// Git discovery
+	let cwd_abs = match cursus::path::AbsolutePath::new(&cwd) {
+		Ok(p) => p,
+		Err(e) => {
+			log::error!("{e:#}");
+			return ExitCode::FAILURE;
+		}
+	};
+	let git_workdir = match cursus::find_git_workdir(&cwd_abs, &*filesystem) {
+		Some(p) => p,
+		None => {
+			log::error!("No git repository found");
+			return ExitCode::FAILURE;
+		}
+	};
+	let git = Arc::new(cursus::git::GitWorkdir::new(
+		Arc::clone(&runner),
+		git_workdir,
+	));
+
+	let env = cursus::Env::new(runner, filesystem, git)
 		.with_editor_opt(editor)
 		.with_github_client_opt(github_client)
 		.with_oidc_environment(oidc_environment)
 		.with_node_auth_token_present(node_auth_token_present)
 		.with_cargo_registry_token_present(cargo_registry_token_present)
 		.with_locale(locale);
-
-	let env = match env.apply_global(&cli.global).local(&cwd) {
-		Ok(env) => env,
-		Err(e) => {
-			log::error!("{e:#}");
-			return ExitCode::FAILURE;
-		}
-	};
 
 	match cursus::run(cli, env) {
 		Ok(code) => code,

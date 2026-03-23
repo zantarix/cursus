@@ -205,10 +205,15 @@ impl Project {
 	pub fn new_test_with_version(name: &str, version: semver::Version) -> Self {
 		use crate::command::test_support::RecordingCommandRunner;
 		use crate::model::config::NpmConfig;
-		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let runner =
+			Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn crate::command::CommandRunner>;
 		let env = crate::Env::new(
-			runner as Arc<dyn crate::command::CommandRunner>,
+			Arc::clone(&runner),
 			Arc::new(crate::filesystem::LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				runner,
+				crate::path::AbsolutePath::new("/tmp").unwrap(),
+			)),
 		);
 		let path = format!("/nonexistent/packages/{name}");
 		Self {
@@ -237,9 +242,14 @@ impl Project {
 	) -> Self {
 		use crate::command::CommandRunner;
 		use crate::model::config::NpmConfig;
+		let runner = runner as Arc<dyn CommandRunner>;
 		let env = crate::Env::new(
-			runner as Arc<dyn CommandRunner>,
+			Arc::clone(&runner),
 			Arc::new(crate::filesystem::LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				runner,
+				crate::path::AbsolutePath::new("/tmp").unwrap(),
+			)),
 		);
 		Self {
 			info: ProjectInfo::for_test(name, AbsolutePath::new(path).unwrap()),
@@ -555,6 +565,10 @@ mod tests {
 			crate::Env::new(
 				Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
 				Arc::new(crate::filesystem::LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
+					crate::path::AbsolutePath::new("/tmp").unwrap(),
+				)),
 			),
 		));
 		let projects = enumerate_projects([adapter.clone()]).unwrap();
@@ -581,6 +595,10 @@ mod tests {
 			crate::Env::new(
 				Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
 				Arc::new(crate::filesystem::LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
+					crate::path::AbsolutePath::new("/tmp").unwrap(),
+				)),
 			),
 		));
 		let adapter2: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
@@ -589,6 +607,10 @@ mod tests {
 			crate::Env::new(
 				Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
 				Arc::new(crate::filesystem::LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
+					crate::path::AbsolutePath::new("/tmp").unwrap(),
+				)),
 			),
 		));
 

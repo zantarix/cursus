@@ -6,7 +6,6 @@ use anyhow::Context as _;
 use clap::Args;
 use log::{debug, info};
 
-use crate::git::Git;
 use crate::model::changeset::Changeset;
 use crate::model::config::Config;
 use crate::package_manager::filter_projects_by_name;
@@ -50,14 +49,12 @@ pub struct CiArgs {
 /// already published to a registry but the tag push failed, re-running `publish` will skip the
 /// already-published registry step and only retry the tag. Checking registry state directly
 /// would add network dependencies and is not necessary for correctness.
-pub(crate) fn cmd_ci(
-	git: &dyn Git,
-	args: &CiArgs,
-	dry_run: bool,
-	config: Config,
-) -> anyhow::Result<ExitCode> {
+pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Result<ExitCode> {
+	let env = config.env().context("env not set")?;
+	let git = env.git();
+
 	// Step 1: check for pending changesets.
-	let changesets = Changeset::read_all(git, config.env().context("env not set")?.fs())?;
+	let changesets = Changeset::read_all(env)?;
 	if !changesets.is_empty() {
 		info!("ci: pending changesets found, running prepare");
 		let prepare_args = PrepareArgs {
@@ -65,7 +62,7 @@ pub(crate) fn cmd_ci(
 			no_git: args.no_git,
 			branch: args.branch.clone(),
 		};
-		return cmd_prepare(git, &prepare_args, dry_run, config);
+		return cmd_prepare(&prepare_args, dry_run, config);
 	}
 
 	// Step 2: when git is enabled and --no-git is not set, check for packages that
@@ -97,7 +94,7 @@ pub(crate) fn cmd_ci(
 				packages: args.packages.clone(),
 				no_git: args.no_git,
 			};
-			return cmd_publish(git, &publish_args, dry_run, config);
+			return cmd_publish(&publish_args, dry_run, config);
 		}
 	}
 

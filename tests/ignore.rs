@@ -23,7 +23,10 @@ fn run_change_with_ignore(
 	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 
 	let mut args = vec![
 		"cursus",

@@ -23,12 +23,14 @@ pub mod test_logging;
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
 
 pub use env::Env;
 
+use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::path::AbsolutePath;
 
 /// Finds the git working directory by walking up from the given path.
@@ -47,13 +49,18 @@ pub fn find_git_workdir(
 
 /// Convenience entry point for local filesystem usage.
 ///
-/// Parses CLI arguments, performs git discovery and dry-run setup via
-/// [`Env::apply_global`] and [`Env::local`], then delegates to [`run`].
+/// Parses CLI arguments, wraps the runner for `--dry-run`, performs git
+/// discovery, builds an [`Env`], and delegates to [`run`].
 ///
 /// Use [`run`] directly when the caller has already parsed the arguments
-/// and set up git on the environment (e.g., from `main` or when providing a
-/// custom [`git::Git`] implementation).
-pub fn run_local<I, T>(args: I, cwd: &Path, env: Env) -> anyhow::Result<ExitCode>
+/// and set up the [`Env`] (e.g., from `main` or when providing a custom
+/// [`git::Git`] implementation).
+pub fn run_local<I, T>(
+	args: I,
+	runner: Arc<dyn CommandRunner>,
+	filesystem: Arc<dyn filesystem::Filesystem>,
+	cwd: &Path,
+) -> anyhow::Result<ExitCode>
 where
 	I: IntoIterator<Item = T>,
 	T: Into<OsString> + Clone,
@@ -73,36 +80,45 @@ where
 		}
 	};
 
-	let env = env.apply_global(&cli.global).local(cwd)?;
+	// Wrap the runner for dry-run BEFORE creating GitWorkdir so it
+	// receives the wrapped runner.
+	let runner = if cli.global.dry_run {
+		Arc::new(DryRunCommandRunner::new(runner)) as Arc<dyn CommandRunner>
+	} else {
+		runner
+	};
+
+	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
+	let git_workdir =
+		find_git_workdir(&cwd_abs, &*filesystem).context("No git repository found")?;
+	let git = Arc::new(git::GitWorkdir::new(Arc::clone(&runner), git_workdir));
+	let env = Env::new(runner, filesystem, git);
+
 	run(cli, env)
 }
 
 /// Dispatches a pre-parsed CLI to the appropriate subcommand.
 ///
-/// The environment must have git already configured via
-/// [`Env::with_git`] before calling this function. Use [`run_local`] for the
-/// convenience entry point that handles git discovery automatically.
+/// The [`Env`] must already contain a configured [`git::Git`] implementation.
+/// Use [`run_local`] for the convenience entry point that handles git
+/// discovery automatically.
 pub fn run(cli: cli::Cli, env: Env) -> anyhow::Result<ExitCode> {
 	// Set the process-global locale from the environment before any output.
 	locale::set_locale(env.locale());
 
 	let dry_run = cli.global.dry_run;
-	let git = env.git().context("No git implementation set on Env")?;
-	let git_workdir = git.path().clone();
 
 	match cli.command {
-		Some(cli::Command::Init(args)) => cli::cmd_init(&git_workdir, &args, &cli.global, &env),
-		Some(cli::Command::Verify(args)) => cli::cmd_verify(git, &args),
+		Some(cli::Command::Init(args)) => cli::cmd_init(&args, &cli.global, &env),
+		Some(cli::Command::Verify(args)) => cli::cmd_verify(&env, &args),
 		command => {
-			let config = model::config::load(&git_workdir, &env)?;
+			let config = model::config::load(&env)?;
 			match command {
-				Some(cli::Command::Change(args)) => {
-					cli::cmd_change(git, &args, &cli.global, config)
-				}
-				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(git, &args, dry_run, config),
-				Some(cli::Command::Publish(args)) => cli::cmd_publish(git, &args, dry_run, config),
-				Some(cli::Command::Ci(args)) => cli::cmd_ci(git, &args, dry_run, config),
-				None => cli::cmd_change(git, &cli::ChangeArgs::default(), &cli.global, config),
+				Some(cli::Command::Change(args)) => cli::cmd_change(&args, &cli.global, config),
+				Some(cli::Command::Prepare(args)) => cli::cmd_prepare(&args, dry_run, config),
+				Some(cli::Command::Publish(args)) => cli::cmd_publish(&args, dry_run, config),
+				Some(cli::Command::Ci(args)) => cli::cmd_ci(&args, dry_run, config),
+				None => cli::cmd_change(&cli::ChangeArgs::default(), &cli.global, config),
 				Some(cli::Command::Init(_)) | Some(cli::Command::Verify(_)) => {
 					// The outer match arms already handle Init and Verify; these arms cannot be reached.
 					anyhow::bail!(

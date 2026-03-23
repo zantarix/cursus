@@ -11,7 +11,6 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use crate::command::{CommandRunner, RealCommandRunner};
-use crate::filesystem::LocalFilesystem;
 use crate::git::Git as _;
 use crate::path::AbsolutePath;
 
@@ -35,11 +34,7 @@ fn git_cmd(dir: &Path, args: &[&str]) {
 
 fn make_workdir(dir: &TempDir) -> super::GitWorkdir {
 	let path = AbsolutePath::new(dir.path()).unwrap();
-	let env = crate::Env::new(
-		Arc::new(RealCommandRunner) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-	);
-	super::GitWorkdir::new(env.runner(), path)
+	super::GitWorkdir::new(Arc::new(RealCommandRunner) as Arc<dyn CommandRunner>, path)
 }
 
 /// Returns the current branch name for a repository directory using a raw git call.

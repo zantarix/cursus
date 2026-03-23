@@ -108,6 +108,10 @@ fn publish_without_cargo_token_still_executes_publish() {
 	let env = crate::Env::new(
 		Arc::clone(&runner) as Arc<dyn CommandRunner>,
 		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
 	)
 	.with_cargo_registry_token_present(false);
 	let adapter = recording_adapter_with_env(dir.path(), env);
@@ -127,6 +131,10 @@ fn publish_without_cargo_token_emits_warning() {
 	let env = crate::Env::new(
 		Arc::clone(&runner) as Arc<dyn CommandRunner>,
 		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
 	)
 	.with_cargo_registry_token_present(false);
 	let adapter = recording_adapter_with_env(dir.path(), env);
@@ -153,6 +161,10 @@ fn publish_with_cargo_token_no_warning() {
 	let env = crate::Env::new(
 		Arc::clone(&runner) as Arc<dyn CommandRunner>,
 		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
 	)
 	.with_cargo_registry_token_present(true);
 	let adapter = recording_adapter_with_env(dir.path(), env);
@@ -174,6 +186,10 @@ fn publish_with_cargo_token_executes_publish() {
 	let env = crate::Env::new(
 		Arc::clone(&runner) as Arc<dyn CommandRunner>,
 		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
 	)
 	.with_cargo_registry_token_present(true);
 	let adapter = recording_adapter_with_env(dir.path(), env);

@@ -10,46 +10,34 @@ use cursus::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageMa
 use cursus::path::AbsolutePath;
 use tempfile::TempDir;
 
-/// Creates a minimal `Env` with a real command runner and local filesystem.
-pub fn test_env() -> cursus::Env {
+/// Creates a minimal `Env` with a real command runner, local filesystem, and git for the given dir.
+pub fn test_env(dir: &std::path::Path) -> cursus::Env {
+	let runner = std::sync::Arc::new(cursus::command::RealCommandRunner)
+		as std::sync::Arc<dyn cursus::command::CommandRunner>;
+	let path = cursus::path::AbsolutePath::new(dir).unwrap();
 	cursus::Env::new(
-		std::sync::Arc::new(cursus::command::RealCommandRunner)
-			as std::sync::Arc<dyn cursus::command::CommandRunner>,
+		std::sync::Arc::clone(&runner),
 		std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
+		std::sync::Arc::new(cursus::git::GitWorkdir::new(runner, path)),
 	)
 }
 
 /// Runs cursus with a default (empty) environment and real command runner, returning the result.
 ///
 /// This is the standard way to invoke `cursus::run` from integration tests.
-/// It passes `Env::default()` so that no real environment variables are read,
-/// and uses `RealCommandRunner` so that actual shell commands (git, cargo, npm) execute.
+/// It passes a real `CommandRunner` and `LocalFilesystem` so that actual shell
+/// commands (git, cargo, npm) execute. Git discovery is handled internally.
 pub fn run_cursus(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
 	cursus::run_local(
 		args,
+		std::sync::Arc::new(cursus::command::RealCommandRunner)
+			as std::sync::Arc<dyn cursus::command::CommandRunner>,
+		std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
 		cwd,
-		cursus::Env::new(
-			std::sync::Arc::new(cursus::command::RealCommandRunner)
-				as std::sync::Arc<dyn cursus::command::CommandRunner>,
-			std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
-		),
 	)
-}
-
-/// Runs cursus with a caller-supplied [`cursus::Env`], returning the result.
-///
-/// Use this when you need to inject a custom command runner (e.g.
-/// [`cursus::command::test_support::DispatchingCommandRunner`]) or pre-populated
-/// environment variables into a test scenario.
-pub fn run_cursus_with_env(
-	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
-	cwd: &std::path::Path,
-	env: cursus::Env,
-) -> anyhow::Result<std::process::ExitCode> {
-	cursus::run_local(args, cwd, env)
 }
 
 /// Runs a git command in the given directory and panics on failure.
@@ -102,7 +90,7 @@ pub fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig)
 			.with_cargo(CargoConfig::enabled())
 			.with_git(git_config),
 	};
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 	dir
 }
 
@@ -117,7 +105,7 @@ pub fn temp_real_git_repo_with_cargo_workspace(
 	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
 		.with_cargo(CargoConfig::enabled())
 		.with_git(git_config);
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 
 	let member_list = members
 		.iter()
@@ -321,7 +309,7 @@ pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 	dir
 }
 
@@ -336,7 +324,7 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(
@@ -368,7 +356,7 @@ pub fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 	let dir = temp_git_repo();
 	let config =
 		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled());
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 
 	let member_list = members
 		.iter()
@@ -410,7 +398,7 @@ pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &s
 		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),
 		PackageManager::Cargo => config.cargo.path = Some(subfolder.to_string()),
 	}
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	match pm {
@@ -470,7 +458,7 @@ pub fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
 			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.with_env(test_env()).save().unwrap();
+	config.with_env(test_env(dir.path())).save().unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(

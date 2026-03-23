@@ -28,7 +28,10 @@ fn temp_git_repo_with_project_in_unicode_dir(prefix: &str) -> TempDir {
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
 	let config =
 		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
@@ -355,7 +358,10 @@ fn config_with_unicode_ignore_pattern() {
 	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 
 	// Targeting "app" (non-ignored) must succeed.
 	let result = run_cursus(
@@ -407,7 +413,10 @@ fn config_with_unicode_subfolder_path() {
 	let mut config =
 		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled());
 	config.cargo.path = Some(subfolder.to_string());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	std::fs::write(
@@ -510,7 +519,10 @@ fn github_config_unicode_pr_title_loads() {
 			GitHubConfig::enabled_config()
 				.with_pull_request_title("Mise \u{00E0} jour des versions \u{1F389}".to_string()),
 		);
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n",

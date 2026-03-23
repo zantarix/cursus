@@ -21,10 +21,17 @@ fn build_dependency_graph_empty_for_single_package() {
 	let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 		NpmConfig::default(),
 		AbsolutePath::new(dir.path()).unwrap(),
-		crate::Env::new(
-			Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		),
+		{
+			let r = Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new("/tmp").unwrap(),
+				)),
+			)
+		},
 	));
 	let projects = enumerate_projects([adapter]).unwrap();
 	let graph = build_dependency_graph(&projects).unwrap();
@@ -62,10 +69,17 @@ fn build_dependency_graph_with_workspace_dependencies() {
 	let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 		NpmConfig::default(),
 		AbsolutePath::new(dir.path()).unwrap(),
-		crate::Env::new(
-			Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		),
+		{
+			let r = Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new("/tmp").unwrap(),
+				)),
+			)
+		},
 	));
 	let projects = enumerate_projects([adapter]).unwrap();
 	let graph = build_dependency_graph(&projects).unwrap();
@@ -107,10 +121,17 @@ fn build_dependency_graph_excludes_external_dependencies() {
 	let adapter: Arc<dyn PackageManagerAdapter> = Arc::new(NpmAdapter::new(
 		NpmConfig::default(),
 		AbsolutePath::new(dir.path()).unwrap(),
-		crate::Env::new(
-			Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		),
+		{
+			let r = Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new("/tmp").unwrap(),
+				)),
+			)
+		},
 	));
 	let projects = enumerate_projects([adapter]).unwrap();
 	let graph = build_dependency_graph(&projects).unwrap();

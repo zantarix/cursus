@@ -5,7 +5,6 @@ use std::process::ExitCode;
 use clap::Args;
 use log::{debug, info};
 
-use crate::git::Git;
 use crate::model::changeset::filter_changeset_paths;
 
 /// Arguments for the `verify` subcommand.
@@ -31,7 +30,8 @@ impl Default for VerifyArgs {
 /// - `ExitCode::SUCCESS` (0) if at least one changeset was added.
 /// - `ExitCode::from(2)` if no changeset was added.
 /// - Propagates errors as `Err` (exit code 1 from the caller).
-pub(crate) fn cmd_verify(git: &dyn Git, args: &VerifyArgs) -> anyhow::Result<ExitCode> {
+pub(crate) fn cmd_verify(env: &crate::Env, args: &VerifyArgs) -> anyhow::Result<ExitCode> {
+	let git = env.git();
 	debug!("Verifying changesets against base ref: {}", args.base);
 
 	if args.base.is_empty() {
@@ -78,16 +78,19 @@ mod tests {
 	use crate::filesystem::LocalFilesystem;
 	use crate::path::AbsolutePath;
 
-	fn make_git() -> (crate::git::GitWorkdir, TempDir) {
+	fn make_env() -> (crate::Env, TempDir) {
 		let dir = tempfile::tempdir().expect("Failed to create temp dir");
 		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let path = AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				runner as Arc<dyn CommandRunner>,
+				path,
+			)),
 		);
-		let path = AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(env.runner(), path);
-		(git, dir)
+		(env, dir)
 	}
 
 	#[test]
@@ -121,11 +124,11 @@ mod tests {
 
 	#[test]
 	fn verify_rejects_dash_prefix_base() {
-		let (git, _dir) = make_git();
+		let (env, _dir) = make_env();
 		let args = VerifyArgs {
 			base: "--output=/tmp/pwned".to_string(),
 		};
-		let err = cmd_verify(&git, &args).unwrap_err();
+		let err = cmd_verify(&env, &args).unwrap_err();
 		assert!(
 			err.to_string().contains("must not start with '-'"),
 			"unexpected error: {err}"
@@ -134,11 +137,11 @@ mod tests {
 
 	#[test]
 	fn verify_rejects_empty_base() {
-		let (git, _dir) = make_git();
+		let (env, _dir) = make_env();
 		let args = VerifyArgs {
 			base: String::new(),
 		};
-		let err = cmd_verify(&git, &args).unwrap_err();
+		let err = cmd_verify(&env, &args).unwrap_err();
 		assert!(
 			err.to_string().contains("must not be empty"),
 			"unexpected error: {err}"

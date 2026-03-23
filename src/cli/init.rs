@@ -8,7 +8,6 @@ use log::info;
 
 use crate::Env;
 use crate::model::config::render_init_template;
-use crate::path::AbsolutePath;
 use crate::tui::init;
 
 use super::GlobalArgs;
@@ -19,7 +18,6 @@ pub struct InitArgs {}
 
 /// Runs the `init` subcommand.
 pub(crate) fn cmd_init(
-	git_workdir: &AbsolutePath,
 	_args: &InitArgs,
 	global: &GlobalArgs,
 	env: &Env,
@@ -27,6 +25,9 @@ pub(crate) fn cmd_init(
 	if global.no_interactive {
 		bail!("cursus init is interactive-only. Scripts can write .cursus/config.toml directly.");
 	}
+
+	let git = env.git();
+	let git_workdir = git.path();
 
 	let result = match init::run(git_workdir, env, global.dry_run)? {
 		Some(r) => r,

@@ -783,7 +783,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 				.with_owner("acme".into())
 				.with_repo("app".into()),
 		)
-		.with_env(common::test_env())
+		.with_env(common::test_env(dir.path()))
 		.save()
 		.unwrap();
 
@@ -809,11 +809,10 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			RestGitHubClient::new("test-token".to_string())
 				.with_base_urls(api_url.clone(), api_url.clone()),
 		) as Arc<dyn GitHubClient>;
-		cursus::Env::new(
-			Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>,
-			Arc::new(LocalFilesystem),
-		)
-		.with_github_client(client)
+		let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
+		let path = AbsolutePath::new(dir.path()).unwrap();
+		let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
+		cursus::Env::new(runner, Arc::new(LocalFilesystem), git).with_github_client(client)
 	};
 
 	// ── First run: no existing PR → find returns empty → create PR ───────────
@@ -833,11 +832,8 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
 	});
 
-	let result = cursus::run_local(
-		["cursus", "--no-interactive", "prepare"],
-		dir.path(),
-		make_env(),
-	);
+	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
+	let result = cursus::run(cli, make_env());
 	assert!(result.is_ok(), "first prepare failed: {result:?}");
 	mock_find_empty.assert_calls(1);
 	mock_create.assert_calls(1);
@@ -863,11 +859,8 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
 	});
 
-	let result = cursus::run_local(
-		["cursus", "--no-interactive", "prepare"],
-		dir.path(),
-		make_env(),
-	);
+	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
+	let result = cursus::run(cli, make_env());
 	assert!(result.is_ok(), "second prepare (update) failed: {result:?}");
 	mock_find_existing.assert_calls(1);
 	mock_update.assert_calls(1);

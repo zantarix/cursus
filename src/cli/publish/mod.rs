@@ -253,12 +253,12 @@ fn run_pre_publish_github_checks(
 
 /// Execute the publish command.
 pub(crate) fn cmd_publish(
-	git: &dyn Git,
 	args: &PublishArgs,
 	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	let env = config.env().context("env not set")?;
+	let git = env.git();
 	let projects = config.load_projects()?;
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
 	let (sorted_projects, graph) = sort_projects_by_dependency(

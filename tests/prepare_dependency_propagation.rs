@@ -5,7 +5,6 @@ mod common;
 use std::process::ExitCode;
 
 use common::{temp_git_repo, temp_git_repo_with_cargo_workspace, write_changeset};
-use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::Config;
 use cursus::model::config::{DependencyBump, NpmConfig, PrepareConfig};
 use cursus::path::AbsolutePath;
@@ -24,20 +23,23 @@ fn read_version(dir: &std::path::Path, pkg: &str) -> String {
 		.to_string()
 }
 
-fn make_env() -> cursus::Env {
+fn make_env_with_git(dir: &std::path::Path) -> cursus::Env {
+	let runner = std::sync::Arc::new(cursus::command::RealCommandRunner)
+		as std::sync::Arc<dyn cursus::command::CommandRunner>;
+	let path = AbsolutePath::new(dir).unwrap();
 	cursus::Env::new(
-		std::sync::Arc::new(cursus::command::RealCommandRunner)
-			as std::sync::Arc<dyn cursus::command::CommandRunner>,
+		std::sync::Arc::clone(&runner),
 		std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
+		std::sync::Arc::new(cursus::git::GitWorkdir::new(runner, path)),
 	)
 }
 
 /// Saves a `[prepare]` config section to an existing cursus config.
 fn set_prepare_config(dir: &std::path::Path, prepare: PrepareConfig) {
-	let abs = AbsolutePath::new(dir).unwrap();
-	let mut config = cursus::model::config::load(&abs, &make_env()).unwrap();
+	let env = make_env_with_git(dir);
+	let mut config = cursus::model::config::load(&env).unwrap();
 	config.prepare = prepare;
-	config.with_env(common::test_env()).save().unwrap();
+	config.with_env(common::test_env(dir)).save().unwrap();
 }
 
 /// Creates a Cargo workspace with pkg-a at 1.0.0 and pkg-b depending on pkg-a.
@@ -473,7 +475,10 @@ fn npm_workspace_with_cycle() -> tempfile::TempDir {
 	let dir = temp_git_repo();
 	let config =
 		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled());
-	config.with_env(common::test_env()).save().unwrap();
+	config
+		.with_env(common::test_env(dir.path()))
+		.save()
+		.unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),

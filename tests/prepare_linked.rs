@@ -5,24 +5,26 @@ mod common;
 use std::process::ExitCode;
 
 use common::{temp_git_repo_with_cargo_workspace, write_changeset};
-use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::{LinkedVersionGroup, LinkedVersionsConfig};
 use cursus::path::AbsolutePath;
 use cursus::test_logging::{init_test_logger, take_logs};
 
 /// Adds a `[linked-versions]` block to the Cursus config saved in `dir`.
 fn add_linked_versions_to_config(dir: &std::path::Path, lv: LinkedVersionsConfig) {
-	let abs = AbsolutePath::new(dir).unwrap();
-	let mut config = cursus::model::config::load(&abs, &make_env()).unwrap();
+	let env = make_env_with_git(dir);
+	let mut config = cursus::model::config::load(&env).unwrap();
 	config.linked_versions = lv;
-	config.with_env(common::test_env()).save().unwrap();
+	config.with_env(common::test_env(dir)).save().unwrap();
 }
 
-fn make_env() -> cursus::Env {
+fn make_env_with_git(dir: &std::path::Path) -> cursus::Env {
+	let runner = std::sync::Arc::new(cursus::command::RealCommandRunner)
+		as std::sync::Arc<dyn cursus::command::CommandRunner>;
+	let path = AbsolutePath::new(dir).unwrap();
 	cursus::Env::new(
-		std::sync::Arc::new(cursus::command::RealCommandRunner)
-			as std::sync::Arc<dyn cursus::command::CommandRunner>,
+		std::sync::Arc::clone(&runner),
 		std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
+		std::sync::Arc::new(cursus::git::GitWorkdir::new(runner, path)),
 	)
 }
 

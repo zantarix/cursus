@@ -33,11 +33,8 @@ fn config_roundtrip_with_global_ignore() {
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
 	config.with_env(make_env()).save().unwrap();
-	let loaded = load(
-		&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		&make_env(),
-	)
-	.unwrap();
+	let env = make_env_with_git(dir.path());
+	let loaded = load(&env).unwrap();
 	assert_eq!(
 		loaded.global.ignore,
 		vec!["example-*".to_string(), "internal-tool".to_string()]

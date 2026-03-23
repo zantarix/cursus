@@ -199,7 +199,6 @@ mod tests {
 	use crate::cli::publish::tests_common::{make_github_config, workdir};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::filesystem::LocalFilesystem;
 	use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 	use crate::model::config::{Config, GitHubConfig};
 	use crate::path::AbsolutePath;

@@ -287,7 +287,14 @@ fn dry_run_adapter(config: NpmConfig, dir: &std::path::Path) -> NpmAdapter {
 	let inner: Arc<dyn CommandRunner> =
 		Arc::new(RecordingCommandRunner::new(0)) as Arc<dyn CommandRunner>;
 	let dry_runner: Arc<dyn CommandRunner> = Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
-	let env = crate::Env::new(dry_runner, Arc::new(LocalFilesystem));
+	let env = crate::Env::new(
+		Arc::clone(&dry_runner),
+		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			dry_runner,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
+	);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
@@ -346,7 +353,14 @@ fn update_lock_file_dry_run_yarn_lock_returns_path() {
 		));
 	let dry_runner: Arc<dyn crate::command::CommandRunner> =
 		Arc::new(DryRunCommandRunner::new(Arc::clone(&inner)));
-	let env = crate::Env::new(dry_runner, Arc::new(LocalFilesystem));
+	let env = crate::Env::new(
+		Arc::clone(&dry_runner),
+		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			dry_runner,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
+	);
 	let adapter = NpmAdapter::new(
 		NpmConfig::default(),
 		crate::path::AbsolutePath::new(dir.path()).unwrap(),

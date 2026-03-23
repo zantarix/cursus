@@ -208,14 +208,13 @@ mod tests {
 	/// Loads all Cargo projects from a temporary workspace directory.
 	fn load_projects_for_dir(dir: &tempfile::TempDir) -> Vec<crate::package_manager::Project> {
 		let runner = make_runner();
+		let path = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env)
-			.unwrap()
-			.load_projects()
-			.unwrap()
+		config::load(&env).unwrap().load_projects().unwrap()
 	}
 
 	/// Sets up a temporary Cargo workspace with `pkg-a` (0.1.0) and `pkg-b` (0.2.0).
@@ -225,11 +224,18 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env(crate::Env::new(
-			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		))
+		cfg.with_env({
+			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				)),
+			)
+		})
 		.save()
 		.unwrap();
 		std::fs::write(
@@ -261,11 +267,18 @@ mod tests {
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.with_env(crate::Env::new(
-				Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-					as Arc<dyn CommandRunner>,
-				Arc::new(LocalFilesystem),
-			))
+			.with_env({
+				let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+					as Arc<dyn CommandRunner>;
+				crate::Env::new(
+					Arc::clone(&r),
+					Arc::new(LocalFilesystem),
+					Arc::new(crate::git::GitWorkdir::new(
+						r,
+						crate::path::AbsolutePath::new(dir.path()).unwrap(),
+					)),
+				)
+			})
 			.save()
 			.unwrap();
 		std::fs::write(
@@ -304,23 +317,22 @@ mod tests {
 		.unwrap();
 
 		let runner = make_runner();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				dir_abs.clone(),
+			)),
 		);
-		let config =
-			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let config = config::load(&env).unwrap();
 		let args = super::super::PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..super::super::PrepareArgs::default()
 		};
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
-		let result = super::super::cmd_prepare(&git, &args, false, config);
+		let result = super::super::cmd_prepare(&args, false, config);
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -371,23 +383,22 @@ mod tests {
 		std::fs::write(&changeset_path, original).unwrap();
 
 		let runner = make_runner();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				dir_abs.clone(),
+			)),
 		);
-		let config =
-			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let config = config::load(&env).unwrap();
 		let args = super::super::PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..super::super::PrepareArgs::default()
 		};
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
-		let result = super::super::cmd_prepare(&git, &args, true, config);
+		let result = super::super::cmd_prepare(&args, true, config);
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped

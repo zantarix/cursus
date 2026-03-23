@@ -354,12 +354,15 @@ fn config_path(git_workdir: &AbsolutePath) -> AbsolutePath {
 /// Checks if a Cursus configuration file exists in the repository.
 ///
 /// Returns `true` if `.cursus/config.toml` exists at the given git root.
-pub fn exists(git_workdir: &AbsolutePath, fs: &dyn crate::filesystem::Filesystem) -> bool {
-	fs.exists(&config_path(git_workdir))
+pub fn exists(env: &crate::Env) -> bool {
+	env.fs().exists(&config_path(env.git().path()))
 }
 
-fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
-	if !exists(git_workdir, env.fs()) {
+fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
+	let git = env.git();
+	let git_workdir = git.path();
+
+	if !env.fs().exists(&config_path(git_workdir)) {
 		bail!("No configuration found. Run 'cursus init' to create one.");
 	}
 
@@ -394,8 +397,8 @@ fn load_impl(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Con
 ///
 /// Returns an error if the config file cannot be read or parsed.
 #[cfg(feature = "test-support")]
-pub fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
-	load_impl(git_workdir, env)
+pub fn load(env: &crate::Env) -> anyhow::Result<Config> {
+	load_impl(env)
 }
 
 /// Loads the Cursus configuration from the repository.
@@ -406,8 +409,8 @@ pub fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Conf
 ///
 /// Returns an error if the config file cannot be read or parsed.
 #[cfg(not(feature = "test-support"))]
-pub(crate) fn load(git_workdir: &AbsolutePath, env: &crate::Env) -> anyhow::Result<Config> {
-	load_impl(git_workdir, env)
+pub(crate) fn load(env: &crate::Env) -> anyhow::Result<Config> {
+	load_impl(env)
 }
 
 #[cfg(test)]

@@ -15,15 +15,23 @@ pub(super) fn write_package_json(dir: &std::path::Path, content: &str) {
 }
 
 /// Creates a `NpmAdapter` backed by a recording runner with the given exit code.
+fn dummy_env(runner: Arc<dyn CommandRunner>) -> crate::Env {
+	crate::Env::new(
+		Arc::clone(&runner),
+		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			runner,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
+	)
+}
+
 pub(super) fn recording_adapter_default(
 	config: NpmConfig,
 	dir: &std::path::Path,
 	exit_code: i32,
 ) -> NpmAdapter {
-	let env = crate::Env::new(
-		Arc::new(RecordingCommandRunner::new(exit_code)) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-	);
+	let env = dummy_env(Arc::new(RecordingCommandRunner::new(exit_code)) as Arc<dyn CommandRunner>);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
@@ -33,10 +41,7 @@ pub(super) fn recording_adapter(
 	dir: &std::path::Path,
 	runner: Arc<RecordingCommandRunner>,
 ) -> NpmAdapter {
-	let env = crate::Env::new(
-		Arc::clone(&runner) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-	);
+	let env = dummy_env(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
@@ -46,10 +51,7 @@ pub(super) fn dispatching_adapter(
 	dir: &std::path::Path,
 	runner: Arc<DispatchingCommandRunner>,
 ) -> NpmAdapter {
-	let env = crate::Env::new(
-		Arc::clone(&runner) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-	);
+	let env = dummy_env(Arc::clone(&runner) as Arc<dyn CommandRunner>);
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 

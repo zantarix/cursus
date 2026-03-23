@@ -148,7 +148,6 @@ mod tests {
 	use super::*;
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::filesystem::LocalFilesystem;
 	use crate::git::GitWorkdir;
 
 	fn workdir() -> crate::path::AbsolutePath {

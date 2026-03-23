@@ -385,16 +385,13 @@ fn change_interactive_with_message_does_not_open_editor() {
 	// call to open_editor returns an error — this catches mutations that would
 	// cause the editor to be opened unnecessarily.
 	let dir = temp_git_repo_with_project(PackageManager::Npm);
-	let env = cursus::Env::new(
-		Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>,
-		Arc::new(LocalFilesystem),
-	)
-	.with_editor("__cursus_test_nonexistent_editor__".to_string());
-	let result = cursus::run_local(
-		["cursus", "change", "-t", "minor", "-m", "bump"],
-		dir.path(),
-		env,
-	);
+	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
+	let path = cursus::path::AbsolutePath::new(dir.path()).unwrap();
+	let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
+	let env = cursus::Env::new(runner, Arc::new(LocalFilesystem), git)
+		.with_editor("__cursus_test_nonexistent_editor__".to_string());
+	let cli = clap::Parser::parse_from(["cursus", "change", "-t", "minor", "-m", "bump"]);
+	let result = cursus::run(cli, env);
 	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
 }
 

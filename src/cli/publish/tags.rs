@@ -74,7 +74,6 @@ mod tests {
 	use crate::cli::publish::tests_common::{make_github_config, workdir};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
-	use crate::filesystem::LocalFilesystem;
 	use crate::model::config::Config;
 	use crate::path::AbsolutePath;
 

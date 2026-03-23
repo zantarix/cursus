@@ -142,15 +142,15 @@ fn compute_version_plan(
 
 /// Runs the `prepare` subcommand.
 pub(crate) fn cmd_prepare(
-	git: &dyn git::Git,
 	args: &PrepareArgs,
 	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	let env = config.env().context("env not set")?;
+	let git = env.git();
 	let adapters = config.create_adapters()?;
 	let projects = config.load_projects_for_adapters(&adapters)?;
-	let changesets = Changeset::read_all(git, env.fs())?;
+	let changesets = Changeset::read_all(env)?;
 
 	if changesets.is_empty() {
 		info!("No pending changesets found. Nothing to prepare.");
@@ -198,11 +198,18 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env(crate::Env::new(
-			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		))
+		cfg.with_env({
+			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				)),
+			)
+		})
 		.save()
 		.unwrap();
 		std::fs::write(
@@ -213,18 +220,17 @@ mod tests {
 
 		let args = PrepareArgs::default();
 		let runner = make_runner();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				dir_abs.clone(),
+			)),
 		);
-		let config =
-			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
-		let result = cmd_prepare(&git, &args, false, config).unwrap();
+		let config = config::load(&env).unwrap();
+		let result = cmd_prepare(&args, false, config).unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -235,11 +241,18 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env(crate::Env::new(
-			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		))
+		cfg.with_env({
+			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				)),
+			)
+		})
 		.save()
 		.unwrap();
 		std::fs::write(
@@ -257,18 +270,17 @@ mod tests {
 
 		let args = PrepareArgs::default();
 		let runner = make_runner();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				dir_abs.clone(),
+			)),
 		);
-		let config =
-			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
-		let result = cmd_prepare(&git, &args, false, config);
+		let config = config::load(&env).unwrap();
+		let result = cmd_prepare(&args, false, config);
 		assert!(result.is_err());
 		assert!(
 			result
@@ -285,11 +297,18 @@ mod tests {
 		let cfg =
 			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
 				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env(crate::Env::new(
-			Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-		))
+		cfg.with_env({
+			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+				as Arc<dyn CommandRunner>;
+			crate::Env::new(
+				Arc::clone(&r),
+				Arc::new(LocalFilesystem),
+				Arc::new(crate::git::GitWorkdir::new(
+					r,
+					crate::path::AbsolutePath::new(dir.path()).unwrap(),
+				)),
+			)
+		})
 		.save()
 		.unwrap();
 		std::fs::write(
@@ -306,23 +325,22 @@ mod tests {
 		.unwrap();
 
 		let runner = make_runner();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				Arc::clone(&runner) as Arc<dyn CommandRunner>,
+				dir_abs.clone(),
+			)),
 		);
-		let config =
-			config::load(&crate::path::AbsolutePath::new(dir.path()).unwrap(), &env).unwrap();
+		let config = config::load(&env).unwrap();
 		let args = PrepareArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
-		let result = cmd_prepare(&git, &args, false, config);
+		let result = cmd_prepare(&args, false, config);
 		assert!(result.is_err());
 		assert!(
 			result
