@@ -774,8 +774,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 
 	// Create a repo with branch strategy + GitHub config (owner = "acme", repo = "app")
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
-	let abs = AbsolutePath::new(dir.path()).unwrap();
-	Config::new(&abs)
+	Config::new(&common::test_env(dir.path()))
 		.with_cargo(CargoConfig::enabled())
 		.with_git(branch_strategy_config())
 		.with_github(
@@ -783,7 +782,6 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 				.with_owner("acme".into())
 				.with_repo("app".into()),
 		)
-		.with_env(common::test_env(dir.path()))
 		.save()
 		.unwrap();
 

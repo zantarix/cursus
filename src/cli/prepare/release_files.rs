@@ -217,27 +217,27 @@ mod tests {
 		config::load(&env).unwrap().load_projects().unwrap()
 	}
 
+	fn make_test_env(dir: &std::path::Path) -> crate::Env {
+		let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+			as Arc<dyn CommandRunner>;
+		crate::Env::new(
+			Arc::clone(&r),
+			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				r,
+				crate::path::AbsolutePath::new(dir).unwrap(),
+			)),
+		)
+	}
+
 	/// Sets up a temporary Cargo workspace with `pkg-a` (0.1.0) and `pkg-b` (0.2.0).
 	fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg =
-			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::model::config::CargoConfig::enabled());
-		cfg.with_env({
-			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>;
-			crate::Env::new(
-				Arc::clone(&r),
-				Arc::new(LocalFilesystem),
-				Arc::new(crate::git::GitWorkdir::new(
-					r,
-					crate::path::AbsolutePath::new(dir.path()).unwrap(),
-				)),
-			)
-		})
-		.save()
-		.unwrap();
+		crate::model::config::Config::new(&make_test_env(dir.path()))
+			.with_cargo(crate::model::config::CargoConfig::enabled())
+			.save()
+			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n",
@@ -265,20 +265,8 @@ mod tests {
 	fn setup_workspace_with_dependency() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.with_env({
-				let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-					as Arc<dyn CommandRunner>;
-				crate::Env::new(
-					Arc::clone(&r),
-					Arc::new(LocalFilesystem),
-					Arc::new(crate::git::GitWorkdir::new(
-						r,
-						crate::path::AbsolutePath::new(dir.path()).unwrap(),
-					)),
-				)
-			})
 			.save()
 			.unwrap();
 		std::fs::write(

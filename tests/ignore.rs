@@ -4,7 +4,6 @@ mod common;
 
 use common::temp_git_repo_with_cargo_workspace;
 use cursus::model::config::{CargoConfig, Config, GlobalConfig};
-use cursus::path::AbsolutePath;
 
 /// Creates a workspace with the ignore list set, saves config, and runs `change`.
 ///
@@ -20,13 +19,10 @@ fn run_change_with_ignore(
 	// Overwrite the config with the ignore list.
 	let mut global = GlobalConfig::default();
 	global.ignore = ignore_patterns;
-	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
+	let config = Config::new(&common::test_env(dir.path()))
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	config.save().unwrap();
 
 	let mut args = vec![
 		"cursus",

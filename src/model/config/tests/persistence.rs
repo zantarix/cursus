@@ -12,20 +12,16 @@ fn exists_returns_false_when_no_config() {
 fn exists_returns_true_when_config_exists() {
 	let dir = temp_dir();
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_env(make_env())
-		.with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
 	let env = make_env_with_git(dir.path());
+	let config = Config::new(&env).with_cargo(CargoConfig::enabled());
+	config.save().unwrap();
 	assert!(exists(&env));
 }
 
 #[test]
 fn create_creates_config_file() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_env(make_env())
-		.with_npm(NpmConfig::enabled());
+	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	let path = config.save().unwrap();
 	assert!(path.exists());
 	assert_eq!(path, dir.path().join(".cursus/config.toml"));
@@ -34,9 +30,7 @@ fn create_creates_config_file() {
 #[test]
 fn create_creates_directory_if_needed() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_env(make_env())
-		.with_cargo(CargoConfig::enabled());
+	let config = Config::new(&make_env_with_git(dir.path())).with_cargo(CargoConfig::enabled());
 	config.save().unwrap();
 	assert!(dir.path().join(".cursus").is_dir());
 }
@@ -44,9 +38,7 @@ fn create_creates_directory_if_needed() {
 #[test]
 fn load_reads_config_file() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_env(make_env())
-		.with_npm(NpmConfig::enabled());
+	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	config.save().unwrap();
 
 	let env = make_env_with_git(dir.path());
@@ -104,9 +96,7 @@ fn load_fails_with_empty_config() {
 #[test]
 fn load_succeeds_with_one_package_manager() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_env(make_env())
-		.with_cargo(CargoConfig::enabled());
+	let config = Config::new(&make_env_with_git(dir.path())).with_cargo(CargoConfig::enabled());
 	config.save().unwrap();
 
 	let env = make_env_with_git(dir.path());
@@ -117,14 +107,15 @@ fn load_succeeds_with_one_package_manager() {
 }
 
 #[test]
-fn git_workdir_returns_some_after_new() {
+fn git_workdir_returns_path_after_new() {
 	let dir = temp_dir();
 	let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-	let config = Config::new(&abs);
+	let env = make_env_with_git(dir.path());
+	let config = Config::new(&env);
 	assert_eq!(
 		config.git_workdir(),
-		Some(&abs),
-		"git_workdir() should return Some after Config::new"
+		&abs,
+		"git_workdir() should return the env's git path after Config::new"
 	);
 }
 

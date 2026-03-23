@@ -1,5 +1,6 @@
 //! Cursus configuration types and persistence.
 
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -68,10 +69,13 @@ pub enum PackageManager {
 	Cargo,
 }
 
-/// Cursus configuration for a repository.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// TOML-persisted configuration fields.
+///
+/// This is the on-disk representation of the Cursus configuration.
+/// Runtime-only state (the execution environment) lives on [`Config`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub struct ConfigData {
 	/// Global configuration settings.
 	#[serde(default)]
 	pub global: GlobalConfig,
@@ -93,111 +97,139 @@ pub struct Config {
 	/// Prepare command configuration.
 	#[serde(default)]
 	pub prepare: PrepareConfig,
-	/// Git repository root path.
-	///
-	/// Always `Some` when constructed via [`Config::new`] or [`load`].
-	/// `None` only when deserialized directly from TOML (which skips this field).
-	#[serde(skip)]
-	git_workdir: Option<AbsolutePath>,
-	/// Runtime environment (command runner, GitHub client, etc.).
-	///
-	/// Always `Some` when constructed via [`load`].
-	/// `None` only when deserialized directly from TOML or constructed via [`Config::new`]
-	/// without a subsequent [`Config::with_env`] call.
-	#[serde(skip)]
-	env: Option<crate::Env>,
+}
+
+/// Cursus configuration for a repository.
+///
+/// Combines the TOML-persisted [`ConfigData`] with the runtime execution
+/// environment ([`Env`][crate::Env]).  The `env` field is always set — there
+/// is no `Option`, no hidden invariant, and no runtime unwrapping.
+///
+/// Field access to the persisted data is provided via [`Deref`] to
+/// [`ConfigData`], so `config.npm`, `config.cargo`, etc. work directly.
+pub struct Config {
+	/// The TOML-persisted configuration data.
+	pub(crate) data: ConfigData,
+	/// Runtime environment (command runner, filesystem, git, etc.).
+	env: crate::Env,
+}
+
+impl std::fmt::Debug for Config {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Config")
+			.field("data", &self.data)
+			.field("env", &self.env)
+			.finish()
+	}
+}
+
+impl Clone for Config {
+	fn clone(&self) -> Self {
+		Self {
+			data: self.data.clone(),
+			env: self.env.clone(),
+		}
+	}
+}
+
+impl PartialEq for Config {
+	fn eq(&self, other: &Self) -> bool {
+		self.data == other.data
+	}
+}
+
+impl Eq for Config {}
+
+impl Serialize for Config {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		self.data.serialize(serializer)
+	}
+}
+
+impl Deref for Config {
+	type Target = ConfigData;
+
+	fn deref(&self) -> &ConfigData {
+		&self.data
+	}
+}
+
+impl DerefMut for Config {
+	fn deref_mut(&mut self) -> &mut ConfigData {
+		&mut self.data
+	}
 }
 
 impl Config {
 	/// Creates a new config with all package managers disabled.
-	pub fn new(git_workdir: &AbsolutePath) -> Self {
+	pub fn new(env: &crate::Env) -> Self {
 		Self {
-			global: GlobalConfig::default(),
-			npm: NpmConfig::default(),
-			cargo: CargoConfig::default(),
-			git: GitConfig::default(),
-			github: GitHubConfig::default(),
-			linked_versions: LinkedVersionsConfig::default(),
-			prepare: PrepareConfig::default(),
-			git_workdir: Some(git_workdir.clone()),
-			env: None,
+			data: ConfigData::default(),
+			env: env.clone(),
 		}
 	}
 
 	/// Sets global configuration (builder pattern).
 	pub fn with_global(mut self, config: GlobalConfig) -> Self {
-		self.global = config;
+		self.data.global = config;
 		self
 	}
 
 	/// Sets npm configuration (builder pattern).
 	pub fn with_npm(mut self, config: NpmConfig) -> Self {
-		self.npm = config;
+		self.data.npm = config;
 		self
 	}
 
 	/// Sets cargo configuration (builder pattern).
 	pub fn with_cargo(mut self, config: CargoConfig) -> Self {
-		self.cargo = config;
+		self.data.cargo = config;
 		self
 	}
 
 	/// Sets git lifecycle configuration (builder pattern).
 	pub fn with_git(mut self, config: GitConfig) -> Self {
-		self.git = config;
+		self.data.git = config;
 		self
 	}
 
 	/// Sets GitHub Releases configuration (builder pattern).
 	pub fn with_github(mut self, config: GitHubConfig) -> Self {
-		self.github = config;
+		self.data.github = config;
 		self
 	}
 
 	/// Sets linked package versions configuration (builder pattern).
 	pub fn with_linked_versions(mut self, config: LinkedVersionsConfig) -> Self {
-		self.linked_versions = config;
+		self.data.linked_versions = config;
 		self
 	}
 
 	/// Sets prepare command configuration (builder pattern).
 	pub fn with_prepare(mut self, config: PrepareConfig) -> Self {
-		self.prepare = config;
+		self.data.prepare = config;
 		self
 	}
 
-	/// Sets the runtime environment (builder pattern).
-	///
-	/// Required for [`save`][Self::save] to access the filesystem.
-	pub fn with_env(mut self, env: crate::Env) -> Self {
-		self.env = Some(env);
-		self
+	/// Returns the runtime environment.
+	pub fn env(&self) -> &crate::Env {
+		&self.env
 	}
 
-	/// Returns the runtime environment, if set.
+	/// Returns the git repository root path.
 	///
-	/// Returns `None` only when `Config` was not constructed via [`load`] and
-	/// [`Config::with_env`] has not been called.
-	pub fn env(&self) -> Option<&crate::Env> {
-		self.env.as_ref()
-	}
-
-	/// Returns the git repository root path, if set.
-	///
-	/// Returns `None` only when `Config` was deserialized directly from TOML without
-	/// going through [`load`]. All production code paths set this via [`Config::new`]
-	/// or [`load`].
-	pub fn git_workdir(&self) -> Option<&AbsolutePath> {
-		self.git_workdir.as_ref()
+	/// Derived from `env.git().path()`.
+	pub fn git_workdir(&self) -> &AbsolutePath {
+		self.env.git().path()
 	}
 
 	/// Returns an iterator over all enabled package managers.
 	pub fn enabled_package_managers(&self) -> impl Iterator<Item = PackageManager> {
 		let mut managers = Vec::new();
-		if self.npm.enabled {
+		if self.data.npm.enabled {
 			managers.push(PackageManager::Npm);
 		}
-		if self.cargo.enabled {
+		if self.data.cargo.enabled {
 			managers.push(PackageManager::Cargo);
 		}
 		managers.into_iter()
@@ -206,32 +238,21 @@ impl Config {
 	/// Creates package manager adapters for all enabled package managers.
 	///
 	/// Returns a vector of adapter instances wrapped in `Arc` for shared ownership.
-	///
-	/// # Errors
-	///
-	/// Returns an error if this `Config` was not constructed via [`load`] or
-	/// [`Config::with_env`] has not been called.
 	pub fn create_adapters(&self) -> anyhow::Result<Vec<Arc<dyn PackageManagerAdapter>>> {
-		let workdir = self.git_workdir.as_ref().context(
-			"git_workdir not set — Config must be constructed via Config::new() or config::load()",
-		)?;
-		let env = self
-			.env
-			.as_ref()
-			.context("env not set — call Config::with_env() or use config::load()")?;
+		let workdir = self.git_workdir();
 		Ok(self
 			.enabled_package_managers()
 			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
 				match pm {
 					PackageManager::Npm => Arc::new(NpmAdapter::new(
-						self.npm.clone(),
+						self.data.npm.clone(),
 						workdir.clone(),
-						env.clone(),
+						self.env.clone(),
 					)),
 					PackageManager::Cargo => Arc::new(CargoAdapter::new(
-						self.cargo.clone(),
+						self.data.cargo.clone(),
 						workdir.clone(),
-						env.clone(),
+						self.env.clone(),
 					)),
 				}
 			})
@@ -257,6 +278,7 @@ impl Config {
 
 		// Compile all ignore patterns upfront so we fail fast on invalid syntax.
 		let ignore_patterns = self
+			.data
 			.global
 			.ignore
 			.iter()
@@ -283,7 +305,7 @@ impl Config {
 			.collect();
 
 		// Warn about ignore patterns that matched nothing.
-		for (matched, raw) in pattern_matched.iter().zip(self.global.ignore.iter()) {
+		for (matched, raw) in pattern_matched.iter().zip(self.data.global.ignore.iter()) {
 			if !matched {
 				log::warn!("Ignore pattern {raw:?} did not match any project");
 			}
@@ -328,19 +350,13 @@ impl Config {
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
 	pub fn save(&self) -> anyhow::Result<PathBuf> {
-		let workdir = self.git_workdir.as_ref().context(
-			"git_workdir not set — Config must be constructed via Config::new() or config::load()",
-		)?;
-		let env = self
-			.env
-			.as_ref()
-			.context("env not set — Config must be constructed via config::load()")?;
-		let fs = env.fs();
+		let workdir = self.git_workdir();
+		let fs = self.env.fs();
 		let config_path = config_path(workdir);
 		let parent = workdir.child(".cursus");
 		fs.create_dir_all(&parent)
 			.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
-		let contents = toml::to_string_pretty(self).context("Failed to serialize config")?;
+		let contents = toml::to_string_pretty(&self.data).context("Failed to serialize config")?;
 		fs.write(&config_path, contents.as_bytes())
 			.with_context(|| format!("Failed to create config: {}", config_path.display()))?;
 		Ok(config_path.into_path_buf())
@@ -371,8 +387,13 @@ fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
 		.fs()
 		.read_to_string(&path)
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
-	let mut config: Config =
+	let data: ConfigData =
 		toml::from_str(&contents).with_context(|| "Failed to parse config.toml")?;
+
+	let mut config = Config {
+		data,
+		env: env.clone(),
+	};
 
 	// Validate that at least one package manager is enabled
 	if config.enabled_package_managers().next().is_none() {
@@ -380,11 +401,7 @@ fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
 	}
 
 	// Apply cross-config derived defaults (git.enabled, git.strategy).
-	config.git.resolve_defaults(config.github.enabled);
-
-	// Set the git root and environment
-	config.git_workdir = Some(git_workdir.clone());
-	config.env = Some(env.clone());
+	config.data.git.resolve_defaults(config.data.github.enabled);
 
 	Ok(config)
 }

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::process::ExitCode;
 
-use anyhow::{Context, bail};
+use anyhow::bail;
 use clap::Args;
 use log::info;
 
@@ -196,7 +196,7 @@ fn cmd_change_auto(
 	global: &GlobalArgs,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let env = config.env().context("env not set")?;
+	let env = config.env();
 	let git = env.git();
 	let Some(message) = validate_single_commit(git)? else {
 		return Ok(ExitCode::SUCCESS);
@@ -237,7 +237,7 @@ fn cmd_change_auto(
 			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
 		}
 	} else {
-		let path = changeset.write(git, config.env().context("env not set")?.fs())?;
+		let path = changeset.write(git, config.env().fs())?;
 		if config.git.enabled() && !args.no_git {
 			git.add(&[path])?;
 		}
@@ -280,7 +280,7 @@ pub(crate) fn cmd_change(
 		return cmd_change_auto(args, global, config);
 	}
 
-	let env = config.env().context("env not set")?;
+	let env = config.env();
 	let git = env.git();
 	let projects = config.load_projects()?;
 
@@ -319,7 +319,7 @@ pub(crate) fn cmd_change(
 		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
 		println!("{}", changeset.format()?);
 	} else {
-		let path = changeset.write(git, config.env().context("env not set")?.fs())?;
+		let path = changeset.write(git, config.env().fs())?;
 		if result.message.is_none() {
 			env.run_editor_on(&path, git.path())?;
 		}

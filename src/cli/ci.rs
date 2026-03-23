@@ -2,7 +2,6 @@
 
 use std::process::ExitCode;
 
-use anyhow::Context as _;
 use clap::Args;
 use log::{debug, info};
 
@@ -50,7 +49,7 @@ pub struct CiArgs {
 /// already-published registry step and only retry the tag. Checking registry state directly
 /// would add network dependencies and is not necessary for correctness.
 pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Result<ExitCode> {
-	let env = config.env().context("env not set")?;
+	let env = config.env();
 	let git = env.git();
 
 	// Step 1: check for pending changesets.
@@ -75,7 +74,6 @@ pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Re
 		let any_tag_missing = selected.iter().any(|project| {
 			if !config
 				.env()
-				.expect("env not set")
 				.fs()
 				.exists(&project.path().child("CHANGELOG.md"))
 			{

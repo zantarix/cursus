@@ -7,7 +7,7 @@ mod tests_common;
 
 use std::process::ExitCode;
 
-use anyhow::{Context, bail};
+use anyhow::bail;
 use clap::Args;
 use log::{error, info, warn};
 
@@ -257,7 +257,7 @@ pub(crate) fn cmd_publish(
 	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let env = config.env().context("env not set")?;
+	let env = config.env();
 	let git = env.git();
 	let projects = config.load_projects()?;
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;

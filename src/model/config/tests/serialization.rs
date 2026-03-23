@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn config_serializes_with_sections() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_npm(NpmConfig::enabled());
+	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	let toml_str = toml::to_string(&config).unwrap();
 	assert!(toml_str.contains("[npm]"));
 	assert!(toml_str.contains("enabled = true"));
@@ -12,11 +11,11 @@ fn config_serializes_with_sections() {
 
 #[test]
 fn config_deserializes_with_sections() {
-	let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+	let config: ConfigData = toml::from_str("[npm]\nenabled = true").unwrap();
 	assert!(config.npm.enabled);
 	assert!(!config.cargo.enabled);
 
-	let config: Config = toml::from_str("[cargo]\nenabled = true").unwrap();
+	let config: ConfigData = toml::from_str("[cargo]\nenabled = true").unwrap();
 	assert!(!config.npm.enabled);
 	assert!(config.cargo.enabled);
 }
@@ -59,14 +58,14 @@ fn load_fails_on_unknown_package_manager_field() {
 
 #[test]
 fn deserialize_config_with_path() {
-	let config: Config = toml::from_str("[npm]\nenabled = true\npath = \"frontend\"").unwrap();
+	let config: ConfigData = toml::from_str("[npm]\nenabled = true\npath = \"frontend\"").unwrap();
 	assert!(config.npm.enabled);
 	assert_eq!(config.npm.path, Some("frontend".to_string()));
 }
 
 #[test]
 fn deserialize_config_without_path() {
-	let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+	let config: ConfigData = toml::from_str("[npm]\nenabled = true").unwrap();
 	assert!(config.npm.enabled);
 	assert_eq!(config.npm.path, None);
 }
@@ -74,8 +73,7 @@ fn deserialize_config_without_path() {
 #[test]
 fn serialize_config_omits_none_path() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_npm(NpmConfig::enabled());
+	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	let toml_str = toml::to_string(&config).unwrap();
 	assert!(!toml_str.contains("path"), "None path should be omitted");
 }
@@ -83,8 +81,7 @@ fn serialize_config_omits_none_path() {
 #[test]
 fn serialize_config_includes_some_path() {
 	let dir = temp_dir();
-	let mut config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_npm(NpmConfig::enabled());
+	let mut config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
 	let toml_str = toml::to_string(&config).unwrap();
 	assert!(
@@ -96,10 +93,9 @@ fn serialize_config_includes_some_path() {
 #[test]
 fn config_roundtrip_with_path() {
 	let dir = temp_dir();
-	let mut config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_npm(NpmConfig::enabled());
+	let mut config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
-	config.with_env(make_env()).save().unwrap();
+	config.save().unwrap();
 	let env = make_env_with_git(dir.path());
 	let loaded = load(&env).unwrap();
 	assert_eq!(loaded.npm.path, Some("frontend".to_string()));
@@ -108,20 +104,14 @@ fn config_roundtrip_with_path() {
 #[test]
 fn config_roundtrip() {
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 
 	for pm in [PackageManager::Npm, PackageManager::Cargo] {
 		let config = match pm {
-			PackageManager::Npm => {
-				Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-					.with_npm(NpmConfig::enabled())
-			}
-			PackageManager::Cargo => {
-				Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-					.with_cargo(CargoConfig::enabled())
-			}
+			PackageManager::Npm => Config::new(&env).with_npm(NpmConfig::enabled()),
+			PackageManager::Cargo => Config::new(&env).with_cargo(CargoConfig::enabled()),
 		};
-		config.with_env(make_env()).save().unwrap();
-		let env = make_env_with_git(dir.path());
+		config.save().unwrap();
 		let loaded = load(&env).unwrap();
 		let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![pm]);
@@ -136,7 +126,7 @@ fn global_config_defaults_to_warnings_enabled() {
 
 #[test]
 fn config_deserializes_without_global_section() {
-	let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+	let config: ConfigData = toml::from_str("[npm]\nenabled = true").unwrap();
 	assert!(config.npm.enabled);
 	assert!(!config.global.disable_dependency_cycle_warnings);
 }
@@ -150,7 +140,7 @@ disable_dependency_cycle_warnings = true
 [npm]
 enabled = true
 "#;
-	let config: Config = toml::from_str(toml_str).unwrap();
+	let config: ConfigData = toml::from_str(toml_str).unwrap();
 	assert!(config.npm.enabled);
 	assert!(config.global.disable_dependency_cycle_warnings);
 }
@@ -160,10 +150,10 @@ fn config_roundtrip_with_global() {
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
 	global.disable_dependency_cycle_warnings = true;
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
 		.with_npm(NpmConfig::enabled());
-	config.with_env(make_env()).save().unwrap();
+	config.save().unwrap();
 	let env = make_env_with_git(dir.path());
 	let loaded = load(&env).unwrap();
 	assert!(loaded.global.disable_dependency_cycle_warnings);
@@ -191,13 +181,14 @@ fn global_config_unknown_field_fails() {
 
 #[test]
 fn config_deserializes_github_section() {
-	let config: Config = toml::from_str("[npm]\nenabled = true\n[github]\nenabled = true").unwrap();
+	let config: ConfigData =
+		toml::from_str("[npm]\nenabled = true\n[github]\nenabled = true").unwrap();
 	assert!(config.github.enabled);
 }
 
 #[test]
 fn config_github_unknown_field_fails() {
-	let result: Result<Config, _> =
+	let result: Result<ConfigData, _> =
 		toml::from_str("[npm]\nenabled = true\n[github]\nunknown = true");
 	assert!(
 		result.is_err(),
@@ -207,7 +198,7 @@ fn config_github_unknown_field_fails() {
 
 #[test]
 fn config_without_github_section_defaults_disabled() {
-	let config: Config = toml::from_str("[npm]\nenabled = true").unwrap();
+	let config: ConfigData = toml::from_str("[npm]\nenabled = true").unwrap();
 	assert!(!config.github.enabled);
 }
 

@@ -3,9 +3,8 @@ use super::*;
 #[test]
 fn load_projects_succeeds_with_cargo_manifest() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_cargo(CargoConfig::enabled());
-	config.with_env(make_env()).save().unwrap();
+	let config = Config::new(&make_env_with_git(dir.path())).with_cargo(CargoConfig::enabled());
+	config.save().unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"test-package\"\nversion = \"0.1.0\"\n",
@@ -22,9 +21,8 @@ fn load_projects_succeeds_with_cargo_manifest() {
 #[test]
 fn load_projects_succeeds_with_npm_manifest() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_npm(NpmConfig::enabled());
-	config.with_env(make_env()).save().unwrap();
+	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
+	config.save().unwrap();
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "test-package", "version": "0.1.0"}"#,
@@ -41,9 +39,8 @@ fn load_projects_succeeds_with_npm_manifest() {
 #[test]
 fn load_projects_fails_when_no_projects_found() {
 	let dir = temp_dir();
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-		.with_cargo(CargoConfig::enabled());
-	config.with_env(make_env()).save().unwrap();
+	let config = Config::new(&make_env_with_git(dir.path())).with_cargo(CargoConfig::enabled());
+	config.save().unwrap();
 	// No Cargo.toml file, so no projects will be found
 
 	let env = make_env_with_git(dir.path());

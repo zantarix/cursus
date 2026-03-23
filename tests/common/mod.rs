@@ -7,7 +7,7 @@
 use std::process::Command;
 
 use cursus::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageManager};
-use cursus::path::AbsolutePath;
+
 use tempfile::TempDir;
 
 /// Creates a minimal `Env` with a real command runner, local filesystem, and git for the given dir.
@@ -83,14 +83,14 @@ pub fn temp_real_git_repo() -> TempDir {
 pub fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig) -> TempDir {
 	let dir = temp_real_git_repo();
 	let config = match pm {
-		PackageManager::Npm => Config::new(&AbsolutePath::new(dir.path()).unwrap())
+		PackageManager::Npm => Config::new(&test_env(dir.path()))
 			.with_npm(NpmConfig::enabled())
 			.with_git(git_config),
-		PackageManager::Cargo => Config::new(&AbsolutePath::new(dir.path()).unwrap())
+		PackageManager::Cargo => Config::new(&test_env(dir.path()))
 			.with_cargo(CargoConfig::enabled())
 			.with_git(git_config),
 	};
-	config.with_env(test_env(dir.path())).save().unwrap();
+	config.save().unwrap();
 	dir
 }
 
@@ -102,10 +102,10 @@ pub fn temp_real_git_repo_with_cargo_workspace(
 	git_config: GitConfig,
 ) -> TempDir {
 	let dir = temp_real_git_repo();
-	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
+	let config = Config::new(&test_env(dir.path()))
 		.with_cargo(CargoConfig::enabled())
 		.with_git(git_config);
-	config.with_env(test_env(dir.path())).save().unwrap();
+	config.save().unwrap();
 
 	let member_list = members
 		.iter()
@@ -302,14 +302,12 @@ pub fn temp_git_repo() -> TempDir {
 pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
-		PackageManager::Npm => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled())
-		}
+		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
 		PackageManager::Cargo => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
+			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.with_env(test_env(dir.path())).save().unwrap();
+	config.save().unwrap();
 	dir
 }
 
@@ -317,14 +315,12 @@ pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
-		PackageManager::Npm => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled())
-		}
+		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
 		PackageManager::Cargo => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
+			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.with_env(test_env(dir.path())).save().unwrap();
+	config.save().unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(
@@ -354,9 +350,8 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 /// an empty `src/lib.rs`.
 pub fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 	let dir = temp_git_repo();
-	let config =
-		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled());
-	config.with_env(test_env(dir.path())).save().unwrap();
+	let config = Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled());
+	config.save().unwrap();
 
 	let member_list = members
 		.iter()
@@ -387,18 +382,16 @@ pub fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &str) -> TempDir {
 	let dir = temp_git_repo();
 	let mut config = match pm {
-		PackageManager::Npm => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled())
-		}
+		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
 		PackageManager::Cargo => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
+			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
 	match pm {
 		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),
 		PackageManager::Cargo => config.cargo.path = Some(subfolder.to_string()),
 	}
-	config.with_env(test_env(dir.path())).save().unwrap();
+	config.save().unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	match pm {
@@ -451,14 +444,12 @@ pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
 pub fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_real_git_repo();
 	let config = match pm {
-		PackageManager::Npm => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled())
-		}
+		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
 		PackageManager::Cargo => {
-			Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled())
+			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.with_env(test_env(dir.path())).save().unwrap();
+	config.save().unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(

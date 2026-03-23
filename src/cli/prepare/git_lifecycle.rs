@@ -549,37 +549,37 @@ mod tests {
 		);
 	}
 
+	fn make_test_env(dir: &std::path::Path) -> crate::Env {
+		let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
+			as Arc<dyn CommandRunner>;
+		crate::Env::new(
+			Arc::clone(&r),
+			Arc::new(LocalFilesystem),
+			Arc::new(crate::git::GitWorkdir::new(
+				r,
+				crate::path::AbsolutePath::new(dir).unwrap(),
+			)),
+		)
+	}
+
 	/// Sets up a temp dir with a Cargo project, branch strategy git config, and GitHub config.
 	fn setup_branch_strategy_with_github() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let cfg =
-			crate::model::config::Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
-				.with_cargo(crate::model::config::CargoConfig::enabled())
-				.with_git(
-					crate::model::config::GitConfig::enabled_config()
-						.with_strategy(crate::model::config::Strategy::Branch),
-				)
-				.with_github(
-					crate::model::config::GitHubConfig::enabled_config()
-						.with_owner("acme".to_string())
-						.with_repo("app".to_string())
-						.with_pull_request_title("My Release PR".to_string()),
-				);
-		cfg.with_env({
-			let r = Arc::new(crate::command::test_support::RecordingCommandRunner::new(0))
-				as Arc<dyn CommandRunner>;
-			crate::Env::new(
-				Arc::clone(&r),
-				Arc::new(LocalFilesystem),
-				Arc::new(crate::git::GitWorkdir::new(
-					r,
-					crate::path::AbsolutePath::new(dir.path()).unwrap(),
-				)),
+		crate::model::config::Config::new(&make_test_env(dir.path()))
+			.with_cargo(crate::model::config::CargoConfig::enabled())
+			.with_git(
+				crate::model::config::GitConfig::enabled_config()
+					.with_strategy(crate::model::config::Strategy::Branch),
 			)
-		})
-		.save()
-		.unwrap();
+			.with_github(
+				crate::model::config::GitHubConfig::enabled_config()
+					.with_owner("acme".to_string())
+					.with_repo("app".to_string())
+					.with_pull_request_title("My Release PR".to_string()),
+			)
+			.save()
+			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"test-pkg\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",

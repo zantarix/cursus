@@ -14,7 +14,7 @@ fn add_linked_versions_to_config(dir: &std::path::Path, lv: LinkedVersionsConfig
 	let env = make_env_with_git(dir);
 	let mut config = cursus::model::config::load(&env).unwrap();
 	config.linked_versions = lv;
-	config.with_env(common::test_env(dir)).save().unwrap();
+	config.save().unwrap();
 }
 
 fn make_env_with_git(dir: &std::path::Path) -> cursus::Env {

@@ -326,14 +326,10 @@ fn change_auto_with_git_commits_and_pushes() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: another fix");
 
-	let config =
-		cursus::model::config::Config::new(&cursus::path::AbsolutePath::new(dir.path()).unwrap())
-			.with_cargo(CargoConfig::enabled())
-			.with_git(GitConfig::enabled_config());
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
+		.with_cargo(CargoConfig::enabled())
+		.with_git(GitConfig::enabled_config());
+	config.save().unwrap();
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto"],

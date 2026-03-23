@@ -14,7 +14,7 @@ use common::{
 use cursus::model::config::{
 	CargoConfig, Config, GitConfig, GitHubConfig, GlobalConfig, PackageManager,
 };
-use cursus::path::AbsolutePath;
+
 use tempfile::TempDir;
 
 // ── Local helpers ──────────────────────────────────────────────────────────────
@@ -26,12 +26,8 @@ fn temp_git_repo_with_project_in_unicode_dir(prefix: &str) -> TempDir {
 		.tempdir()
 		.expect("Failed to create unicode temp dir");
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
-	let config =
-		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled());
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	let config = Config::new(&common::test_env(dir.path())).with_cargo(CargoConfig::enabled());
+	config.save().unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
@@ -355,13 +351,10 @@ fn config_with_unicode_ignore_pattern() {
 		ignore: vec!["biblioth\u{00E8}que".to_string()],
 		..Default::default()
 	};
-	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
+	let config = Config::new(&common::test_env(dir.path()))
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	config.save().unwrap();
 
 	// Targeting "app" (non-ignored) must succeed.
 	let result = run_cursus(
@@ -410,13 +403,9 @@ fn config_with_unicode_subfolder_path() {
 	// with a multi-byte directory segment.
 	let dir = temp_git_repo();
 	let subfolder = "donn\u{00E9}es";
-	let mut config =
-		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_cargo(CargoConfig::enabled());
+	let mut config = Config::new(&common::test_env(dir.path())).with_cargo(CargoConfig::enabled());
 	config.cargo.path = Some(subfolder.to_string());
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	config.save().unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	std::fs::write(
@@ -513,16 +502,13 @@ fn github_config_unicode_pr_title_loads() {
 	// multi-byte values in the github config section survive TOML serialization
 	// and deserialization via the Config builder API.
 	let dir = temp_git_repo();
-	let config = Config::new(&AbsolutePath::new(dir.path()).unwrap())
+	let config = Config::new(&common::test_env(dir.path()))
 		.with_cargo(CargoConfig::enabled())
 		.with_github(
 			GitHubConfig::enabled_config()
 				.with_pull_request_title("Mise \u{00E0} jour des versions \u{1F389}".to_string()),
 		);
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	config.save().unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n",

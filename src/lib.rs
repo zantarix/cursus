@@ -110,7 +110,7 @@ pub fn run(cli: cli::Cli, env: Env) -> anyhow::Result<ExitCode> {
 
 	match cli.command {
 		Some(cli::Command::Init(args)) => cli::cmd_init(&args, &cli.global, &env),
-		Some(cli::Command::Verify(args)) => cli::cmd_verify(&env, &args),
+		Some(cli::Command::Verify(args)) => cli::cmd_verify(&args, &env),
 		command => {
 			let config = model::config::load(&env)?;
 			match command {

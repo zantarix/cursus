@@ -17,7 +17,7 @@ ignore = ["example-*", "internal-tool"]
 [npm]
 enabled = true
 "#;
-	let config: Config = toml::from_str(toml_str).unwrap();
+	let config: ConfigData = toml::from_str(toml_str).unwrap();
 	assert_eq!(
 		config.global.ignore,
 		vec!["example-*".to_string(), "internal-tool".to_string()]
@@ -29,10 +29,10 @@ fn config_roundtrip_with_global_ignore() {
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["example-*".to_string(), "internal-tool".to_string()];
-	let config = Config::new(&crate::path::AbsolutePath::new(dir.path()).unwrap())
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.with_env(make_env()).save().unwrap();
+	config.save().unwrap();
 	let env = make_env_with_git(dir.path());
 	let loaded = load(&env).unwrap();
 	assert_eq!(
@@ -45,13 +45,11 @@ fn config_roundtrip_with_global_ignore() {
 fn load_projects_filters_ignored_packages() {
 	// Set up a workspace with two packages; ignore one by exact name.
 	let dir = temp_dir();
-	let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["internal-tool".to_string()];
-	let config = Config::new(&abs)
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
-		.with_cargo(CargoConfig::enabled())
-		.with_env(make_env());
+		.with_cargo(CargoConfig::enabled());
 
 	// Create a workspace with two members.
 	std::fs::write(
@@ -81,13 +79,11 @@ fn load_projects_filters_ignored_packages() {
 fn load_projects_filters_by_glob_pattern() {
 	// Wildcard pattern: ignore all packages matching "example-*".
 	let dir = temp_dir();
-	let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["example-*".to_string()];
-	let config = Config::new(&abs)
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
-		.with_cargo(CargoConfig::enabled())
-		.with_env(make_env());
+		.with_cargo(CargoConfig::enabled());
 
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
@@ -119,13 +115,11 @@ fn load_projects_filters_by_glob_pattern() {
 #[test]
 fn load_projects_ignore_invalid_glob_fails() {
 	let dir = temp_dir();
-	let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["[invalid".to_string()];
-	let config = Config::new(&abs)
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
-		.with_cargo(CargoConfig::enabled())
-		.with_env(make_env());
+		.with_cargo(CargoConfig::enabled());
 
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
@@ -147,13 +141,11 @@ fn load_projects_ignore_invalid_glob_fails() {
 fn load_projects_ignore_no_match_warns() {
 	// A pattern that matches nothing should succeed (just log a warning).
 	let dir = temp_dir();
-	let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["nonexistent-package".to_string()];
-	let config = Config::new(&abs)
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
-		.with_cargo(CargoConfig::enabled())
-		.with_env(make_env());
+		.with_cargo(CargoConfig::enabled());
 
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
@@ -174,13 +166,11 @@ fn load_projects_ignoring_all_packages_fails_with_informative_error() {
 	// When all projects are filtered by ignore patterns, the error message
 	// should mention the ignore patterns rather than the package manager config.
 	let dir = temp_dir();
-	let abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["app".to_string()];
-	let config = Config::new(&abs)
+	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
-		.with_cargo(CargoConfig::enabled())
-		.with_env(make_env());
+		.with_cargo(CargoConfig::enabled());
 
 	std::fs::write(
 		dir.path().join("Cargo.toml"),

@@ -39,7 +39,7 @@ fn set_prepare_config(dir: &std::path::Path, prepare: PrepareConfig) {
 	let env = make_env_with_git(dir);
 	let mut config = cursus::model::config::load(&env).unwrap();
 	config.prepare = prepare;
-	config.with_env(common::test_env(dir)).save().unwrap();
+	config.save().unwrap();
 }
 
 /// Creates a Cargo workspace with pkg-a at 1.0.0 and pkg-b depending on pkg-a.
@@ -473,12 +473,8 @@ fn propagation_dry_run_does_not_modify_files() {
 /// exercises the BFS cycle-termination property of the propagation algorithm.
 fn npm_workspace_with_cycle() -> tempfile::TempDir {
 	let dir = temp_git_repo();
-	let config =
-		Config::new(&AbsolutePath::new(dir.path()).unwrap()).with_npm(NpmConfig::enabled());
-	config
-		.with_env(common::test_env(dir.path()))
-		.save()
-		.unwrap();
+	let config = Config::new(&common::test_env(dir.path())).with_npm(NpmConfig::enabled());
+	config.save().unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),

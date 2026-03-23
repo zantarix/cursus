@@ -30,7 +30,7 @@ impl Default for VerifyArgs {
 /// - `ExitCode::SUCCESS` (0) if at least one changeset was added.
 /// - `ExitCode::from(2)` if no changeset was added.
 /// - Propagates errors as `Err` (exit code 1 from the caller).
-pub(crate) fn cmd_verify(env: &crate::Env, args: &VerifyArgs) -> anyhow::Result<ExitCode> {
+pub(crate) fn cmd_verify(args: &VerifyArgs, env: &crate::Env) -> anyhow::Result<ExitCode> {
 	let git = env.git();
 	debug!("Verifying changesets against base ref: {}", args.base);
 
@@ -128,7 +128,7 @@ mod tests {
 		let args = VerifyArgs {
 			base: "--output=/tmp/pwned".to_string(),
 		};
-		let err = cmd_verify(&env, &args).unwrap_err();
+		let err = cmd_verify(&args, &env).unwrap_err();
 		assert!(
 			err.to_string().contains("must not start with '-'"),
 			"unexpected error: {err}"
@@ -141,7 +141,7 @@ mod tests {
 		let args = VerifyArgs {
 			base: String::new(),
 		};
-		let err = cmd_verify(&env, &args).unwrap_err();
+		let err = cmd_verify(&args, &env).unwrap_err();
 		assert!(
 			err.to_string().contains("must not be empty"),
 			"unexpected error: {err}"
