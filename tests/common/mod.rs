@@ -22,22 +22,43 @@ pub fn test_env(dir: &std::path::Path) -> cursus::Env {
 	)
 }
 
-/// Runs cursus with a default (empty) environment and real command runner, returning the result.
+/// Runs cursus with a real command runner and local filesystem.
 ///
-/// This is the standard way to invoke `cursus::run` from integration tests.
-/// It passes a real `CommandRunner` and `LocalFilesystem` so that actual shell
-/// commands (git, cargo, npm) execute. Git discovery is handled internally.
+/// This is the standard way to invoke cursus from integration tests.
+/// Parses CLI arguments, handles dry-run wrapping, performs git discovery,
+/// and delegates to [`cursus::run`].
 pub fn run_cursus(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
-	cursus::run_local(
-		args,
-		std::sync::Arc::new(cursus::command::RealCommandRunner)
-			as std::sync::Arc<dyn cursus::command::CommandRunner>,
-		std::sync::Arc::new(cursus::filesystem::LocalFilesystem),
-		cwd,
-	)
+	use std::sync::Arc;
+
+	use clap::Parser as _;
+	use cursus::command::{CommandRunner, DryRunCommandRunner, RealCommandRunner};
+	use cursus::filesystem::LocalFilesystem;
+	use cursus::path::AbsolutePath;
+
+	let runner: Arc<dyn CommandRunner> = Arc::new(RealCommandRunner);
+	let filesystem: Arc<dyn cursus::filesystem::Filesystem> = Arc::new(LocalFilesystem);
+
+	let cli = cursus::cli::Cli::try_parse_from(args)?;
+
+	let runner = if cli.global.dry_run {
+		Arc::new(DryRunCommandRunner::new(runner)) as Arc<dyn CommandRunner>
+	} else {
+		runner
+	};
+
+	let cwd_abs = AbsolutePath::new(cwd)?;
+	let git_workdir = cursus::find_git_workdir(&cwd_abs, &*filesystem)
+		.ok_or_else(|| anyhow::anyhow!("No git repository found"))?;
+	let git = Arc::new(cursus::git::GitWorkdir::new(
+		Arc::clone(&runner),
+		git_workdir,
+	));
+	let env = cursus::Env::new(runner, filesystem, git);
+
+	cursus::run(cli, env)
 }
 
 /// Runs a git command in the given directory and panics on failure.

@@ -20,17 +20,11 @@ pub mod utils;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_logging;
 
-use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
-
-use anyhow::Context;
-use clap::Parser;
 
 pub use env::Env;
 
-use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::path::AbsolutePath;
 
 /// Finds the git working directory by walking up from the given path.
@@ -47,61 +41,9 @@ pub fn find_git_workdir(
 	.and_then(|p| AbsolutePath::new(p).ok())
 }
 
-/// Convenience entry point for local filesystem usage.
-///
-/// Parses CLI arguments, wraps the runner for `--dry-run`, performs git
-/// discovery, builds an [`Env`], and delegates to [`run`].
-///
-/// Use [`run`] directly when the caller has already parsed the arguments
-/// and set up the [`Env`] (e.g., from `main` or when providing a custom
-/// [`git::Git`] implementation).
-pub fn run_local<I, T>(
-	args: I,
-	runner: Arc<dyn CommandRunner>,
-	filesystem: Arc<dyn filesystem::Filesystem>,
-	cwd: &Path,
-) -> anyhow::Result<ExitCode>
-where
-	I: IntoIterator<Item = T>,
-	T: Into<OsString> + Clone,
-{
-	let cli = match cli::Cli::try_parse_from(args) {
-		Ok(cli) => cli,
-		Err(e) => {
-			// clap returns errors for help/version requests too
-			// Use clap's error printing to handle them correctly
-			e.print().context("Failed to print clap error")?;
-			let exit_code = if e.use_stderr() {
-				ExitCode::FAILURE
-			} else {
-				ExitCode::SUCCESS
-			};
-			return Ok(exit_code);
-		}
-	};
-
-	// Wrap the runner for dry-run BEFORE creating GitWorkdir so it
-	// receives the wrapped runner.
-	let runner = if cli.global.dry_run {
-		Arc::new(DryRunCommandRunner::new(runner)) as Arc<dyn CommandRunner>
-	} else {
-		runner
-	};
-
-	let cwd_abs = AbsolutePath::new(cwd).context("current working directory is not absolute")?;
-	let git_workdir =
-		find_git_workdir(&cwd_abs, &*filesystem).context("No git repository found")?;
-	let git = Arc::new(git::GitWorkdir::new(Arc::clone(&runner), git_workdir));
-	let env = Env::new(runner, filesystem, git);
-
-	run(cli, env)
-}
-
 /// Dispatches a pre-parsed CLI to the appropriate subcommand.
 ///
 /// The [`Env`] must already contain a configured [`git::Git`] implementation.
-/// Use [`run_local`] for the convenience entry point that handles git
-/// discovery automatically.
 pub fn run(cli: cli::Cli, env: Env) -> anyhow::Result<ExitCode> {
 	// Set the process-global locale from the environment before any output.
 	locale::set_locale(env.locale());
