@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use anyhow::Context;
 use log::info;
 
-use crate::git::Git;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config::DependencyBump;
 use crate::package_manager::Project;
@@ -84,9 +83,8 @@ pub(super) fn write_out_of_scope_changeset(
 	pkg_name: &str,
 	effective_ct: ChangeType,
 	dep_msgs: &[String],
-	git: &dyn Git,
+	env: &crate::Env,
 	dry_run: bool,
-	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Option<PathBuf>> {
 	let message = format!("Dependency updates: {}", dep_msgs.join(", "));
 	let mut packages = BTreeMap::new();
@@ -100,7 +98,7 @@ pub(super) fn write_out_of_scope_changeset(
 		return Ok(None);
 	}
 	let path = changeset
-		.write(git, fs)
+		.write(env.git(), env.fs())
 		.with_context(|| format!("Failed to write propagation changeset for '{pkg_name}'"))?;
 	info!(
 		"Wrote dependency propagation changeset for '{pkg_name}': {}",
@@ -129,9 +127,8 @@ pub(super) fn apply_dependency_propagation(
 	version_overrides: &BTreeMap<String, semver::Version>,
 	package_filter: &[String],
 	dep_bump: DependencyBump,
-	git: &dyn Git,
+	env: &crate::Env,
 	dry_run: bool,
-	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<PropagationResult> {
 	let reverse_deps = build_reverse_dep_graph(projects);
 	let propagation_map =
@@ -175,7 +172,7 @@ pub(super) fn apply_dependency_propagation(
 				);
 			}
 		} else if let Some(path) =
-			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, git, dry_run, fs)?
+			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, env, dry_run)?
 		{
 			new_changeset_paths.push(path);
 		}

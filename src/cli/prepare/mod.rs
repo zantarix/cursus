@@ -17,7 +17,6 @@ use log::info;
 
 use semver::Version;
 
-use crate::git;
 use crate::model::changeset::{ChangeType, Changeset};
 use crate::model::config::Config;
 use crate::package_manager::Project;
@@ -91,15 +90,14 @@ pub(super) struct VersionPlan {
 ///
 /// Returns the full version plan for the prepare run.
 fn compute_version_plan(
-	git: &dyn git::Git,
 	changesets: &[(PathBuf, Changeset)],
 	args: &PrepareArgs,
 	config: &Config,
 	projects: &[Project],
 	git_ctx: &GitContext,
 	dry_run: bool,
-	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<VersionPlan> {
+	let git = config.env().git();
 	let commit_refs = resolve_commit_references(changesets, git, git_ctx.enabled);
 	let (mut aggregated, mut changes_per_package) =
 		aggregate_changesets(changesets, &args.packages, projects, &commit_refs)?;
@@ -111,15 +109,15 @@ fn compute_version_plan(
 		&linked_groups,
 		projects,
 	);
+	let env = config.env();
 	let (dep_entries, propagation_changeset_paths) = apply_dependency_propagation(
 		projects,
 		&mut aggregated,
 		&version_overrides,
 		&args.packages,
 		config.prepare.dependency_bump,
-		git,
+		env,
 		dry_run,
-		fs,
 	)?;
 	// Second pass: propagated bumps may have raised a linked member's version, so
 	// re-sync to bring the rest of each group up to the new target.
@@ -157,16 +155,7 @@ pub(crate) fn cmd_prepare(
 	}
 
 	let git_ctx = setup_git_context(&config, args);
-	let plan = compute_version_plan(
-		git,
-		&changesets,
-		args,
-		&config,
-		&projects,
-		&git_ctx,
-		dry_run,
-		env.fs(),
-	)?;
+	let plan = compute_version_plan(&changesets, args, &config, &projects, &git_ctx, dry_run)?;
 	let branches = preflight_checks(git, &config, env, args, &git_ctx, dry_run)?;
 	let output = prepare_release_files(&adapters, &projects, &changesets, plan, dry_run, env.fs())?;
 

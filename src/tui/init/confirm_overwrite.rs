@@ -55,7 +55,7 @@ impl ButtonScreen for ConfirmOverwriteButtons {
 		state: WizardState,
 	) -> anyhow::Result<KeyResult<(WizardState, Screen), InitResult>> {
 		if self.yes {
-			let (cargo, npm) = detect_package_managers(&state.env.git().path(), state.env.fs());
+			let (cargo, npm) = detect_package_managers(state.env.git().path(), state.env.fs());
 			Ok(KeyResult::Continue((
 				state,
 				Screen::SelectPackageManagers {
