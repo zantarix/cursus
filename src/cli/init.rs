@@ -29,7 +29,7 @@ pub(crate) fn cmd_init(
 	let git = env.git();
 	let git_workdir = git.path();
 
-	let result = match init::run(git_workdir, env, global.dry_run)? {
+	let result = match init::run(env, global.dry_run)? {
 		Some(r) => r,
 		None => return Ok(ExitCode::from(2)),
 	};

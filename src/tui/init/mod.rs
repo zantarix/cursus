@@ -8,7 +8,6 @@ use ratatui_textarea::TextArea;
 use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
-use crate::git::GitWorkdir;
 use crate::github::GitHubRepo;
 use crate::model::config::{PackageManager, Strategy, exists as config_exists};
 use crate::path::AbsolutePath;
@@ -315,14 +314,13 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 ///
 /// Returns an error if terminal setup or I/O operations fail.
 pub fn run(
-	git_workdir: &AbsolutePath,
 	env: &Env,
 	dry_run: bool,
 ) -> anyhow::Result<Option<InitResult>> {
-	let (cargo_detected, npm_detected) = detect_package_managers(git_workdir, env.fs());
+	let git = env.git();
+	let (cargo_detected, npm_detected) = detect_package_managers(git.path(), env.fs());
 
-	let git = GitWorkdir::new(env.runner(), git_workdir.clone());
-	let detected_github = crate::github::remote::GitHubRepo::detect_in(&git)
+	let detected_github = crate::github::remote::GitHubRepo::detect_in(git)
 		.ok()
 		.flatten();
 

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
 use crate::git::Git;
 use crate::model::changelog::CommitReference;

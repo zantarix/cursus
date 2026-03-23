@@ -14,7 +14,6 @@ pub(super) fn write_package_json(dir: &std::path::Path, content: &str) {
 	std::fs::write(dir.join("package.json"), content).unwrap();
 }
 
-/// Creates a `NpmAdapter` backed by a recording runner with the given exit code.
 fn dummy_env(runner: Arc<dyn CommandRunner>) -> crate::Env {
 	crate::Env::new(
 		Arc::clone(&runner),
@@ -26,6 +25,7 @@ fn dummy_env(runner: Arc<dyn CommandRunner>) -> crate::Env {
 	)
 }
 
+/// Creates a `NpmAdapter` backed by a recording runner with the given exit code.
 pub(super) fn recording_adapter_default(
 	config: NpmConfig,
 	dir: &std::path::Path,
