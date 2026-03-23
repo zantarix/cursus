@@ -313,10 +313,7 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
-pub fn run(
-	env: &Env,
-	dry_run: bool,
-) -> anyhow::Result<Option<InitResult>> {
+pub fn run(env: &Env, dry_run: bool) -> anyhow::Result<Option<InitResult>> {
 	let git = env.git();
 	let (cargo_detected, npm_detected) = detect_package_managers(git.path(), env.fs());
 

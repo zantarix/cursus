@@ -126,15 +126,12 @@ impl Git for GitWorkdir {
 		Ok(())
 	}
 
-	/// Returns the porcelain status of the working tree.
-	///
-	/// Runs `git status --porcelain` and returns the raw output as a string.
-	/// An empty string means the working tree is clean.
+	/// Returns `true` if the working tree has uncommitted changes.
 	///
 	/// # Errors
 	///
 	/// Returns an error if `git status` exits with a non-zero status.
-	fn status_porcelain(&self) -> anyhow::Result<String> {
+	fn is_dirty(&self) -> anyhow::Result<bool> {
 		let output = self
 			.runner
 			.run("git", &["status", "--porcelain"], &self.path)
@@ -145,7 +142,7 @@ impl Git for GitWorkdir {
 			bail!("git status failed: {stderr}");
 		}
 
-		Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+		Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
 	}
 
 	/// Returns the name of the current branch, or `None` when HEAD is detached.

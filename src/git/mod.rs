@@ -28,10 +28,8 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 
 	// ── read-only queries ────────────────────────────────────────────────
 
-	/// Returns the porcelain status of the working tree.
-	///
-	/// An empty string means the working tree is clean.
-	fn status_porcelain(&self) -> anyhow::Result<String>;
+	/// Returns `true` if the working tree has uncommitted changes.
+	fn is_dirty(&self) -> anyhow::Result<bool>;
 
 	/// Returns the name of the current branch, or `None` when HEAD is detached.
 	fn current_branch(&self) -> anyhow::Result<Option<String>>;

@@ -173,12 +173,12 @@ fn git_push_failure_propagates() {
 }
 
 #[test]
-fn git_status_porcelain_passes_correct_args() {
+fn git_is_dirty_passes_correct_args() {
 	let dir = temp_dir();
 	let runner = recording(0);
 	let dir_abs = abs(&dir);
 	let (git, runner) = make_git(runner, dir_abs);
-	git.status_porcelain().unwrap();
+	git.is_dirty().unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "git");
@@ -187,12 +187,12 @@ fn git_status_porcelain_passes_correct_args() {
 }
 
 #[test]
-fn git_status_porcelain_failure_propagates() {
+fn git_is_dirty_failure_propagates() {
 	let dir = temp_dir();
 	let runner = recording_with_stderr(1, b"fatal: not a git repo");
 	let dir_abs = abs(&dir);
 	let (git, _) = make_git(runner, dir_abs);
-	let result = git.status_porcelain();
+	let result = git.is_dirty();
 	assert!(result.is_err());
 	let msg = result.unwrap_err().to_string();
 	assert!(
@@ -202,13 +202,21 @@ fn git_status_porcelain_failure_propagates() {
 }
 
 #[test]
-fn git_status_porcelain_returns_stdout() {
+fn git_is_dirty_returns_true_when_changes_present() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
 	let dir_abs = abs(&dir);
 	let (git, _) = make_git(runner, dir_abs);
-	let result = git.status_porcelain().unwrap();
-	assert_eq!(result, " M src/main.rs\n");
+	assert!(git.is_dirty().unwrap());
+}
+
+#[test]
+fn git_is_dirty_returns_false_when_clean() {
+	let dir = temp_dir();
+	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"".to_vec()));
+	let dir_abs = abs(&dir);
+	let (git, _) = make_git(runner, dir_abs);
+	assert!(!git.is_dirty().unwrap());
 }
 
 #[test]

@@ -28,8 +28,7 @@ pub(super) struct BranchState {
 ///
 /// Returns an error if the working tree has uncommitted changes.
 pub(super) fn check_dirty_tree(git: &dyn Git) -> anyhow::Result<()> {
-	let status = git.status_porcelain()?;
-	if !status.trim().is_empty() {
+	if git.is_dirty()? {
 		anyhow::bail!(
 			"Working tree is dirty. Commit or stash changes before releasing.\n\
 			 Run `git status` to see pending changes."

@@ -126,29 +126,23 @@ fn add_stages_file_visible_in_status() {
 	let new_file = dir.path().join("hello.txt");
 	std::fs::write(&new_file, "hello").unwrap();
 
-	// Before staging the file should be untracked.
-	let before = git.status_porcelain().unwrap();
+	// Before staging the file should show as dirty.
 	assert!(
-		before.contains("hello.txt"),
-		"untracked not shown: {before}"
+		git.is_dirty().unwrap(),
+		"untracked file should make repo dirty"
 	);
 
 	git.add(&[new_file]).unwrap();
 
-	// After staging the file should appear as Added (A).
-	let after = git.status_porcelain().unwrap();
-	assert!(after.contains('A'), "file not staged: {after}");
-	assert!(after.contains("hello.txt"), "file name missing: {after}");
+	// After staging the repo is still dirty (staged but uncommitted).
+	assert!(git.is_dirty().unwrap(), "staged file should still be dirty");
 }
 
 #[test]
 fn add_empty_list_leaves_repo_clean() {
 	let (_dir, git) = setup_repo();
 	git.add(&[]).unwrap();
-	assert!(
-		git.status_porcelain().unwrap().is_empty(),
-		"repo should still be clean"
-	);
+	assert!(!git.is_dirty().unwrap(), "repo should still be clean");
 }
 
 // --- commit ---
@@ -171,7 +165,7 @@ fn commit_clears_staged_changes() {
 	git.add(&[file]).unwrap();
 	git.commit("feat: add feature").unwrap();
 	assert!(
-		git.status_porcelain().unwrap().is_empty(),
+		!git.is_dirty().unwrap(),
 		"working tree should be clean after commit"
 	);
 }
@@ -294,20 +288,19 @@ fn checkout_or_reset_branch_resets_to_current_head() {
 	);
 }
 
-// --- status_porcelain ---
+// --- is_dirty ---
 
 #[test]
-fn status_porcelain_is_empty_for_clean_repo() {
+fn is_dirty_returns_false_for_clean_repo() {
 	let (_dir, git) = setup_repo();
-	assert!(git.status_porcelain().unwrap().is_empty());
+	assert!(!git.is_dirty().unwrap());
 }
 
 #[test]
-fn status_porcelain_shows_modified_tracked_file() {
+fn is_dirty_returns_true_for_modified_file() {
 	let (dir, git) = setup_repo();
 	std::fs::write(dir.path().join("README.md"), "changed").unwrap();
-	let status = git.status_porcelain().unwrap();
-	assert!(status.contains("README.md"), "got: {status}");
+	assert!(git.is_dirty().unwrap());
 }
 
 // --- log_message / log_subject ---
