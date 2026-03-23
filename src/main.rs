@@ -3,6 +3,7 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use clap::Parser as _;
 use cursus::command::{DryRunCommandRunner, RealCommandRunner, VerboseCommandRunner};
 
@@ -95,6 +96,15 @@ fn determine_log_level(global: &cursus::cli::GlobalArgs) -> log::LevelFilter {
 	}
 }
 
+/// Returns the first non-empty value from the given environment variables,
+/// or `None` if none are set or all are empty.
+#[coverage(off)]
+#[mutants::skip]
+fn env_first(vars: &[&str]) -> Option<String> {
+	vars.iter()
+		.find_map(|name| std::env::var(name).ok().filter(|s| !s.is_empty()))
+}
+
 /// Resolves the BCP 47 locale tag for user-visible messages.
 ///
 /// Priority order:
@@ -104,16 +114,13 @@ fn determine_log_level(global: &cursus::cli::GlobalArgs) -> log::LevelFilter {
 #[coverage(off)]
 #[mutants::skip]
 fn detect_locale() -> String {
-	std::env::var("CURSUS_LOCALE")
-		.ok()
-		.filter(|s| !s.is_empty())
+	env_first(&["CURSUS_LOCALE"])
 		.or_else(sys_locale::get_locale)
 		.unwrap_or_else(|| cursus::locale::DEFAULT_LOCALE.to_string())
 }
 
 #[coverage(off)]
 #[mutants::skip]
-#[allow(clippy::too_many_lines)]
 fn main() -> ExitCode {
 	// Parse args exactly once. Logging is initialised immediately after so
 	// that every subsequent operation benefits from the user-requested level.
@@ -136,44 +143,25 @@ fn main() -> ExitCode {
 
 	init_logging(determine_log_level(&cli.global));
 
-	let cwd = match std::env::current_dir() {
-		Ok(cwd) => cwd,
+	match try_main(cli) {
+		Ok(code) => code,
 		Err(e) => {
 			log::error!("{e:#}");
-			return ExitCode::FAILURE;
+			ExitCode::FAILURE
 		}
-	};
+	}
+}
+
+/// Runs the application after CLI parsing and logging setup.
+///
+/// Separated from [`main`] so that all fallible operations can use `?`
+/// with a single error-handling site in the caller.
+fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
+	let cwd = std::env::current_dir()?;
+	let cwd_abs = cursus::path::AbsolutePath::new(&cwd)?;
 
 	let runner: Arc<dyn cursus::command::CommandRunner> =
 		Arc::new(VerboseCommandRunner::new(RealCommandRunner));
-	let editor = std::env::var("VISUAL")
-		.ok()
-		.filter(|s| !s.is_empty())
-		.or_else(|| std::env::var("EDITOR").ok().filter(|s| !s.is_empty()));
-	let github_client = std::env::var("GH_TOKEN")
-		.ok()
-		.or_else(|| std::env::var("GITHUB_TOKEN").ok())
-		.map(|token| {
-			Arc::new(cursus::github::RestGitHubClient::new(token))
-				as Arc<dyn cursus::github::client::GitHubClient>
-		});
-	let oidc_environment = std::env::var("ACTIONS_ID_TOKEN_REQUEST_URL")
-		.ok()
-		.filter(|s| !s.is_empty())
-		.is_some()
-		|| std::env::var("CI_JOB_JWT_V2")
-			.ok()
-			.filter(|s| !s.is_empty())
-			.is_some();
-	let node_auth_token_present = std::env::var("NODE_AUTH_TOKEN")
-		.ok()
-		.filter(|s| !s.is_empty())
-		.is_some();
-	let cargo_registry_token_present = std::env::var("CARGO_REGISTRY_TOKEN")
-		.ok()
-		.filter(|s| !s.is_empty())
-		.is_some();
-	let locale = detect_locale();
 	let filesystem: Arc<dyn cursus::filesystem::Filesystem> =
 		Arc::new(cursus::filesystem::LocalFilesystem);
 
@@ -185,25 +173,22 @@ fn main() -> ExitCode {
 		runner
 	};
 
-	// Git discovery
-	let cwd_abs = match cursus::path::AbsolutePath::new(&cwd) {
-		Ok(p) => p,
-		Err(e) => {
-			log::error!("{e:#}");
-			return ExitCode::FAILURE;
-		}
-	};
-	let git_workdir = match cursus::git::find_workdir(&cwd_abs, &*filesystem) {
-		Some(p) => p,
-		None => {
-			log::error!("No git repository found");
-			return ExitCode::FAILURE;
-		}
-	};
+	let git_workdir =
+		cursus::git::find_workdir(&cwd_abs, &*filesystem).context("No git repository found")?;
 	let git = Arc::new(cursus::git::GitWorkdir::new(
 		Arc::clone(&runner),
 		git_workdir,
 	));
+
+	let editor = env_first(&["VISUAL", "EDITOR"]);
+	let github_client = env_first(&["GH_TOKEN", "GITHUB_TOKEN"]).map(|token| {
+		Arc::new(cursus::github::RestGitHubClient::new(token))
+			as Arc<dyn cursus::github::client::GitHubClient>
+	});
+	let oidc_environment = env_first(&["ACTIONS_ID_TOKEN_REQUEST_URL", "CI_JOB_JWT_V2"]).is_some();
+	let node_auth_token_present = env_first(&["NODE_AUTH_TOKEN"]).is_some();
+	let cargo_registry_token_present = env_first(&["CARGO_REGISTRY_TOKEN"]).is_some();
+	let locale = detect_locale();
 
 	let env = cursus::Env::new(runner, filesystem, git)
 		.with_editor_opt(editor)
@@ -213,11 +198,5 @@ fn main() -> ExitCode {
 		.with_cargo_registry_token_present(cargo_registry_token_present)
 		.with_locale(locale);
 
-	match cursus::run(cli, env) {
-		Ok(code) => code,
-		Err(e) => {
-			log::error!("{e:#}");
-			ExitCode::FAILURE
-		}
-	}
+	cursus::run(cli, env)
 }
