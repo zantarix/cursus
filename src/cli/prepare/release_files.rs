@@ -21,7 +21,7 @@ use super::{PackageChanges, PrepareOutput, ReleaseInfo, VersionPlan};
 pub(super) fn prepare_release_files(
 	adapters: &[Arc<dyn PackageManagerAdapter>],
 	projects: &[Project],
-	changesets: &[(PathBuf, Changeset)],
+	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	plan: VersionPlan,
 	dry_run: bool,
 	fs: &dyn crate::filesystem::Filesystem,
@@ -161,7 +161,7 @@ pub(super) fn update_lock_files(
 ///
 /// Returns the list of changeset paths that would be (or were) modified or deleted.
 pub(super) fn consume_changesets(
-	changesets: &[(PathBuf, Changeset)],
+	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	released: &BTreeSet<String>,
 	dry_run: bool,
 	fs: &dyn crate::filesystem::Filesystem,
@@ -174,7 +174,7 @@ pub(super) fn consume_changesets(
 			.filter(|name| released.contains(*name))
 			.collect();
 		if !released_pkgs.is_empty() {
-			additional_files.push(path.clone());
+			additional_files.push(path.clone().into_path_buf());
 		}
 		if dry_run {
 			if !released_pkgs.is_empty() {

@@ -157,7 +157,7 @@ build_command = "cargo build --release"
 		}
 		.with_owner("owner".to_string())
 		.with_repo("repo".to_string());
-		let toml_str = toml::to_string(&config.data).unwrap();
+		let toml_str = toml::to_string(&config).unwrap();
 		let deserialized: GitHubConfig = toml::from_str(&toml_str).unwrap();
 		assert_eq!(config, deserialized);
 	}
@@ -165,7 +165,7 @@ build_command = "cargo build --release"
 	#[test]
 	fn github_config_serializes_skips_none_and_empty() {
 		let config = GitHubConfig::default();
-		let toml_str = toml::to_string(&config.data).unwrap();
+		let toml_str = toml::to_string(&config).unwrap();
 		assert!(!toml_str.contains("owner"), "None owner should be omitted");
 		assert!(!toml_str.contains("repo"), "None repo should be omitted");
 		assert!(
@@ -181,7 +181,7 @@ build_command = "cargo build --release"
 	#[test]
 	fn github_config_serializes_some_owner() {
 		let config = GitHubConfig::default().with_owner("myorg".to_string());
-		let toml_str = toml::to_string(&config.data).unwrap();
+		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("owner = \"myorg\""));
 	}
 
@@ -191,7 +191,7 @@ build_command = "cargo build --release"
 			build_command: "make all".to_string(),
 			..Default::default()
 		};
-		let toml_str = toml::to_string(&config.data).unwrap();
+		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("build_command = \"make all\""));
 	}
 
@@ -210,7 +210,7 @@ build_command = "cargo build --release"
 	#[test]
 	fn github_config_serializes_omits_pull_request_title_when_none() {
 		let config = GitHubConfig::default();
-		let toml_str = toml::to_string(&config.data).unwrap();
+		let toml_str = toml::to_string(&config).unwrap();
 		assert!(
 			!toml_str.contains("pull_request_title"),
 			"None pull_request_title should be omitted, got: {toml_str}"
@@ -220,7 +220,7 @@ build_command = "cargo build --release"
 	#[test]
 	fn github_config_serializes_pull_request_title_when_set() {
 		let config = GitHubConfig::default().with_pull_request_title("My Release".to_string());
-		let toml_str = toml::to_string(&config.data).unwrap();
+		let toml_str = toml::to_string(&config).unwrap();
 		assert!(toml_str.contains("pull_request_title = \"My Release\""));
 	}
 }

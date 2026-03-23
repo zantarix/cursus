@@ -248,7 +248,9 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub(crate) fn read_all(env: &crate::Env) -> anyhow::Result<Vec<(PathBuf, Self)>> {
+	pub(crate) fn read_all(
+		env: &crate::Env,
+	) -> anyhow::Result<Vec<(crate::path::AbsolutePath, Self)>> {
 		let git = env.git();
 		let fs = env.fs();
 		let cursus_dir = git.path().child(".cursus");
@@ -286,7 +288,7 @@ impl Changeset {
 					Ok(c) => c,
 					Err(e) => return Some(Err(e)),
 				};
-				Some(Ok((path, changeset)))
+				Some(Ok((abs_path, changeset)))
 			})
 			.collect()
 	}
@@ -303,7 +305,7 @@ impl Changeset {
 	/// Returns an error if the file cannot be deleted or rewritten.
 	pub fn consume(
 		&self,
-		path: &Path,
+		path: &crate::path::AbsolutePath,
 		released_packages: &BTreeSet<String>,
 		fs: &dyn crate::filesystem::Filesystem,
 	) -> anyhow::Result<()> {
@@ -321,17 +323,13 @@ impl Changeset {
 
 		if remaining.is_empty() {
 			// All packages consumed — delete the file.
-			let abs_path = crate::path::AbsolutePath::new(path)
-				.with_context(|| format!("changeset path is not absolute: {}", path.display()))?;
-			fs.remove_file(&abs_path)
+			fs.remove_file(path)
 				.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
 		} else {
 			// Partially consumed — rewrite with remaining packages only.
 			let rewritten = Self::new(remaining, self.message.clone());
 			let content = rewritten.format()?;
-			let abs_path = crate::path::AbsolutePath::new(path)
-				.with_context(|| format!("changeset path is not absolute: {}", path.display()))?;
-			fs.write(&abs_path, content.as_bytes())
+			fs.write(path, content.as_bytes())
 				.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
 		}
 
@@ -888,8 +886,12 @@ pkg = \"minor\"
 			"+++\npkg-a = \"patch\"\n+++\n\nSome message\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		cs.consume(
+			&crate::path::AbsolutePath::new(&path).unwrap(),
+			&released,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 		assert!(!path.exists(), "File should be deleted when fully consumed");
 	}
 
@@ -902,8 +904,12 @@ pkg = \"minor\"
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\n+++\n\nSome message\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		cs.consume(
+			&crate::path::AbsolutePath::new(&path).unwrap(),
+			&released,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert!(
 			path.exists(),
@@ -930,8 +936,12 @@ pkg = \"minor\"
 		let original = "+++\npkg-b = \"minor\"\n+++\n\nUnrelated change\n";
 		let (path, cs) = make_path_and_changeset(dir.path(), "change.md", original);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
-		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		cs.consume(
+			&crate::path::AbsolutePath::new(&path).unwrap(),
+			&released,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		assert!(path.exists(), "File should be untouched");
 		let content = std::fs::read_to_string(&path).unwrap();
@@ -947,8 +957,12 @@ pkg = \"minor\"
 			"+++\npkg-a = \"patch\"\npkg-b = \"minor\"\npkg-c = \"major\"\n+++\n\nMulti-package change\n",
 		);
 		let released: BTreeSet<String> = ["pkg-a".to_string(), "pkg-c".to_string()].into();
-		cs.consume(&path, &released, &crate::filesystem::LocalFilesystem)
-			.unwrap();
+		cs.consume(
+			&crate::path::AbsolutePath::new(&path).unwrap(),
+			&released,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.unwrap();
 
 		let content = std::fs::read_to_string(&path).unwrap();
 		let reparsed = Changeset::parse(&content).unwrap();
@@ -966,7 +980,11 @@ pkg = \"minor\"
 		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// File doesn't exist, so remove_file should fail
-		let result = cs.consume(&path, &released, &crate::filesystem::LocalFilesystem);
+		let result = cs.consume(
+			&crate::path::AbsolutePath::new(&path).unwrap(),
+			&released,
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(result.is_err(), "Should fail when file cannot be deleted");
 	}
 
@@ -981,7 +999,11 @@ pkg = \"minor\"
 		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// Partially consumed → rewrite branch triggered, but parent dir missing.
-		let result = cs.consume(&path, &released, &crate::filesystem::LocalFilesystem);
+		let result = cs.consume(
+			&crate::path::AbsolutePath::new(&path).unwrap(),
+			&released,
+			&crate::filesystem::LocalFilesystem,
+		);
 		assert!(result.is_err(), "Should fail when file cannot be rewritten");
 	}
 

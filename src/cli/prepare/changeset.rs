@@ -14,10 +14,10 @@ use super::PackageChanges;
 /// - `aggregated`: the maximum `ChangeType` per package name
 /// - `changes_per_package`: all `(ChangeType, message, commit_ref)` tuples per package name
 pub(super) fn aggregate_changesets(
-	changesets: &[(PathBuf, Changeset)],
+	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	package_filter: &[String],
 	projects: &[crate::package_manager::Project],
-	commit_refs: &BTreeMap<PathBuf, Option<CommitReference>>,
+	commit_refs: &BTreeMap<crate::path::AbsolutePath, Option<CommitReference>>,
 ) -> anyhow::Result<(
 	BTreeMap<String, ChangeType>,
 	BTreeMap<String, PackageChanges>,
@@ -58,10 +58,10 @@ pub(super) fn aggregate_changesets(
 ///
 /// Never fails — always returns a map entry (possibly `None`) for every path.
 pub(super) fn resolve_commit_references(
-	changesets: &[(PathBuf, Changeset)],
+	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	git: &dyn Git,
 	git_enabled: bool,
-) -> BTreeMap<PathBuf, Option<CommitReference>> {
+) -> BTreeMap<crate::path::AbsolutePath, Option<CommitReference>> {
 	if !git_enabled {
 		log::debug!("Git disabled; skipping commit reference resolution");
 		return changesets.iter().map(|(p, _)| (p.clone(), None)).collect();
@@ -139,7 +139,8 @@ mod tests {
 		);
 
 		// Create a fake changeset path
-		let changeset_path = dir.path().join(".cursus/test.md");
+		let changeset_path =
+			crate::path::AbsolutePath::new(dir.path().join(".cursus/test.md")).unwrap();
 		let fake_cs = crate::model::changeset::Changeset {
 			packages: std::collections::BTreeMap::new(),
 			message: None,
@@ -165,7 +166,7 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let changeset_path = dir.path().join("test.md");
+		let changeset_path = crate::path::AbsolutePath::new(dir.path().join("test.md")).unwrap();
 		let fake_cs = crate::model::changeset::Changeset {
 			packages: std::collections::BTreeMap::new(),
 			message: None,
@@ -187,7 +188,7 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let changeset_path = dir.path().join("test.md");
+		let changeset_path = crate::path::AbsolutePath::new(dir.path().join("test.md")).unwrap();
 		let fake_cs = crate::model::changeset::Changeset {
 			packages: std::collections::BTreeMap::new(),
 			message: None,
@@ -220,11 +221,11 @@ mod tests {
 		];
 		let changesets = vec![
 			(
-				PathBuf::from("a.md"),
+				crate::path::AbsolutePath::new("/a.md").unwrap(),
 				make_changeset("alpha", crate::model::changeset::ChangeType::Minor),
 			),
 			(
-				PathBuf::from("b.md"),
+				crate::path::AbsolutePath::new("/b.md").unwrap(),
 				make_changeset("beta", crate::model::changeset::ChangeType::Major),
 			),
 		];
@@ -299,7 +300,7 @@ mod tests {
 			.save()
 			.unwrap();
 
-		let path = PathBuf::from("test.md");
+		let path = crate::path::AbsolutePath::new("/test.md").unwrap();
 		let mut pkgs = std::collections::BTreeMap::new();
 		pkgs.insert(
 			"my-pkg".to_string(),

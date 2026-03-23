@@ -81,7 +81,7 @@ mod tests {
 			let config = PrepareConfig {
 				dependency_bump: variant,
 			};
-			let serialized = toml::to_string(&config.data).unwrap();
+			let serialized = toml::to_string(&config).unwrap();
 			assert!(
 				serialized.contains(&format!("dependency_bump = \"{expected}\"")),
 				"Expected 'dependency_bump = \"{expected}\"' in:\n{serialized}"
@@ -118,7 +118,7 @@ mod tests {
 		let config = PrepareConfig {
 			dependency_bump: DependencyBump::Match,
 		};
-		let serialized = toml::to_string(&config.data).unwrap();
+		let serialized = toml::to_string(&config).unwrap();
 		let deserialized: PrepareConfig = toml::from_str(&serialized).unwrap();
 		assert_eq!(config, deserialized);
 	}

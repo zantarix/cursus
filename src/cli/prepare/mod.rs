@@ -90,7 +90,7 @@ pub(super) struct VersionPlan {
 ///
 /// Returns the full version plan for the prepare run.
 fn compute_version_plan(
-	changesets: &[(PathBuf, Changeset)],
+	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	args: &PrepareArgs,
 	config: &Config,
 	projects: &[Project],
