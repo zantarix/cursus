@@ -114,6 +114,10 @@ pub struct Config {
 	env: crate::Env,
 }
 
+// Debug and Clone are derived-equivalent but implemented manually because
+// Env doesn't participate in PartialEq (two configs are equal when their
+// persisted data matches, regardless of runtime environment).
+
 impl std::fmt::Debug for Config {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("Config")
@@ -139,12 +143,6 @@ impl PartialEq for Config {
 }
 
 impl Eq for Config {}
-
-impl Serialize for Config {
-	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		self.data.serialize(serializer)
-	}
-}
 
 impl Deref for Config {
 	type Target = ConfigData;

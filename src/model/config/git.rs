@@ -310,7 +310,7 @@ mod tests {
 			.with_tag_format(TagFormat::Prefixed)
 			.with_extra_files(vec!["custom.lock".to_string()])
 			.with_prepare_commit_message("chore: bump versions".to_string());
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		let deserialized: GitConfig = toml::from_str(&toml_str).unwrap();
 		assert_eq!(config, deserialized);
 	}
@@ -318,14 +318,14 @@ mod tests {
 	#[test]
 	fn git_config_serializes_enabled_true() {
 		let config = GitConfig::enabled_config();
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		assert!(toml_str.contains("enabled = true"));
 	}
 
 	#[test]
 	fn git_config_serializes_omits_enabled_when_none() {
 		let config = GitConfig::default();
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		assert!(
 			!toml_str.contains("enabled"),
 			"None enabled should be omitted"
@@ -335,7 +335,7 @@ mod tests {
 	#[test]
 	fn git_config_serializes_omits_strategy_when_none() {
 		let config = GitConfig::default();
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		assert!(
 			!toml_str.contains("strategy"),
 			"None strategy should be omitted"
@@ -345,7 +345,7 @@ mod tests {
 	#[test]
 	fn git_config_serializes_omits_release_branch_prefix_when_none() {
 		let config = GitConfig::default();
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		assert!(
 			!toml_str.contains("release_branch_prefix"),
 			"None release_branch_prefix should be omitted"
@@ -446,7 +446,7 @@ mod tests {
 	fn prepare_commit_message_serializes_when_set() {
 		let config =
 			GitConfig::default().with_prepare_commit_message("chore: bump versions".to_string());
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		assert!(
 			toml_str.contains("prepare_commit_message = \"chore: bump versions\""),
 			"Custom message should be serialized, got: {toml_str}"
@@ -456,7 +456,7 @@ mod tests {
 	#[test]
 	fn prepare_commit_message_omitted_when_not_set() {
 		let config = GitConfig::default();
-		let toml_str = toml::to_string(&config).unwrap();
+		let toml_str = toml::to_string(&config.data).unwrap();
 		assert!(
 			!toml_str.contains("prepare_commit_message"),
 			"Default message should not be serialized, got: {toml_str}"

@@ -4,7 +4,7 @@ use super::*;
 fn config_serializes_with_sections() {
 	let dir = temp_dir();
 	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
-	let toml_str = toml::to_string(&config).unwrap();
+	let toml_str = toml::to_string(&config.data).unwrap();
 	assert!(toml_str.contains("[npm]"));
 	assert!(toml_str.contains("enabled = true"));
 }
@@ -74,7 +74,7 @@ fn deserialize_config_without_path() {
 fn serialize_config_omits_none_path() {
 	let dir = temp_dir();
 	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
-	let toml_str = toml::to_string(&config).unwrap();
+	let toml_str = toml::to_string(&config.data).unwrap();
 	assert!(!toml_str.contains("path"), "None path should be omitted");
 }
 
@@ -83,7 +83,7 @@ fn serialize_config_includes_some_path() {
 	let dir = temp_dir();
 	let mut config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
-	let toml_str = toml::to_string(&config).unwrap();
+	let toml_str = toml::to_string(&config.data).unwrap();
 	assert!(
 		toml_str.contains("path = \"frontend\""),
 		"Some path should be serialized, got: {toml_str}"
