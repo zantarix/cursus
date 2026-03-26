@@ -16,7 +16,7 @@ We will document the following founding constraints and choices as the baseline 
 
 ### Claude Code for development
 
->![INFO]
+>[!IMPORTANT]
 > As with the most of the rest of this repo, the other sections of this document were AI written, with guidance. This section is 100% human. To anyone who interacts with this repo, I have one promise. If something says it's from me, then it is from me and hasn't gone through a bot. That is just common decency.
 
 One of the leading reasons for me starting this project was to stress test AI coding agents and see how good, or bad, they really were. From day one, there has been an explicit goal to be hands off with the precise code that is written and only provide feedback in the form of reviews and design work.
