@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -16,7 +16,7 @@ The current `run_with()` entry point takes `(cli, cwd, env)`, discovers the git 
 
 ## Decision
 
-We will introduce a `Git` trait that abstracts all git operations behind a dynamic dispatch boundary, and store it on `Env` as `Option<Arc<dyn Git>>`.
+We will introduce a `Git` trait that abstracts all git operations behind a dynamic dispatch boundary, and store it on `Env` as `Arc<dyn Git>`.
 
 The trait will contain 20 methods spanning three categories:
 
@@ -26,29 +26,29 @@ The trait will contain 20 methods spanning three categories:
 
 **Read-only queries:**
 
-- `status_porcelain`, `current_branch`, `tag_exists`, `remote_origin_url`, `rev_list_count`, `log_message`, `log_subject`, `log_added_commit`, `diff_tree_names`, `diff_names`
+- `is_dirty`, `current_branch`, `tag_exists`, `remote_origin_url`, `rev_list_count`, `log_message`, `log_subject`, `log_added_commit`, `diff_tree_names`, `diff_names`
 
 **Mutations:**
 
 - `add`, `commit`, `tag`, `push`, `checkout`, `checkout_or_reset_branch`, `force_push_branch`, `delete_tag`, `push_tag`
 
-`GitWorkdir` will become the concrete implementation of this trait, preserving its current behaviour of delegating to `CommandRunner` via `env.run()` and `env.run_mut()`. A `RecordingGit` test double will be provided for in-memory test scenarios.
+`GitWorkdir` will become the concrete implementation of this trait, preserving its current behaviour of delegating to `CommandRunner` for subprocess execution. Tests use `RecordingCommandRunner` with `GitWorkdir` to assert on git operations at the subprocess level.
 
-Git is optional on `Env`, set via a `.with_git()` builder method and accessed via `env.git() -> Option<&dyn Git>`. Some commands (such as `init`) need only the git workdir path for filesystem operations, not the full git operation surface. Making it optional avoids forcing callers to construct a `Git` implementation when one is not needed.
+Git is required on `Env`, accessed via `env.git() -> &dyn Git`. `Env::new()` takes a `git` parameter alongside the other dependencies. Every subcommand that needs git accesses it through `Env`; the `init` command constructs its own `Env` with a `GitWorkdir` pointed at the discovered workdir.
 
 Subcommand functions will drop their `git: &GitWorkdir` parameter and instead access git via `env.git()` or through the `Config` which carries the `Env`. This aligns git access with how `CommandRunner`, `GitHubClient`, and other injected dependencies are already consumed.
 
 The `run_with()` library entry point will change its signature from `(cli, cwd, env)` to `(cli, env)`. Git discovery (finding the `.git` directory by walking up from the working directory) will move to the caller or to the `run()` convenience function, which continues to accept `cwd`. The `find_git_workdir()` function will become a public utility.
 
-Dry-run handling for git mutations requires no changes. `GitWorkdir` uses `env.run_mut()` for all mutating operations, which is already intercepted by the `DryRunCommandRunner` decorator per [ADR-017](017-late-guard-dry-run-pattern.md). The construction order in `run_with()` ensures `GitWorkdir` is created after the dry-run wrapper is applied to `Env`, so all mutations are automatically suppressed in dry-run mode without any trait-level dry-run awareness.
+Dry-run handling for git mutations requires no changes. `GitWorkdir` uses its `CommandRunner` for all mutating operations, which is already intercepted by the `DryRunCommandRunner` decorator per [ADR-017](017-late-guard-dry-run-pattern.md). The construction order in `run_with()` ensures `GitWorkdir` is created after the dry-run wrapper is applied to `Env`, so all mutations are automatically suppressed in dry-run mode without any trait-level dry-run awareness.
 
-`GitWorkdir` will continue to hold `Env` internally for access to `CommandRunner`. The constructor remains `GitWorkdir::new(&env, path)`.
+`GitWorkdir` takes an `Arc<dyn CommandRunner>` and an `AbsolutePath` directly, rather than accepting a full `Env`. This narrows the dependency to exactly what `GitWorkdir` needs -- a command runner and a path -- keeping the struct decoupled from the broader `Env` type.
 
 ## Consequences
 
 ### Positive
 
-- Tests can use `RecordingGit` to assert on git operations at a semantic level (e.g. "commit was called with this message") rather than parsing raw subprocess invocations from `RecordingCommandRunner`
+- Tests can use `RecordingCommandRunner` with `GitWorkdir` to capture and assert on git subprocess invocations, maintaining full test isolation without needing real repositories
 - The dependency injection model becomes consistent: all major I/O boundaries (`CommandRunner`, `GitHubClient`, `Git`) are traits on `Env`
 - Non-local git backends (forge APIs, in-memory implementations) become possible without touching any consuming code
 - Removing the `git: &GitWorkdir` threading parameter from every subcommand function simplifies their signatures
@@ -56,15 +56,14 @@ Dry-run handling for git mutations requires no changes. `GitWorkdir` uses `env.r
 
 ### Negative
 
-- The `Git` trait has 20 methods, which is a large surface area; adding new git operations requires updating the trait, `GitWorkdir`, and `RecordingGit`
-- `Option<Arc<dyn Git>>` means call sites that require git must handle the `None` case, adding a small amount of boilerplate compared to the current guaranteed `&GitWorkdir` parameter
+- The `Git` trait has 20 methods, which is a large surface area; adding new git operations requires updating the trait and `GitWorkdir`
 - Dynamic dispatch via `dyn Git` prevents inlining of git method calls, though the cost is negligible since every method performs subprocess I/O
 
 ### Neutral
 
 - `GitWorkdir` continues to exist as a struct; the change is additive (new trait) rather than a rewrite
 - The `find_git_workdir()` function moves from private to public but its logic is unchanged
-- Existing integration tests that construct real git repositories remain valid; they now construct a `GitWorkdir` and inject it via `env.with_git()` instead of relying on internal discovery
+- Existing integration tests that construct real git repositories remain valid; they now construct a `GitWorkdir` and pass it to `Env::new()` instead of relying on internal discovery
 
 ## Alternatives Considered
 
@@ -72,10 +71,10 @@ Dry-run handling for git mutations requires no changes. `GitWorkdir` uses `env.r
 
 This would avoid putting git on `Env` by threading a `&dyn Git` argument through `run_with()` and into each subcommand. This was rejected because it creates an inconsistency: `CommandRunner`, `GitHubClient`, and other dependencies are already accessed via `Env`, and adding a parallel parameter-threading pattern would fragment the dependency injection approach. It would also not simplify subcommand signatures since they would still need an extra parameter.
 
-### Have `GitWorkdir` take `Arc<dyn CommandRunner>` directly instead of `Env`
+### Have `GitWorkdir` hold a full `Env` instead of `Arc<dyn CommandRunner>`
 
-`GitWorkdir` currently holds a full `Env` to access `CommandRunner`. An alternative would be to narrow the dependency to just `Arc<dyn CommandRunner>`. This was rejected because `Env` may carry additional context needed by `GitWorkdir` in the future, and the `GitWorkdir::new(&env, path)` constructor is the established pattern. The `Env` clone is cheap (it contains only `Arc` pointers and small scalars).
+`GitWorkdir` could accept a full `Env` reference to access `CommandRunner` and any future dependencies. This was rejected because `GitWorkdir` only needs a command runner and a path; accepting `Env` would create a circular dependency concern (since `Env` holds `Arc<dyn Git>`, and `GitWorkdir` implements `Git`) and would over-couple `GitWorkdir` to the broader dependency injection container. Narrowing to `Arc<dyn CommandRunner>` keeps the struct focused and avoids the circularity.
 
-### Make Git required (not optional) on `Env`
+### Make Git optional on `Env`
 
-Instead of `Option<Arc<dyn Git>>`, always require a `Git` implementation on `Env`. This was rejected because the `init` command needs only the git workdir path for filesystem operations (writing `.cursus/config.toml`) and does not perform any git commands. Forcing callers to construct a full `Git` implementation for commands that do not use it would be wasteful and would couple `init` to the git abstraction unnecessarily.
+Store git as `Option<Arc<dyn Git>>` with a `.with_git()` builder method, so commands that do not need git (such as `init`) can skip constructing a `Git` implementation. This was rejected because in practice every code path that reaches `run_with()` has a discovered git workdir, and the `init` command constructs its own `Env` with a `GitWorkdir` pointed at the project root. Making git optional would add `None`-handling boilerplate at every call site for a case that does not arise in practice.

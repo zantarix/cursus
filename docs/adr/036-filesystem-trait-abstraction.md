@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -12,7 +12,7 @@ Cursus already abstracts two of its three external I/O boundaries behind traits:
 
 The existing `CommandRunner` and `GitHubClient` abstractions demonstrate that trait-based I/O boundaries integrate well with Cursus's architecture: they compose cleanly on `Env`, support decorator patterns (e.g. `DryRunCommandRunner`), and enable test doubles without filesystem side effects. A `Filesystem` trait would complete this picture, giving the library a uniform, injectable interface for all external I/O.
 
-Several modules also contain free helper functions (e.g. `read_cargo_toml`, `read_package_json`) that read files on behalf of an adapter. These functions sit outside any struct and call `std::fs` directly, making them impossible to intercept. Since the adapter structs already hold `Env`, these helpers can be refactored into methods on their respective adapters, gaining access to the `Filesystem` through the existing dependency injection path.
+Several modules also contain free helper functions (e.g. `read_cargo_toml`, `read_package_json`) that read files on behalf of an adapter. These functions sit outside any struct and call `std::fs` directly, making them impossible to intercept without a trait boundary. Accepting `&dyn Filesystem` as a parameter gives these functions access to the abstraction without requiring them to be moved onto adapter structs.
 
 ## Decision
 
@@ -60,9 +60,13 @@ Unlike `GitHubClient` (which is `Option<Arc<dyn GitHubClient>>` because not all 
 
 All path-accepting trait methods will take `&AbsolutePath` rather than `&Path`. A codebase audit confirmed that every production filesystem call site derives its path from an `AbsolutePath`. Using `&AbsolutePath` in the trait signature enforces this invariant at the type level, preventing accidental use with relative paths. Since `AbsolutePath` implements `Deref<Target = Path>`, the `LocalFilesystem` implementation can still delegate to `std::fs` functions that accept `AsRef<Path>` without any conversion. The `glob` method keeps `&str` since glob patterns are not paths.
 
-### Free helpers become adapter methods
+### Free helpers accept `&dyn Filesystem`
 
-Free helper functions that read files (e.g. `read_cargo_toml`, `read_package_json`) will be refactored into methods on their respective adapter structs (`CargoAdapter`, `NpmAdapter`). The adapters already hold `Env`, so they can access `env.fs()` without any new plumbing. This eliminates the last remaining direct `std::fs` calls outside the `Filesystem` implementation.
+Free helper functions that read files (e.g. `read_cargo_toml`, `read_package_json`) will remain as free functions rather than being moved onto adapter structs. They will accept a `&dyn Filesystem` parameter, allowing callers to pass the trait object from `Env`. This preserves the existing module structure -- these helpers are used across multiple call sites and their free-function form is a better fit than tying them to a specific adapter -- while still routing all I/O through the `Filesystem` trait.
+
+### Streaming file upload exception
+
+`src/github/rest.rs` retains a direct `std::fs::File::open` call for streaming file uploads to GitHub Releases. The `Filesystem` trait's `read` method returns `Vec<u8>`, which would require loading entire release artifacts into memory before uploading. Since release binaries can be tens of megabytes, streaming from a file handle is the correct approach. This exception is scoped to a single call site and will be addressed in a future ADR if a streaming read method or a dedicated upload abstraction is needed.
 
 ## Consequences
 
@@ -71,7 +75,7 @@ Free helper functions that read files (e.g. `read_cargo_toml`, `read_package_jso
 - Completes the I/O abstraction triad (`CommandRunner`, `GitHubClient`, `Filesystem`), giving the library a fully injectable interface for all external interactions.
 - Enables non-local backends (e.g. remote code forges) by providing a seam that callers can implement against their own storage.
 - The pattern is already proven in this codebase by `CommandRunner` and `GitHubClient`, so the team has established conventions to follow.
-- Moving free file-reading helpers into adapter methods reduces the number of standalone functions with implicit filesystem dependencies.
+- Free file-reading helpers gain an explicit `&dyn Filesystem` dependency, making their I/O visible and injectable without restructuring modules.
 
 ### Negative
 
@@ -83,6 +87,7 @@ Free helper functions that read files (e.g. `read_cargo_toml`, `read_package_jso
 
 - The dry-run mechanism is unchanged. [ADR-017](017-late-guard-dry-run-pattern.md)'s call-site guards continue to handle filesystem write suppression; the `Filesystem` trait is orthogonal to dry-run.
 - `AbsolutePath::subpath()` and `safe_glob()` will need to accept a `&dyn Filesystem` (or access it through `Env`) instead of calling `std::fs::canonicalize` directly. The security invariant they enforce is preserved; only the implementation path changes.
+- `src/github/rest.rs` retains a direct `std::fs::File::open` call for streaming file uploads, since the `Filesystem` trait does not support streaming reads. This is a known, scoped exception to the "all I/O through the trait" principle, to be revisited if non-local backends need to upload artifacts.
 - This decision supersedes the rejection rationale in [ADR-030](030-bin-lib-crate-separation.md)'s "Full trait abstraction for filesystem access" alternative. [ADR-030](030-bin-lib-crate-separation.md)'s core decision (environment injection via `Env`) remains valid and is extended, not replaced.
 
 ## Alternatives Considered

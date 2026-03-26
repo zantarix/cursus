@@ -55,7 +55,7 @@ Key differences from old style:
 - ADR-019: Accepted (improved init workflow)
 - ADR-020: Accepted (TUI screen submodule structure)
 - ADR-021: Accepted (commit references in changelog entries)
-- ADR-022: Proposed (distribution strategy)
+- ADR-022: Accepted (distribution strategy)
 - ADR-023: Accepted (dependency propagation bumps)
 - ADR-024: Accepted (linked package versions)
 - ADR-025: Accepted (auto changeset from conventional commit)
@@ -68,8 +68,8 @@ Key differences from old style:
 - ADR-032: Accepted (verify changeset on feature branch)
 - ADR-033: Accepted (Windows shell execution)
 - ADR-034: Accepted (compile-time embedded localisation via fluent-templates)
-- ADR-035: Proposed (Git trait abstraction for all git operations)
-- ADR-036: Proposed (Filesystem trait for file I/O abstraction)
+- ADR-035: Accepted (Git trait abstraction for all git operations)
+- ADR-036: Accepted (Filesystem trait for file I/O abstraction)
 - Next ADR number: 037
 
 ## Project ADR Rules (from CLAUDE.md)
