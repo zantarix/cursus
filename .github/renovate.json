@@ -23,6 +23,11 @@
 			"groupName": "docs site dependencies",
 			"matchFileNames": ["docs/site/package.json"],
 			"matchPackageNames": ["*"]
+		},
+		{
+			"description": "Workspace dependency updates are fix-level (patch changeset)",
+			"matchDepTypes": ["workspace.dependencies"],
+			"semanticCommitType": "fix"
 		}
 	]
 }

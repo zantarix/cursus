@@ -24,12 +24,12 @@ test-support = []
 
 [dev-dependencies]
 cursus = { path = "../cursus", features = ["test-support"], default-features = false }
-httpmock.workspace = true
-insta.workspace = true
-jsonschema.workspace = true
-proptest.workspace = true
+httpmock = "=0.8.3"
+insta = "=1.46.3"
+jsonschema = "=0.45.0"
+proptest = "=1.10.0"
 serde_json.workspace = true
-tempfile.workspace = true
+tempfile = "=3.27.0"
 toml.workspace = true
 
 [build-dependencies]
