@@ -4,48 +4,48 @@ default_to_workspace = false
 [tasks.coverage]
 clear = true
 command = "cargo"
-args = ["llvm-cov", "--summary-only", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
+args = ["llvm-cov", "--workspace", "--summary-only", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 # Note: Branch coverage target is 80%, but cargo-llvm-cov doesn't support --fail-under-branches
 # Manually verify branch coverage in the output
 
 [tasks.coverage-html]
 clear = true
 command = "cargo"
-args = ["llvm-cov", "--html", "--open", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
+args = ["llvm-cov", "--workspace", "--html", "--open", "--branch", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 
 [tasks.release-linux-x86_64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "x86_64-unknown-linux-musl"]
 
 [tasks.release-linux-aarch64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "aarch64-unknown-linux-musl"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "aarch64-unknown-linux-musl"]
 
 [tasks.release-linux-riscv64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "riscv64gc-unknown-linux-musl"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "riscv64gc-unknown-linux-musl"]
 
 [tasks.release-linux]
 dependencies = ["release-linux-x86_64", "release-linux-aarch64", "release-linux-riscv64"]
 
 [tasks.release-macos-x86_64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "x86_64-apple-darwin"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "x86_64-apple-darwin"]
 
 [tasks.release-macos-aarch64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "aarch64-apple-darwin"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "aarch64-apple-darwin"]
 
 [tasks.release-macos]
 dependencies = ["release-macos-x86_64", "release-macos-aarch64"]
 
 [tasks.release-windows-x86_64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "x86_64-pc-windows-gnullvm"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "x86_64-pc-windows-gnullvm"]
 
 [tasks.release-windows-aarch64]
 command = "cargo"
-args = ["zigbuild", "--release", "--target", "aarch64-pc-windows-gnullvm"]
+args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "aarch64-pc-windows-gnullvm"]
 
 [tasks.release-windows]
 dependencies = ["release-windows-x86_64", "release-windows-aarch64"]

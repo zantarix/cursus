@@ -10,13 +10,13 @@
 /target/
 
 # Cached files from build scripts
-/.cache/
+.cache/
 
 # npm compiled output, dependencies, and postinstall-downloaded binaries
 node_modules/
-/pkg/bin/download-binary.js
-/pkg/bin/cursus
-/pkg/bin/cursus.exe
+/packages/npm/bin/download-binary.js
+/packages/npm/bin/cursus
+/packages/npm/bin/cursus.exe
 
 # Just Claude things
 /.claude/worktrees

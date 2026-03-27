@@ -280,7 +280,7 @@ pub fn run_cursus_in_nix_shell(
 	cwd: &std::path::Path,
 ) -> (bool, String, String) {
 	let bin = env!("CARGO_BIN_EXE_cursus");
-	let flake_root = env!("CARGO_MANIFEST_DIR");
+	let flake_root = env!("CURSUS_WORKSPACE_ROOT");
 	let flake_ref = format!("{flake_root}#{shell_attr}");
 	let mut nix_args = vec!["develop", flake_ref.as_str(), "--command", bin];
 	nix_args.extend_from_slice(args);

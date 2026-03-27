@@ -41,14 +41,16 @@
 			in
 			{
 				packages.default = rustPlatform.buildRustPackage {
-					pname = cargoToml.package.name;
-					version = cargoToml.package.version;
+					pname = "cursus";
+					version = cargoToml.workspace.package.version;
 					src = ./.;
 					cargoLock.lockFile = ./Cargo.lock;
 
+					cargoBuildFlags = [ "-p" "cursus-bin" ];
+
 					# Skip nix-shell integration tests: they require `nix develop` which
 					# is not available inside the Nix sandbox.
-					cargoTestFlags = [ "--no-default-features" ];
+					cargoTestFlags = [ "--workspace" "--no-default-features" ];
 
 					# Required for managing the node module in this project
 					nativeBuildInputs = with pkgs; [

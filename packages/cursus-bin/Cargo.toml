@@ -1,0 +1,40 @@
+[package]
+name = "cursus-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cursus"
+path = "src/main.rs"
+
+[dependencies]
+cursus = { path = "../cursus" }
+anyhow.workspace = true
+clap.workspace = true
+log.workspace = true
+mutants.workspace = true
+sys-locale.workspace = true
+
+[features]
+default = ["nix-tests"]
+nix-tests = []
+# Exists so `cargo mutants --features test-support` does not error on this crate.
+test-support = []
+
+[dev-dependencies]
+cursus = { path = "../cursus", features = ["test-support"], default-features = false }
+httpmock.workspace = true
+insta.workspace = true
+jsonschema.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+
+[build-dependencies]
+# Pinned separately from workspace (no `json` feature needed for build script).
+ureq = { version = "=3.2.0" }
+
+[lints]
+workspace = true

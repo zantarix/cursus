@@ -1,4 +1,4 @@
-exclude_globs = ["src/main.rs"]
+exclude_globs = ["packages/cursus-bin/**"]
 # Disable nix tests in mutants
 no_default_features = true
 features = ["test-support"]

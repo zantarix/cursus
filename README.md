@@ -16,7 +16,7 @@ open a request if you need it to run a new platform.
 # Initialise Cursus in your repository
 cursus init
 
-# Record a change (interactive TUI)
+# Record a change
 cursus
 
 # Or non-interactively

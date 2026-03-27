@@ -1,10 +1,33 @@
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+	emit_workspace_root();
 	fetch_github_openapi_spec();
 	generate_windows_synchronization_lib()?;
 
 	Ok(())
+}
+
+/// Emits `CURSUS_WORKSPACE_ROOT` so integration tests can locate `flake.nix`.
+///
+/// Walks up from `CARGO_MANIFEST_DIR` until it finds a directory containing
+/// `flake.nix`, then sets the env var for compile-time access via `env!()`.
+fn emit_workspace_root() {
+	let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
+		Ok(d) => d,
+		Err(_) => return,
+	};
+	let mut dir = std::path::PathBuf::from(&manifest_dir);
+	loop {
+		if dir.join("flake.nix").exists() {
+			println!("cargo:rustc-env=CURSUS_WORKSPACE_ROOT={}", dir.display());
+			return;
+		}
+		if !dir.pop() {
+			eprintln!("cargo:warning=Could not find flake.nix above {manifest_dir}");
+			break;
+		}
+	}
 }
 
 const GITHUB_OPENAPI_URL: &str = "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2022-11-28.json";
@@ -37,6 +60,10 @@ fn fetch_github_openapi_spec() {
 		Err(_) => true,
 	};
 
+	// Always tell Cargo to only rerun when the cache file changes, avoiding
+	// unnecessary rebuilds from the default "rerun on any file change" behaviour.
+	println!("cargo:rerun-if-changed={spec_path}");
+
 	if !needs_fetch {
 		return;
 	}
@@ -44,9 +71,6 @@ fn fetch_github_openapi_spec() {
 	if std::fs::create_dir_all(&cache_dir).is_err() {
 		return;
 	}
-
-	// Inform Cargo that deleting the cache file should trigger a re-fetch.
-	println!("cargo:rerun-if-changed={spec_path}");
 
 	match ureq::get(GITHUB_OPENAPI_URL).call() {
 		Ok(mut response) => match response.body_mut().read_to_string() {

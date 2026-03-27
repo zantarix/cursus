@@ -1,0 +1,42 @@
+[package]
+name = "cursus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+fluent-templates.workspace = true
+glob.workspace = true
+jsonc-parser.workspace = true
+log.workspace = true
+mutants.workspace = true
+petname.workspace = true
+ratatui.workspace = true
+ratatui-textarea.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde-saphyr.workspace = true
+shell-escape.workspace = true
+sys-locale.workspace = true
+time.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+unic-langid.workspace = true
+ureq.workspace = true
+
+[features]
+test-support = []
+
+[dev-dependencies]
+cursus = { path = ".", features = ["test-support"], default-features = false }
+httpmock.workspace = true
+insta.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

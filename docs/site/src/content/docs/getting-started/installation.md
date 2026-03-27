@@ -30,7 +30,7 @@ This makes `cursus` available via `npx cursus` or in npm scripts.
 With a Rust toolchain installed:
 
 ```bash
-cargo install cursus
+cargo install cursus-bin
 ```
 
 This builds from source and installs the binary to `~/.cargo/bin/`.

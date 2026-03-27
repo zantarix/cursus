@@ -591,7 +591,6 @@ dependencies = [
  "httpmock",
  "insta",
  "jsonc-parser",
- "jsonschema",
  "log",
  "mutants",
  "petname",
@@ -609,6 +608,26 @@ dependencies = [
  "toml",
  "toml_edit",
  "unic-langid",
+ "ureq",
+]
+
+[[package]]
+name = "cursus-bin"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cursus",
+ "httpmock",
+ "insta",
+ "jsonschema",
+ "log",
+ "mutants",
+ "proptest",
+ "serde_json",
+ "sys-locale",
+ "tempfile",
+ "toml",
  "ureq",
 ]
 
