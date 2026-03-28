@@ -115,3 +115,97 @@ version = "0.1.0"
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].version.to_string(), "0.2.0");
 }
+
+#[test]
+fn write_version_workspace_inherited_updates_root() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+"#,
+	);
+
+	let member = dir.path().join("crates/member");
+	std::fs::create_dir_all(&member).unwrap();
+	write_cargo_toml(
+		&member,
+		r#"
+[package]
+name = "member"
+version.workspace = true
+"#,
+	);
+
+	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+	let info = project_info(dir.path(), "member", "crates/member");
+
+	let new_v: semver::Version = "2.0.0".parse().unwrap();
+	adapter.write_version(&info, &new_v, false).unwrap();
+
+	// Member should still have version.workspace = true
+	let member_toml = std::fs::read_to_string(member.join("Cargo.toml")).unwrap();
+	assert!(
+		member_toml.contains("version.workspace = true"),
+		"Member Cargo.toml should preserve workspace inheritance, got:\n{member_toml}"
+	);
+
+	// Workspace root should have the updated version
+	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+	assert!(
+		root_toml.contains("\"2.0.0\""),
+		"Workspace root should have updated version, got:\n{root_toml}"
+	);
+
+	// Re-enumerate to verify the resolved version
+	let projects = enumerate(dir.path()).unwrap();
+	assert_eq!(projects.len(), 1);
+	assert_eq!(projects[0].version.to_string(), "2.0.0");
+}
+
+#[test]
+fn write_version_workspace_inherited_dry_run_does_not_write() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+"#,
+	);
+
+	let member = dir.path().join("crates/member");
+	std::fs::create_dir_all(&member).unwrap();
+	write_cargo_toml(
+		&member,
+		r#"
+[package]
+name = "member"
+version.workspace = true
+"#,
+	);
+
+	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
+	let info = project_info(dir.path(), "member", "crates/member");
+
+	let new_v: semver::Version = "2.0.0".parse().unwrap();
+	adapter.write_version(&info, &new_v, true).unwrap();
+
+	// Workspace root should still have the original version
+	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+	assert!(
+		root_toml.contains("\"1.0.0\""),
+		"Dry-run should not update workspace root, got:\n{root_toml}"
+	);
+	assert!(
+		!root_toml.contains("\"2.0.0\""),
+		"Dry-run should not write new version, got:\n{root_toml}"
+	);
+}

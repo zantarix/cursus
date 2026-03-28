@@ -524,3 +524,115 @@ tempfile = "3.0"
 			.contains(&"tempfile".to_string())
 	);
 }
+
+#[test]
+fn enumerate_workspace_member_inherits_version() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "3.2.1"
+"#,
+	);
+
+	let member = dir.path().join("crates/member");
+	std::fs::create_dir_all(&member).unwrap();
+	write_cargo_toml(
+		&member,
+		r#"
+[package]
+name = "member"
+version.workspace = true
+"#,
+	);
+
+	let projects = enumerate(dir.path()).unwrap();
+	assert_eq!(projects.len(), 1);
+	assert_eq!(projects[0].version.to_string(), "3.2.1");
+	assert!(
+		projects[0].workspace_version,
+		"should flag workspace inheritance"
+	);
+}
+
+#[test]
+fn enumerate_workspace_true_without_workspace_version_fails() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[workspace]
+members = ["crates/*"]
+"#,
+	);
+
+	let member = dir.path().join("crates/member");
+	std::fs::create_dir_all(&member).unwrap();
+	write_cargo_toml(
+		&member,
+		r#"
+[package]
+name = "member"
+version.workspace = true
+"#,
+	);
+
+	let result = enumerate(dir.path());
+	assert!(result.is_err());
+	let msg = format!("{:#}", result.unwrap_err());
+	assert!(
+		msg.contains("version.workspace = true"),
+		"Error should mention version.workspace = true, got: {msg}"
+	);
+}
+
+#[test]
+fn enumerate_root_package_inherits_workspace_version() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[package]
+name = "root-crate"
+version.workspace = true
+
+[workspace]
+
+[workspace.package]
+version = "2.0.0"
+"#,
+	);
+
+	let projects = enumerate(dir.path()).unwrap();
+	assert_eq!(projects.len(), 1);
+	assert_eq!(projects[0].name, "root-crate");
+	assert_eq!(projects[0].version.to_string(), "2.0.0");
+	assert!(
+		projects[0].workspace_version,
+		"should flag workspace inheritance"
+	);
+}
+
+#[test]
+fn enumerate_literal_version_not_flagged_as_workspace() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[package]
+name = "my-crate"
+version = "1.0.0"
+"#,
+	);
+
+	let projects = enumerate(dir.path()).unwrap();
+	assert_eq!(projects.len(), 1);
+	assert!(
+		!projects[0].workspace_version,
+		"literal version should not be flagged as workspace"
+	);
+}

@@ -39,6 +39,41 @@ impl CargoAdapter {
 	fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
 		self.config.resolve_root(&self.adapter_root, self.env.fs())
 	}
+
+	/// Updates `[workspace.package].version` in the workspace root Cargo.toml.
+	fn write_workspace_package_version(
+		&self,
+		version: &Version,
+		dry_run: bool,
+	) -> anyhow::Result<()> {
+		let pm_root = self.resolve_root()?;
+		let root_path = pm_root.child("Cargo.toml");
+		log::debug!(
+			"Updating workspace root version at {} to {version}",
+			root_path.display()
+		);
+		let contents = self
+			.env
+			.fs()
+			.read_to_string(&root_path)
+			.with_context(|| format!("Failed to read {}", root_path.display()))?;
+		let mut doc = contents
+			.parse::<toml_edit::DocumentMut>()
+			.with_context(|| format!("Failed to parse {}", root_path.display()))?;
+		let ws_package = doc
+			.get_mut("workspace")
+			.and_then(|ws| ws.get_mut("package"))
+			.and_then(|p| p.as_table_like_mut())
+			.context("No [workspace.package] table in workspace root Cargo.toml")?;
+		ws_package.insert("version", toml_edit::value(version.to_string()));
+		if !dry_run {
+			self.env
+				.fs()
+				.write(&root_path, doc.to_string().as_bytes())
+				.with_context(|| format!("Failed to write {}", root_path.display()))?;
+		}
+		Ok(())
+	}
 }
 
 /// Represents the relevant fields from Cargo.toml.
@@ -57,8 +92,18 @@ struct CargoToml {
 #[derive(Debug, Deserialize)]
 struct Package {
 	name: String,
-	version: Option<String>,
+	/// Version can be a plain string (`"1.0.0"`) or a table (`{ workspace = true }`).
+	/// When workspace-inherited, the actual version is resolved from `[workspace.package]`.
+	version: Option<VersionField>,
 	publish: Option<PublishField>,
+}
+
+/// A version field that can be either a literal string or `{ workspace = true }`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum VersionField {
+	Literal(String),
+	Workspace { workspace: bool },
 }
 
 /// The publish field can be either a boolean or an array of registry names.
@@ -73,6 +118,23 @@ enum PublishField {
 #[derive(Debug, Deserialize)]
 struct Workspace {
 	members: Option<Vec<String>>,
+	package: Option<WorkspacePackage>,
+}
+
+impl CargoToml {
+	/// Returns the version from `[workspace.package].version`, if present.
+	fn workspace_version(&self) -> Option<&str> {
+		self.workspace
+			.as_ref()
+			.and_then(|ws| ws.package.as_ref())
+			.and_then(|pkg| pkg.version.as_deref())
+	}
+}
+
+/// The [workspace.package] section of Cargo.toml.
+#[derive(Debug, Deserialize)]
+struct WorkspacePackage {
+	version: Option<String>,
 }
 
 /// Reads and parses a Cargo.toml file from a directory.
@@ -97,16 +159,29 @@ fn read_cargo_toml(
 
 /// Extracts project metadata from a parsed Cargo.toml.
 ///
-/// Returns version, publishable status, and dependency names.
+/// `workspace_version` is the version from `[workspace.package].version` in the
+/// workspace root, used to resolve `version.workspace = true` in member crates.
+///
+/// Returns version, workspace-inherited flag, publishable status, and dependency names.
 fn extract_project_metadata(
 	cargo: &CargoToml,
 	package: &Package,
-) -> anyhow::Result<(Version, bool, Vec<String>)> {
-	// Extract version
-	let version_str = package
-		.version
-		.as_deref()
-		.context("Missing version in package section")?;
+	workspace_version: Option<&str>,
+) -> anyhow::Result<(Version, bool, bool, Vec<String>)> {
+	// Extract version — resolve workspace-inherited versions from [workspace.package]
+	let inherits_workspace = matches!(
+		&package.version,
+		Some(VersionField::Workspace { workspace: true })
+	);
+	let version_str: &str = match &package.version {
+		Some(VersionField::Literal(v)) => v,
+		Some(VersionField::Workspace { workspace: true }) => workspace_version.context(
+			"version.workspace = true but no [workspace.package].version found in workspace root",
+		)?,
+		Some(VersionField::Workspace { workspace: false }) | None => {
+			anyhow::bail!("Missing version in package section");
+		}
+	};
 	let version = version_str
 		.parse::<Version>()
 		.with_context(|| format!("Invalid semver version: {version_str}"))?;
@@ -131,7 +206,7 @@ fn extract_project_metadata(
 		dependency_names.extend(deps_map.keys().cloned());
 	}
 
-	Ok((version, publishable, dependency_names))
+	Ok((version, inherits_workspace, publishable, dependency_names))
 }
 
 /// Attempts to create a ProjectInfo from a workspace member directory.
@@ -140,6 +215,7 @@ fn extract_project_metadata(
 fn read_workspace_member(
 	member_path: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
+	workspace_version: Option<&str>,
 ) -> anyhow::Result<Option<ProjectInfo>> {
 	if !fs.is_dir(member_path) {
 		return Ok(None);
@@ -157,8 +233,8 @@ fn read_workspace_member(
 	let path = member_path.clone();
 
 	let manifest_path = member_path.child("Cargo.toml");
-	let (version, publishable, dependency_names) = extract_project_metadata(&cargo, package)
-		.with_context(|| {
+	let (version, inherits_workspace, publishable, dependency_names) =
+		extract_project_metadata(&cargo, package, workspace_version).with_context(|| {
 			format!(
 				"Failed to extract metadata from {}",
 				manifest_path.display()
@@ -172,6 +248,7 @@ fn read_workspace_member(
 		publishable,
 		dependency_names,
 		publishconfig_provenance: None,
+		workspace_version: inherits_workspace,
 	}))
 }
 
@@ -185,11 +262,12 @@ fn expand_member_pattern(
 	pm_root: &AbsolutePath,
 	pattern: &str,
 	fs: &dyn crate::filesystem::Filesystem,
+	workspace_version: Option<&str>,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
 	pm_root
 		.safe_glob(pattern, fs)?
 		.into_iter()
-		.map(|member_path| read_workspace_member(&member_path, fs))
+		.map(|member_path| read_workspace_member(&member_path, fs, workspace_version))
 		.filter_map(Result::transpose)
 		.collect()
 }
@@ -321,13 +399,14 @@ fn build_cargo_root_project_info(
 	pm_root: &AbsolutePath,
 	root_manifest_path: &Path,
 ) -> anyhow::Result<ProjectInfo> {
-	let (version, publishable, dependency_names) = extract_project_metadata(root_cargo, package)
-		.with_context(|| {
-			format!(
-				"Failed to extract metadata from {}",
-				root_manifest_path.display()
-			)
-		})?;
+	let (version, inherits_workspace, publishable, dependency_names) =
+		extract_project_metadata(root_cargo, package, root_cargo.workspace_version())
+			.with_context(|| {
+				format!(
+					"Failed to extract metadata from {}",
+					root_manifest_path.display()
+				)
+			})?;
 	Ok(ProjectInfo {
 		name: package.name.clone(),
 		path: pm_root.clone(),
@@ -335,6 +414,7 @@ fn build_cargo_root_project_info(
 		publishable,
 		dependency_names,
 		publishconfig_provenance: None,
+		workspace_version: inherits_workspace,
 	})
 }
 
@@ -358,6 +438,20 @@ impl PackageManagerAdapter for CargoAdapter {
 			.get_mut("package")
 			.and_then(|p| p.as_table_like_mut())
 			.with_context(|| format!("No [package] table in {}", manifest_path.display()))?;
+
+		// If version is inherited from workspace, update [workspace.package].version
+		// in the workspace root instead of overwriting the member's `version.workspace = true`.
+		let inherits_workspace = package
+			.get("version")
+			.and_then(|v| v.as_table_like())
+			.and_then(|t| t.get("workspace"))
+			.and_then(|v| v.as_bool())
+			== Some(true);
+
+		if inherits_workspace {
+			return self.write_workspace_package_version(version, dry_run);
+		}
+
 		package.insert("version", toml_edit::value(version.to_string()));
 		if !dry_run {
 			self.env
@@ -395,9 +489,10 @@ impl PackageManagerAdapter for CargoAdapter {
 		};
 
 		// Workspace with members
+		let ws_version = root_cargo.workspace_version();
 		let mut projects: Vec<ProjectInfo> = members
 			.iter()
-			.map(|pattern| expand_member_pattern(&pm_root, pattern, self.env.fs()))
+			.map(|pattern| expand_member_pattern(&pm_root, pattern, self.env.fs(), ws_version))
 			.collect::<anyhow::Result<Vec<_>>>()?
 			.into_iter()
 			.flatten()

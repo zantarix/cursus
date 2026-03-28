@@ -274,6 +274,9 @@ impl Config {
 	) -> anyhow::Result<Vec<Project>> {
 		let all_projects = package_manager::enumerate_projects(adapters.to_vec())?;
 
+		// Validate that workspace-version-inherited projects are covered by linked versions.
+		validate_workspace_version_linking(&all_projects, &self.data.linked_versions)?;
+
 		// Compile all ignore patterns upfront so we fail fast on invalid syntax.
 		let ignore_patterns = self
 			.data
@@ -426,6 +429,78 @@ pub fn load(env: &crate::Env) -> anyhow::Result<Config> {
 #[cfg(not(feature = "test-support"))]
 pub(crate) fn load(env: &crate::Env) -> anyhow::Result<Config> {
 	load_impl(env)
+}
+
+/// Validates that projects inheriting workspace versions are properly covered
+/// by linked-versions configuration.
+///
+/// When a project uses `version.workspace = true`, writing its version updates
+/// the workspace root's `[workspace.package].version`, which affects all other
+/// projects that inherit from it. This is only safe when all such projects are
+/// guaranteed to receive the same version — i.e. they are in the same linked
+/// group (or global linking is enabled).
+///
+/// # Errors
+///
+/// Returns an error if any projects inherit a workspace version but are not all
+/// covered by the same linked-versions group.
+fn validate_workspace_version_linking(
+	projects: &[package_manager::Project],
+	linked: &LinkedVersionsConfig,
+) -> anyhow::Result<()> {
+	let ws_projects: Vec<&str> = projects
+		.iter()
+		.filter(|p| p.workspace_version())
+		.map(|p| p.name())
+		.collect();
+
+	if ws_projects.is_empty() {
+		return Ok(());
+	}
+
+	// Global linking covers all projects — always safe.
+	if linked.is_global() {
+		return Ok(());
+	}
+
+	// Resolve groups to check if all workspace-version projects are in the same group.
+	let all_names: Vec<&str> = projects.iter().map(|p| p.name()).collect();
+	let groups = linked.resolve_groups(&all_names)?;
+
+	// Find which group each workspace-version project belongs to.
+	let mut group_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+	let mut unlinked: Vec<&str> = Vec::new();
+
+	for name in &ws_projects {
+		let group_idx = groups.iter().position(|g| g.iter().any(|n| n == name));
+		match group_idx {
+			Some(idx) => {
+				group_indices.insert(idx);
+			}
+			None => unlinked.push(name),
+		}
+	}
+
+	if !unlinked.is_empty() {
+		bail!(
+			"The following packages use version.workspace = true but are not in any \
+			 linked-versions group: {}. All packages sharing a workspace version must \
+			 be in the same linked-versions group (or use [linked-versions] enabled = true \
+			 for global linking).",
+			unlinked.join(", ")
+		);
+	}
+
+	if group_indices.len() > 1 {
+		bail!(
+			"Packages using version.workspace = true are spread across {} different \
+			 linked-versions groups. All packages sharing a workspace version must be \
+			 in the same linked-versions group.",
+			group_indices.len()
+		);
+	}
+
+	Ok(())
 }
 
 #[cfg(test)]

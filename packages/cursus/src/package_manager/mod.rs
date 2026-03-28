@@ -37,6 +37,13 @@ pub struct ProjectInfo {
 	///
 	/// Only populated by the npm adapter; `None` for other adapters.
 	pub publishconfig_provenance: Option<bool>,
+	/// Whether this project inherits its version from the workspace root
+	/// (e.g. `version.workspace = true` in Cargo).
+	///
+	/// When `true`, [`PackageManagerAdapter::write_version`] updates the workspace
+	/// root rather than this project's manifest. All projects sharing a workspace
+	/// version must be in the same linked-versions group.
+	pub workspace_version: bool,
 }
 
 #[cfg(test)]
@@ -59,6 +66,7 @@ impl ProjectInfo {
 			publishable: true,
 			dependency_names: Vec::new(),
 			publishconfig_provenance: None,
+			workspace_version: false,
 		}
 	}
 }
@@ -163,6 +171,11 @@ impl Project {
 		&self.info.dependency_names
 	}
 
+	/// Returns `true` if this project inherits its version from the workspace root.
+	pub fn workspace_version(&self) -> bool {
+		self.info.workspace_version
+	}
+
 	/// Updates a dependency version in this project's manifest file.
 	///
 	/// When `dry_run` is `true`, detects which files would change but does not write them.
@@ -190,6 +203,13 @@ impl Project {
 	pub fn new_test(name: &str, path: &str) -> Self {
 		use crate::command::test_support::RecordingCommandRunner;
 		Self::new_test_with_runner(name, path, Arc::new(RecordingCommandRunner::new(0)))
+	}
+
+	/// Sets the `workspace_version` flag on this test project.
+	#[cfg(test)]
+	pub fn with_workspace_version(mut self, workspace_version: bool) -> Self {
+		self.info.workspace_version = workspace_version;
+		self
 	}
 
 	/// Creates a `Project` with specific dependency names for use in unit tests.
@@ -224,6 +244,7 @@ impl Project {
 				publishable: true,
 				dependency_names: Vec::new(),
 				publishconfig_provenance: None,
+				workspace_version: false,
 			},
 			adapter: Arc::new(NpmAdapter::new(
 				NpmConfig::default(),

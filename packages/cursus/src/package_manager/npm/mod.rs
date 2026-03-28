@@ -228,6 +228,7 @@ fn read_workspace_project(
 		publishable,
 		dependency_names,
 		publishconfig_provenance,
+		workspace_version: false,
 	}))
 }
 
@@ -276,6 +277,7 @@ fn build_npm_root_project_info(
 		publishable,
 		dependency_names,
 		publishconfig_provenance,
+		workspace_version: false,
 	})
 }
 

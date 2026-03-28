@@ -26,3 +26,4 @@ pub(super) mod ignore;
 pub(super) mod load_projects;
 pub(super) mod persistence;
 pub(super) mod serialization;
+pub(super) mod workspace_version;
