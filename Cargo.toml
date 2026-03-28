@@ -29,7 +29,7 @@ time = { version = "=0.3.47", default-features = false, features = ["std"] }
 toml = "=1.0.6"
 toml_edit = "=0.25.4"
 unic-langid = "=0.9.6"
-ureq = { version = "=3.2.0", features = ["json"] }
+ureq = { version = "=3.3.0", features = ["json"] }
 
 [workspace.lints.clippy]
 too_many_lines = "warn"

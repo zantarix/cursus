@@ -34,7 +34,7 @@ toml.workspace = true
 
 [build-dependencies]
 # Pinned separately from workspace (no `json` feature needed for build script).
-ureq = { version = "=3.2.0" }
+ureq = { version = "=3.3.0" }
 
 [lints]
 workspace = true
