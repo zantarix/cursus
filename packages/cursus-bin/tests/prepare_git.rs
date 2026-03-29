@@ -766,11 +766,11 @@ async fn prepare_branch_strategy_rerun_is_idempotent() {
 async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	// Full end-to-end test: prepare with branch strategy + GitHub enabled.
 	// First run creates a PR; second run finds the existing PR and updates it.
-	// Uses httpmock to intercept the GitHub REST API calls made by RestGitHubClient.
+	// Uses httpmock to intercept the GitHub REST API calls made via octocrab.
 	use std::sync::Arc;
 
 	use cursus::command::RealCommandRunner;
-	use cursus::github::RestGitHubClient;
+	use cursus::github::OctocrabGitHubClient;
 	use cursus::github::client::GitHubClient;
 	use cursus::model::config::CargoConfig;
 	use cursus::model::config::{Config, GitHubConfig};
@@ -809,13 +809,16 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	let release_branch = format!("cursus-release/{initial_branch}");
 	let head_param = format!("acme:{release_branch}");
 
-	// Build a fresh Env with a RestGitHubClient pointing at the mock server.
+	// Build a fresh Env with an OctocrabGitHubClient pointing at the mock server.
 	// A new client is created for each run because Env is consumed by cursus::run.
 	let make_env = || {
-		let client = Arc::new(
-			RestGitHubClient::new("test-token".to_string())
-				.with_base_urls(api_url.clone(), api_url.clone()),
-		) as Arc<dyn GitHubClient>;
+		let octocrab_client = octocrab::Octocrab::builder()
+			.personal_token("test-token".to_string())
+			.base_uri(&api_url)
+			.unwrap()
+			.build()
+			.unwrap();
+		let client = Arc::new(OctocrabGitHubClient::new(octocrab_client)) as Arc<dyn GitHubClient>;
 		let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
 		let path = AbsolutePath::new(dir.path()).unwrap();
 		let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
@@ -836,7 +839,7 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 		when.method(POST).path("/repos/acme/app/pulls");
 		then.status(201)
 			.header("Content-Type", "application/json")
-			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
+			.body(r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}"#);
 	});
 
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
@@ -857,13 +860,13 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.query_param("state", "open");
 		then.status(200)
 			.header("Content-Type", "application/json")
-			.body(r#"[{"number": 7, "html_url": "https://github.com/acme/app/pull/7"}]"#);
+			.body(r#"[{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}]"#);
 	});
 	let mock_update = server.mock(|when, then| {
 		when.method(PATCH).path("/repos/acme/app/pulls/7");
 		then.status(200)
 			.header("Content-Type", "application/json")
-			.body(r#"{"id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7"}"#);
+			.body(r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}"#);
 	});
 
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);

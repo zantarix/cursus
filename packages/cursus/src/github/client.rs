@@ -18,8 +18,8 @@ pub struct PullRequest {
 /// Abstract interface for GitHub API operations.
 ///
 /// All methods are async. The production implementation uses
-/// REST API calls over ureq. The `test_support` module provides a
-/// recording fake for unit tests.
+/// octocrab. The `test_support` module provides a recording fake
+/// for unit tests.
 #[async_trait]
 pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// Creates a GitHub Release for the given tag, returning the release ID.

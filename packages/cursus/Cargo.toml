@@ -27,15 +27,14 @@ chrono.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "fs"] }
 toml.workspace = true
 toml_edit.workspace = true
+octocrab.workspace = true
 unic-langid.workspace = true
-ureq.workspace = true
 
 [features]
 test-support = []
 
 [dev-dependencies]
 cursus = { path = ".", features = ["test-support"], default-features = false }
-httpmock = "=0.8.3"
 insta = "=1.46.3"
 proptest = "=1.10.0"
 tempfile = "=3.27.0"

@@ -71,7 +71,7 @@ Key differences from old style:
 - ADR-035: Accepted (Git trait abstraction for all git operations)
 - ADR-036: Accepted (Filesystem trait for file I/O abstraction)
 - ADR-037: Accepted (async library with tokio runtime)
-- ADR-038: Proposed (octocrab-based shared GitHubClient)
+- ADR-038: Accepted (octocrab-based shared GitHubClient)
 - Next ADR number: 039
 
 ## Project ADR Rules (from CLAUDE.md)

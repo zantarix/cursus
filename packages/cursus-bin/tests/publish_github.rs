@@ -9,14 +9,18 @@ use cursus::test_logging::{init_test_logger, take_logs};
 
 /// Runs cursus in-process with a fake GitHub token configured.
 ///
-/// Equivalent to `run_cursus` but with a `RestGitHubClient` set up
+/// Equivalent to `run_cursus` but with an `OctocrabGitHubClient` set up
 /// using the provided token string, matching what `main.rs` does at runtime.
 async fn run_cursus_with_token(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 	token: &str,
 ) -> anyhow::Result<std::process::ExitCode> {
-	let github_client = Arc::new(cursus::github::RestGitHubClient::new(token.to_string()))
+	let octocrab_client = octocrab::Octocrab::builder()
+		.personal_token(token.to_string())
+		.build()
+		.unwrap();
+	let github_client = Arc::new(cursus::github::OctocrabGitHubClient::new(octocrab_client))
 		as Arc<dyn cursus::github::client::GitHubClient>;
 	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
 	let path = cursus::path::AbsolutePath::new(cwd).unwrap();

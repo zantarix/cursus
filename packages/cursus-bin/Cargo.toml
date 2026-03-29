@@ -14,6 +14,7 @@ anyhow.workspace = true
 clap.workspace = true
 log.workspace = true
 mutants.workspace = true
+octocrab.workspace = true
 sys-locale.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
@@ -25,18 +26,13 @@ test-support = []
 
 [dev-dependencies]
 cursus = { path = "../cursus", features = ["test-support"], default-features = false }
-httpmock = "=0.8.3"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+httpmock = "=0.8.3"
 insta = "=1.46.3"
-jsonschema = "=0.45.0"
 proptest = "=1.10.0"
 serde_json.workspace = true
 tempfile = "=3.27.0"
 toml.workspace = true
-
-[build-dependencies]
-# Pinned separately from workspace (no `json` feature needed for build script).
-ureq = { version = "=3.2.0" }
 
 [lints]
 workspace = true

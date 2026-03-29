@@ -2,7 +2,6 @@ use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	emit_workspace_root();
-	fetch_github_openapi_spec();
 	generate_windows_synchronization_lib()?;
 
 	Ok(())
@@ -26,61 +25,6 @@ fn emit_workspace_root() {
 		if !dir.pop() {
 			eprintln!("cargo:warning=Could not find flake.nix above {manifest_dir}");
 			break;
-		}
-	}
-}
-
-const GITHUB_OPENAPI_URL: &str = "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2022-11-28.json";
-
-/// Fetches and caches the GitHub OpenAPI spec for use in integration tests.
-///
-/// Writes the spec to `.cache/github-openapi.json` relative to the crate root.
-/// Refreshes the cache if the file is older than 7 days.
-/// Fails silently if the network is unavailable.
-fn fetch_github_openapi_spec() {
-	let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
-		Ok(d) => d,
-		Err(_) => return,
-	};
-
-	let cache_dir = format!("{manifest_dir}/.cache");
-	let spec_path = format!("{cache_dir}/github-openapi.json");
-
-	let needs_fetch = match std::fs::metadata(&spec_path) {
-		Ok(meta) => {
-			if let Ok(modified) = meta.modified() {
-				let age = std::time::SystemTime::now()
-					.duration_since(modified)
-					.unwrap_or(std::time::Duration::from_secs(u64::MAX));
-				age > std::time::Duration::from_secs(7 * 24 * 3600)
-			} else {
-				true
-			}
-		}
-		Err(_) => true,
-	};
-
-	// Always tell Cargo to only rerun when the cache file changes, avoiding
-	// unnecessary rebuilds from the default "rerun on any file change" behaviour.
-	println!("cargo:rerun-if-changed={spec_path}");
-
-	if !needs_fetch {
-		return;
-	}
-
-	if std::fs::create_dir_all(&cache_dir).is_err() {
-		return;
-	}
-
-	match ureq::get(GITHUB_OPENAPI_URL).call() {
-		Ok(mut response) => match response.body_mut().read_to_string() {
-			Ok(body) if !body.is_empty() => {
-				let _ = std::fs::write(&spec_path, body);
-			}
-			_ => {}
-		},
-		Err(_) => {
-			// Network unavailable — integration tests that require the spec will skip.
 		}
 	}
 }

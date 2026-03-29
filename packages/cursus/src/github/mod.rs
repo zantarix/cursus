@@ -4,9 +4,9 @@
 //! for creating GitHub Releases as a post-publish action.
 
 pub mod client;
+mod octocrab_client;
 pub mod remote;
-pub mod rest;
 
 pub use client::PullRequest;
+pub use octocrab_client::OctocrabGitHubClient;
 pub use remote::GitHubRepo;
-pub use rest::RestGitHubClient;

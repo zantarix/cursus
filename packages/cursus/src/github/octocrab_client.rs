@@ -1,0 +1,175 @@
+//! Production GitHub API client using octocrab.
+//!
+//! Wraps an [`octocrab::Octocrab`] instance to implement the [`GitHubClient`]
+//! trait. The `Octocrab` is constructed and configured by the consumer (binary
+//! or bot), so authentication strategy stays outside the library.
+
+use std::path::Path;
+
+use anyhow::Context;
+use async_trait::async_trait;
+
+use super::client::{GitHubClient, PullRequest};
+use super::remote::GitHubRepo;
+
+/// GitHub API client backed by octocrab.
+///
+/// Accepts a pre-configured [`octocrab::Octocrab`] instance at construction.
+/// The library does not handle authentication — consumers provide a fully
+/// configured client (e.g. with a personal access token or GitHub App token).
+pub struct OctocrabGitHubClient {
+	client: octocrab::Octocrab,
+}
+
+impl std::fmt::Debug for OctocrabGitHubClient {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("OctocrabGitHubClient")
+			.finish_non_exhaustive()
+	}
+}
+
+impl OctocrabGitHubClient {
+	/// Creates a new client wrapping the given octocrab instance.
+	pub fn new(client: octocrab::Octocrab) -> Self {
+		Self { client }
+	}
+}
+
+#[async_trait]
+impl GitHubClient for OctocrabGitHubClient {
+	async fn create_release(
+		&self,
+		gh_repo: &GitHubRepo,
+		tag_name: &str,
+		name: &str,
+		body: &str,
+	) -> anyhow::Result<String> {
+		log::trace!("create_release: tag={tag_name} name={name}");
+		let release = self
+			.client
+			.repos(&gh_repo.owner, &gh_repo.repo)
+			.releases()
+			.create(tag_name)
+			.name(name)
+			.body(body)
+			.draft(true)
+			.prerelease(false)
+			.send()
+			.await
+			.with_context(|| format!("Failed to create GitHub Release for tag '{tag_name}'"))?;
+		Ok(release.id.to_string())
+	}
+
+	async fn upload_asset(
+		&self,
+		gh_repo: &GitHubRepo,
+		release_id: &str,
+		file_name: &str,
+		file_path: &Path,
+	) -> anyhow::Result<()> {
+		let id: u64 = release_id
+			.parse()
+			.with_context(|| format!("Invalid GitHub release_id: {release_id:?}"))?;
+
+		log::trace!("upload_asset: release_id={release_id} file={file_name}");
+		let data = tokio::fs::read(file_path)
+			.await
+			.with_context(|| format!("Failed to read asset file '{}'", file_path.display()))?;
+
+		self.client
+			.repos(&gh_repo.owner, &gh_repo.repo)
+			.releases()
+			.upload_asset(id, file_name, data.into())
+			.send()
+			.await
+			.with_context(|| format!("Failed to upload asset '{file_name}'"))?;
+		Ok(())
+	}
+
+	async fn create_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		title: &str,
+		body: &str,
+		head: &str,
+		base: &str,
+	) -> anyhow::Result<String> {
+		log::trace!("create_pull_request: title={title} head={head} base={base}");
+		let pr = self
+			.client
+			.pulls(&gh_repo.owner, &gh_repo.repo)
+			.create(title, head, base)
+			.body(body)
+			.send()
+			.await
+			.with_context(|| format!("Failed to create pull request '{title}'"))?;
+		let url = pr
+			.html_url
+			.context("GitHub API response missing html_url for created pull request")?;
+		Ok(url.to_string())
+	}
+
+	async fn find_open_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		head: &str,
+	) -> anyhow::Result<Option<PullRequest>> {
+		let head_filter = format!("{}:{}", gh_repo.owner, head);
+		log::trace!("find_open_pull_request: head={head_filter}");
+		let page = self
+			.client
+			.pulls(&gh_repo.owner, &gh_repo.repo)
+			.list()
+			.state(octocrab::params::State::Open)
+			.head(&head_filter)
+			.send()
+			.await
+			.with_context(|| format!("Failed to list pull requests for branch '{head}'"))?;
+		Ok(page.items.into_iter().next().map(|pr| {
+			let html_url = pr.html_url.map_or_else(String::new, |u| u.to_string());
+			PullRequest {
+				number: pr.number,
+				html_url,
+			}
+		}))
+	}
+
+	async fn update_pull_request(
+		&self,
+		gh_repo: &GitHubRepo,
+		pull_number: u64,
+		title: &str,
+		body: &str,
+	) -> anyhow::Result<String> {
+		log::trace!("update_pull_request: #{pull_number} title={title}");
+		let pr = self
+			.client
+			.pulls(&gh_repo.owner, &gh_repo.repo)
+			.update(pull_number)
+			.title(title)
+			.body(body)
+			.send()
+			.await
+			.with_context(|| format!("Failed to update pull request #{pull_number}"))?;
+		let url = pr
+			.html_url
+			.context("GitHub API response missing html_url for updated pull request")?;
+		Ok(url.to_string())
+	}
+
+	async fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
+		let id: u64 = release_id
+			.parse()
+			.with_context(|| format!("Invalid GitHub release_id: {release_id:?}"))?;
+		log::trace!("publish_release: release_id={release_id}");
+		self.client
+			.repos(&gh_repo.owner, &gh_repo.repo)
+			.releases()
+			.update(id)
+			.draft(false)
+			.send()
+			.await
+			.with_context(|| format!("Failed to publish GitHub Release {release_id}"))?;
+		Ok(())
+	}
+}
