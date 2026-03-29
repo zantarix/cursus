@@ -24,25 +24,25 @@ enabled = true
 	);
 }
 
-#[test]
-fn config_roundtrip_with_global_ignore() {
+#[tokio::test]
+async fn config_roundtrip_with_global_ignore() {
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["example-*".to_string(), "internal-tool".to_string()];
 	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert_eq!(
 		loaded.global.ignore,
 		vec!["example-*".to_string(), "internal-tool".to_string()]
 	);
 }
 
-#[test]
-fn load_projects_filters_ignored_packages() {
+#[tokio::test]
+async fn load_projects_filters_ignored_packages() {
 	// Set up a workspace with two packages; ignore one by exact name.
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
@@ -69,14 +69,14 @@ fn load_projects_filters_ignored_packages() {
 	}
 
 	let adapters = config.create_adapters().unwrap();
-	let projects = config.load_projects_for_adapters(&adapters).unwrap();
+	let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "app");
 }
 
-#[test]
-fn load_projects_filters_by_glob_pattern() {
+#[tokio::test]
+async fn load_projects_filters_by_glob_pattern() {
 	// Wildcard pattern: ignore all packages matching "example-*".
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
@@ -106,14 +106,14 @@ fn load_projects_filters_by_glob_pattern() {
 	}
 
 	let adapters = config.create_adapters().unwrap();
-	let projects = config.load_projects_for_adapters(&adapters).unwrap();
+	let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "core");
 }
 
-#[test]
-fn load_projects_ignore_invalid_glob_fails() {
+#[tokio::test]
+async fn load_projects_ignore_invalid_glob_fails() {
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["[invalid".to_string()];
@@ -128,7 +128,7 @@ fn load_projects_ignore_invalid_glob_fails() {
 	.unwrap();
 
 	let adapters = config.create_adapters().unwrap();
-	let result = config.load_projects_for_adapters(&adapters);
+	let result = config.load_projects_for_adapters(&adapters).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err().to_string();
 	assert!(
@@ -137,8 +137,8 @@ fn load_projects_ignore_invalid_glob_fails() {
 	);
 }
 
-#[test]
-fn load_projects_ignore_no_match_warns() {
+#[tokio::test]
+async fn load_projects_ignore_no_match_warns() {
 	// A pattern that matches nothing should succeed (just log a warning).
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
@@ -154,15 +154,15 @@ fn load_projects_ignore_no_match_warns() {
 	.unwrap();
 
 	let adapters = config.create_adapters().unwrap();
-	let projects = config.load_projects_for_adapters(&adapters).unwrap();
+	let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 	// app is still returned; the no-match pattern just warns
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "app");
 }
 
-#[test]
-fn load_projects_ignoring_all_packages_fails_with_informative_error() {
+#[tokio::test]
+async fn load_projects_ignoring_all_packages_fails_with_informative_error() {
 	// When all projects are filtered by ignore patterns, the error message
 	// should mention the ignore patterns rather than the package manager config.
 	let dir = temp_dir();
@@ -179,7 +179,7 @@ fn load_projects_ignoring_all_packages_fails_with_informative_error() {
 	.unwrap();
 
 	let adapters = config.create_adapters().unwrap();
-	let result = config.load_projects_for_adapters(&adapters);
+	let result = config.load_projects_for_adapters(&adapters).await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err().to_string();

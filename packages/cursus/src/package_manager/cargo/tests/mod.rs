@@ -46,12 +46,14 @@ pub(super) fn recording_adapter_inspectable(
 }
 
 /// Helper to enumerate projects using the adapter with no configured path.
-pub(super) fn enumerate(dir: &std::path::Path) -> anyhow::Result<Vec<ProjectInfo>> {
-	recording_adapter(CargoConfig::default(), dir, 0).enumerate_projects()
+pub(super) async fn enumerate(dir: &std::path::Path) -> anyhow::Result<Vec<ProjectInfo>> {
+	recording_adapter(CargoConfig::default(), dir, 0)
+		.enumerate_projects()
+		.await
 }
 
 /// Helper to enumerate projects using the adapter with a configured path.
-pub(super) fn enumerate_with_path(
+pub(super) async fn enumerate_with_path(
 	dir: &std::path::Path,
 	path: &str,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
@@ -64,6 +66,7 @@ pub(super) fn enumerate_with_path(
 		0,
 	)
 	.enumerate_projects()
+	.await
 }
 
 pub(super) mod dependency_version;

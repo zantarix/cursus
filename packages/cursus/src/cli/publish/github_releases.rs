@@ -33,7 +33,7 @@ pub(super) fn log_dry_run_github_releases(
 /// Runs the configured GitHub pre-release build command, if any.
 ///
 /// Returns `true` if the build command failed, `false` if it succeeded or was not configured.
-pub(super) fn run_github_build_command(
+pub(super) async fn run_github_build_command(
 	env: &crate::Env,
 	config: &Config,
 	git: &dyn Git,
@@ -44,6 +44,7 @@ pub(super) fn run_github_build_command(
 	info!("Running build command: {}", config.github.build_command);
 	let output = env
 		.run_shell_mut(&config.github.build_command, git.path())
+		.await
 		.with_context(|| {
 			format!(
 				"Failed to execute build command: {}",
@@ -58,15 +59,15 @@ pub(super) fn run_github_build_command(
 }
 
 /// Reads the changelog body for a published package, returning an empty string on any error.
-pub(super) fn read_changelog_body(
+pub(super) async fn read_changelog_body(
 	pkg: &PublishedPackage,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> String {
 	let changelog_path = pkg.project_path.child("CHANGELOG.md");
-	if !fs.exists(&changelog_path) {
+	if !fs.exists(&changelog_path).await.unwrap_or(false) {
 		return String::new();
 	}
-	match extract_version_body(&changelog_path, &pkg.version, fs) {
+	match extract_version_body(&changelog_path, &pkg.version, fs).await {
 		Ok(text) => text,
 		Err(e) => {
 			warn!("could not read changelog for {}: {e:#}", pkg.name);
@@ -78,7 +79,7 @@ pub(super) fn read_changelog_body(
 /// Uploads artifacts then publishes a draft release.
 ///
 /// Returns `true` if any step failed (the release is left as a draft on upload failure).
-pub(super) fn publish_draft_release(
+pub(super) async fn publish_draft_release(
 	github_client: &dyn GitHubClient,
 	gh_repo: &GitHubRepo,
 	tag: &str,
@@ -87,11 +88,11 @@ pub(super) fn publish_draft_release(
 	git_root: &crate::path::AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> bool {
-	if upload_release_artifacts(github_client, gh_repo, release_id, artifacts, git_root, fs) {
+	if upload_release_artifacts(github_client, gh_repo, release_id, artifacts, git_root, fs).await {
 		warn!("Artifact uploads failed for {tag}; leaving release as a draft");
 		return true;
 	}
-	match github_client.publish_release(gh_repo, release_id) {
+	match github_client.publish_release(gh_repo, release_id).await {
 		Ok(()) => {
 			info!("Created GitHub Release for {tag}");
 			false
@@ -109,7 +110,7 @@ pub(super) fn publish_draft_release(
 /// is `Some` before calling this function (enforced by the early check in `cmd_publish`).
 ///
 /// Returns `(releases_created, any_failed)`.
-pub(super) fn orchestrate_github_releases(
+pub(super) async fn orchestrate_github_releases(
 	git: &dyn Git,
 	config: &Config,
 	github_client: &dyn GitHubClient,
@@ -120,7 +121,7 @@ pub(super) fn orchestrate_github_releases(
 	if published_packages.is_empty() {
 		return Ok((0, false));
 	}
-	let gh_repo = GitHubRepo::resolve(&config.github, git)?;
+	let gh_repo = GitHubRepo::resolve(&config.github, git).await?;
 	let mut github_failed = false;
 	let mut created_count = 0;
 	for pkg in published_packages {
@@ -128,8 +129,11 @@ pub(super) fn orchestrate_github_releases(
 			.git
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
-		let body = read_changelog_body(pkg, fs);
-		match github_client.create_release(&gh_repo, &tag, &tag, &body) {
+		let body = read_changelog_body(pkg, fs).await;
+		match github_client
+			.create_release(&gh_repo, &tag, &tag, &body)
+			.await
+		{
 			Ok(release_id) => {
 				if publish_draft_release(
 					github_client,
@@ -139,7 +143,9 @@ pub(super) fn orchestrate_github_releases(
 					&config.github.artifacts,
 					git.path(),
 					fs,
-				) {
+				)
+				.await
+				{
 					github_failed = true;
 				} else {
 					created_count += 1;
@@ -157,7 +163,7 @@ pub(super) fn orchestrate_github_releases(
 /// Uploads all configured artifacts to a GitHub release.
 ///
 /// Returns `true` if any upload failed, `false` if all succeeded.
-pub(super) fn upload_release_artifacts(
+pub(super) async fn upload_release_artifacts(
 	github_client: &dyn GitHubClient,
 	gh_repo: &GitHubRepo,
 	release_id: &str,
@@ -167,7 +173,7 @@ pub(super) fn upload_release_artifacts(
 ) -> bool {
 	let mut any_failed = false;
 	for (display_name, artifact_path) in artifacts {
-		let full_path = match git_root.subpath(artifact_path, fs) {
+		let full_path = match git_root.subpath(artifact_path, fs).await {
 			Ok(p) => p,
 			Err(e) => {
 				warn!("  Skipping '{display_name}': invalid artifact path: {e:#}");
@@ -175,7 +181,10 @@ pub(super) fn upload_release_artifacts(
 				continue;
 			}
 		};
-		match github_client.upload_asset(gh_repo, release_id, display_name, &full_path) {
+		match github_client
+			.upload_asset(gh_repo, release_id, display_name, &full_path)
+			.await
+		{
 			Ok(()) => info!("  Attached: {display_name}"),
 			Err(e) => {
 				warn!("  Failed to attach '{display_name}': {e:#}");
@@ -203,8 +212,8 @@ mod tests {
 
 	// --- Tests for orchestrate_github_releases ---
 
-	#[test]
-	fn github_release_skipped_when_no_published_packages() {
+	#[tokio::test]
+	async fn github_release_skipped_when_no_published_packages() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
@@ -221,6 +230,7 @@ mod tests {
 			false,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert_eq!(created, 0);
@@ -228,8 +238,8 @@ mod tests {
 		assert!(client.invocations().is_empty());
 	}
 
-	#[test]
-	fn github_releases_created_for_published_packages() {
+	#[tokio::test]
+	async fn github_releases_created_for_published_packages() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
@@ -252,6 +262,7 @@ mod tests {
 			false,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert_eq!(created, 1);
@@ -269,8 +280,8 @@ mod tests {
 		));
 	}
 
-	#[test]
-	fn github_releases_uses_prefixed_tag_for_monorepo() {
+	#[tokio::test]
+	async fn github_releases_uses_prefixed_tag_for_monorepo() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new();
@@ -293,6 +304,7 @@ mod tests {
 			true,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert_eq!(created, 1);
@@ -309,8 +321,8 @@ mod tests {
 		));
 	}
 
-	#[test]
-	fn github_release_create_failure_continues_other_packages() {
+	#[tokio::test]
+	async fn github_release_create_failure_continues_other_packages() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new().with_create_failure();
@@ -340,6 +352,7 @@ mod tests {
 			true,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert_eq!(created, 0);
@@ -348,8 +361,8 @@ mod tests {
 		assert_eq!(client.invocations().len(), 2);
 	}
 
-	#[test]
-	fn github_release_upload_failure_continues_other_artifacts() {
+	#[tokio::test]
+	async fn github_release_upload_failure_continues_other_artifacts() {
 		// Create the artifact files
 		let dir = tempfile::tempdir().unwrap();
 		let linux_path = dir.path().join("linux.tar.gz");
@@ -397,6 +410,7 @@ mod tests {
 			false,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		// Draft was created but upload failed — not counted as created (left as draft)
@@ -419,8 +433,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn github_release_artifacts_attached_to_every_release() {
+	#[tokio::test]
+	async fn github_release_artifacts_attached_to_every_release() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"binary content").unwrap();
@@ -467,6 +481,7 @@ mod tests {
 			true,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert_eq!(created, 2);
@@ -481,8 +496,8 @@ mod tests {
 		assert_eq!(upload_count, 2);
 	}
 
-	#[test]
-	fn github_release_publish_failure_sets_github_failed() {
+	#[tokio::test]
+	async fn github_release_publish_failure_sets_github_failed() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingGitHubClient::new().with_publish_release_failure();
@@ -505,6 +520,7 @@ mod tests {
 			false,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		// Draft was created but publish failed — not counted as created
@@ -522,8 +538,8 @@ mod tests {
 		));
 	}
 
-	#[test]
-	fn github_artifacts_each_release_includes_publish() {
+	#[tokio::test]
+	async fn github_artifacts_each_release_includes_publish() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"binary content").unwrap();
@@ -563,6 +579,7 @@ mod tests {
 			false,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert_eq!(created, 1);
@@ -587,8 +604,8 @@ mod tests {
 
 	// --- Tests for publish_draft_release ---
 
-	#[test]
-	fn publish_draft_release_success_returns_false() {
+	#[tokio::test]
+	async fn publish_draft_release_success_returns_false() {
 		let client = RecordingGitHubClient::new();
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let failed = publish_draft_release(
@@ -599,7 +616,8 @@ mod tests {
 			&BTreeMap::new(),
 			&workdir(),
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(!failed);
 		let invocations = client.invocations();
 		assert_eq!(invocations.len(), 1);
@@ -609,8 +627,8 @@ mod tests {
 		));
 	}
 
-	#[test]
-	fn publish_draft_release_upload_failure_returns_true_no_publish() {
+	#[tokio::test]
+	async fn publish_draft_release_upload_failure_returns_true_no_publish() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"data").unwrap();
@@ -632,7 +650,8 @@ mod tests {
 			&artifacts,
 			&dir_abs,
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(failed);
 		// Upload was attempted; publish must NOT be called
 		let invocations = client.invocations();
@@ -648,8 +667,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn publish_draft_release_publish_failure_returns_true() {
+	#[tokio::test]
+	async fn publish_draft_release_publish_failure_returns_true() {
 		let client = RecordingGitHubClient::new().with_publish_release_failure();
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let failed = publish_draft_release(
@@ -660,7 +679,8 @@ mod tests {
 			&BTreeMap::new(),
 			&workdir(),
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(failed);
 		assert!(matches!(
 			&client.invocations()[0],
@@ -670,21 +690,21 @@ mod tests {
 
 	// --- Tests for read_changelog_body ---
 
-	#[test]
-	fn read_changelog_body_returns_empty_when_no_changelog() {
+	#[tokio::test]
+	async fn read_changelog_body_returns_empty_when_no_changelog() {
 		let pkg = PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		};
 		assert_eq!(
-			read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem),
+			read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem).await,
 			""
 		);
 	}
 
-	#[test]
-	fn read_changelog_body_returns_version_section() {
+	#[tokio::test]
+	async fn read_changelog_body_returns_version_section() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::write(
 			dir.path().join("CHANGELOG.md"),
@@ -696,15 +716,15 @@ mod tests {
 			version: "1.0.0".parse().unwrap(),
 			project_path: AbsolutePath::new(dir.path()).unwrap(),
 		};
-		let body = read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem);
+		let body = read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem).await;
 		assert!(
 			body.contains("Fix a bug"),
 			"Expected changelog body, got: {body}"
 		);
 	}
 
-	#[test]
-	fn read_changelog_body_returns_empty_when_version_missing() {
+	#[tokio::test]
+	async fn read_changelog_body_returns_empty_when_version_missing() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::write(dir.path().join("CHANGELOG.md"), "## 0.9.0\n\nOld release\n").unwrap();
 		let pkg = PublishedPackage {
@@ -714,13 +734,13 @@ mod tests {
 		};
 		// Version not found returns empty string
 		assert_eq!(
-			read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem),
+			read_changelog_body(&pkg, &crate::filesystem::LocalFilesystem).await,
 			""
 		);
 	}
 
-	#[test]
-	fn upload_release_artifacts_rejects_path_traversal() {
+	#[tokio::test]
+	async fn upload_release_artifacts_rejects_path_traversal() {
 		let outer = tempfile::tempdir().unwrap();
 		let inner = outer.path().join("repo");
 		std::fs::create_dir(&inner).unwrap();
@@ -741,7 +761,8 @@ mod tests {
 			&artifacts,
 			&git_root,
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 
 		assert!(failed, "Expected failure for path traversal");
 		// No upload should have been attempted
@@ -753,8 +774,8 @@ mod tests {
 
 	// --- Tests for log_dry_run_github_releases ---
 
-	#[test]
-	fn log_dry_run_github_releases_emits_would_publish_always() {
+	#[tokio::test]
+	async fn log_dry_run_github_releases_emits_would_publish_always() {
 		use crate::test_logging::{init_test_logger, take_logs};
 		init_test_logger();
 		let _ = take_logs();
@@ -777,8 +798,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_dry_run_github_releases_emits_would_attach_for_artifacts() {
+	#[tokio::test]
+	async fn log_dry_run_github_releases_emits_would_attach_for_artifacts() {
 		use crate::test_logging::{init_test_logger, take_logs};
 		init_test_logger();
 		let _ = take_logs();

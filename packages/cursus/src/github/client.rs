@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use async_trait::async_trait;
+
 use super::remote::GitHubRepo;
 
 /// A resolved GitHub pull request.
@@ -15,9 +17,10 @@ pub struct PullRequest {
 
 /// Abstract interface for GitHub API operations.
 ///
-/// All methods are synchronous. The production implementation uses
+/// All methods are async. The production implementation uses
 /// REST API calls over ureq. The `test_support` module provides a
 /// recording fake for unit tests.
+#[async_trait]
 pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// Creates a GitHub Release for the given tag, returning the release ID.
 	///
@@ -27,7 +30,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails or authentication is missing.
-	fn create_release(
+	async fn create_release(
 		&self,
 		gh_repo: &GitHubRepo,
 		tag_name: &str,
@@ -40,7 +43,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the upload fails.
-	fn upload_asset(
+	async fn upload_asset(
 		&self,
 		gh_repo: &GitHubRepo,
 		release_id: &str,
@@ -61,7 +64,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails.
-	fn create_pull_request(
+	async fn create_pull_request(
 		&self,
 		gh_repo: &GitHubRepo,
 		title: &str,
@@ -77,7 +80,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails.
-	fn find_open_pull_request(
+	async fn find_open_pull_request(
 		&self,
 		gh_repo: &GitHubRepo,
 		head: &str,
@@ -88,7 +91,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails.
-	fn update_pull_request(
+	async fn update_pull_request(
 		&self,
 		gh_repo: &GitHubRepo,
 		pull_number: u64,
@@ -101,7 +104,7 @@ pub trait GitHubClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails or `release_id` is not numeric.
-	fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()>;
+	async fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()>;
 }
 
 /// Test support types for GitHub client operations.
@@ -116,6 +119,7 @@ pub mod test_support {
 	use std::sync::Mutex;
 
 	use anyhow::bail;
+	use async_trait::async_trait;
 
 	use super::{GitHubClient, PullRequest};
 	use crate::github::remote::GitHubRepo;
@@ -277,8 +281,9 @@ pub mod test_support {
 		}
 	}
 
+	#[async_trait]
 	impl GitHubClient for RecordingGitHubClient {
-		fn create_release(
+		async fn create_release(
 			&self,
 			gh_repo: &GitHubRepo,
 			tag_name: &str,
@@ -299,7 +304,7 @@ pub mod test_support {
 			Ok(self.release_id.clone())
 		}
 
-		fn upload_asset(
+		async fn upload_asset(
 			&self,
 			gh_repo: &GitHubRepo,
 			release_id: &str,
@@ -321,7 +326,7 @@ pub mod test_support {
 			Ok(())
 		}
 
-		fn create_pull_request(
+		async fn create_pull_request(
 			&self,
 			gh_repo: &GitHubRepo,
 			title: &str,
@@ -346,7 +351,7 @@ pub mod test_support {
 			Ok(format!("https://github.com/{owner}/{repo}/pull/1"))
 		}
 
-		fn find_open_pull_request(
+		async fn find_open_pull_request(
 			&self,
 			gh_repo: &GitHubRepo,
 			head: &str,
@@ -363,7 +368,7 @@ pub mod test_support {
 			Ok(self.existing_pr.clone())
 		}
 
-		fn update_pull_request(
+		async fn update_pull_request(
 			&self,
 			gh_repo: &GitHubRepo,
 			pull_number: u64,
@@ -388,7 +393,11 @@ pub mod test_support {
 			))
 		}
 
-		fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
+		async fn publish_release(
+			&self,
+			gh_repo: &GitHubRepo,
+			release_id: &str,
+		) -> anyhow::Result<()> {
 			self.invocations.lock().expect("mutex poisoned").push(
 				GitHubInvocation::PublishRelease {
 					gh_repo: gh_repo.clone(),
@@ -408,8 +417,8 @@ pub mod test_support {
 
 		use super::*;
 
-		#[test]
-		fn recording_client_records_create_release() {
+		#[tokio::test]
+		async fn recording_client_records_create_release() {
 			let client = RecordingGitHubClient::new().with_release_id("r-42");
 			let id = client
 				.create_release(
@@ -418,6 +427,7 @@ pub mod test_support {
 					"Release 1.0.0",
 					"body text",
 				)
+				.await
 				.unwrap();
 			assert_eq!(id, "r-42");
 			let invocations = client.invocations();
@@ -428,8 +438,8 @@ pub mod test_support {
 			));
 		}
 
-		#[test]
-		fn recording_client_records_upload_asset() {
+		#[tokio::test]
+		async fn recording_client_records_upload_asset() {
 			let client = RecordingGitHubClient::new();
 			let path = PathBuf::from("/tmp/app.tar.gz");
 			client
@@ -439,6 +449,7 @@ pub mod test_support {
 					"app.tar.gz",
 					&path,
 				)
+				.await
 				.unwrap();
 			let invocations = client.invocations();
 			assert_eq!(invocations.len(), 1);
@@ -448,35 +459,39 @@ pub mod test_support {
 			));
 		}
 
-		#[test]
-		fn recording_client_create_failure_returns_error() {
+		#[tokio::test]
+		async fn recording_client_create_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_create_failure();
-			let result = client.create_release(
-				&GitHubRepo::new("owner", "repo").unwrap(),
-				"v1.0.0",
-				"Release",
-				"body",
-			);
+			let result = client
+				.create_release(
+					&GitHubRepo::new("owner", "repo").unwrap(),
+					"v1.0.0",
+					"Release",
+					"body",
+				)
+				.await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);
 		}
 
-		#[test]
-		fn recording_client_upload_failure_returns_error() {
+		#[tokio::test]
+		async fn recording_client_upload_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_upload_failure();
-			let result = client.upload_asset(
-				&GitHubRepo::new("owner", "repo").unwrap(),
-				"r-1",
-				"file.tar.gz",
-				Path::new("/tmp/file.tar.gz"),
-			);
+			let result = client
+				.upload_asset(
+					&GitHubRepo::new("owner", "repo").unwrap(),
+					"r-1",
+					"file.tar.gz",
+					Path::new("/tmp/file.tar.gz"),
+				)
+				.await;
 			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
 
-		#[test]
-		fn recording_client_records_create_pull_request() {
+		#[tokio::test]
+		async fn recording_client_records_create_pull_request() {
 			let client = RecordingGitHubClient::new();
 			let url = client
 				.create_pull_request(
@@ -486,6 +501,7 @@ pub mod test_support {
 					"cursus-release/main",
 					"main",
 				)
+				.await
 				.unwrap();
 			assert!(
 				url.contains("acme/app"),
@@ -500,29 +516,32 @@ pub mod test_support {
 			));
 		}
 
-		#[test]
-		fn recording_client_create_pr_failure_returns_error() {
+		#[tokio::test]
+		async fn recording_client_create_pr_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_create_pr_failure();
-			let result = client.create_pull_request(
-				&GitHubRepo::new("acme", "app").unwrap(),
-				"Release",
-				"body",
-				"release-branch",
-				"main",
-			);
+			let result = client
+				.create_pull_request(
+					&GitHubRepo::new("acme", "app").unwrap(),
+					"Release",
+					"body",
+					"release-branch",
+					"main",
+				)
+				.await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);
 		}
 
-		#[test]
-		fn recording_client_find_open_pr_returns_none_when_not_configured() {
+		#[tokio::test]
+		async fn recording_client_find_open_pr_returns_none_when_not_configured() {
 			let client = RecordingGitHubClient::new();
 			let result = client
 				.find_open_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
 					"cursus-release/main",
 				)
+				.await
 				.unwrap();
 			assert!(result.is_none());
 			let invocations = client.invocations();
@@ -534,8 +553,8 @@ pub mod test_support {
 			));
 		}
 
-		#[test]
-		fn recording_client_find_open_pr_returns_configured_pr() {
+		#[tokio::test]
+		async fn recording_client_find_open_pr_returns_configured_pr() {
 			let pr = PullRequest {
 				number: 42,
 				html_url: "https://github.com/acme/app/pull/42".to_string(),
@@ -546,6 +565,7 @@ pub mod test_support {
 					&GitHubRepo::new("acme", "app").unwrap(),
 					"cursus-release/main",
 				)
+				.await
 				.unwrap();
 			assert!(result.is_some());
 			let found = result.unwrap();
@@ -553,17 +573,18 @@ pub mod test_support {
 			assert!(found.html_url.contains("pull/42"));
 		}
 
-		#[test]
-		fn recording_client_find_pr_failure_returns_error() {
+		#[tokio::test]
+		async fn recording_client_find_pr_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_find_pr_failure();
 			let result = client
-				.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch");
+				.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
+				.await;
 			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
 
-		#[test]
-		fn recording_client_update_pull_request_records_invocation() {
+		#[tokio::test]
+		async fn recording_client_update_pull_request_records_invocation() {
 			let client = RecordingGitHubClient::new();
 			let url = client
 				.update_pull_request(
@@ -572,6 +593,7 @@ pub mod test_support {
 					"Updated Title",
 					"Updated body",
 				)
+				.await
 				.unwrap();
 			assert!(url.contains("pull/42"), "URL should contain pull/42: {url}");
 			let invocations = client.invocations();
@@ -583,24 +605,22 @@ pub mod test_support {
 			));
 		}
 
-		#[test]
-		fn recording_client_update_pr_failure_returns_error() {
+		#[tokio::test]
+		async fn recording_client_update_pr_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_update_pr_failure();
-			let result = client.update_pull_request(
-				&GitHubRepo::new("acme", "app").unwrap(),
-				1,
-				"Title",
-				"body",
-			);
+			let result = client
+				.update_pull_request(&GitHubRepo::new("acme", "app").unwrap(), 1, "Title", "body")
+				.await;
 			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
 
-		#[test]
-		fn recording_client_records_publish_release() {
+		#[tokio::test]
+		async fn recording_client_records_publish_release() {
 			let client = RecordingGitHubClient::new();
 			client
 				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
+				.await
 				.unwrap();
 			let invocations = client.invocations();
 			assert_eq!(invocations.len(), 1);
@@ -610,11 +630,12 @@ pub mod test_support {
 			));
 		}
 
-		#[test]
-		fn recording_client_publish_release_failure_returns_error() {
+		#[tokio::test]
+		async fn recording_client_publish_release_failure_returns_error() {
 			let client = RecordingGitHubClient::new().with_publish_release_failure();
-			let result =
-				client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1");
+			let result = client
+				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
+				.await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);

@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use async_trait::async_trait;
 use semver::Version;
 use serde::Deserialize;
 
@@ -36,17 +37,19 @@ impl CargoAdapter {
 	}
 
 	/// Returns the resolved root directory for this package manager.
-	fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
-		self.config.resolve_root(&self.adapter_root, self.env.fs())
+	async fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
+		self.config
+			.resolve_root(&self.adapter_root, self.env.fs())
+			.await
 	}
 
 	/// Updates `[workspace.package].version` in the workspace root Cargo.toml.
-	fn write_workspace_package_version(
+	async fn write_workspace_package_version(
 		&self,
 		version: &Version,
 		dry_run: bool,
 	) -> anyhow::Result<()> {
-		let pm_root = self.resolve_root()?;
+		let pm_root = self.resolve_root().await?;
 		let root_path = pm_root.child("Cargo.toml");
 		log::debug!(
 			"Updating workspace root version at {} to {version}",
@@ -56,6 +59,7 @@ impl CargoAdapter {
 			.env
 			.fs()
 			.read_to_string(&root_path)
+			.await
 			.with_context(|| format!("Failed to read {}", root_path.display()))?;
 		let mut doc = contents
 			.parse::<toml_edit::DocumentMut>()
@@ -70,6 +74,7 @@ impl CargoAdapter {
 			self.env
 				.fs()
 				.write(&root_path, doc.to_string().as_bytes())
+				.await
 				.with_context(|| format!("Failed to write {}", root_path.display()))?;
 		}
 		Ok(())
@@ -141,16 +146,17 @@ struct WorkspacePackage {
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(cargo))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_cargo_toml(
+async fn read_cargo_toml(
 	dir: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Option<CargoToml>> {
 	let path = dir.child("Cargo.toml");
-	if !fs.exists(&path) {
+	if !fs.exists(&path).await? {
 		return Ok(None);
 	}
 	let contents = fs
 		.read_to_string(&path)
+		.await
 		.with_context(|| format!("Failed to read {}", path.display()))?;
 	let cargo: CargoToml =
 		toml::from_str(&contents).with_context(|| format!("Failed to parse {}", path.display()))?;
@@ -212,16 +218,16 @@ fn extract_project_metadata(
 /// Attempts to create a ProjectInfo from a workspace member directory.
 ///
 /// Returns `Ok(None)` if the path is not a valid crate (not a directory or no Cargo.toml).
-fn read_workspace_member(
+async fn read_workspace_member(
 	member_path: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 	workspace_version: Option<&str>,
 ) -> anyhow::Result<Option<ProjectInfo>> {
-	if !fs.is_dir(member_path) {
+	if !fs.is_dir(member_path).await? {
 		return Ok(None);
 	}
 
-	let Some(cargo) = read_cargo_toml(member_path, fs)? else {
+	let Some(cargo) = read_cargo_toml(member_path, fs).await? else {
 		return Ok(None);
 	};
 
@@ -258,18 +264,20 @@ fn read_workspace_member(
 /// [`ProjectInfo`] are absolute paths to each member directory. Only paths
 /// that remain within `pm_root` are returned; paths that escape via `..` or
 /// symlinks are rejected with an error.
-fn expand_member_pattern(
+async fn expand_member_pattern(
 	pm_root: &AbsolutePath,
 	pattern: &str,
 	fs: &dyn crate::filesystem::Filesystem,
 	workspace_version: Option<&str>,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
-	pm_root
-		.safe_glob(pattern, fs)?
-		.into_iter()
-		.map(|member_path| read_workspace_member(&member_path, fs, workspace_version))
-		.filter_map(Result::transpose)
-		.collect()
+	let paths = pm_root.safe_glob(pattern, fs).await?;
+	let mut projects = Vec::new();
+	for member_path in paths {
+		if let Some(info) = read_workspace_member(&member_path, fs, workspace_version).await? {
+			projects.push(info);
+		}
+	}
+	Ok(projects)
 }
 
 /// Updates the version in a `toml_edit::Item` representing a Cargo dependency.
@@ -307,18 +315,19 @@ fn update_dep_item_version(item: &mut toml_edit::Item, new_version: &str) -> boo
 /// Reads the Cargo.toml at `workspace_toml_path`, finds the entry under
 /// `workspace.dependencies`, updates its version, and writes the file back.
 /// Returns `true` if the file was modified.
-fn update_workspace_dep(
+async fn update_workspace_dep(
 	workspace_toml_path: &AbsolutePath,
 	dependency_name: &str,
 	new_version: &str,
 	dry_run: bool,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<bool> {
-	if !fs.exists(workspace_toml_path) {
+	if !fs.exists(workspace_toml_path).await? {
 		return Ok(false);
 	}
 	let contents = fs
 		.read_to_string(workspace_toml_path)
+		.await
 		.with_context(|| format!("Failed to read {}", workspace_toml_path.display()))?;
 	let mut doc = contents
 		.parse::<toml_edit::DocumentMut>()
@@ -334,6 +343,7 @@ fn update_workspace_dep(
 	{
 		if !dry_run {
 			fs.write(workspace_toml_path, doc.to_string().as_bytes())
+				.await
 				.with_context(|| format!("Failed to write {}", workspace_toml_path.display()))?;
 		}
 		return Ok(true);
@@ -347,18 +357,19 @@ fn update_workspace_dep(
 /// Entries with `workspace = true` are skipped (those are managed via the
 /// workspace root). Writes the file if any entry was modified (skipped when
 /// `dry_run` is `true`). Returns `true` if the file was (or would be) modified.
-fn update_member_dep(
+async fn update_member_dep(
 	member_toml_path: &AbsolutePath,
 	dependency_name: &str,
 	new_version: &str,
 	dry_run: bool,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<bool> {
-	if !fs.exists(member_toml_path) {
+	if !fs.exists(member_toml_path).await? {
 		return Ok(false);
 	}
 	let contents = fs
 		.read_to_string(member_toml_path)
+		.await
 		.with_context(|| format!("Failed to read {}", member_toml_path.display()))?;
 	let mut doc = contents
 		.parse::<toml_edit::DocumentMut>()
@@ -385,6 +396,7 @@ fn update_member_dep(
 
 	if changed && !dry_run {
 		fs.write(member_toml_path, doc.to_string().as_bytes())
+			.await
 			.with_context(|| format!("Failed to write {}", member_toml_path.display()))?;
 	}
 	Ok(changed)
@@ -418,8 +430,9 @@ fn build_cargo_root_project_info(
 	})
 }
 
+#[async_trait]
 impl PackageManagerAdapter for CargoAdapter {
-	fn write_version(
+	async fn write_version(
 		&self,
 		project: &ProjectInfo,
 		version: &Version,
@@ -430,6 +443,7 @@ impl PackageManagerAdapter for CargoAdapter {
 			.env
 			.fs()
 			.read_to_string(&manifest_path)
+			.await
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
 		let mut doc = contents
 			.parse::<toml_edit::DocumentMut>()
@@ -449,7 +463,7 @@ impl PackageManagerAdapter for CargoAdapter {
 			== Some(true);
 
 		if inherits_workspace {
-			return self.write_workspace_package_version(version, dry_run);
+			return self.write_workspace_package_version(version, dry_run).await;
 		}
 
 		package.insert("version", toml_edit::value(version.to_string()));
@@ -457,14 +471,15 @@ impl PackageManagerAdapter for CargoAdapter {
 			self.env
 				.fs()
 				.write(&manifest_path, doc.to_string().as_bytes())
+				.await
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		}
 		Ok(())
 	}
 
-	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
-		let pm_root = self.resolve_root()?;
-		let Some(root_cargo) = read_cargo_toml(&pm_root, self.env.fs())? else {
+	async fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
+		let pm_root = self.resolve_root().await?;
+		let Some(root_cargo) = read_cargo_toml(&pm_root, self.env.fs()).await? else {
 			return Ok(Vec::new());
 		};
 
@@ -490,13 +505,12 @@ impl PackageManagerAdapter for CargoAdapter {
 
 		// Workspace with members
 		let ws_version = root_cargo.workspace_version();
-		let mut projects: Vec<ProjectInfo> = members
-			.iter()
-			.map(|pattern| expand_member_pattern(&pm_root, pattern, self.env.fs(), ws_version))
-			.collect::<anyhow::Result<Vec<_>>>()?
-			.into_iter()
-			.flatten()
-			.collect();
+		let mut projects = Vec::new();
+		for pattern in members {
+			let member_projects =
+				expand_member_pattern(&pm_root, pattern, self.env.fs(), ws_version).await?;
+			projects.extend(member_projects);
+		}
 
 		// Include root package if it exists (some workspaces have a root crate too)
 		if let Some(ref package) = root_cargo.package {
@@ -511,15 +525,16 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
+	async fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
 		// Resolve the lock file path unconditionally — this is known regardless of dry-run.
-		let workspace_root = self.resolve_root()?;
+		let workspace_root = self.resolve_root().await?;
 		let lock_path = workspace_root.join("Cargo.lock");
 
 		// run_mut is a no-op when DryRunCommandRunner is active, so this is always safe to call.
 		let output = self
 			.env
 			.run_mut("cargo", &["update", "--workspace"], &workspace_root)
+			.await
 			.with_context(|| {
 				format!(
 					"Failed to execute cargo update --workspace in {}",
@@ -539,7 +554,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		Ok(Some(lock_path))
 	}
 
-	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
+	async fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		if !self.env.cargo_registry_token_present() {
 			warn!(
 				"{}: CARGO_REGISTRY_TOKEN is not set; publish may fail if no other \
@@ -558,6 +573,7 @@ impl PackageManagerAdapter for CargoAdapter {
 				&["publish", "--manifest-path", &manifest_str],
 				&self.adapter_root,
 			)
+			.await
 			.with_context(|| {
 				format!(
 					"Failed to execute cargo publish for {}",
@@ -583,22 +599,22 @@ impl PackageManagerAdapter for CargoAdapter {
 		);
 	}
 
-	fn registry_name(&self) -> &str {
+	async fn registry_name(&self) -> &str {
 		"crates.io"
 	}
 
-	fn manifest_filename(&self) -> &str {
+	async fn manifest_filename(&self) -> &str {
 		"Cargo.toml"
 	}
 
-	fn update_dependency_version(
+	async fn update_dependency_version(
 		&self,
 		project: &ProjectInfo,
 		dependency_name: &str,
 		new_version: &Version,
 		dry_run: bool,
 	) -> anyhow::Result<Vec<PathBuf>> {
-		let pm_root = self.resolve_root()?;
+		let pm_root = self.resolve_root().await?;
 		let version_str = new_version.to_string();
 		let mut modified = Vec::new();
 
@@ -610,7 +626,9 @@ impl PackageManagerAdapter for CargoAdapter {
 			&version_str,
 			dry_run,
 			fs,
-		)? {
+		)
+		.await?
+		{
 			modified.push(workspace_toml_path.clone().into_path_buf());
 		}
 
@@ -623,7 +641,9 @@ impl PackageManagerAdapter for CargoAdapter {
 				&version_str,
 				dry_run,
 				fs,
-			)? {
+			)
+			.await?
+		{
 			modified.push(member_toml_path.into_path_buf());
 		}
 

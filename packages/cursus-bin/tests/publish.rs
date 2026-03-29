@@ -5,14 +5,15 @@ mod common;
 use common::{run_cursus, run_cursus_subprocess, temp_git_repo};
 use cursus::test_logging::{init_test_logger, take_logs};
 
-#[test]
-fn publish_with_no_config_fails() {
+#[tokio::test]
+async fn publish_with_no_config_fails() {
 	let dir = temp_git_repo();
 
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	assert!(
@@ -23,8 +24,8 @@ fn publish_with_no_config_fails() {
 	);
 }
 
-#[test]
-fn publish_dry_run_with_unknown_package_fails() {
+#[tokio::test]
+async fn publish_dry_run_with_unknown_package_fails() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -50,7 +51,8 @@ fn publish_dry_run_with_unknown_package_fails() {
 			"nonexistent",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	assert!(
@@ -61,8 +63,8 @@ fn publish_dry_run_with_unknown_package_fails() {
 	);
 }
 
-#[test]
-fn publish_dry_run_basic() {
+#[tokio::test]
+async fn publish_dry_run_basic() {
 	init_test_logger();
 	let _ = take_logs();
 
@@ -87,7 +89,8 @@ fn publish_dry_run_basic() {
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
@@ -100,8 +103,8 @@ fn publish_dry_run_basic() {
 	);
 }
 
-#[test]
-fn publish_with_package_filter() {
+#[tokio::test]
+async fn publish_with_package_filter() {
 	init_test_logger();
 	let _ = take_logs();
 
@@ -151,7 +154,8 @@ fn publish_with_package_filter() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
@@ -168,8 +172,8 @@ fn publish_with_package_filter() {
 	);
 }
 
-#[test]
-fn publish_dry_run_with_workspace_dependencies() {
+#[tokio::test]
+async fn publish_dry_run_with_workspace_dependencies() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -202,14 +206,15 @@ fn publish_dry_run_with_workspace_dependencies() {
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
-#[test]
-fn publish_dry_run_with_workspace_dependencies_filtered() {
+#[tokio::test]
+async fn publish_dry_run_with_workspace_dependencies_filtered() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -260,14 +265,15 @@ fn publish_dry_run_with_workspace_dependencies_filtered() {
 			"@cursus-test/app",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
-#[test]
-fn publish_cargo_dry_run() {
+#[tokio::test]
+async fn publish_cargo_dry_run() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -289,14 +295,15 @@ fn publish_cargo_dry_run() {
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
-#[test]
-fn publish_dry_run_npm_private_package_excluded() {
+#[tokio::test]
+async fn publish_dry_run_npm_private_package_excluded() {
 	init_test_logger();
 	let _ = take_logs();
 
@@ -318,7 +325,8 @@ fn publish_dry_run_npm_private_package_excluded() {
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	// Should succeed with no output (package silently excluded)
 	assert!(result.is_ok());
@@ -338,8 +346,8 @@ fn publish_dry_run_npm_private_package_excluded() {
 	);
 }
 
-#[test]
-fn publish_dry_run_npm_mixed_workspace() {
+#[tokio::test]
+async fn publish_dry_run_npm_mixed_workspace() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -372,15 +380,16 @@ fn publish_dry_run_npm_mixed_workspace() {
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	// Should succeed and only list public packages
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
-#[test]
-fn publish_dry_run_cargo_publish_false_excluded() {
+#[tokio::test]
+async fn publish_dry_run_cargo_publish_false_excluded() {
 	init_test_logger();
 	let _ = take_logs();
 
@@ -405,7 +414,8 @@ fn publish_dry_run_cargo_publish_false_excluded() {
 	let result = common::run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	// Should succeed with no output (crate silently excluded)
 	assert!(result.is_ok());
@@ -425,8 +435,8 @@ fn publish_dry_run_cargo_publish_false_excluded() {
 	);
 }
 
-#[test]
-fn publish_dry_run_explicitly_naming_private_package() {
+#[tokio::test]
+async fn publish_dry_run_explicitly_naming_private_package() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -452,15 +462,16 @@ fn publish_dry_run_explicitly_naming_private_package() {
 			"private-pkg",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	// Should succeed (not error) and silently skip the private package
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 }
 
-#[test]
-fn publish_dry_run_cyclic_npm_workspace() {
+#[tokio::test]
+async fn publish_dry_run_cyclic_npm_workspace() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -517,7 +528,8 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -559,8 +571,8 @@ fn publish_dry_run_cyclic_npm_workspace() {
 	);
 }
 
-#[test]
-fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
+#[tokio::test]
+async fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 	let dir = temp_git_repo();
 
 	std::fs::create_dir(dir.path().join(".cursus")).unwrap();
@@ -603,8 +615,8 @@ fn publish_dry_run_cyclic_npm_workspace_warnings_suppressed() {
 	);
 }
 
-#[test]
-fn publish_dry_run_summary_single_public_package() {
+#[tokio::test]
+async fn publish_dry_run_summary_single_public_package() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -626,7 +638,8 @@ fn publish_dry_run_summary_single_public_package() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -642,8 +655,8 @@ fn publish_dry_run_summary_single_public_package() {
 	);
 }
 
-#[test]
-fn publish_dry_run_summary_multiple_public_packages() {
+#[tokio::test]
+async fn publish_dry_run_summary_multiple_public_packages() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -688,7 +701,8 @@ fn publish_dry_run_summary_multiple_public_packages() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -699,8 +713,8 @@ fn publish_dry_run_summary_multiple_public_packages() {
 	);
 }
 
-#[test]
-fn publish_dry_run_summary_mixed_public_private_packages() {
+#[tokio::test]
+async fn publish_dry_run_summary_mixed_public_private_packages() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -740,7 +754,8 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -752,8 +767,8 @@ fn publish_dry_run_summary_mixed_public_private_packages() {
 	);
 }
 
-#[test]
-fn publish_dry_run_summary_all_private_packages() {
+#[tokio::test]
+async fn publish_dry_run_summary_all_private_packages() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -774,7 +789,8 @@ fn publish_dry_run_summary_all_private_packages() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -786,8 +802,8 @@ fn publish_dry_run_summary_all_private_packages() {
 }
 
 /// A public package without `CHANGELOG.md` is warned about and skipped; publish succeeds.
-#[test]
-fn publish_skips_package_without_changelog() {
+#[tokio::test]
+async fn publish_skips_package_without_changelog() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -810,7 +826,8 @@ fn publish_skips_package_without_changelog() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 	assert_eq!(result.unwrap(), std::process::ExitCode::SUCCESS);
 
@@ -828,8 +845,8 @@ fn publish_skips_package_without_changelog() {
 
 /// In a two-package workspace, only the package with `CHANGELOG.md` is published;
 /// the other is warned about and skipped with a correct summary.
-#[test]
-fn publish_mixed_changelog_packages() {
+#[tokio::test]
+async fn publish_mixed_changelog_packages() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -870,7 +887,8 @@ fn publish_mixed_changelog_packages() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();

@@ -222,19 +222,21 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub(crate) fn write(
+	pub(crate) async fn write(
 		&self,
 		git: &dyn Git,
 		fs: &dyn crate::filesystem::Filesystem,
 	) -> anyhow::Result<PathBuf> {
 		let cursus_dir = git.path().child(".cursus");
 		fs.create_dir_all(&cursus_dir)
+			.await
 			.with_context(|| format!("Failed to create directory: {}", cursus_dir.display()))?;
 
 		let filename = Self::generate_filename();
 		let path = cursus_dir.child(filename);
 		let content = self.format()?;
 		fs.write(&path, content.as_bytes())
+			.await
 			.with_context(|| format!("Failed to write changeset: {}", path.display()))?;
 		Ok(path.into_path_buf())
 	}
@@ -248,13 +250,13 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if any changeset file cannot be read or parsed.
-	pub(crate) fn read_all(
+	pub(crate) async fn read_all(
 		env: &crate::Env,
 	) -> anyhow::Result<Vec<(crate::path::AbsolutePath, Self)>> {
 		let git = env.git();
 		let fs = env.fs();
 		let cursus_dir = git.path().child(".cursus");
-		if !fs.is_dir(&cursus_dir) {
+		if !fs.is_dir(&cursus_dir).await? {
 			return Ok(Vec::new());
 		}
 
@@ -264,33 +266,23 @@ impl Changeset {
 			.context("Invalid UTF-8 in .cursus path")?
 			.to_string();
 
-		fs.glob(&pattern)?
-			.into_iter()
-			.filter_map(|path| {
-				let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-				if !is_changeset_filename(filename) {
-					return None;
-				}
-				let abs_path = match crate::path::AbsolutePath::new(&path) {
-					Ok(p) => p,
-					Err(e) => return Some(Err(e)),
-				};
-				let contents = match fs
-					.read_to_string(&abs_path)
-					.with_context(|| format!("Failed to read changeset: {}", path.display()))
-				{
-					Ok(c) => c,
-					Err(e) => return Some(Err(e)),
-				};
-				let changeset = match Self::parse(&contents)
-					.with_context(|| format!("Failed to parse changeset: {}", path.display()))
-				{
-					Ok(c) => c,
-					Err(e) => return Some(Err(e)),
-				};
-				Some(Ok((abs_path, changeset)))
-			})
-			.collect()
+		let paths = fs.glob(&pattern).await?;
+		let mut result = Vec::new();
+		for path in paths {
+			let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+			if !is_changeset_filename(filename) {
+				continue;
+			}
+			let abs_path = crate::path::AbsolutePath::new(&path)?;
+			let contents = fs
+				.read_to_string(&abs_path)
+				.await
+				.with_context(|| format!("Failed to read changeset: {}", path.display()))?;
+			let changeset = Self::parse(&contents)
+				.with_context(|| format!("Failed to parse changeset: {}", path.display()))?;
+			result.push((abs_path, changeset));
+		}
+		Ok(result)
 	}
 
 	/// Consumes released package entries from a changeset file.
@@ -303,7 +295,7 @@ impl Changeset {
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be deleted or rewritten.
-	pub fn consume(
+	pub async fn consume(
 		&self,
 		path: &crate::path::AbsolutePath,
 		released_packages: &BTreeSet<String>,
@@ -324,12 +316,14 @@ impl Changeset {
 		if remaining.is_empty() {
 			// All packages consumed — delete the file.
 			fs.remove_file(path)
+				.await
 				.with_context(|| format!("Failed to delete changeset: {}", path.display()))?;
 		} else {
 			// Partially consumed — rewrite with remaining packages only.
 			let rewritten = Self::new(remaining, self.message.clone());
 			let content = rewritten.format()?;
 			fs.write(path, content.as_bytes())
+				.await
 				.with_context(|| format!("Failed to rewrite changeset: {}", path.display()))?;
 		}
 
@@ -484,8 +478,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn write_changeset_creates_file() {
+	#[tokio::test]
+	async fn write_changeset_creates_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -497,14 +491,14 @@ mod tests {
 			)),
 		);
 		let changeset = single_package_changeset();
-		let path = changeset.write(env.git(), env.fs()).unwrap();
+		let path = changeset.write(env.git(), env.fs()).await.unwrap();
 		assert!(path.exists(), "Changeset file should exist");
 		assert!(path.starts_with(dir.path().join(".cursus")));
 		assert!(path.extension().is_some_and(|ext| ext == "md"));
 	}
 
-	#[test]
-	fn write_changeset_creates_directory() {
+	#[tokio::test]
+	async fn write_changeset_creates_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -516,15 +510,15 @@ mod tests {
 			)),
 		);
 		let changeset = single_package_changeset();
-		changeset.write(env.git(), env.fs()).unwrap();
+		changeset.write(env.git(), env.fs()).await.unwrap();
 		assert!(
 			dir.path().join(".cursus").is_dir(),
 			".cursus directory should exist"
 		);
 	}
 
-	#[test]
-	fn write_changeset_file_has_correct_content() {
+	#[tokio::test]
+	async fn write_changeset_file_has_correct_content() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -537,7 +531,7 @@ mod tests {
 		);
 		let mut changeset = single_package_changeset();
 		changeset.message = Some("Test message".to_string());
-		let path = changeset.write(env.git(), env.fs()).unwrap();
+		let path = changeset.write(env.git(), env.fs()).await.unwrap();
 		let content = std::fs::read_to_string(path).unwrap();
 		assert!(content.starts_with("+++\n"));
 		assert!(
@@ -650,8 +644,8 @@ pkg = \"minor\"
 		assert!(toml_str.contains("\"patch\""));
 	}
 
-	#[test]
-	fn read_all_changesets_empty_when_no_directory() {
+	#[tokio::test]
+	async fn read_all_changesets_empty_when_no_directory() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -662,12 +656,12 @@ pkg = \"minor\"
 				abs.clone(),
 			)),
 		);
-		let result = Changeset::read_all(&env).unwrap();
+		let result = Changeset::read_all(&env).await.unwrap();
 		assert!(result.is_empty());
 	}
 
-	#[test]
-	fn read_all_changesets_empty_when_no_md_files() {
+	#[tokio::test]
+	async fn read_all_changesets_empty_when_no_md_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -681,12 +675,12 @@ pkg = \"minor\"
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("config.toml"), "").unwrap();
-		let result = Changeset::read_all(&env).unwrap();
+		let result = Changeset::read_all(&env).await.unwrap();
 		assert!(result.is_empty());
 	}
 
-	#[test]
-	fn read_all_changesets_single_file() {
+	#[tokio::test]
+	async fn read_all_changesets_single_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -705,14 +699,14 @@ pkg = \"minor\"
 		)
 		.unwrap();
 
-		let result = Changeset::read_all(&env).unwrap();
+		let result = Changeset::read_all(&env).await.unwrap();
 		assert_eq!(result.len(), 1);
 		assert_eq!(result[0].1.packages["my-app"], ChangeType::Minor);
 		assert_eq!(result[0].1.message, Some("A change".to_string()));
 	}
 
-	#[test]
-	fn read_all_changesets_multiple_files() {
+	#[tokio::test]
+	async fn read_all_changesets_multiple_files() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -728,12 +722,12 @@ pkg = \"minor\"
 		std::fs::write(cursus_dir.join("a.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 		std::fs::write(cursus_dir.join("b.md"), "+++\napp = \"patch\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(&env).unwrap();
+		let result = Changeset::read_all(&env).await.unwrap();
 		assert_eq!(result.len(), 2);
 	}
 
-	#[test]
-	fn read_all_changesets_invalid_file_returns_error() {
+	#[tokio::test]
+	async fn read_all_changesets_invalid_file_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -748,12 +742,12 @@ pkg = \"minor\"
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("bad.md"), "not a valid changeset").unwrap();
 
-		let result = Changeset::read_all(&env);
+		let result = Changeset::read_all(&env).await;
 		assert!(result.is_err());
 	}
 
-	#[test]
-	fn read_all_changesets_skips_readme() {
+	#[tokio::test]
+	async fn read_all_changesets_skips_readme() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -773,13 +767,13 @@ pkg = \"minor\"
 		.unwrap();
 		std::fs::write(cursus_dir.join("valid.md"), "+++\napp = \"minor\"\n+++\n\n").unwrap();
 
-		let result = Changeset::read_all(&env).unwrap();
+		let result = Changeset::read_all(&env).await.unwrap();
 		assert_eq!(result.len(), 1, "README.md should be skipped");
 		assert_eq!(result[0].1.packages["app"], ChangeType::Minor);
 	}
 
-	#[test]
-	fn read_all_changesets_skips_readme_case_insensitive() {
+	#[tokio::test]
+	async fn read_all_changesets_skips_readme_case_insensitive() {
 		let dir = tempfile::tempdir().unwrap();
 		let (abs, runner) = make_git(&dir);
 		let env = crate::Env::new(
@@ -794,7 +788,7 @@ pkg = \"minor\"
 		std::fs::create_dir_all(&cursus_dir).unwrap();
 		std::fs::write(cursus_dir.join("readme.md"), "not a changeset").unwrap();
 
-		let result = Changeset::read_all(&env).unwrap();
+		let result = Changeset::read_all(&env).await.unwrap();
 		assert!(result.is_empty(), "readme.md (lowercase) should be skipped");
 	}
 
@@ -877,8 +871,8 @@ pkg = \"minor\"
 		(path, changeset)
 	}
 
-	#[test]
-	fn consume_changeset_fully_consumed_deletes_file() {
+	#[tokio::test]
+	async fn consume_changeset_fully_consumed_deletes_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (path, cs) = make_path_and_changeset(
 			dir.path(),
@@ -891,12 +885,13 @@ pkg = \"minor\"
 			&released,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 		assert!(!path.exists(), "File should be deleted when fully consumed");
 	}
 
-	#[test]
-	fn consume_changeset_partially_consumed_rewrites_file() {
+	#[tokio::test]
+	async fn consume_changeset_partially_consumed_rewrites_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let (path, cs) = make_path_and_changeset(
 			dir.path(),
@@ -909,6 +904,7 @@ pkg = \"minor\"
 			&released,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert!(
@@ -930,8 +926,8 @@ pkg = \"minor\"
 		);
 	}
 
-	#[test]
-	fn consume_changeset_unrelated_leaves_file_untouched() {
+	#[tokio::test]
+	async fn consume_changeset_unrelated_leaves_file_untouched() {
 		let dir = tempfile::tempdir().unwrap();
 		let original = "+++\npkg-b = \"minor\"\n+++\n\nUnrelated change\n";
 		let (path, cs) = make_path_and_changeset(dir.path(), "change.md", original);
@@ -941,6 +937,7 @@ pkg = \"minor\"
 			&released,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		assert!(path.exists(), "File should be untouched");
@@ -948,8 +945,8 @@ pkg = \"minor\"
 		assert_eq!(content, original, "File contents should be unchanged");
 	}
 
-	#[test]
-	fn consume_changeset_partial_rewrite_round_trips() {
+	#[tokio::test]
+	async fn consume_changeset_partial_rewrite_round_trips() {
 		let dir = tempfile::tempdir().unwrap();
 		let (path, cs) = make_path_and_changeset(
 			dir.path(),
@@ -962,6 +959,7 @@ pkg = \"minor\"
 			&released,
 			&crate::filesystem::LocalFilesystem,
 		)
+		.await
 		.unwrap();
 
 		let content = std::fs::read_to_string(&path).unwrap();
@@ -971,8 +969,8 @@ pkg = \"minor\"
 		assert_eq!(reparsed.message, Some("Multi-package change".to_string()));
 	}
 
-	#[test]
-	fn consume_changeset_delete_fails_returns_error() {
+	#[tokio::test]
+	async fn consume_changeset_delete_fails_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("nonexistent.md");
 		let mut packages = BTreeMap::new();
@@ -980,16 +978,18 @@ pkg = \"minor\"
 		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// File doesn't exist, so remove_file should fail
-		let result = cs.consume(
-			&crate::path::AbsolutePath::new(&path).unwrap(),
-			&released,
-			&crate::filesystem::LocalFilesystem,
-		);
+		let result = cs
+			.consume(
+				&crate::path::AbsolutePath::new(&path).unwrap(),
+				&released,
+				&crate::filesystem::LocalFilesystem,
+			)
+			.await;
 		assert!(result.is_err(), "Should fail when file cannot be deleted");
 	}
 
-	#[test]
-	fn consume_changeset_rewrite_fails_returns_error() {
+	#[tokio::test]
+	async fn consume_changeset_rewrite_fails_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		// Path inside a non-existent subdirectory — fs::write will fail.
 		let path = dir.path().join("no-such-dir/change.md");
@@ -999,11 +999,13 @@ pkg = \"minor\"
 		let cs = Changeset::new(packages, None);
 		let released: BTreeSet<String> = ["pkg-a".to_string()].into();
 		// Partially consumed → rewrite branch triggered, but parent dir missing.
-		let result = cs.consume(
-			&crate::path::AbsolutePath::new(&path).unwrap(),
-			&released,
-			&crate::filesystem::LocalFilesystem,
-		);
+		let result = cs
+			.consume(
+				&crate::path::AbsolutePath::new(&path).unwrap(),
+				&released,
+				&crate::filesystem::LocalFilesystem,
+			)
+			.await;
 		assert!(result.is_err(), "Should fail when file cannot be rewritten");
 	}
 

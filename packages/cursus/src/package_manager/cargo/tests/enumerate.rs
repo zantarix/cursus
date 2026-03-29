@@ -1,14 +1,14 @@
 use super::*;
 
-#[test]
-fn enumerate_returns_empty_when_no_cargo_toml() {
+#[tokio::test]
+async fn enumerate_returns_empty_when_no_cargo_toml() {
 	let dir = temp_dir();
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert!(projects.is_empty());
 }
 
-#[test]
-fn enumerate_single_crate() {
+#[tokio::test]
+async fn enumerate_single_crate() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -19,15 +19,15 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name, "my-crate");
 	assert_eq!(projects[0].path.as_path(), dir.path());
 }
 
-#[test]
-fn enumerate_virtual_manifest_no_members() {
+#[tokio::test]
+async fn enumerate_virtual_manifest_no_members() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -36,12 +36,12 @@ fn enumerate_virtual_manifest_no_members() {
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert!(projects.is_empty());
 }
 
-#[test]
-fn enumerate_workspace_members() {
+#[tokio::test]
+async fn enumerate_workspace_members() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -72,7 +72,7 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 
 	assert_eq!(projects.len(), 2);
 	assert_eq!(projects[0].name, "crate-a");
@@ -87,8 +87,8 @@ version = "0.1.0"
 	);
 }
 
-#[test]
-fn enumerate_workspace_with_root_package() {
+#[tokio::test]
+async fn enumerate_workspace_with_root_package() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -113,7 +113,7 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 
 	assert_eq!(projects.len(), 2);
 	// Root comes first (shorter absolute path sorts first)
@@ -123,8 +123,8 @@ version = "0.1.0"
 	assert_eq!(projects[1].path.as_path(), dir.path().join("crates/member"));
 }
 
-#[test]
-fn enumerate_multiple_member_patterns() {
+#[tokio::test]
+async fn enumerate_multiple_member_patterns() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -155,7 +155,7 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 
 	assert_eq!(projects.len(), 2);
 	assert_eq!(projects[0].name, "lib");
@@ -164,8 +164,8 @@ version = "0.1.0"
 	assert_eq!(projects[1].path.as_path(), dir.path().join("tools/cli"));
 }
 
-#[test]
-fn enumerate_skips_directories_without_cargo_toml() {
+#[tokio::test]
+async fn enumerate_skips_directories_without_cargo_toml() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -188,14 +188,14 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name, "valid");
 }
 
-#[test]
-fn enumerate_skips_virtual_manifest_members() {
+#[tokio::test]
+async fn enumerate_skips_virtual_manifest_members() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -226,24 +226,24 @@ members = []
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name, "real");
 }
 
-#[test]
-fn enumerate_fails_on_invalid_cargo_toml() {
+#[tokio::test]
+async fn enumerate_fails_on_invalid_cargo_toml() {
 	let dir = temp_dir();
 	write_cargo_toml(dir.path(), "not valid toml [[[");
 
-	let result = enumerate(dir.path());
+	let result = enumerate(dir.path()).await;
 
 	assert!(result.is_err());
 }
 
-#[test]
-fn enumerate_fails_on_invalid_member_cargo_toml() {
+#[tokio::test]
+async fn enumerate_fails_on_invalid_member_cargo_toml() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -257,20 +257,20 @@ members = ["crates/*"]
 	std::fs::create_dir_all(&bad).unwrap();
 	write_cargo_toml(&bad, "invalid toml");
 
-	let result = enumerate(dir.path());
+	let result = enumerate(dir.path()).await;
 
 	assert!(result.is_err());
 }
 
-#[test]
-fn new_creates_adapter() {
+#[tokio::test]
+async fn new_creates_adapter() {
 	let dir = temp_dir();
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-	let _ = adapter.enumerate_projects();
+	let _ = adapter.enumerate_projects().await;
 }
 
-#[test]
-fn enumerate_single_crate_in_subfolder() {
+#[tokio::test]
+async fn enumerate_single_crate_in_subfolder() {
 	let dir = temp_dir();
 	let subfolder = dir.path().join("backend");
 	std::fs::create_dir_all(&subfolder).unwrap();
@@ -283,15 +283,15 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate_with_path(dir.path(), "backend").unwrap();
+	let projects = enumerate_with_path(dir.path(), "backend").await.unwrap();
 
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name, "my-crate");
 	assert_eq!(projects[0].path.as_path(), dir.path().join("backend"));
 }
 
-#[test]
-fn enumerate_workspace_in_subfolder() {
+#[tokio::test]
+async fn enumerate_workspace_in_subfolder() {
 	let dir = temp_dir();
 	let subfolder = dir.path().join("backend");
 	std::fs::create_dir_all(&subfolder).unwrap();
@@ -324,7 +324,7 @@ version = "0.1.0"
 "#,
 	);
 
-	let projects = enumerate_with_path(dir.path(), "backend").unwrap();
+	let projects = enumerate_with_path(dir.path(), "backend").await.unwrap();
 
 	assert_eq!(projects.len(), 2);
 	assert_eq!(projects[0].name, "crate-a");
@@ -339,10 +339,10 @@ version = "0.1.0"
 	);
 }
 
-#[test]
-fn enumerate_errors_when_subfolder_missing() {
+#[tokio::test]
+async fn enumerate_errors_when_subfolder_missing() {
 	let dir = temp_dir();
-	let result = enumerate_with_path(dir.path(), "nonexistent");
+	let result = enumerate_with_path(dir.path(), "nonexistent").await;
 	assert!(result.is_err());
 	let msg = result.unwrap_err().to_string();
 	assert!(
@@ -351,8 +351,8 @@ fn enumerate_errors_when_subfolder_missing() {
 	);
 }
 
-#[test]
-fn enumerate_includes_version() {
+#[tokio::test]
+async fn enumerate_includes_version() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -362,13 +362,13 @@ name = "my-crate"
 version = "1.2.3"
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].version.to_string(), "1.2.3");
 }
 
-#[test]
-fn enumerate_missing_version_fails() {
+#[tokio::test]
+async fn enumerate_missing_version_fails() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -377,12 +377,12 @@ fn enumerate_missing_version_fails() {
 name = "my-crate"
 "#,
 	);
-	let result = enumerate(dir.path());
+	let result = enumerate(dir.path()).await;
 	assert!(result.is_err());
 }
 
-#[test]
-fn enumerate_invalid_semver_fails() {
+#[tokio::test]
+async fn enumerate_invalid_semver_fails() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -392,12 +392,12 @@ name = "my-crate"
 version = "not-a-version"
 "#,
 	);
-	let result = enumerate(dir.path());
+	let result = enumerate(dir.path()).await;
 	assert!(result.is_err());
 }
 
-#[test]
-fn enumerate_includes_publishable_status() {
+#[tokio::test]
+async fn enumerate_includes_publishable_status() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -407,7 +407,7 @@ name = "my-crate"
 version = "1.0.0"
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert!(
 		projects[0].publishable,
@@ -415,8 +415,8 @@ version = "1.0.0"
 	);
 }
 
-#[test]
-fn enumerate_publishable_false_for_publish_false() {
+#[tokio::test]
+async fn enumerate_publishable_false_for_publish_false() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -427,7 +427,7 @@ version = "1.0.0"
 publish = false
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert!(
 		!projects[0].publishable,
@@ -435,8 +435,8 @@ publish = false
 	);
 }
 
-#[test]
-fn enumerate_publishable_false_for_empty_array() {
+#[tokio::test]
+async fn enumerate_publishable_false_for_empty_array() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -447,7 +447,7 @@ version = "1.0.0"
 publish = []
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert!(
 		!projects[0].publishable,
@@ -455,8 +455,8 @@ publish = []
 	);
 }
 
-#[test]
-fn enumerate_publishable_true_for_publish_true() {
+#[tokio::test]
+async fn enumerate_publishable_true_for_publish_true() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -467,7 +467,7 @@ version = "1.0.0"
 publish = true
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert!(
 		projects[0].publishable,
@@ -475,8 +475,8 @@ publish = true
 	);
 }
 
-#[test]
-fn enumerate_publishable_true_for_registry_array() {
+#[tokio::test]
+async fn enumerate_publishable_true_for_registry_array() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -487,7 +487,7 @@ version = "1.0.0"
 publish = ["crates-io"]
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert!(
 		projects[0].publishable,
@@ -495,8 +495,8 @@ publish = ["crates-io"]
 	);
 }
 
-#[test]
-fn enumerate_includes_dependency_names() {
+#[tokio::test]
+async fn enumerate_includes_dependency_names() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -513,7 +513,7 @@ tokio = "1.0"
 tempfile = "3.0"
 "#,
 	);
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].dependency_names.len(), 3);
 	assert!(projects[0].dependency_names.contains(&"serde".to_string()));
@@ -525,8 +525,8 @@ tempfile = "3.0"
 	);
 }
 
-#[test]
-fn enumerate_workspace_member_inherits_version() {
+#[tokio::test]
+async fn enumerate_workspace_member_inherits_version() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -550,7 +550,7 @@ version.workspace = true
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].version.to_string(), "3.2.1");
 	assert!(
@@ -559,8 +559,8 @@ version.workspace = true
 	);
 }
 
-#[test]
-fn enumerate_workspace_true_without_workspace_version_fails() {
+#[tokio::test]
+async fn enumerate_workspace_true_without_workspace_version_fails() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -581,7 +581,7 @@ version.workspace = true
 "#,
 	);
 
-	let result = enumerate(dir.path());
+	let result = enumerate(dir.path()).await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -590,8 +590,8 @@ version.workspace = true
 	);
 }
 
-#[test]
-fn enumerate_root_package_inherits_workspace_version() {
+#[tokio::test]
+async fn enumerate_root_package_inherits_workspace_version() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -607,7 +607,7 @@ version = "2.0.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name, "root-crate");
 	assert_eq!(projects[0].version.to_string(), "2.0.0");
@@ -617,8 +617,8 @@ version = "2.0.0"
 	);
 }
 
-#[test]
-fn enumerate_literal_version_not_flagged_as_workspace() {
+#[tokio::test]
+async fn enumerate_literal_version_not_flagged_as_workspace() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -629,7 +629,7 @@ version = "1.0.0"
 "#,
 	);
 
-	let projects = enumerate(dir.path()).unwrap();
+	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert!(
 		!projects[0].workspace_version,

@@ -18,7 +18,7 @@ use super::{PackageChanges, PrepareOutput, ReleaseInfo, VersionPlan};
 /// Runs version bumping, changelog generation, dependency propagation, lock
 /// file updates, and changeset consumption. Returns a [`PrepareOutput`] containing
 /// release infos and the deduplicated list of all paths written.
-pub(super) fn prepare_release_files(
+pub(super) async fn prepare_release_files(
 	adapters: &[Arc<dyn PackageManagerAdapter>],
 	projects: &[Project],
 	changesets: &[(crate::path::AbsolutePath, Changeset)],
@@ -34,15 +34,12 @@ pub(super) fn prepare_release_files(
 		&plan.dep_entries,
 		dry_run,
 		fs,
-	)?;
-	files.extend(propagate_dependency_updates(
-		projects,
-		&release_infos,
-		dry_run,
-	)?);
-	files.extend(update_lock_files(adapters)?);
+	)
+	.await?;
+	files.extend(propagate_dependency_updates(projects, &release_infos, dry_run).await?);
+	files.extend(update_lock_files(adapters).await?);
 	let released: BTreeSet<String> = plan.aggregated.keys().cloned().collect();
-	files.extend(consume_changesets(changesets, &released, dry_run, fs)?);
+	files.extend(consume_changesets(changesets, &released, dry_run, fs).await?);
 	files.extend(plan.propagation_changeset_paths);
 	files.sort();
 	files.dedup();
@@ -59,7 +56,7 @@ pub(super) fn prepare_release_files(
 ///
 /// When `version_overrides` is non-empty, packages in that map use the override
 /// version instead of the standard semver bump.
-pub(super) fn bump_versions_and_generate_changelogs(
+pub(super) async fn bump_versions_and_generate_changelogs(
 	aggregated: &BTreeMap<String, ChangeType>,
 	changes_per_package: &BTreeMap<String, PackageChanges>,
 	projects: &[Project],
@@ -82,7 +79,7 @@ pub(super) fn bump_versions_and_generate_changelogs(
 			.get(pkg_name)
 			.cloned()
 			.unwrap_or_else(|| bump_version(current_version, *change_type));
-		modified_files.push(project.manifest_path());
+		modified_files.push(project.manifest_path().await);
 		modified_files.push(project.path().join("CHANGELOG.md"));
 		let changes = changes_per_package
 			.get(pkg_name)
@@ -97,8 +94,8 @@ pub(super) fn bump_versions_and_generate_changelogs(
 		)
 		.with_dependency_entries(pkg_dep_entries);
 		let changelog_entry = changelog.format_sections();
-		project.write_version(&new_version, dry_run)?;
-		changelog.update(dry_run, fs)?;
+		project.write_version(&new_version, dry_run).await?;
+		changelog.update(dry_run, fs).await?;
 		info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		release_infos.push(ReleaseInfo {
 			package_name: pkg_name.clone(),
@@ -113,7 +110,7 @@ pub(super) fn bump_versions_and_generate_changelogs(
 ///
 /// For each project that depends on a bumped package, calls `update_dependency_version`
 /// and returns the list of modified manifest paths.
-pub(super) fn propagate_dependency_updates(
+pub(super) async fn propagate_dependency_updates(
 	projects: &[Project],
 	release_infos: &[ReleaseInfo],
 	dry_run: bool,
@@ -129,7 +126,9 @@ pub(super) fn propagate_dependency_updates(
 			let Some(new_version) = bumped_versions.get(dep_name.as_str()) else {
 				continue;
 			};
-			let paths = project.update_dependency_version(dep_name, new_version, dry_run)?;
+			let paths = project
+				.update_dependency_version(dep_name, new_version, dry_run)
+				.await?;
 			if !paths.is_empty() {
 				info!(
 					"  {}: {update_verb} dependency {} to {}",
@@ -145,12 +144,12 @@ pub(super) fn propagate_dependency_updates(
 }
 
 /// Runs `update_lock_file` on all adapters and collects the resulting paths.
-pub(super) fn update_lock_files(
+pub(super) async fn update_lock_files(
 	adapters: &[Arc<dyn PackageManagerAdapter>],
 ) -> anyhow::Result<Vec<PathBuf>> {
 	let mut files: Vec<PathBuf> = Vec::new();
 	for adapter in adapters {
-		if let Some(path) = adapter.update_lock_file()? {
+		if let Some(path) = adapter.update_lock_file().await? {
 			files.push(path);
 		}
 	}
@@ -160,7 +159,7 @@ pub(super) fn update_lock_files(
 /// Consumes or dry-runs the given changeset files for the released packages.
 ///
 /// Returns the list of changeset paths that would be (or were) modified or deleted.
-pub(super) fn consume_changesets(
+pub(super) async fn consume_changesets(
 	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	released: &BTreeSet<String>,
 	dry_run: bool,
@@ -186,7 +185,7 @@ pub(super) fn consume_changesets(
 				info!("Would consume changeset {}: {pkg_list}", path.display());
 			}
 		} else {
-			cs.consume(path, released, fs)?;
+			cs.consume(path, released, fs).await?;
 		}
 	}
 	Ok(additional_files)
@@ -206,7 +205,9 @@ mod tests {
 	}
 
 	/// Loads all Cargo projects from a temporary workspace directory.
-	fn load_projects_for_dir(dir: &tempfile::TempDir) -> Vec<crate::package_manager::Project> {
+	async fn load_projects_for_dir(
+		dir: &tempfile::TempDir,
+	) -> Vec<crate::package_manager::Project> {
 		let runner = make_runner();
 		let path = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
@@ -214,7 +215,12 @@ mod tests {
 			Arc::new(LocalFilesystem),
 			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		config::load(&env).unwrap().load_projects().unwrap()
+		config::load(&env)
+			.await
+			.unwrap()
+			.load_projects()
+			.await
+			.unwrap()
 	}
 
 	fn make_test_env(dir: &std::path::Path) -> crate::Env {
@@ -231,12 +237,13 @@ mod tests {
 	}
 
 	/// Sets up a temporary Cargo workspace with `pkg-a` (0.1.0) and `pkg-b` (0.2.0).
-	fn setup_two_package_workspace() -> tempfile::TempDir {
+	async fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -262,12 +269,13 @@ mod tests {
 
 	/// Sets up a temporary Cargo workspace where `pkg-b` (1.0.0) has an
 	/// intra-workspace dependency on `pkg-a` (1.0.0).
-	fn setup_workspace_with_dependency() -> tempfile::TempDir {
+	async fn setup_workspace_with_dependency() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -291,9 +299,9 @@ mod tests {
 		dir
 	}
 
-	#[test]
-	fn cmd_prepare_package_flag_filters_packages() {
-		let dir = setup_two_package_workspace();
+	#[tokio::test]
+	async fn cmd_prepare_package_flag_filters_packages() {
+		let dir = setup_two_package_workspace().await;
 
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -314,13 +322,13 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).unwrap();
+		let config = config::load(&env).await.unwrap();
 		let args = super::super::PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..super::super::PrepareArgs::default()
 		};
-		let result = super::super::cmd_prepare(&args, false, config);
+		let result = super::super::cmd_prepare(&args, false, config).await;
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -339,19 +347,20 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn propagate_dependency_updates_returns_modified_manifest_paths() {
+	#[tokio::test]
+	async fn propagate_dependency_updates_returns_modified_manifest_paths() {
 		// Guards `additional_files.extend(paths)` mutation: verifies that when a dependency
 		// version is updated, the modified manifest path is included in the returned vec.
-		let dir = setup_workspace_with_dependency();
-		let projects = load_projects_for_dir(&dir);
+		let dir = setup_workspace_with_dependency().await;
+		let projects = load_projects_for_dir(&dir).await;
 		let release_infos = vec![super::ReleaseInfo {
 			package_name: "pkg-a".to_string(),
 			new_version: "1.0.1".parse().unwrap(),
 			changelog_entry: String::new(),
 		}];
-		let modified_paths =
-			super::propagate_dependency_updates(&projects, &release_infos, false).unwrap();
+		let modified_paths = super::propagate_dependency_updates(&projects, &release_infos, false)
+			.await
+			.unwrap();
 		assert!(
 			modified_paths
 				.iter()
@@ -360,9 +369,9 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn cmd_prepare_package_flag_with_dry_run_leaves_changeset_untouched() {
-		let dir = setup_two_package_workspace();
+	#[tokio::test]
+	async fn cmd_prepare_package_flag_with_dry_run_leaves_changeset_untouched() {
+		let dir = setup_two_package_workspace().await;
 
 		let cursus_dir = dir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -380,13 +389,13 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).unwrap();
+		let config = config::load(&env).await.unwrap();
 		let args = super::super::PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..super::super::PrepareArgs::default()
 		};
-		let result = super::super::cmd_prepare(&args, true, config);
+		let result = super::super::cmd_prepare(&args, true, config).await;
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped

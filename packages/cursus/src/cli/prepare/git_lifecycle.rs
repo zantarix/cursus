@@ -27,8 +27,8 @@ pub(super) struct BranchState {
 /// # Errors
 ///
 /// Returns an error if the working tree has uncommitted changes.
-pub(super) fn check_dirty_tree(git: &dyn Git) -> anyhow::Result<()> {
-	if git.is_dirty()? {
+pub(super) async fn check_dirty_tree(git: &dyn Git) -> anyhow::Result<()> {
+	if git.is_dirty().await? {
 		anyhow::bail!(
 			"Working tree is dirty. Commit or stash changes before releasing.\n\
 			 Run `git status` to see pending changes."
@@ -85,7 +85,7 @@ pub(super) fn compute_release_branch(
 /// # Errors
 ///
 /// Returns an error if any git command fails.
-pub(super) fn stage_and_commit(
+pub(super) async fn stage_and_commit(
 	git: &dyn Git,
 	extra_files: &[String],
 	release_infos: &[ReleaseInfo],
@@ -101,9 +101,9 @@ pub(super) fn stage_and_commit(
 	let git_workdir = git.path();
 	let mut all_files = modified_files.to_vec();
 	for f in extra_files {
-		match git_workdir.subpath(f, fs) {
+		match git_workdir.subpath(f, fs).await {
 			Ok(resolved) => all_files.push(resolved.into_path_buf()),
-			Err(_) if !fs.exists(&git_workdir.child(f)) => {
+			Err(_) if !fs.exists(&git_workdir.child(f)).await? => {
 				log::warn!("extra_files entry {:?} does not exist, skipping", f);
 			}
 			Err(e) => {
@@ -118,8 +118,10 @@ pub(super) fn stage_and_commit(
 	}
 
 	git.add(&all_files)
+		.await
 		.context("Failed to stage files for git commit")?;
 	git.commit(commit_message)
+		.await
 		.context("Failed to create git commit")?;
 
 	Ok(())
@@ -130,7 +132,7 @@ pub(super) fn stage_and_commit(
 /// Validates GitHub token availability when required, checks for a dirty working
 /// tree, and checks out the release branch for the branch strategy.
 /// Returns a [`BranchState`] with the original and release branch names.
-pub(super) fn preflight_checks(
+pub(super) async fn preflight_checks(
 	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
@@ -156,20 +158,20 @@ pub(super) fn preflight_checks(
 		});
 	}
 	if !dry_run {
-		check_dirty_tree(git)?;
+		check_dirty_tree(git).await?;
 	}
 	if git_ctx.strategy == Strategy::Branch {
 		let current = if dry_run {
-			git.current_branch().ok().flatten()
+			git.current_branch().await.ok().flatten()
 		} else {
-			git.current_branch()?
+			git.current_branch().await?
 		};
 		let branch = compute_release_branch(
 			args.branch.as_deref(),
 			config.git.release_branch_prefix(),
 			current.as_deref(),
 		)?;
-		git.checkout_or_reset_branch(&branch)?;
+		git.checkout_or_reset_branch(&branch).await?;
 		Ok(BranchState {
 			original: current,
 			release: Some(branch),
@@ -182,8 +184,50 @@ pub(super) fn preflight_checks(
 	}
 }
 
+/// Pushes the release branch and optionally creates/updates a pull request.
+async fn push_branch_and_pr(
+	git: &dyn Git,
+	config: &Config,
+	env: &crate::Env,
+	output: &PrepareOutput,
+	branches: &BranchState,
+	dry_run: bool,
+) -> anyhow::Result<()> {
+	let Some(branch) = branches.release.as_deref() else {
+		return Ok(());
+	};
+	info!("Pushing branch '{branch}' to origin");
+	git.force_push_branch(branch).await.with_context(|| {
+		format!(
+			"Failed to push release branch '{branch}'. \
+			 You are still on the release branch; run \
+			 `git checkout <your-branch>` to return."
+		)
+	})?;
+	let pr_result = if config.github.enabled {
+		super::github::upsert_release_pull_request(
+			git,
+			config,
+			env,
+			&output.release_infos,
+			branch,
+			branches.original.as_deref(),
+			dry_run,
+		)
+		.await
+	} else {
+		Ok(())
+	};
+	if let Some(orig) = branches.original.as_deref()
+		&& let Err(checkout_err) = git.checkout(orig).await
+	{
+		log::error!("Failed to check out original branch after release: {checkout_err:#}");
+	}
+	pr_result
+}
+
 /// Stages, commits, and pushes release changes according to the configured git strategy.
-pub(super) fn finalize_git_lifecycle(
+pub(super) async fn finalize_git_lifecycle(
 	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
@@ -202,43 +246,12 @@ pub(super) fn finalize_git_lifecycle(
 		&output.modified_files,
 		config.git.prepare_commit_message(),
 		env.fs(),
-	)?;
+	)
+	.await?;
 	match git_ctx.strategy {
-		Strategy::Push => {
-			git.push()?;
-		}
+		Strategy::Push => git.push().await?,
 		Strategy::Branch => {
-			if let Some(branch) = branches.release.as_deref() {
-				info!("Pushing branch '{branch}' to origin");
-				git.force_push_branch(branch).with_context(|| {
-					format!(
-						"Failed to push release branch '{branch}'. \
-						 You are still on the release branch; run \
-						 `git checkout <your-branch>` to return."
-					)
-				})?;
-				let pr_result = if config.github.enabled {
-					super::github::upsert_release_pull_request(
-						git,
-						config,
-						env,
-						&output.release_infos,
-						branch,
-						branches.original.as_deref(),
-						dry_run,
-					)
-				} else {
-					Ok(())
-				};
-				if let Some(orig) = branches.original.as_deref()
-					&& let Err(checkout_err) = git.checkout(orig)
-				{
-					log::error!(
-						"Failed to check out original branch after release: {checkout_err:#}"
-					);
-				}
-				pr_result?;
-			}
+			push_branch_and_pr(git, config, env, output, branches, dry_run).await?;
 		}
 	}
 	Ok(())
@@ -267,8 +280,8 @@ mod tests {
 
 	// ── stage_and_commit ──────────────────────────────────────────────────────
 
-	#[test]
-	fn stage_and_commit_empty_releases_is_noop() {
+	#[tokio::test]
+	async fn stage_and_commit_empty_releases_is_noop() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -283,12 +296,13 @@ mod tests {
 			&[],
 			"ci(release): version packages",
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(result.is_ok());
 	}
 
-	#[test]
-	fn stage_and_commit_dry_run_suppresses_git_commands() {
+	#[tokio::test]
+	async fn stage_and_commit_dry_run_suppresses_git_commands() {
 		let dir = tempfile::tempdir().unwrap();
 		let release_infos = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
@@ -310,14 +324,15 @@ mod tests {
 			&[],
 			"ci(release): version packages",
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(result.is_ok());
 		// DryRunCommandRunner suppresses run_mut calls — the inner recorder receives nothing.
 		assert!(inner.invocations().is_empty());
 	}
 
-	#[test]
-	fn extra_files_outside_repo_is_rejected() {
+	#[tokio::test]
+	async fn extra_files_outside_repo_is_rejected() {
 		// Create an outer temp dir with a repo subdir and a secret file alongside it.
 		let outer = tempfile::tempdir().unwrap();
 		let repo_dir = outer.path().join("repo");
@@ -344,7 +359,8 @@ mod tests {
 			&[],
 			"ci(release): version packages",
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(result.is_err());
 		assert!(
 			result
@@ -355,8 +371,8 @@ mod tests {
 	}
 
 	#[cfg(unix)]
-	#[test]
-	fn extra_files_symlink_outside_repo_is_rejected() {
+	#[tokio::test]
+	async fn extra_files_symlink_outside_repo_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
 		// Create a symlink inside the tempdir pointing to /tmp (outside the repo).
 		let symlink_path = dir.path().join("escape");
@@ -380,7 +396,8 @@ mod tests {
 			&[],
 			"ci(release): version packages",
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(result.is_err());
 		assert!(
 			result
@@ -390,8 +407,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn extra_files_nonexistent_is_skipped() {
+	#[tokio::test]
+	async fn extra_files_nonexistent_is_skipped() {
 		let dir = tempfile::tempdir().unwrap();
 		let extra_files = vec!["does-not-exist.txt".to_string()];
 		let release_infos = vec![ReleaseInfo {
@@ -413,12 +430,13 @@ mod tests {
 			&[],
 			"ci(release): version packages",
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(result.is_ok());
 	}
 
-	#[test]
-	fn extra_files_absolute_path_is_rejected() {
+	#[tokio::test]
+	async fn extra_files_absolute_path_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
 		let extra_files = vec!["/etc/passwd".to_string()];
 		let release_infos = vec![ReleaseInfo {
@@ -439,7 +457,8 @@ mod tests {
 			&[],
 			"ci(release): version packages",
 			&crate::filesystem::LocalFilesystem,
-		);
+		)
+		.await;
 		assert!(result.is_err());
 		assert!(
 			result
@@ -449,40 +468,40 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_uses_flag_over_all() {
+	#[tokio::test]
+	async fn compute_release_branch_uses_flag_over_all() {
 		assert_eq!(
 			compute_release_branch(Some("my-branch"), "release/", Some("main")).unwrap(),
 			"my-branch"
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_uses_config_prefix() {
+	#[tokio::test]
+	async fn compute_release_branch_uses_config_prefix() {
 		assert_eq!(
 			compute_release_branch(None, "release/", Some("main")).unwrap(),
 			"release/main"
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_uses_default_prefix() {
+	#[tokio::test]
+	async fn compute_release_branch_uses_default_prefix() {
 		assert_eq!(
 			compute_release_branch(None, "cursus-release/", Some("main")).unwrap(),
 			"cursus-release/main"
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_detached_fallback() {
+	#[tokio::test]
+	async fn compute_release_branch_detached_fallback() {
 		assert_eq!(
 			compute_release_branch(None, "cursus-release/", None).unwrap(),
 			"cursus-release/detached"
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_rejects_dash_prefix() {
+	#[tokio::test]
+	async fn compute_release_branch_rejects_dash_prefix() {
 		let result = compute_release_branch(Some("--detach"), "release/", Some("main"));
 		assert!(result.is_err());
 		assert!(
@@ -493,8 +512,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_rejects_single_dash() {
+	#[tokio::test]
+	async fn compute_release_branch_rejects_single_dash() {
 		let result = compute_release_branch(Some("-"), "release/", None);
 		assert!(result.is_err());
 		assert!(
@@ -505,8 +524,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn compute_release_branch_rejects_empty() {
+	#[tokio::test]
+	async fn compute_release_branch_rejects_empty() {
 		let result = compute_release_branch(Some(""), "release/", Some("main"));
 		assert!(result.is_err());
 		assert!(
@@ -517,8 +536,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn check_dirty_tree_succeeds_when_clean() {
+	#[tokio::test]
+	async fn check_dirty_tree_succeeds_when_clean() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout → clean
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -526,12 +545,12 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
-		let result = check_dirty_tree(&git);
+		let result = check_dirty_tree(&git).await;
 		assert!(result.is_ok());
 	}
 
-	#[test]
-	fn check_dirty_tree_fails_when_dirty() {
+	#[tokio::test]
+	async fn check_dirty_tree_fails_when_dirty() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner =
 			Arc::new(RecordingCommandRunner::new(0).with_stdout(b" M src/main.rs\n".to_vec()));
@@ -540,7 +559,7 @@ mod tests {
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
 			dir_abs.clone(),
 		);
-		let result = check_dirty_tree(&git);
+		let result = check_dirty_tree(&git).await;
 		assert!(result.is_err());
 		assert!(
 			result.unwrap_err().to_string().contains("dirty"),
@@ -562,7 +581,7 @@ mod tests {
 	}
 
 	/// Sets up a temp dir with a Cargo project, branch strategy git config, and GitHub config.
-	fn setup_branch_strategy_with_github() -> tempfile::TempDir {
+	async fn setup_branch_strategy_with_github() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
@@ -578,6 +597,7 @@ mod tests {
 					.with_pull_request_title("My Release PR".to_string()),
 			)
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -595,11 +615,11 @@ mod tests {
 		dir
 	}
 
-	#[test]
-	fn cmd_prepare_branch_strategy_with_github_creates_pr() {
+	#[tokio::test]
+	async fn cmd_prepare_branch_strategy_with_github_creates_pr() {
 		use crate::github::client::GitHubClient;
 		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
-		let dir = setup_branch_strategy_with_github();
+		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
 			vec![
@@ -621,10 +641,10 @@ mod tests {
 			)),
 		)
 		.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
-		let config = config::load(&env).unwrap();
+		let config = config::load(&env).await.unwrap();
 		let args = PrepareArgs::default();
 
-		let result = super::super::cmd_prepare(&args, false, config);
+		let result = super::super::cmd_prepare(&args, false, config).await;
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 		let invocations = client.invocations();
@@ -639,11 +659,11 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn cmd_prepare_branch_strategy_pr_failure_is_fatal() {
+	#[tokio::test]
+	async fn cmd_prepare_branch_strategy_pr_failure_is_fatal() {
 		use crate::github::client::GitHubClient;
 		use crate::github::client::test_support::RecordingGitHubClient;
-		let dir = setup_branch_strategy_with_github();
+		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
 			vec![
@@ -665,19 +685,19 @@ mod tests {
 			)),
 		)
 		.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
-		let config = config::load(&env).unwrap();
+		let config = config::load(&env).await.unwrap();
 		let args = PrepareArgs::default();
 
-		let result = super::super::cmd_prepare(&args, false, config);
+		let result = super::super::cmd_prepare(&args, false, config).await;
 		assert!(
 			result.is_err(),
 			"PR failure should be fatal, got: {result:?}"
 		);
 	}
 
-	#[test]
-	fn cmd_prepare_no_github_client_errors() {
-		let dir = setup_branch_strategy_with_github();
+	#[tokio::test]
+	async fn cmd_prepare_no_github_client_errors() {
+		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		// No github client — pre-flight check should error
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -689,10 +709,10 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).unwrap();
+		let config = config::load(&env).await.unwrap();
 		let args = PrepareArgs::default();
 
-		let result = super::super::cmd_prepare(&args, false, config);
+		let result = super::super::cmd_prepare(&args, false, config).await;
 		assert!(result.is_err(), "Expected Err without github client");
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

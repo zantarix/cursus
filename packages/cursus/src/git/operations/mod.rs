@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
+use async_trait::async_trait;
 
 use crate::command::CommandRunner;
 use crate::git::Git;
@@ -27,6 +28,7 @@ impl GitWorkdir {
 	}
 }
 
+#[async_trait]
 impl Git for GitWorkdir {
 	fn path(&self) -> &AbsolutePath {
 		&self.path
@@ -37,7 +39,7 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git add` exits with a non-zero status.
-	fn add(&self, files: &[PathBuf]) -> anyhow::Result<()> {
+	async fn add(&self, files: &[PathBuf]) -> anyhow::Result<()> {
 		if files.is_empty() {
 			return Ok(());
 		}
@@ -54,6 +56,7 @@ impl Git for GitWorkdir {
 		let output = self
 			.runner
 			.run_mut("git", &args, &self.path)
+			.await
 			.context("Failed to run git add")?;
 
 		if !output.status.success() {
@@ -69,10 +72,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git commit` exits with a non-zero status.
-	fn commit(&self, message: &str) -> anyhow::Result<()> {
+	async fn commit(&self, message: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["commit", "-m", message], &self.path)
+			.await
 			.context("Failed to run git commit")?;
 
 		if !output.status.success() {
@@ -88,10 +92,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git tag` exits with a non-zero status.
-	fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
+	async fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["tag", "-a", tag_name, "-m", message], &self.path)
+			.await
 			.context("Failed to run git tag")?;
 
 		if !output.status.success() {
@@ -112,10 +117,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
-	fn push(&self) -> anyhow::Result<()> {
+	async fn push(&self) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["push", "origin", "HEAD"], &self.path)
+			.await
 			.context("Failed to run git push")?;
 
 		if !output.status.success() {
@@ -131,10 +137,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git status` exits with a non-zero status.
-	fn is_dirty(&self) -> anyhow::Result<bool> {
+	async fn is_dirty(&self) -> anyhow::Result<bool> {
 		let output = self
 			.runner
 			.run("git", &["status", "--porcelain"], &self.path)
+			.await
 			.context("Failed to run git status")?;
 
 		if !output.status.success() {
@@ -153,10 +160,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git rev-parse` exits with a non-zero status.
-	fn current_branch(&self) -> anyhow::Result<Option<String>> {
+	async fn current_branch(&self) -> anyhow::Result<Option<String>> {
 		let output = self
 			.runner
 			.run("git", &["rev-parse", "--abbrev-ref", "HEAD"], &self.path)
+			.await
 			.context("Failed to run git rev-parse")?;
 
 		if !output.status.success() {
@@ -179,10 +187,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git checkout` exits with a non-zero status.
-	fn checkout(&self, branch: &str) -> anyhow::Result<()> {
+	async fn checkout(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["checkout", branch], &self.path)
+			.await
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
@@ -206,11 +215,12 @@ impl Git for GitWorkdir {
 	/// exit code — whether due to a missing ref, not being in a git repository,
 	/// or any other reason — is treated as the tag not existing and returns
 	/// `Ok(false)`.
-	fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
+	async fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
 		let ref_path = format!("refs/tags/{tag}");
 		let output = self
 			.runner
 			.run("git", &["rev-parse", "--verify", &ref_path], &self.path)
+			.await
 			.context("Failed to run git rev-parse")?;
 
 		Ok(output.status.success())
@@ -224,10 +234,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if the git command cannot be executed at all.
-	fn remote_origin_url(&self) -> anyhow::Result<Option<String>> {
+	async fn remote_origin_url(&self) -> anyhow::Result<Option<String>> {
 		let output = self
 			.runner
 			.run("git", &["remote", "get-url", "origin"], &self.path)
+			.await
 			.context("Failed to query git remote URL")?;
 
 		if !output.status.success() {
@@ -247,10 +258,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git checkout` exits with a non-zero status.
-	fn checkout_or_reset_branch(&self, branch: &str) -> anyhow::Result<()> {
+	async fn checkout_or_reset_branch(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["checkout", "-B", branch], &self.path)
+			.await
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
@@ -270,7 +282,7 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
-	fn force_push_branch(&self, branch: &str) -> anyhow::Result<()> {
+	async fn force_push_branch(&self, branch: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut(
@@ -278,6 +290,7 @@ impl Git for GitWorkdir {
 				&["push", "--force-with-lease", "origin", branch],
 				&self.path,
 			)
+			.await
 			.context("Failed to run git force push branch")?;
 
 		if !output.status.success() {
@@ -296,10 +309,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git tag -d` exits with a non-zero status.
-	fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
+	async fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["tag", "-d", tag], &self.path)
+			.await
 			.context("Failed to run git tag -d")?;
 
 		if !output.status.success() {
@@ -318,10 +332,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
-	fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
+	async fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
 		let output = self
 			.runner
 			.run_mut("git", &["push", "origin", "tag", tag], &self.path)
+			.await
 			.context("Failed to run git push tag")?;
 
 		if !output.status.success() {
@@ -340,10 +355,11 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git rev-list` exits with a non-zero status or the
 	/// output cannot be parsed as an integer.
-	fn rev_list_count(&self, range: &str) -> anyhow::Result<usize> {
+	async fn rev_list_count(&self, range: &str) -> anyhow::Result<usize> {
 		let output = self
 			.runner
 			.run("git", &["rev-list", "--count", range], &self.path)
+			.await
 			.context("Failed to run git rev-list --count")?;
 
 		if !output.status.success() {
@@ -364,10 +380,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
-	fn log_message(&self, rev: &str) -> anyhow::Result<String> {
+	async fn log_message(&self, rev: &str) -> anyhow::Result<String> {
 		let output = self
 			.runner
 			.run("git", &["log", "-1", "--format=%B", rev], &self.path)
+			.await
 			.context("Failed to run git log")?;
 
 		if !output.status.success() {
@@ -386,7 +403,7 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git diff-tree` exits with a non-zero status.
-	fn diff_tree_names(&self, commit: &str) -> anyhow::Result<Vec<String>> {
+	async fn diff_tree_names(&self, commit: &str) -> anyhow::Result<Vec<String>> {
 		let output = self
 			.runner
 			.run(
@@ -394,6 +411,7 @@ impl Git for GitWorkdir {
 				&["diff-tree", "--no-commit-id", "-r", "--name-only", commit],
 				&self.path,
 			)
+			.await
 			.context("Failed to run git diff-tree")?;
 
 		if !output.status.success() {
@@ -417,7 +435,7 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
-	fn log_added_commit(&self, path: &std::path::Path) -> anyhow::Result<Option<String>> {
+	async fn log_added_commit(&self, path: &std::path::Path) -> anyhow::Result<Option<String>> {
 		let path_str = path.to_string_lossy();
 		let output = self
 			.runner
@@ -433,6 +451,7 @@ impl Git for GitWorkdir {
 				],
 				&self.path,
 			)
+			.await
 			.context("Failed to run git log --diff-filter=A")?;
 
 		if !output.status.success() {
@@ -456,10 +475,11 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
-	fn log_subject(&self, rev: &str) -> anyhow::Result<String> {
+	async fn log_subject(&self, rev: &str) -> anyhow::Result<String> {
 		let output = self
 			.runner
 			.run("git", &["log", "-1", "--format=%s", rev], &self.path)
+			.await
 			.context("Failed to run git log --format=%s")?;
 
 		if !output.status.success() {
@@ -481,12 +501,13 @@ impl Git for GitWorkdir {
 	/// # Errors
 	///
 	/// Returns an error if `git diff` exits with a non-zero status.
-	fn diff_names(&self, extra_args: &[&str]) -> anyhow::Result<Vec<String>> {
+	async fn diff_names(&self, extra_args: &[&str]) -> anyhow::Result<Vec<String>> {
 		let mut args = vec!["diff", "--name-only"];
 		args.extend_from_slice(extra_args);
 		let output = self
 			.runner
 			.run("git", &args, &self.path)
+			.await
 			.context("Failed to run git diff --name-only")?;
 
 		if !output.status.success() {

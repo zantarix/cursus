@@ -10,10 +10,10 @@ use common::{
 use cursus::model::config::PackageManager;
 use cursus::test_logging::{init_test_logger, take_logs};
 
-#[test]
-fn prepare_fails_when_no_config() {
+#[tokio::test]
+async fn prepare_fails_when_no_config() {
 	let dir = temp_git_repo();
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -23,12 +23,12 @@ fn prepare_fails_when_no_config() {
 	);
 }
 
-#[test]
-fn prepare_with_no_changesets_is_noop() {
+#[tokio::test]
+async fn prepare_with_no_changesets_is_noop() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -42,18 +42,18 @@ fn prepare_with_no_changesets_is_noop() {
 	);
 }
 
-#[test]
-fn prepare_with_single_changeset_cargo() {
+#[tokio::test]
+async fn prepare_with_single_changeset_cargo() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
 		"+++\ntest-project = \"minor\"\n+++\n\nAdded a feature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -90,18 +90,18 @@ fn prepare_with_single_changeset_cargo() {
 	);
 }
 
-#[test]
-fn prepare_with_single_changeset_npm() {
+#[tokio::test]
+async fn prepare_with_single_changeset_npm() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
 		"+++\ntest-project = \"patch\"\n+++\n\nFixed a bug\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -123,9 +123,9 @@ fn prepare_with_single_changeset_npm() {
 	assert!(!dir.path().join(".cursus/test-change.md").exists());
 }
 
-#[test]
-fn prepare_aggregates_to_highest_change_type() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_aggregates_to_highest_change_type() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change-1.md",
@@ -137,7 +137,7 @@ fn prepare_aggregates_to_highest_change_type() {
 		"+++\ntest-project = \"minor\"\n+++\n\nNew feature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -153,11 +153,11 @@ fn prepare_aggregates_to_highest_change_type() {
 	assert!(!dir.path().join(".cursus/change-2.md").exists());
 }
 
-#[test]
-fn prepare_dry_run_does_not_modify_files() {
+#[tokio::test]
+async fn prepare_dry_run_does_not_modify_files() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
@@ -169,7 +169,8 @@ fn prepare_dry_run_does_not_modify_files() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -200,9 +201,9 @@ fn prepare_dry_run_does_not_modify_files() {
 	);
 }
 
-#[test]
-fn prepare_major_bump_resets_minor_and_patch() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_major_bump_resets_minor_and_patch() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	// First set the version to something non-trivial
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
@@ -215,7 +216,7 @@ fn prepare_major_bump_resets_minor_and_patch() {
 		"+++\ntest-project = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -225,9 +226,9 @@ fn prepare_major_bump_resets_minor_and_patch() {
 	);
 }
 
-#[test]
-fn prepare_idempotent_no_changesets_after_release() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_idempotent_no_changesets_after_release() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
@@ -235,18 +236,18 @@ fn prepare_idempotent_no_changesets_after_release() {
 	);
 
 	// First release
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	// Second release (no changesets)
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
-#[test]
-fn prepare_changelog_has_proper_sections() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_changelog_has_proper_sections() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change-1.md",
@@ -263,7 +264,7 @@ fn prepare_changelog_has_proper_sections() {
 		"+++\ntest-project = \"patch\"\n+++\n\nBug fix\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	let today = cursus::utils::today_iso_date();
@@ -288,9 +289,9 @@ fn prepare_changelog_has_proper_sections() {
 	);
 }
 
-#[test]
-fn prepare_successive_releases_prepend_to_changelog() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_successive_releases_prepend_to_changelog() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 
 	// First release: minor bump 0.1.0 -> 0.2.0
 	write_changeset(
@@ -298,7 +299,7 @@ fn prepare_successive_releases_prepend_to_changelog() {
 		"change-1.md",
 		"+++\ntest-project = \"minor\"\n+++\n\nFirst feature\n",
 	);
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	// Second release: patch bump 0.2.0 -> 0.2.1
@@ -307,7 +308,7 @@ fn prepare_successive_releases_prepend_to_changelog() {
 		"change-2.md",
 		"+++\ntest-project = \"patch\"\n+++\n\nA bug fix\n",
 	);
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	let today = cursus::utils::today_iso_date();
@@ -332,16 +333,16 @@ fn prepare_successive_releases_prepend_to_changelog() {
 	);
 }
 
-#[test]
-fn prepare_unknown_package_in_changeset_fails() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_unknown_package_in_changeset_fails() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
 		"+++\nnonexistent-package = \"minor\"\n+++\n\nSome change\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err();
 	assert!(
@@ -350,9 +351,9 @@ fn prepare_unknown_package_in_changeset_fails() {
 	);
 }
 
-#[test]
-fn prepare_package_flag_filters_packages() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+#[tokio::test]
+async fn prepare_package_flag_filters_packages() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]).await;
 
 	write_changeset(
 		dir.path(),
@@ -369,7 +370,8 @@ fn prepare_package_flag_filters_packages() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -396,9 +398,9 @@ fn prepare_package_flag_filters_packages() {
 	insta::assert_snapshot!(rewritten);
 }
 
-#[test]
-fn prepare_scoped_fully_consumed_changeset_is_deleted() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0")]);
+#[tokio::test]
+async fn prepare_scoped_fully_consumed_changeset_is_deleted() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0")]).await;
 
 	// Changeset only references pkg-a
 	write_changeset(
@@ -416,7 +418,8 @@ fn prepare_scoped_fully_consumed_changeset_is_deleted() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 
 	// Fully consumed changeset must be deleted
@@ -426,9 +429,9 @@ fn prepare_scoped_fully_consumed_changeset_is_deleted() {
 	);
 }
 
-#[test]
-fn prepare_scoped_sequential_releases() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+#[tokio::test]
+async fn prepare_scoped_sequential_releases() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]).await;
 
 	// Single changeset covering both packages
 	write_changeset(
@@ -447,7 +450,8 @@ fn prepare_scoped_sequential_releases() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "First release failed: {result:?}");
 
 	// Changeset should be rewritten with only pkg-b
@@ -474,7 +478,8 @@ fn prepare_scoped_sequential_releases() {
 			"pkg-b",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Second release failed: {result:?}");
 
 	// Changeset now fully consumed — should be deleted
@@ -489,9 +494,9 @@ fn prepare_scoped_sequential_releases() {
 	);
 }
 
-#[test]
-fn prepare_scoped_unrelated_changeset_untouched() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+#[tokio::test]
+async fn prepare_scoped_unrelated_changeset_untouched() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]).await;
 
 	// One changeset for pkg-a, one for pkg-b
 	let pkg_b_content = "+++\npkg-b = \"minor\"\n+++\n\nPkg-b only change\n";
@@ -512,7 +517,8 @@ fn prepare_scoped_unrelated_changeset_untouched() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 
 	// pkg-a changeset deleted
@@ -533,9 +539,9 @@ fn prepare_scoped_unrelated_changeset_untouched() {
 	);
 }
 
-#[test]
-fn prepare_unknown_package_flag_fails() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_unknown_package_flag_fails() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
@@ -551,7 +557,8 @@ fn prepare_unknown_package_flag_fails() {
 			"nonexistent",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_err());
 	let err = result.unwrap_err();
 	assert!(
@@ -560,9 +567,9 @@ fn prepare_unknown_package_flag_fails() {
 	);
 }
 
-#[test]
-fn prepare_updates_cargo_lock_file() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_updates_cargo_lock_file() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"test-change.md",
@@ -575,7 +582,7 @@ fn prepare_updates_cargo_lock_file() {
 		std::fs::remove_file(&lock_file).unwrap();
 	}
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	if let Err(ref err) = result {
 		eprintln!("Release failed: {:#}", err);
 	}
@@ -601,9 +608,9 @@ fn prepare_updates_cargo_lock_file() {
 // version-branching logic in a realistic isolated environment.
 
 #[cfg(feature = "nix-tests")]
-#[test]
-fn prepare_updates_npm_lock_file() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn prepare_updates_npm_lock_file() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	std::fs::write(
 		dir.path().join("package-lock.json"),
 		r#"{"name":"test-project","version":"0.1.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"test-project","version":"0.1.0"}}}"#,
@@ -631,9 +638,9 @@ fn prepare_updates_npm_lock_file() {
 }
 
 #[cfg(feature = "nix-tests")]
-#[test]
-fn prepare_updates_pnpm_lock_file() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn prepare_updates_pnpm_lock_file() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	std::fs::write(
 		dir.path().join("pnpm-lock.yaml"),
 		"lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n",
@@ -661,12 +668,12 @@ fn prepare_updates_pnpm_lock_file() {
 }
 
 #[cfg(feature = "nix-tests")]
-#[test]
-fn prepare_updates_yarn_classic_lock_file() {
+#[tokio::test]
+async fn prepare_updates_yarn_classic_lock_file() {
 	// In test-yarn-classic, `yarn` is Yarn Classic (1.x). The implementation detects
 	// this via `yarn --version` and uses `--ignore-scripts` instead of `--mode
 	// update-lockfile` (which Classic silently ignores, leaving scripts running).
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
 	write_changeset(
 		dir.path(),
@@ -693,12 +700,12 @@ fn prepare_updates_yarn_classic_lock_file() {
 }
 
 #[cfg(feature = "nix-tests")]
-#[test]
-fn prepare_updates_yarn_berry_lock_file() {
+#[tokio::test]
+async fn prepare_updates_yarn_berry_lock_file() {
 	// In test-yarn-berry, `yarn` is Yarn Berry (v4) installed directly from
 	// pkgs.yarn-berry — no wrapper needed. The implementation detects the major
 	// version and uses `--mode update-lockfile`, which skips scripts automatically.
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
 	write_changeset(
 		dir.path(),
@@ -724,10 +731,10 @@ fn prepare_updates_yarn_berry_lock_file() {
 	);
 }
 
-#[test]
-fn prepare_updates_cargo_intra_workspace_dep_version() {
+#[tokio::test]
+async fn prepare_updates_cargo_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b via a path dep; when pkg-b is bumped, pkg-a's Cargo.toml should be updated
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]).await;
 
 	// Write pkg-a with a path + version dep on pkg-b (path lets Cargo resolve it locally)
 	std::fs::write(
@@ -742,7 +749,7 @@ fn prepare_updates_cargo_intra_workspace_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	// Verify pkg-b version was bumped
@@ -764,11 +771,11 @@ fn prepare_updates_cargo_intra_workspace_dep_version() {
 	);
 }
 
-#[test]
-fn prepare_updates_cargo_workspace_dep_in_root() {
+#[tokio::test]
+async fn prepare_updates_cargo_workspace_dep_in_root() {
 	// Root Cargo.toml has [workspace.dependencies]; pkg-a uses it via workspace = true.
 	// When pkg-b is bumped, the root [workspace.dependencies] entry should be updated.
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]).await;
 
 	// Root Cargo.toml with workspace.dependencies (path dep so Cargo finds it locally)
 	std::fs::write(
@@ -790,7 +797,7 @@ fn prepare_updates_cargo_workspace_dep_in_root() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -804,9 +811,9 @@ fn prepare_updates_cargo_workspace_dep_in_root() {
 	);
 }
 
-#[test]
-fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]);
+#[tokio::test]
+async fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0"), ("pkg-b", "0.2.0")]).await;
 
 	std::fs::write(
 		dir.path().join("pkg-a/Cargo.toml"),
@@ -825,7 +832,8 @@ fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 
 	// pkg-a/Cargo.toml should not be modified in dry-run
@@ -834,11 +842,11 @@ fn prepare_dry_run_shows_dep_updates_without_modifying_files() {
 }
 
 /// `prepare` issues a warning when `--branch` is given with the push strategy.
-#[test]
-fn prepare_branch_arg_with_push_strategy_warns() {
+#[tokio::test]
+async fn prepare_branch_arg_with_push_strategy_warns() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change.md",
@@ -855,7 +863,8 @@ fn prepare_branch_arg_with_push_strategy_warns() {
 			"custom-branch",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -870,11 +879,11 @@ fn prepare_branch_arg_with_push_strategy_warns() {
 ///
 /// This guards against mutations that weaken `&&` to `||` in the branch-warning predicate,
 /// which would incorrectly warn whenever push strategy is active even without a `--branch` arg.
-#[test]
-fn prepare_no_branch_arg_with_push_strategy_no_warning() {
+#[tokio::test]
+async fn prepare_no_branch_arg_with_push_strategy_no_warning() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change.md",
@@ -882,7 +891,7 @@ fn prepare_no_branch_arg_with_push_strategy_no_warning() {
 	);
 
 	// No --branch arg, push strategy (default) → warning must NOT appear.
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -894,13 +903,13 @@ fn prepare_no_branch_arg_with_push_strategy_no_warning() {
 	);
 }
 
-#[test]
-fn prepare_updates_npm_intra_workspace_dep_version() {
+#[tokio::test]
+async fn prepare_updates_npm_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
 	let dir = temp_git_repo();
 	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
 		.with_npm(cursus::model::config::NpmConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	// Root package.json with workspace config
 	std::fs::write(
@@ -929,7 +938,7 @@ fn prepare_updates_npm_intra_workspace_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {:?}", result.unwrap_err());
 
 	// Verify pkg-b version was bumped
@@ -947,14 +956,14 @@ fn prepare_updates_npm_intra_workspace_dep_version() {
 	);
 }
 
-#[test]
-fn prepare_skips_workspace_protocol_dep_version() {
+#[tokio::test]
+async fn prepare_skips_workspace_protocol_dep_version() {
 	// pkg-a depends on pkg-b via workspace: protocol; that dep must NOT be rewritten
 	// (ADR-012: workspace: entries auto-resolve at publish time via the package manager)
 	let dir = temp_git_repo();
 	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
 		.with_npm(cursus::model::config::NpmConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),
@@ -982,7 +991,7 @@ fn prepare_skips_workspace_protocol_dep_version() {
 		"+++\npkg-b = \"minor\"\n+++\n\nAdded feature to pkg-b\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "prepare failed: {:?}", result.unwrap_err());
 
 	// pkg-b version should be bumped normally

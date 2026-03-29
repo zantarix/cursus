@@ -11,7 +11,7 @@ use cursus::test_logging::{init_test_logger, take_logs};
 ///
 /// Equivalent to `run_cursus` but with a `RestGitHubClient` set up
 /// using the provided token string, matching what `main.rs` does at runtime.
-fn run_cursus_with_token(
+async fn run_cursus_with_token(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 	token: &str,
@@ -24,7 +24,7 @@ fn run_cursus_with_token(
 	let env =
 		cursus::Env::new(runner, Arc::new(LocalFilesystem), git).with_github_client(github_client);
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(args);
-	cursus::run(cli, env)
+	cursus::run(cli, env).await
 }
 
 /// Helper: write a config file with the given TOML content under `.cursus/`.
@@ -34,8 +34,8 @@ fn write_config(dir: &std::path::Path, toml: &str) {
 	std::fs::write(config_dir.join("config.toml"), toml).unwrap();
 }
 
-#[test]
-fn github_config_section_loads_correctly() {
+#[tokio::test]
+async fn github_config_section_loads_correctly() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -53,12 +53,13 @@ fn github_config_section_loads_correctly() {
 	let result = run_cursus(
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
-#[test]
-fn github_unknown_field_causes_parse_error() {
+#[tokio::test]
+async fn github_unknown_field_causes_parse_error() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -68,7 +69,8 @@ fn github_unknown_field_causes_parse_error() {
 	let result = run_cursus(
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-	);
+	)
+	.await;
 	let err = result.unwrap_err();
 	let msg = format!("{err:#}");
 	assert!(
@@ -77,8 +79,8 @@ fn github_unknown_field_causes_parse_error() {
 	);
 }
 
-#[test]
-fn github_enabled_implies_git_enabled_integration() {
+#[tokio::test]
+async fn github_enabled_implies_git_enabled_integration() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -93,15 +95,16 @@ fn github_enabled_implies_git_enabled_integration() {
 	let result = run_cursus(
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-	);
+	)
+	.await;
 	// The command should succeed (dry-run, no network). The key assertion is
 	// that config loading did not fail, which would mean github→git derivation worked.
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
 /// Dry-run with GitHub enabled prints "Would create GitHub Release" to log.
-#[test]
-fn publish_dry_run_with_github_shows_would_create() {
+#[tokio::test]
+async fn publish_dry_run_with_github_shows_would_create() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -120,7 +123,8 @@ fn publish_dry_run_with_github_shows_would_create() {
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 		"test-token",
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -138,8 +142,8 @@ fn publish_dry_run_with_github_shows_would_create() {
 
 /// During dry-run, the build_command is suppressed by the DryRunCommandRunner.
 /// Verified by using `false` (always exits 1) as the build_command and checking success.
-#[test]
-fn publish_dry_run_with_github_no_build_command_executed() {
+#[tokio::test]
+async fn publish_dry_run_with_github_no_build_command_executed() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -155,7 +159,8 @@ fn publish_dry_run_with_github_no_build_command_executed() {
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 		"test-token",
-	);
+	)
+	.await;
 	// If build_command were executed, `false` (exits 1) would cause orchestration to fail.
 	// In dry-run it must be skipped → success.
 	assert!(
@@ -168,8 +173,8 @@ fn publish_dry_run_with_github_no_build_command_executed() {
 ///
 /// Using `false` as the build_command (always exits 1) with a real runner verifies that
 /// the build command runs before any registry publish, and a failure halts the whole operation.
-#[test]
-fn publish_build_command_failure_aborts_before_publishing() {
+#[tokio::test]
+async fn publish_build_command_failure_aborts_before_publishing() {
 	cursus::test_logging::init_test_logger();
 	let _ = cursus::test_logging::take_logs();
 
@@ -188,7 +193,8 @@ fn publish_build_command_failure_aborts_before_publishing() {
 		["cursus", "publish", "--no-interactive"],
 		dir.path(),
 		"test-token",
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok(ExitCode), got: {result:?}");
 	assert_eq!(
 		result.unwrap(),
@@ -211,8 +217,8 @@ fn publish_build_command_failure_aborts_before_publishing() {
 
 /// When GitHub Releases is enabled and no token is set, the command fails immediately
 /// without attempting to publish anything.
-#[test]
-fn publish_github_missing_token_fails() {
+#[tokio::test]
+async fn publish_github_missing_token_fails() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
@@ -225,7 +231,7 @@ fn publish_github_missing_token_fails() {
 	.unwrap();
 
 	// Run without a token — Env has no github client, so it should fail before publishing.
-	let result = run_cursus(["cursus", "publish", "--no-interactive"], dir.path());
+	let result = run_cursus(["cursus", "publish", "--no-interactive"], dir.path()).await;
 	let err = result.unwrap_err();
 	let msg = format!("{err:#}");
 	assert!(
@@ -236,8 +242,8 @@ fn publish_github_missing_token_fails() {
 
 /// Dry-run with artifacts configured prints "Would attach: {name}" and "Would publish release"
 /// for each artifact.
-#[test]
-fn publish_dry_run_with_artifacts_shows_would_attach() {
+#[tokio::test]
+async fn publish_dry_run_with_artifacts_shows_would_attach() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo();
@@ -256,7 +262,8 @@ fn publish_dry_run_with_artifacts_shows_would_attach() {
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
 		"test-token",
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();

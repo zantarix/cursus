@@ -50,7 +50,7 @@ impl AbsolutePath {
 	/// Joins `sub` onto this path, canonicalizes the result, and verifies it
 	/// remains within this path. Returns an error if the resolved path escapes
 	/// the base directory (e.g. via `..` components or symlinks).
-	pub fn subpath(
+	pub async fn subpath(
 		&self,
 		sub: impl AsRef<Path>,
 		fs: &dyn Filesystem,
@@ -58,6 +58,7 @@ impl AbsolutePath {
 		let joined = self.0.join(sub);
 		let canonical_base = fs
 			.canonicalize(self)
+			.await
 			.with_context(|| format!("failed to canonicalize base path: {}", self.0.display()))?;
 		let joined_abs = AbsolutePath::new(&joined).with_context(|| {
 			format!(
@@ -65,7 +66,7 @@ impl AbsolutePath {
 				joined.display()
 			)
 		})?;
-		let canonical_joined = fs.canonicalize(&joined_abs).with_context(|| {
+		let canonical_joined = fs.canonicalize(&joined_abs).await.with_context(|| {
 			format!(
 				"path does not exist or cannot be resolved: {}",
 				joined.display()
@@ -80,7 +81,7 @@ impl AbsolutePath {
 	/// Expands a glob pattern relative to this path, returning only results
 	/// that resolve within this directory. Paths that escape (via `..` or
 	/// symlinks) are rejected with an error.
-	pub fn safe_glob(
+	pub async fn safe_glob(
 		&self,
 		pattern: &str,
 		fs: &dyn Filesystem,
@@ -91,13 +92,14 @@ impl AbsolutePath {
 			.context("Invalid UTF-8 in glob pattern")?;
 		let canonical_base = fs
 			.canonicalize(self)
+			.await
 			.with_context(|| format!("failed to canonicalize base path: {}", self.0.display()))?;
 
 		let mut results = Vec::new();
-		for path in fs.glob(pattern_str)? {
+		for path in fs.glob(pattern_str).await? {
 			let abs_path = AbsolutePath::new(&path)
 				.with_context(|| format!("glob result is not absolute: {}", path.display()))?;
-			let canonical = fs.canonicalize(&abs_path).with_context(|| {
+			let canonical = fs.canonicalize(&abs_path).await.with_context(|| {
 				format!("failed to canonicalize glob result: {}", path.display())
 			})?;
 			if !canonical.starts_with(&canonical_base) {
@@ -199,94 +201,94 @@ mod tests {
 
 	// ── subpath ───────────────────────────────────────────────────────────────
 
-	#[test]
-	fn subpath_valid_child_succeeds() {
+	#[tokio::test]
+	async fn subpath_valid_child_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		let child = dir.path().join("child");
 		std::fs::create_dir(&child).unwrap();
 		let base = AbsolutePath::new(dir.path()).unwrap();
-		let result = base.subpath("child", &fs()).unwrap();
+		let result = base.subpath("child", &fs()).await.unwrap();
 		assert!(result.starts_with(dir.path()));
 	}
 
-	#[test]
-	fn subpath_dotdot_escape_is_rejected() {
+	#[tokio::test]
+	async fn subpath_dotdot_escape_is_rejected() {
 		let outer = tempfile::tempdir().unwrap();
 		let repo = outer.path().join("repo");
 		std::fs::create_dir(&repo).unwrap();
 		let escape = outer.path().join("secret");
 		std::fs::create_dir(&escape).unwrap();
 		let base = AbsolutePath::new(&repo).unwrap();
-		let result = base.subpath("../secret", &fs());
+		let result = base.subpath("../secret", &fs()).await;
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(msg.contains("escapes base directory"), "got: {msg}");
 	}
 
 	#[cfg(unix)]
-	#[test]
-	fn subpath_symlink_escape_is_rejected() {
+	#[tokio::test]
+	async fn subpath_symlink_escape_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
 		let link = dir.path().join("escape");
 		std::os::unix::fs::symlink("/tmp", &link).unwrap();
 		let base = AbsolutePath::new(dir.path()).unwrap();
-		let result = base.subpath("escape", &fs());
+		let result = base.subpath("escape", &fs()).await;
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(msg.contains("escapes base directory"), "got: {msg}");
 	}
 
-	#[test]
-	fn subpath_dot_resolves_to_base() {
+	#[tokio::test]
+	async fn subpath_dot_resolves_to_base() {
 		let dir = tempfile::tempdir().unwrap();
 		let base = AbsolutePath::new(dir.path()).unwrap();
-		let result = base.subpath(".", &fs()).unwrap();
+		let result = base.subpath(".", &fs()).await.unwrap();
 		assert_eq!(*result, *base);
 	}
 
 	// ── safe_glob ─────────────────────────────────────────────────────────────
 
-	#[test]
-	fn safe_glob_empty_result_is_ok() {
+	#[tokio::test]
+	async fn safe_glob_empty_result_is_ok() {
 		let dir = tempfile::tempdir().unwrap();
 		let base = AbsolutePath::new(dir.path()).unwrap();
-		let results = base.safe_glob("no-match-*", &fs()).unwrap();
+		let results = base.safe_glob("no-match-*", &fs()).await.unwrap();
 		assert!(results.is_empty());
 	}
 
-	#[test]
-	fn safe_glob_matching_subdirs_succeeds() {
+	#[tokio::test]
+	async fn safe_glob_matching_subdirs_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join("pkg-a")).unwrap();
 		std::fs::create_dir(dir.path().join("pkg-b")).unwrap();
 		let base = AbsolutePath::new(dir.path()).unwrap();
-		let results = base.safe_glob("pkg-*", &fs()).unwrap();
+		let results = base.safe_glob("pkg-*", &fs()).await.unwrap();
 		assert_eq!(results.len(), 2);
 		assert!(results.iter().all(|p| p.starts_with(dir.path())));
 	}
 
-	#[test]
-	fn safe_glob_dotdot_pattern_escape_is_rejected() {
+	#[tokio::test]
+	async fn safe_glob_dotdot_pattern_escape_is_rejected() {
 		let outer = tempfile::tempdir().unwrap();
 		let repo = outer.path().join("repo");
 		std::fs::create_dir(&repo).unwrap();
 		let escape = outer.path().join("secret");
 		std::fs::create_dir(&escape).unwrap();
 		let base = AbsolutePath::new(&repo).unwrap();
-		let result = base.safe_glob("../secret", &fs());
+		let result = base.safe_glob("../secret", &fs()).await;
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(msg.contains("escapes base directory"), "got: {msg}");
 	}
 
 	#[cfg(unix)]
-	#[test]
-	fn safe_glob_symlink_escape_is_rejected() {
+	#[tokio::test]
+	async fn safe_glob_symlink_escape_is_rejected() {
 		let dir = tempfile::tempdir().unwrap();
 		let link = dir.path().join("escape");
 		std::os::unix::fs::symlink("/tmp", &link).unwrap();
 		let base = AbsolutePath::new(dir.path()).unwrap();
-		let result = base.safe_glob("escape", &fs());
+		let result = base.safe_glob("escape", &fs()).await;
 		assert!(result.is_err());
 		let msg = result.unwrap_err().to_string();
 		assert!(msg.contains("escapes base directory"), "got: {msg}");

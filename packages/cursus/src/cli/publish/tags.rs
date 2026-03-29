@@ -14,7 +14,7 @@ use super::PublishedPackage;
 /// so that a retry can re-create and re-push it, then processing continues with the next tag.
 ///
 /// Returns `(tags_created, tags_skipped, tags_push_failed)`.
-pub(super) fn create_and_push_tags(
+pub(super) async fn create_and_push_tags(
 	published: &[PublishedPackage],
 	config: &Config,
 	git: &dyn Git,
@@ -30,7 +30,7 @@ pub(super) fn create_and_push_tags(
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 
-		if git.tag_exists(&tag)? {
+		if git.tag_exists(&tag).await? {
 			info!("Tag {tag} already exists, skipping");
 			skipped += 1;
 			continue;
@@ -41,12 +41,12 @@ pub(super) fn create_and_push_tags(
 		// typically indicates a deeper problem (corrupt repo, permission denied) that
 		// cannot be resolved by retrying. Push failures, by contrast, are often transient
 		// and are handled with best-effort cleanup so retries can succeed.
-		git.tag(&tag, &message)?;
+		git.tag(&tag, &message).await?;
 		info!("Created tag {tag}");
 
-		if let Err(e) = git.push_tag(&tag) {
+		if let Err(e) = git.push_tag(&tag).await {
 			warn!("Failed to push tag {tag}: {e:#}");
-			if let Err(del_err) = git.delete_tag(&tag) {
+			if let Err(del_err) = git.delete_tag(&tag).await {
 				warn!("Failed to delete local tag {tag} after push failure: {del_err:#}");
 			}
 			push_failed += 1;
@@ -77,8 +77,8 @@ mod tests {
 	use crate::model::config::Config;
 	use crate::path::AbsolutePath;
 
-	#[test]
-	fn create_and_push_tags_creates_annotated_tags_and_pushes() {
+	#[tokio::test]
+	async fn create_and_push_tags_creates_annotated_tags_and_pushes() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&make_test_env(dir.path()));
 		// rev-parse exits 1 → tag_exists returns false (no existing tag)
@@ -100,7 +100,9 @@ mod tests {
 		}];
 
 		let (created, skipped, push_failed) =
-			create_and_push_tags(&published, &config, &git, false).unwrap();
+			create_and_push_tags(&published, &config, &git, false)
+				.await
+				.unwrap();
 
 		assert_eq!(created, 1);
 		assert_eq!(skipped, 0);
@@ -122,8 +124,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn create_and_push_tags_skips_existing_tag() {
+	#[tokio::test]
+	async fn create_and_push_tags_skips_existing_tag() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&make_test_env(dir.path()));
 		// rev-parse exits 0 → tag_exists returns true (tag already exists)
@@ -140,7 +142,9 @@ mod tests {
 		}];
 
 		let (created, skipped, push_failed) =
-			create_and_push_tags(&published, &config, &git, false).unwrap();
+			create_and_push_tags(&published, &config, &git, false)
+				.await
+				.unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 1);
@@ -151,8 +155,8 @@ mod tests {
 		assert!(invocations[0].args.contains(&"rev-parse".to_string()));
 	}
 
-	#[test]
-	fn create_and_push_tags_empty_list_does_nothing() {
+	#[tokio::test]
+	async fn create_and_push_tags_empty_list_does_nothing() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&make_test_env(dir.path()));
 		let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -162,8 +166,9 @@ mod tests {
 			dir_abs.clone(),
 		);
 
-		let (created, skipped, push_failed) =
-			create_and_push_tags(&[], &config, &git, false).unwrap();
+		let (created, skipped, push_failed) = create_and_push_tags(&[], &config, &git, false)
+			.await
+			.unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
@@ -171,8 +176,8 @@ mod tests {
 		assert!(runner.invocations().is_empty());
 	}
 
-	#[test]
-	fn create_and_push_tags_does_not_log_when_nothing_created() {
+	#[tokio::test]
+	async fn create_and_push_tags_does_not_log_when_nothing_created() {
 		// When no packages are published the "Pushed N tag(s)" info line must NOT appear.
 		// This guards against mutations that make the `if created > 0` guard always true
 		// (e.g. replace `>` with `>=`), which would log a misleading message for 0 tags.
@@ -187,8 +192,9 @@ mod tests {
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, dir_abs);
 
-		let (created, skipped, push_failed) =
-			create_and_push_tags(&[], &config, &git, false).unwrap();
+		let (created, skipped, push_failed) = create_and_push_tags(&[], &config, &git, false)
+			.await
+			.unwrap();
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
 		assert_eq!(push_failed, 0);
@@ -202,8 +208,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn create_and_push_tags_logs_when_tags_created() {
+	#[tokio::test]
+	async fn create_and_push_tags_logs_when_tags_created() {
 		// When a tag IS created the "Pushed N tag(s)" info line MUST appear.
 		// This guards against mutations that make `if created > 0` always false
 		// (e.g. replace `>` with `<`), which would suppress the log even when tags
@@ -230,7 +236,9 @@ mod tests {
 		}];
 
 		let (created, skipped, push_failed) =
-			create_and_push_tags(&published, &config, &git, false).unwrap();
+			create_and_push_tags(&published, &config, &git, false)
+				.await
+				.unwrap();
 		assert_eq!(created, 1);
 		assert_eq!(skipped, 0);
 		assert_eq!(push_failed, 0);
@@ -243,8 +251,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
+	#[tokio::test]
+	async fn create_and_push_tags_uses_prefixed_tag_for_monorepo() {
 		// Verifies that the `my-app@2.0.0` prefix format is used throughout
 		// the full create-and-push flow, not just the existence check.
 		let dir = tempfile::tempdir().unwrap();
@@ -266,7 +274,9 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
-		create_and_push_tags(&published, &config, &git, true).unwrap();
+		create_and_push_tags(&published, &config, &git, true)
+			.await
+			.unwrap();
 
 		let invocations = runner.invocations();
 		// rev-parse ref, tag -a create, push — all must use the prefixed name
@@ -289,8 +299,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn create_and_push_tags_push_failure_deletes_local_tag_and_counts_failed() {
+	#[tokio::test]
+	async fn create_and_push_tags_push_failure_deletes_local_tag_and_counts_failed() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&make_test_env(dir.path()));
 		// rev-parse exits 1 (tag absent); push of v1.0.0 also fails; all else succeeds.
@@ -324,7 +334,9 @@ mod tests {
 		}];
 
 		let (created, skipped, push_failed) =
-			create_and_push_tags(&published, &config, &git, false).unwrap();
+			create_and_push_tags(&published, &config, &git, false)
+				.await
+				.unwrap();
 
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
@@ -342,8 +354,8 @@ mod tests {
 		assert!(invocations[3].args.contains(&"v1.0.0".to_string()));
 	}
 
-	#[test]
-	fn create_and_push_tags_push_failure_continues_to_next_package() {
+	#[tokio::test]
+	async fn create_and_push_tags_push_failure_continues_to_next_package() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&make_test_env(dir.path()));
 		// rev-parse exits 1 (both tags absent); only the first push (v1.0.0) fails.
@@ -384,7 +396,9 @@ mod tests {
 		];
 
 		let (created, skipped, push_failed) =
-			create_and_push_tags(&published, &config, &git, false).unwrap();
+			create_and_push_tags(&published, &config, &git, false)
+				.await
+				.unwrap();
 
 		// First package push failed, second succeeded.
 		assert_eq!(created, 1);
@@ -392,8 +406,8 @@ mod tests {
 		assert_eq!(push_failed, 1);
 	}
 
-	#[test]
-	fn create_and_push_tags_delete_failure_after_push_failure_is_non_fatal() {
+	#[tokio::test]
+	async fn create_and_push_tags_delete_failure_after_push_failure_is_non_fatal() {
 		let dir = tempfile::tempdir().unwrap();
 		let config = Config::new(&make_test_env(dir.path()));
 		// rev-parse exits 1 (tag absent); push and delete also fail.
@@ -419,7 +433,7 @@ mod tests {
 		}];
 
 		// Must not error out even though both push and delete failed.
-		let result = create_and_push_tags(&published, &config, &git, false);
+		let result = create_and_push_tags(&published, &config, &git, false).await;
 		assert!(result.is_ok());
 		let (created, skipped, push_failed) = result.unwrap();
 		assert_eq!(created, 0);

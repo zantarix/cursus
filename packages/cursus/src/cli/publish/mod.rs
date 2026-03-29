@@ -78,7 +78,7 @@ pub struct PublishArgs {
 ///
 /// Returns the sorted project list and the full dependency graph (for use in
 /// downstream failure propagation).
-fn sort_projects_by_dependency(
+async fn sort_projects_by_dependency(
 	projects: &[crate::package_manager::Project],
 	selected_projects: Vec<crate::package_manager::Project>,
 	disable_cycle_warnings: bool,
@@ -142,7 +142,7 @@ fn add_transitive_dependents(
 /// Creates git tags and GitHub Releases for all published packages.
 ///
 /// Returns a [`GitReleaseOutcome`] with tag and GitHub Release counts.
-fn run_git_release_operations(
+async fn run_git_release_operations(
 	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
@@ -156,7 +156,8 @@ fn run_git_release_operations(
 		flags.dry_run,
 		flags.git_enabled,
 		flags.is_multi_package,
-	)?;
+	)
+	.await?;
 	let (github_created, github_failed) = maybe_orchestrate_github_releases(
 		git,
 		config,
@@ -165,7 +166,8 @@ fn run_git_release_operations(
 		flags.dry_run,
 		flags.no_git,
 		flags.is_multi_package,
-	)?;
+	)
+	.await?;
 	Ok(GitReleaseOutcome {
 		tags_created,
 		tags_skipped,
@@ -178,7 +180,7 @@ fn run_git_release_operations(
 /// Creates git tags for published packages (or logs dry-run intent) and returns counts.
 ///
 /// Returns `(tags_created, tags_skipped, tags_push_failed)`.
-fn maybe_create_tags(
+async fn maybe_create_tags(
 	published_packages: &[PublishedPackage],
 	config: &Config,
 	git: &dyn Git,
@@ -199,13 +201,13 @@ fn maybe_create_tags(
 		}
 		return Ok((0, 0, 0));
 	}
-	create_and_push_tags(published_packages, config, git, is_multi_package)
+	create_and_push_tags(published_packages, config, git, is_multi_package).await
 }
 
 /// Orchestrates GitHub Releases when enabled, or logs dry-run intent.
 ///
 /// Returns `(releases_created, any_failed)`.
-fn maybe_orchestrate_github_releases(
+async fn maybe_orchestrate_github_releases(
 	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
@@ -233,13 +235,14 @@ fn maybe_orchestrate_github_releases(
 		is_multi_package,
 		env.fs(),
 	)
+	.await
 }
 
 /// Runs pre-publish GitHub checks: validates token presence and runs the build command.
 ///
 /// Returns `Ok(true)` if the build command failed (caller should return `ExitCode::FAILURE`),
 /// `Ok(false)` if checks pass or GitHub is not enabled, or `Err` if no token was found.
-fn run_pre_publish_github_checks(
+async fn run_pre_publish_github_checks(
 	env: &crate::Env,
 	config: &Config,
 	git: &dyn Git,
@@ -255,25 +258,26 @@ fn run_pre_publish_github_checks(
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
 		);
 	}
-	run_github_build_command(env, config, git)
+	run_github_build_command(env, config, git).await
 }
 
 /// Execute the publish command.
-pub(crate) fn cmd_publish(
+pub(crate) async fn cmd_publish(
 	args: &PublishArgs,
 	dry_run: bool,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	let env = config.env();
 	let git = env.git();
-	let projects = config.load_projects()?;
+	let projects = config.load_projects().await?;
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
 	let (sorted_projects, graph) = sort_projects_by_dependency(
 		&projects,
 		selected_projects,
 		config.global.disable_dependency_cycle_warnings,
-	)?;
-	if run_pre_publish_github_checks(env, &config, git, args.no_git, dry_run)? {
+	)
+	.await?;
+	if run_pre_publish_github_checks(env, &config, git, args.no_git, dry_run).await? {
 		return Ok(ExitCode::FAILURE);
 	}
 	let flags = PublishFlags {
@@ -283,8 +287,8 @@ pub(crate) fn cmd_publish(
 		no_git: args.no_git,
 		is_multi_package: projects.len() > 1,
 	};
-	let publish = publish_projects(&sorted_projects, &graph, dry_run, env.fs())?;
-	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags)?;
+	let publish = publish_projects(&sorted_projects, &graph, dry_run, env.fs()).await?;
+	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags).await?;
 	log_publish_summary(&publish, &flags, &outcome);
 
 	let code = if publish.failed || outcome.github_failed || outcome.tags_push_failed > 0 {
@@ -321,7 +325,7 @@ impl PublishState {
 	///
 	/// In dry-run mode, logs what would be published and pushes to `published`.
 	/// In real mode, delegates to `do_publish` and updates counts/blocked set on failure.
-	fn record_outcome(
+	async fn record_outcome(
 		&mut self,
 		project: &package_manager::Project,
 		graph: &DependencyGraph,
@@ -329,11 +333,12 @@ impl PublishState {
 	) {
 		if dry_run {
 			let version = project.version();
+			let registry = project.registry_name().await;
 			info!(
 				"Would publish {}@{} to {}",
 				project.name(),
 				version,
-				project.registry_name()
+				registry
 			);
 			self.published.push(PublishedPackage {
 				name: project.name().to_string(),
@@ -341,7 +346,7 @@ impl PublishState {
 				project_path: project.path().clone(),
 			});
 		} else {
-			match do_publish(project) {
+			match do_publish(project).await {
 				PublishResult::Published => self.published.push(PublishedPackage {
 					name: project.name().to_string(),
 					version: project.version().clone(),
@@ -373,7 +378,7 @@ impl PublishState {
 /// * `projects` - Projects to publish, pre-sorted in dependency order.
 /// * `graph` - The dependency graph used to determine which packages to skip on failure.
 /// * `dry_run` - If true, only print what would be published without actually publishing.
-fn publish_projects(
+async fn publish_projects(
 	projects: &[package_manager::Project],
 	graph: &DependencyGraph,
 	dry_run: bool,
@@ -396,7 +401,7 @@ fn publish_projects(
 		}
 		// Skip public packages that have never been prepared (no CHANGELOG.md).
 		// Not added to `blocked` — dependents may be independently publishable.
-		if !fs.exists(&project.path().child("CHANGELOG.md")) {
+		if !fs.exists(&project.path().child("CHANGELOG.md")).await? {
 			warn!(
 				"Skipping {}: no CHANGELOG.md found (run 'cursus prepare' first, with an appropriate changeset)",
 				project.name()
@@ -404,7 +409,7 @@ fn publish_projects(
 			state.unprepared_count += 1;
 			continue;
 		}
-		state.record_outcome(project, graph, dry_run);
+		state.record_outcome(project, graph, dry_run).await;
 	}
 
 	Ok(state)
@@ -511,11 +516,11 @@ fn log_publish_summary(state: &PublishState, flags: &PublishFlags, outcome: &Git
 /// Counts publish outcomes for each project, printing per-project results.
 ///
 /// Executes the actual publish operation for a project, handling output and errors.
-fn do_publish(project: &package_manager::Project) -> PublishResult {
+async fn do_publish(project: &package_manager::Project) -> PublishResult {
 	let version = project.version();
-	let registry = project.registry_name();
+	let registry = project.registry_name().await;
 
-	match project.publish() {
+	match project.publish().await {
 		Ok(PublishOutcome::Published) => {
 			info!("Published {}@{} to {}", project.name(), version, registry);
 			PublishResult::Published
@@ -540,8 +545,8 @@ fn do_publish(project: &package_manager::Project) -> PublishResult {
 mod tests {
 	use super::*;
 
-	#[test]
-	fn default_publish_args() {
+	#[tokio::test]
+	async fn default_publish_args() {
 		let args = PublishArgs::default();
 		assert!(args.packages.is_empty());
 		assert!(!args.no_git);
@@ -555,8 +560,8 @@ mod tests {
 		DependencyGraph::from_adjacency(adjacency)
 	}
 
-	#[test]
-	fn add_transitive_dependents_linear_chain() {
+	#[tokio::test]
+	async fn add_transitive_dependents_linear_chain() {
 		// c -> b -> a: if c fails, b and a should be blocked
 		let graph = make_graph(&[("a", &["b"]), ("b", &["c"]), ("c", &[])]);
 		let mut blocked = std::collections::HashSet::new();
@@ -569,8 +574,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn add_transitive_dependents_diamond() {
+	#[tokio::test]
+	async fn add_transitive_dependents_diamond() {
 		// d <- b <- a, d <- c <- a: if d fails, b, c and a should be blocked
 		let graph = make_graph(&[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"]), ("d", &[])]);
 		let mut blocked = std::collections::HashSet::new();
@@ -581,8 +586,8 @@ mod tests {
 		assert!(!blocked.contains("d"));
 	}
 
-	#[test]
-	fn add_transitive_dependents_cycle_terminates() {
+	#[tokio::test]
+	async fn add_transitive_dependents_cycle_terminates() {
 		// a <-> b: if a fails, b should be blocked; cycle must not loop infinitely
 		let graph = make_graph(&[("a", &["b"]), ("b", &["a"])]);
 		let mut blocked = std::collections::HashSet::new();
@@ -591,8 +596,8 @@ mod tests {
 		// Must terminate (would panic/hang otherwise)
 	}
 
-	#[test]
-	fn add_transitive_dependents_independent_subtree_not_blocked() {
+	#[tokio::test]
+	async fn add_transitive_dependents_independent_subtree_not_blocked() {
 		// a -> b, c -> d: if b fails only a is blocked; c and d are unaffected
 		let graph = make_graph(&[("a", &["b"]), ("b", &[]), ("c", &["d"]), ("d", &[])]);
 		let mut blocked = std::collections::HashSet::new();
@@ -622,8 +627,8 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn log_summary_line_non_dry_run_dep_skipped_note_in_log() {
+	#[tokio::test]
+	async fn log_summary_line_non_dry_run_dep_skipped_note_in_log() {
 		// dep_skipped_note only appears in non-dry-run mode.
 		// Guards `> 0` → `> 1` on dep_skipped_count condition.
 		crate::test_logging::init_test_logger();
@@ -646,8 +651,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_summary_line_non_dry_run_unprepared_note_in_log() {
+	#[tokio::test]
+	async fn log_summary_line_non_dry_run_unprepared_note_in_log() {
 		// unprepared_note appears in both dry-run (via tag_note path) and non-dry-run.
 		// Guards `> 0` → `> 1` on unprepared_count condition.
 		crate::test_logging::init_test_logger();
@@ -670,8 +675,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_summary_line_dry_run_git_disabled_no_tag_note() {
+	#[tokio::test]
+	async fn log_summary_line_dry_run_git_disabled_no_tag_note() {
 		// Guards &&→|| on `flags.git_enabled && !state.published.is_empty()` (tag_note guard).
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
@@ -692,8 +697,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_summary_line_dry_run_git_enabled_tag_note_present() {
+	#[tokio::test]
+	async fn log_summary_line_dry_run_git_enabled_tag_note_present() {
 		// Guards &&→|| on `flags.git_enabled && !state.published.is_empty()` (tag_note guard).
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
@@ -716,8 +721,8 @@ mod tests {
 
 	// ── log_publish_summary tests ─────────────────────────────────────────────
 
-	#[test]
-	fn log_publish_summary_tags_created_appears_in_log() {
+	#[tokio::test]
+	async fn log_publish_summary_tags_created_appears_in_log() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
 		let state = PublishState::new();
@@ -744,8 +749,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_publish_summary_tags_push_failed_appears_in_log() {
+	#[tokio::test]
+	async fn log_publish_summary_tags_push_failed_appears_in_log() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
 		let state = PublishState::new();
@@ -772,8 +777,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_publish_summary_dry_run_no_tag_log_lines() {
+	#[tokio::test]
+	async fn log_publish_summary_dry_run_no_tag_log_lines() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
 		let state = PublishState::new();
@@ -809,8 +814,8 @@ mod tests {
 
 	// ── log_github_releases_summary tests ─────────────────────────────────────
 
-	#[test]
-	fn log_github_releases_summary_no_failure_logs_created_count() {
+	#[tokio::test]
+	async fn log_github_releases_summary_no_failure_logs_created_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
 		log_github_releases_summary(3, 0, "", "", 2, false);
@@ -822,8 +827,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn log_github_releases_summary_with_failure_logs_failed_count() {
+	#[tokio::test]
+	async fn log_github_releases_summary_with_failure_logs_failed_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
 		log_github_releases_summary(3, 0, "", "", 2, true);
@@ -837,8 +842,8 @@ mod tests {
 
 	// ── PublishState::record_outcome tests ────────────────────────────────────
 
-	#[test]
-	fn record_outcome_skipped_increments_skipped_count() {
+	#[tokio::test]
+	async fn record_outcome_skipped_increments_skipped_count() {
 		// Guards the `Skipped => self.skipped_count += 1` branch in non-dry-run mode.
 		// Uses the NpmAdapter (default in new_test_with_runner) with EPUBLISHCONFLICT in
 		// stderr to trigger PublishOutcome::AlreadyPublished → PublishResult::Skipped.
@@ -856,13 +861,13 @@ mod tests {
 		);
 		let graph = make_graph(&[]);
 		let mut state = PublishState::new();
-		state.record_outcome(&project, &graph, false);
+		state.record_outcome(&project, &graph, false).await;
 		assert_eq!(state.skipped_count, 1, "Expected skipped_count == 1");
 		assert_eq!(state.published.len(), 0, "Expected no published packages");
 	}
 
-	#[test]
-	fn add_transitive_dependents_with_prepopulated_blocked_set() {
+	#[tokio::test]
+	async fn add_transitive_dependents_with_prepopulated_blocked_set() {
 		// a -> b -> c: if blocked already contains "a" and we add dependents of b,
 		// "a" should not be re-enqueued (returns false from insert) and the BFS still terminates.
 		let graph = make_graph(&[("a", &["b"]), ("b", &["c"]), ("c", &[])]);

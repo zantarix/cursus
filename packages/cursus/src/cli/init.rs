@@ -2,7 +2,7 @@
 
 use std::process::ExitCode;
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use clap::Args;
 use log::info;
 
@@ -17,7 +17,7 @@ use super::GlobalArgs;
 pub struct InitArgs {}
 
 /// Runs the `init` subcommand.
-pub(crate) fn cmd_init(
+pub(crate) async fn cmd_init(
 	_args: &InitArgs,
 	global: &GlobalArgs,
 	env: &Env,
@@ -29,10 +29,21 @@ pub(crate) fn cmd_init(
 	let git = env.git();
 	let git_workdir = git.path();
 
-	let result = match init::run(env, global.dry_run)? {
-		Some(r) => r,
-		None => return Ok(ExitCode::from(2)),
-	};
+	let detected_github = crate::github::remote::GitHubRepo::detect_in(git)
+		.await
+		.ok()
+		.flatten();
+
+	let env_clone = env.clone();
+	let dry_run = global.dry_run;
+	let result =
+		match tokio::task::spawn_blocking(move || init::run(&env_clone, dry_run, detected_github))
+			.await
+			.context("TUI task panicked")??
+		{
+			Some(r) => r,
+			None => return Ok(ExitCode::from(2)),
+		};
 
 	let config_toml = render_init_template(&result)?;
 
@@ -42,14 +53,15 @@ pub(crate) fn cmd_init(
 	}
 
 	let cursus_dir = git_workdir.child(".cursus");
-	env.fs().create_dir_all(&cursus_dir)?;
+	env.fs().create_dir_all(&cursus_dir).await?;
 
 	let config_path = cursus_dir.child("config.toml");
-	env.fs().write(&config_path, config_toml.as_bytes())?;
+	env.fs().write(&config_path, config_toml.as_bytes()).await?;
 	info!("Created {}", config_path.display());
 
 	if result.open_editor {
-		env.run_editor_on(config_path.as_ref(), git_workdir.as_ref())?;
+		env.run_editor_on(config_path.as_ref(), git_workdir.as_ref())
+			.await?;
 	}
 
 	Ok(ExitCode::SUCCESS)

@@ -20,14 +20,14 @@ use tempfile::TempDir;
 // ── Local helpers ──────────────────────────────────────────────────────────────
 
 /// Creates a temp dir with a Unicode prefix, sets up fake `.git`, Cargo config, and manifest.
-fn temp_git_repo_with_project_in_unicode_dir(prefix: &str) -> TempDir {
+async fn temp_git_repo_with_project_in_unicode_dir(prefix: &str) -> TempDir {
 	let dir = tempfile::Builder::new()
 		.prefix(prefix)
 		.tempdir()
 		.expect("Failed to create unicode temp dir");
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
 	let config = Config::new(&common::test_env(dir.path())).with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
@@ -87,8 +87,8 @@ fn setup_single_cargo_package(dir: &std::path::Path, name: &str, version: &str) 
 
 /// Runs `change -t <change_type> -m <message>` and asserts the message is preserved
 /// verbatim in the written changeset file.
-fn assert_change_preserves_message(change_type: &str, message: &str) {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+async fn assert_change_preserves_message(change_type: &str, message: &str) {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	let result = run_cursus(
 		[
 			"cursus",
@@ -100,7 +100,8 @@ fn assert_change_preserves_message(change_type: &str, message: &str) {
 			message,
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	let files = read_changeset_files(dir.path());
 	assert!(!files.is_empty(), "Expected at least one changeset file");
@@ -111,44 +112,44 @@ fn assert_change_preserves_message(change_type: &str, message: &str) {
 	);
 }
 
-#[test]
-fn change_with_emoji_message() {
-	assert_change_preserves_message("minor", "🎉 Added internationalization support");
+#[tokio::test]
+async fn change_with_emoji_message() {
+	assert_change_preserves_message("minor", "🎉 Added internationalization support").await;
 }
 
-#[test]
-fn change_with_cjk_message() {
-	assert_change_preserves_message("minor", "新機能を追加しました");
+#[tokio::test]
+async fn change_with_cjk_message() {
+	assert_change_preserves_message("minor", "新機能を追加しました").await;
 }
 
-#[test]
-fn change_with_mixed_script_message() {
-	assert_change_preserves_message("patch", "Ändere die Konfiguration für café");
+#[tokio::test]
+async fn change_with_mixed_script_message() {
+	assert_change_preserves_message("patch", "Ändere die Konfiguration für café").await;
 }
 
-#[test]
-fn change_with_rtl_message() {
-	assert_change_preserves_message("minor", "إضافة ميزة جديدة");
+#[tokio::test]
+async fn change_with_rtl_message() {
+	assert_change_preserves_message("minor", "إضافة ميزة جديدة").await;
 }
 
-#[test]
-fn change_with_combining_characters_message() {
+#[tokio::test]
+async fn change_with_combining_characters_message() {
 	// "cafe" + U+0301 COMBINING ACUTE ACCENT = "café" in NFD form
-	assert_change_preserves_message("patch", "Update cafe\u{0301} configuration");
+	assert_change_preserves_message("patch", "Update cafe\u{0301} configuration").await;
 }
 
 // ── Category 2: Unicode roundtripped through `prepare` ─────────────────────────
 
-#[test]
-fn prepare_preserves_emoji_in_changelog() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_preserves_emoji_in_changelog() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	let message = "🎉 Added internationalization support";
 	write_changeset(
 		dir.path(),
 		"change.md",
 		&format!("+++\ntest-project = \"minor\"\n+++\n\n{message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md"))
 		.expect("CHANGELOG.md should exist after prepare");
@@ -158,16 +159,16 @@ fn prepare_preserves_emoji_in_changelog() {
 	);
 }
 
-#[test]
-fn prepare_preserves_cjk_in_changelog() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_preserves_cjk_in_changelog() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	let message = "新機能を追加しました";
 	write_changeset(
 		dir.path(),
 		"change.md",
 		&format!("+++\ntest-project = \"minor\"\n+++\n\n{message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md"))
 		.expect("CHANGELOG.md should exist after prepare");
@@ -177,9 +178,9 @@ fn prepare_preserves_cjk_in_changelog() {
 	);
 }
 
-#[test]
-fn prepare_preserves_mixed_unicode_across_sections() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("alpha", "0.1.0"), ("beta", "0.1.0")]);
+#[tokio::test]
+async fn prepare_preserves_mixed_unicode_across_sections() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("alpha", "0.1.0"), ("beta", "0.1.0")]).await;
 	let minor_message = "Füge neue Konfigurationsoptionen hinzu";
 	let patch_message = "Исправить ошибку в обработке запросов";
 	write_changeset(
@@ -192,7 +193,7 @@ fn prepare_preserves_mixed_unicode_across_sections() {
 		"fix.md",
 		&format!("+++\nbeta = \"patch\"\n+++\n\n{patch_message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	// In a workspace, each package gets its own CHANGELOG.md under its subdirectory.
 	let alpha_changelog = std::fs::read_to_string(dir.path().join("alpha/CHANGELOG.md"))
@@ -209,9 +210,9 @@ fn prepare_preserves_mixed_unicode_across_sections() {
 	);
 }
 
-#[test]
-fn prepare_preserves_message_with_pr_like_pattern_and_unicode() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_preserves_message_with_pr_like_pattern_and_unicode() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	// Multi-byte chars adjacent to a parenthetical PR-like pattern exercises
 	// byte-offset arithmetic in extract_pr_number without corrupting neighbours.
 	let message = "Fix for café (#42)";
@@ -220,7 +221,7 @@ fn prepare_preserves_message_with_pr_like_pattern_and_unicode() {
 		"change.md",
 		&format!("+++\ntest-project = \"patch\"\n+++\n\n{message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md"))
 		.expect("CHANGELOG.md should exist");
@@ -230,9 +231,9 @@ fn prepare_preserves_message_with_pr_like_pattern_and_unicode() {
 	);
 }
 
-#[test]
-fn prepare_preserves_multiline_unicode_message() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn prepare_preserves_multiline_unicode_message() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	let line1 = "First line: 新機能";
 	let line2 = "Second line: Ändere";
 	let line3 = "Third line: إضافة";
@@ -242,7 +243,7 @@ fn prepare_preserves_multiline_unicode_message() {
 		"change.md",
 		&format!("+++\ntest-project = \"minor\"\n+++\n\n{message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md"))
 		.expect("CHANGELOG.md should exist");
@@ -262,10 +263,10 @@ fn prepare_preserves_multiline_unicode_message() {
 
 // ── Category 3: Unicode in directory paths ─────────────────────────────────────
 
-#[test]
-fn change_in_unicode_directory_cjk() {
+#[tokio::test]
+async fn change_in_unicode_directory_cjk() {
 	// テスト = "test" in Japanese katakana
-	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-\u{30C6}\u{30B9}\u{30C8}-");
+	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-\u{30C6}\u{30B9}\u{30C8}-").await;
 	let result = run_cursus(
 		[
 			"cursus",
@@ -277,7 +278,8 @@ fn change_in_unicode_directory_cjk() {
 			"test change",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected success in CJK directory: {result:?}"
@@ -286,10 +288,10 @@ fn change_in_unicode_directory_cjk() {
 	assert!(!files.is_empty(), "Expected a changeset file");
 }
 
-#[test]
-fn change_in_unicode_directory_emoji() {
+#[tokio::test]
+async fn change_in_unicode_directory_emoji() {
 	// 🚀 = U+1F680 ROCKET
-	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-\u{1F680}-");
+	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-\u{1F680}-").await;
 	let result = run_cursus(
 		[
 			"cursus",
@@ -301,7 +303,8 @@ fn change_in_unicode_directory_emoji() {
 			"test change",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected success in emoji directory: {result:?}"
@@ -310,17 +313,17 @@ fn change_in_unicode_directory_emoji() {
 	assert!(!files.is_empty(), "Expected a changeset file");
 }
 
-#[test]
-fn prepare_in_unicode_directory() {
+#[tokio::test]
+async fn prepare_in_unicode_directory() {
 	// café — precomposed é (U+00E9)
-	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-caf\u{00E9}-");
+	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-caf\u{00E9}-").await;
 	let message = "A feature for café users";
 	write_changeset(
 		dir.path(),
 		"change.md",
 		&format!("+++\ntest-project = \"minor\"\n+++\n\n{message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(
 		result.is_ok(),
 		"Expected prepare to succeed in unicode directory: {result:?}"
@@ -341,12 +344,13 @@ fn prepare_in_unicode_directory() {
 
 // ── Category 4: Unicode via the config file ────────────────────────────────────
 
-#[test]
-fn config_with_unicode_ignore_pattern() {
+#[tokio::test]
+async fn config_with_unicode_ignore_pattern() {
 	// "bibliothèque" as a package name exercices the ignore glob match path
 	// with a multi-byte UTF-8 package name.
 	let dir =
-		temp_git_repo_with_cargo_workspace(&[("app", "0.1.0"), ("biblioth\u{00E8}que", "0.1.0")]);
+		temp_git_repo_with_cargo_workspace(&[("app", "0.1.0"), ("biblioth\u{00E8}que", "0.1.0")])
+			.await;
 	let global = GlobalConfig {
 		ignore: vec!["biblioth\u{00E8}que".to_string()],
 		..Default::default()
@@ -354,7 +358,7 @@ fn config_with_unicode_ignore_pattern() {
 	let config = Config::new(&common::test_env(dir.path()))
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	// Targeting "app" (non-ignored) must succeed.
 	let result = run_cursus(
@@ -370,7 +374,8 @@ fn config_with_unicode_ignore_pattern() {
 			"app",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected success targeting non-ignored package: {result:?}"
@@ -390,22 +395,23 @@ fn config_with_unicode_ignore_pattern() {
 			"biblioth\u{00E8}que",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_err(),
 		"Expected error when targeting unicode-named ignored package"
 	);
 }
 
-#[test]
-fn config_with_unicode_subfolder_path() {
+#[tokio::test]
+async fn config_with_unicode_subfolder_path() {
 	// "données" as the cargo.path subfolder exercises AbsolutePath and safe_glob()
 	// with a multi-byte directory segment.
 	let dir = temp_git_repo();
 	let subfolder = "donn\u{00E9}es";
 	let mut config = Config::new(&common::test_env(dir.path())).with_cargo(CargoConfig::enabled());
 	config.cargo.path = Some(subfolder.to_string());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	std::fs::write(
@@ -425,18 +431,20 @@ fn config_with_unicode_subfolder_path() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected success with unicode subfolder path: {result:?}"
 	);
 }
 
-#[test]
-fn change_targets_unicode_project_name() {
+#[tokio::test]
+async fn change_targets_unicode_project_name() {
 	// "données" as a workspace package name exercises the -p flag string match
 	// and the changeset frontmatter write path with a multi-byte package name.
-	let dir = temp_git_repo_with_cargo_workspace(&[("donn\u{00E9}es", "0.1.0"), ("app", "0.1.0")]);
+	let dir =
+		temp_git_repo_with_cargo_workspace(&[("donn\u{00E9}es", "0.1.0"), ("app", "0.1.0")]).await;
 
 	let result = run_cursus(
 		[
@@ -451,7 +459,8 @@ fn change_targets_unicode_project_name() {
 			"donn\u{00E9}es",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected success targeting unicode package name: {result:?}"
@@ -467,12 +476,12 @@ fn change_targets_unicode_project_name() {
 
 // ── Category 5: Unicode in git commit messages ─────────────────────────────────
 
-#[test]
-fn prepare_git_unicode_commit_message() {
+#[tokio::test]
+async fn prepare_git_unicode_commit_message() {
 	// "ci: mise à jour des versions 🚀" — Latin-with-accents + emoji commit message
 	let commit_msg = "ci: mise \u{00E0} jour des versions \u{1F680}";
 	let config = GitConfig::enabled_config().with_prepare_commit_message(commit_msg.to_string());
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -483,7 +492,7 @@ fn prepare_git_unicode_commit_message() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 
 	let log = git_log(dir.path());
@@ -496,8 +505,8 @@ fn prepare_git_unicode_commit_message() {
 
 // ── Category 6: Unicode in GitHub config fields (TOML roundtrip) ───────────────
 
-#[test]
-fn github_config_unicode_pr_title_loads() {
+#[tokio::test]
+async fn github_config_unicode_pr_title_loads() {
 	// "Mise à jour des versions 🎉" as pull_request_title verifies that
 	// multi-byte values in the github config section survive TOML serialization
 	// and deserialization via the Config builder API.
@@ -508,7 +517,7 @@ fn github_config_unicode_pr_title_loads() {
 			GitHubConfig::enabled_config()
 				.with_pull_request_title("Mise \u{00E0} jour des versions \u{1F389}".to_string()),
 		);
-	config.save().unwrap();
+	config.save().await.unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n",
@@ -518,15 +527,16 @@ fn github_config_unicode_pr_title_loads() {
 	let result = run_cursus(
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected config to load with unicode PR title: {result:?}"
 	);
 }
 
-#[test]
-fn github_config_unicode_artifact_name_loads() {
+#[tokio::test]
+async fn github_config_unicode_artifact_name_loads() {
 	// "binário-linux" as an artifact display name key verifies that Unicode
 	// keys in the [github.artifacts] BTreeMap survive TOML deserialization.
 	let dir = temp_git_repo();
@@ -544,7 +554,8 @@ fn github_config_unicode_artifact_name_loads() {
 	let result = run_cursus(
 		["cursus", "publish", "--dry-run", "--no-interactive"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"Expected config to load with unicode artifact name: {result:?}"
@@ -553,17 +564,17 @@ fn github_config_unicode_artifact_name_loads() {
 
 // ── Category 7: Combined Unicode path + Unicode content ────────────────────────
 
-#[test]
-fn change_and_prepare_unicode_path_and_content() {
+#[tokio::test]
+async fn change_and_prepare_unicode_path_and_content() {
 	// 🌍 = U+1F30D EARTH GLOBE EUROPE-AFRICA
-	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-\u{1F30D}-");
+	let dir = temp_git_repo_with_project_in_unicode_dir("cursus-\u{1F30D}-").await;
 	let message = "🌍 Support for international users";
 	write_changeset(
 		dir.path(),
 		"change.md",
 		&format!("+++\ntest-project = \"minor\"\n+++\n\n{message}\n"),
 	);
-	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(
 		result.is_ok(),
 		"Expected success with unicode path and content: {result:?}"

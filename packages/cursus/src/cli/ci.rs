@@ -48,12 +48,16 @@ pub struct CiArgs {
 /// already published to a registry but the tag push failed, re-running `publish` will skip the
 /// already-published registry step and only retry the tag. Checking registry state directly
 /// would add network dependencies and is not necessary for correctness.
-pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Result<ExitCode> {
+pub(crate) async fn cmd_ci(
+	args: &CiArgs,
+	dry_run: bool,
+	config: Config,
+) -> anyhow::Result<ExitCode> {
 	let env = config.env();
 	let git = env.git();
 
 	// Step 1: check for pending changesets.
-	let changesets = Changeset::read_all(env)?;
+	let changesets = Changeset::read_all(env).await?;
 	if !changesets.is_empty() {
 		info!("ci: pending changesets found, running prepare");
 		let prepare_args = PrepareArgs {
@@ -61,26 +65,34 @@ pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Re
 			no_git: args.no_git,
 			branch: args.branch.clone(),
 		};
-		return cmd_prepare(&prepare_args, dry_run, config);
+		return cmd_prepare(&prepare_args, dry_run, config).await;
 	}
 
 	// Step 2: when git is enabled and --no-git is not set, check for packages that
 	// have not yet been tagged (post-release, pre-publish state).
 	if config.git.enabled() && !args.no_git {
-		let projects = config.load_projects()?;
+		let projects = config.load_projects().await?;
 		let selected = filter_projects_by_name(&projects, &args.packages)?;
 		let is_multi = projects.len() > 1;
 
-		let any_tag_missing = selected.iter().any(|project| {
-			if !env.fs().exists(&project.path().child("CHANGELOG.md")) {
+		let mut any_tag_missing = false;
+		for project in &selected {
+			if !env
+				.fs()
+				.exists(&project.path().child("CHANGELOG.md"))
+				.await?
+			{
 				debug!("skipping tag check for {}", project.name());
-				return false;
+				continue;
 			}
 			let version = project.version();
 			let tag = config.git.tag_format.tag(project.name(), version, is_multi);
 			// Treat git errors as "tag not found" — conservative, triggers publish.
-			!git.tag_exists(&tag).unwrap_or(false)
-		});
+			if !git.tag_exists(&tag).await.unwrap_or(false) {
+				any_tag_missing = true;
+				break;
+			}
+		}
 
 		if any_tag_missing {
 			info!("ci: no changesets but unpublished tags detected, running publish");
@@ -88,7 +100,7 @@ pub(crate) fn cmd_ci(args: &CiArgs, dry_run: bool, config: Config) -> anyhow::Re
 				packages: args.packages.clone(),
 				no_git: args.no_git,
 			};
-			return cmd_publish(&publish_args, dry_run, config);
+			return cmd_publish(&publish_args, dry_run, config).await;
 		}
 	}
 

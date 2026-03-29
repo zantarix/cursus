@@ -89,7 +89,7 @@ pub(super) struct VersionPlan {
 /// Aggregates changesets, applies linked versions, and runs dependency propagation.
 ///
 /// Returns the full version plan for the prepare run.
-fn compute_version_plan(
+async fn compute_version_plan(
 	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	args: &PrepareArgs,
 	config: &Config,
@@ -98,7 +98,7 @@ fn compute_version_plan(
 	dry_run: bool,
 ) -> anyhow::Result<VersionPlan> {
 	let git = config.env().git();
-	let commit_refs = resolve_commit_references(changesets, git, git_ctx.enabled);
+	let commit_refs = resolve_commit_references(changesets, git, git_ctx.enabled).await;
 	let (mut aggregated, mut changes_per_package) =
 		aggregate_changesets(changesets, &args.packages, projects, &commit_refs)?;
 	let linked_groups = resolve_linked_groups(config, args, projects)?;
@@ -118,7 +118,8 @@ fn compute_version_plan(
 		config.prepare.dependency_bump,
 		env,
 		dry_run,
-	)?;
+	)
+	.await?;
 	// Second pass: propagated bumps may have raised a linked member's version, so
 	// re-sync to bring the rest of each group up to the new target.
 	sync_linked_groups_after_propagation(
@@ -138,7 +139,7 @@ fn compute_version_plan(
 }
 
 /// Runs the `prepare` subcommand.
-pub(crate) fn cmd_prepare(
+pub(crate) async fn cmd_prepare(
 	args: &PrepareArgs,
 	dry_run: bool,
 	config: Config,
@@ -146,8 +147,8 @@ pub(crate) fn cmd_prepare(
 	let env = config.env();
 	let git = env.git();
 	let adapters = config.create_adapters()?;
-	let projects = config.load_projects_for_adapters(&adapters)?;
-	let changesets = Changeset::read_all(env)?;
+	let projects = config.load_projects_for_adapters(&adapters).await?;
+	let changesets = Changeset::read_all(env).await?;
 
 	if changesets.is_empty() {
 		info!("No pending changesets found. Nothing to prepare.");
@@ -155,11 +156,13 @@ pub(crate) fn cmd_prepare(
 	}
 
 	let git_ctx = setup_git_context(&config, args);
-	let plan = compute_version_plan(&changesets, args, &config, &projects, &git_ctx, dry_run)?;
-	let branches = preflight_checks(git, &config, env, args, &git_ctx, dry_run)?;
-	let output = prepare_release_files(&adapters, &projects, &changesets, plan, dry_run, env.fs())?;
+	let plan =
+		compute_version_plan(&changesets, args, &config, &projects, &git_ctx, dry_run).await?;
+	let branches = preflight_checks(git, &config, env, args, &git_ctx, dry_run).await?;
+	let output =
+		prepare_release_files(&adapters, &projects, &changesets, plan, dry_run, env.fs()).await?;
 
-	finalize_git_lifecycle(git, &config, env, &output, &branches, &git_ctx, dry_run)?;
+	finalize_git_lifecycle(git, &config, env, &output, &branches, &git_ctx, dry_run).await?;
 
 	Ok(ExitCode::SUCCESS)
 }
@@ -192,13 +195,14 @@ mod tests {
 		)
 	}
 
-	#[test]
-	fn cmd_prepare_no_changesets_succeeds() {
+	#[tokio::test]
+	async fn cmd_prepare_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -217,18 +221,19 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).unwrap();
-		let result = cmd_prepare(&args, false, config).unwrap();
+		let config = config::load(&env).await.unwrap();
+		let result = cmd_prepare(&args, false, config).await.unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
-	#[test]
-	fn cmd_prepare_unknown_package_in_changeset_fails() {
+	#[tokio::test]
+	async fn cmd_prepare_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -254,8 +259,8 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).unwrap();
-		let result = cmd_prepare(&args, false, config);
+		let config = config::load(&env).await.unwrap();
+		let result = cmd_prepare(&args, false, config).await;
 		assert!(result.is_err());
 		assert!(
 			result
@@ -265,13 +270,14 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn cmd_prepare_unknown_package_flag_fails() {
+	#[tokio::test]
+	async fn cmd_prepare_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -296,13 +302,13 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).unwrap();
+		let config = config::load(&env).await.unwrap();
 		let args = PrepareArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let result = cmd_prepare(&args, false, config);
+		let result = cmd_prepare(&args, false, config).await;
 		assert!(result.is_err());
 		assert!(
 			result

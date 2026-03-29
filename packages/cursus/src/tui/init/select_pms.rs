@@ -20,12 +20,27 @@ pub(super) fn advance_from_select_pms(
 	state.cargo_enabled = cargo;
 	state.npm_enabled = npm;
 
-	let fs = state.env.fs();
 	let mut remaining = Vec::new();
-	if cargo && !fs.exists(&state.env.git().path().child("Cargo.toml")) {
+	if cargo
+		&& !state
+			.env
+			.git()
+			.path()
+			.child("Cargo.toml")
+			.as_path()
+			.exists()
+	{
 		remaining.push(PackageManager::Cargo);
 	}
-	if npm && !fs.exists(&state.env.git().path().child("package.json")) {
+	if npm
+		&& !state
+			.env
+			.git()
+			.path()
+			.child("package.json")
+			.as_path()
+			.exists()
+	{
 		remaining.push(PackageManager::Npm);
 	}
 	state.remaining_manifest_pms = remaining;

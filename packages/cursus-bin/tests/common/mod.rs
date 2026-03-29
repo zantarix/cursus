@@ -27,7 +27,7 @@ pub fn test_env(dir: &std::path::Path) -> cursus::Env {
 /// This is the standard way to invoke cursus from integration tests.
 /// Parses CLI arguments, handles dry-run wrapping, performs git discovery,
 /// and delegates to [`cursus::run`].
-pub fn run_cursus(
+pub async fn run_cursus(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
@@ -51,6 +51,7 @@ pub fn run_cursus(
 
 	let cwd_abs = AbsolutePath::new(cwd)?;
 	let git_workdir = cursus::git::find_workdir(&cwd_abs, &*filesystem)
+		.await
 		.ok_or_else(|| anyhow::anyhow!("No git repository found"))?;
 	let git = Arc::new(cursus::git::GitWorkdir::new(
 		Arc::clone(&runner),
@@ -58,7 +59,7 @@ pub fn run_cursus(
 	));
 	let env = cursus::Env::new(runner, filesystem, git);
 
-	cursus::run(cli, env)
+	cursus::run(cli, env).await
 }
 
 /// Runs a git command in the given directory and panics on failure.
@@ -101,7 +102,7 @@ pub fn temp_real_git_repo() -> TempDir {
 }
 
 /// Creates a real git repository with a Cursus config that has git lifecycle enabled.
-pub fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig) -> TempDir {
+pub async fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig) -> TempDir {
 	let dir = temp_real_git_repo();
 	let config = match pm {
 		PackageManager::Npm => Config::new(&test_env(dir.path()))
@@ -111,14 +112,14 @@ pub fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig)
 			.with_cargo(CargoConfig::enabled())
 			.with_git(git_config),
 	};
-	config.save().unwrap();
+	config.save().await.unwrap();
 	dir
 }
 
 /// Creates a real git repository with a Cargo workspace and Cursus config.
 ///
 /// All files are staged and committed in the initial state.
-pub fn temp_real_git_repo_with_cargo_workspace(
+pub async fn temp_real_git_repo_with_cargo_workspace(
 	members: &[(&str, &str)],
 	git_config: GitConfig,
 ) -> TempDir {
@@ -126,7 +127,7 @@ pub fn temp_real_git_repo_with_cargo_workspace(
 	let config = Config::new(&test_env(dir.path()))
 		.with_cargo(CargoConfig::enabled())
 		.with_git(git_config);
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	let member_list = members
 		.iter()
@@ -320,7 +321,7 @@ pub fn temp_git_repo() -> TempDir {
 }
 
 /// Creates a temporary git repository with a Cursus config file.
-pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
+pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
 		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
@@ -328,12 +329,12 @@ pub fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.save().unwrap();
+	config.save().await.unwrap();
 	dir
 }
 
 /// Creates a temporary git repository with a config and matching package manifest.
-pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
+pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let config = match pm {
 		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
@@ -341,7 +342,7 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.save().unwrap();
+	config.save().await.unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(
@@ -369,10 +370,10 @@ pub fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 /// Each entry in `members` is a `(name, version)` pair. The workspace root
 /// `Cargo.toml` lists all members, and each gets its own `Cargo.toml` and
 /// an empty `src/lib.rs`.
-pub fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
+pub async fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 	let dir = temp_git_repo();
 	let config = Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	let member_list = members
 		.iter()
@@ -400,7 +401,10 @@ pub fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 }
 
 /// Creates a temporary git repository with a config and package manifest in a subfolder.
-pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &str) -> TempDir {
+pub async fn temp_git_repo_with_project_in_subfolder(
+	pm: PackageManager,
+	subfolder: &str,
+) -> TempDir {
 	let dir = temp_git_repo();
 	let mut config = match pm {
 		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
@@ -412,7 +416,7 @@ pub fn temp_git_repo_with_project_in_subfolder(pm: PackageManager, subfolder: &s
 		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),
 		PackageManager::Cargo => config.cargo.path = Some(subfolder.to_string()),
 	}
-	config.save().unwrap();
+	config.save().await.unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	match pm {
@@ -462,7 +466,7 @@ pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
 /// Unlike [`temp_git_repo_with_project`] (which uses a fake `.git` folder),
 /// this creates a proper git repo with commits so that git operations like
 /// `rev-list` and `diff-tree` work correctly.
-pub fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
+pub async fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_real_git_repo();
 	let config = match pm {
 		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
@@ -470,7 +474,7 @@ pub fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
 			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
 		}
 	};
-	config.save().unwrap();
+	config.save().await.unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(

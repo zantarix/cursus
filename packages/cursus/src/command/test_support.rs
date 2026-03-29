@@ -1,5 +1,6 @@
 use super::*;
 
+use async_trait::async_trait;
 use std::path::PathBuf;
 use std::process::Output;
 use std::sync::Mutex;
@@ -102,8 +103,9 @@ impl RecordingCommandRunner {
 	}
 }
 
+#[async_trait]
 impl CommandRunner for RecordingCommandRunner {
-	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		self.record(
 			program,
 			args.iter().map(|s| s.to_string()).collect(),
@@ -114,7 +116,7 @@ impl CommandRunner for RecordingCommandRunner {
 		Ok(self.make_output())
 	}
 
-	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		self.record(
 			shell_program(),
 			vec![shell_flag().to_string(), command.to_string()],
@@ -125,17 +127,17 @@ impl CommandRunner for RecordingCommandRunner {
 		Ok(self.make_output())
 	}
 
-	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		// Records the invocation (recording runner does not suppress mutations).
-		self.run(program, args, cwd)
+		self.run(program, args, cwd).await
 	}
 
-	fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		// Records the invocation (recording runner does not suppress mutations).
-		self.run_shell(command, cwd)
+		self.run_shell(command, cwd).await
 	}
 
-	fn run_interactive(
+	async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
@@ -151,7 +153,7 @@ impl CommandRunner for RecordingCommandRunner {
 		Ok(self.make_output().status)
 	}
 
-	fn run_shell_interactive(
+	async fn run_shell_interactive(
 		&self,
 		command: &str,
 		cwd: &Path,
@@ -374,8 +376,9 @@ impl DispatchingCommandRunner {
 	}
 }
 
+#[async_trait]
 impl CommandRunner for DispatchingCommandRunner {
-	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		self.record(
 			program,
 			args.iter().map(|s| s.to_string()).collect(),
@@ -386,7 +389,7 @@ impl CommandRunner for DispatchingCommandRunner {
 		Ok(self.make_output_for(program, args))
 	}
 
-	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		self.record(
 			shell_program(),
 			vec![shell_flag().to_string(), command.to_string()],
@@ -397,15 +400,15 @@ impl CommandRunner for DispatchingCommandRunner {
 		Ok(self.make_output_for(shell_program(), &[shell_flag(), command]))
 	}
 
-	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-		self.run(program, args, cwd)
+	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		self.run(program, args, cwd).await
 	}
 
-	fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.run_shell(command, cwd)
+	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		self.run_shell(command, cwd).await
 	}
 
-	fn run_interactive(
+	async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
@@ -421,7 +424,7 @@ impl CommandRunner for DispatchingCommandRunner {
 		Ok(self.make_output_for(program, args).status)
 	}
 
-	fn run_shell_interactive(
+	async fn run_shell_interactive(
 		&self,
 		command: &str,
 		cwd: &Path,
@@ -445,36 +448,39 @@ mod dispatching_tests {
 
 	use super::*;
 
-	#[test]
-	fn dispatching_runner_returns_default_when_no_rule_matches() {
+	#[tokio::test]
+	async fn dispatching_runner_returns_default_when_no_rule_matches() {
 		let runner = DispatchingCommandRunner::new(1);
 		let cwd = Path::new("/tmp");
-		let output = runner.run("unknown", &[], cwd).unwrap();
+		let output = runner.run("unknown", &[], cwd).await.unwrap();
 		assert!(!output.status.success());
 	}
 
-	#[test]
-	fn dispatching_runner_matches_program_name() {
+	#[tokio::test]
+	async fn dispatching_runner_matches_program_name() {
 		let runner = DispatchingCommandRunner::new(1).on("git", 0);
 		let cwd = Path::new("/tmp");
-		let output = runner.run("git", &["status"], cwd).unwrap();
+		let output = runner.run("git", &["status"], cwd).await.unwrap();
 		assert!(output.status.success());
 	}
 
-	#[test]
-	fn dispatching_runner_first_matching_rule_wins() {
+	#[tokio::test]
+	async fn dispatching_runner_first_matching_rule_wins() {
 		let runner = DispatchingCommandRunner::new(1).on("git", 0).on("git", 2); // should never be reached
 		let cwd = Path::new("/tmp");
-		let output = runner.run("git", &[], cwd).unwrap();
+		let output = runner.run("git", &[], cwd).await.unwrap();
 		assert!(output.status.success());
 	}
 
-	#[test]
-	fn dispatching_runner_matches_args_prefix() {
+	#[tokio::test]
+	async fn dispatching_runner_matches_args_prefix() {
 		let runner =
 			DispatchingCommandRunner::new(0).on_with_args("git", vec!["push".to_string()], 42);
 		let cwd = Path::new("/tmp");
-		let output = runner.run("git", &["push", "origin", "HEAD"], cwd).unwrap();
+		let output = runner
+			.run("git", &["push", "origin", "HEAD"], cwd)
+			.await
+			.unwrap();
 		#[cfg(unix)]
 		{
 			use std::os::unix::process::ExitStatusExt;
@@ -482,38 +488,38 @@ mod dispatching_tests {
 		}
 	}
 
-	#[test]
-	fn dispatching_runner_falls_through_when_args_prefix_does_not_match() {
+	#[tokio::test]
+	async fn dispatching_runner_falls_through_when_args_prefix_does_not_match() {
 		let runner =
 			DispatchingCommandRunner::new(0).on_with_args("git", vec!["push".to_string()], 42);
 		let cwd = Path::new("/tmp");
 		// "fetch" does not match the "push" prefix rule; default (0) is used
-		let output = runner.run("git", &["fetch"], cwd).unwrap();
+		let output = runner.run("git", &["fetch"], cwd).await.unwrap();
 		assert!(output.status.success());
 	}
 
-	#[test]
-	fn dispatching_runner_returns_configured_stdout() {
+	#[tokio::test]
+	async fn dispatching_runner_returns_configured_stdout() {
 		let runner = DispatchingCommandRunner::new(0).on_stdout("npm", 0, b"test-user\n".to_vec());
 		let cwd = Path::new("/tmp");
-		let output = runner.run("npm", &["whoami"], cwd).unwrap();
+		let output = runner.run("npm", &["whoami"], cwd).await.unwrap();
 		assert_eq!(output.stdout, b"test-user\n");
 	}
 
-	#[test]
-	fn dispatching_runner_returns_configured_stderr() {
+	#[tokio::test]
+	async fn dispatching_runner_returns_configured_stderr() {
 		let runner = DispatchingCommandRunner::new(0).on_stderr(
 			"cargo",
 			1,
 			b"error: not logged in\n".to_vec(),
 		);
 		let cwd = Path::new("/tmp");
-		let output = runner.run("cargo", &[], cwd).unwrap();
+		let output = runner.run("cargo", &[], cwd).await.unwrap();
 		assert_eq!(output.stderr, b"error: not logged in\n");
 	}
 
-	#[test]
-	fn dispatching_runner_on_rule_accepts_full_dispatch_rule() {
+	#[tokio::test]
+	async fn dispatching_runner_on_rule_accepts_full_dispatch_rule() {
 		let rule = DispatchRule {
 			program: "npm".to_string(),
 			args: Some(vec!["whoami".to_string()]),
@@ -523,18 +529,19 @@ mod dispatching_tests {
 		};
 		let runner = DispatchingCommandRunner::new(1).on_rule(rule);
 		let cwd = Path::new("/tmp");
-		let output = runner.run("npm", &["whoami"], cwd).unwrap();
+		let output = runner.run("npm", &["whoami"], cwd).await.unwrap();
 		assert_eq!(output.stdout, b"alice\n");
 		assert!(output.status.success());
 	}
 
-	#[test]
-	fn dispatching_runner_records_invocations() {
+	#[tokio::test]
+	async fn dispatching_runner_records_invocations() {
 		let runner = DispatchingCommandRunner::new(0).on("git", 0);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run("git", &["status"], cwd).unwrap();
+		let _ = runner.run("git", &["status"], cwd).await.unwrap();
 		let _ = runner
 			.run_mut("git", &["commit", "-m", "msg"], cwd)
+			.await
 			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 2);
@@ -542,22 +549,25 @@ mod dispatching_tests {
 		assert_eq!(invocations[1].args, vec!["commit", "-m", "msg"]);
 	}
 
-	#[test]
-	fn dispatching_runner_records_shell_invocations() {
+	#[tokio::test]
+	async fn dispatching_runner_records_shell_invocations() {
 		let runner = DispatchingCommandRunner::new(0);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell("npm install", cwd).unwrap();
+		let _ = runner.run_shell("npm install", cwd).await.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
 		assert_eq!(invocations[0].program, shell_program());
 	}
 
-	#[test]
-	fn dispatching_runner_records_interactive_invocations() {
+	#[tokio::test]
+	async fn dispatching_runner_records_interactive_invocations() {
 		let runner = DispatchingCommandRunner::new(0);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_interactive("vim", &["file.txt"], cwd).unwrap();
+		let _ = runner
+			.run_interactive("vim", &["file.txt"], cwd)
+			.await
+			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_interactive);

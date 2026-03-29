@@ -21,14 +21,14 @@ fn recording_adapter_with_env(dir: &std::path::Path, env: crate::Env) -> CargoAd
 	)
 }
 
-#[test]
-fn publish_success_returns_published() {
+#[tokio::test]
+async fn publish_success_returns_published() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter =
 		recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
@@ -36,8 +36,8 @@ fn publish_success_returns_published() {
 	assert_eq!(invocations[0].args[0], "publish");
 }
 
-#[test]
-fn publish_already_uploaded_returns_already_published() {
+#[tokio::test]
+async fn publish_already_uploaded_returns_already_published() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(
@@ -46,12 +46,12 @@ fn publish_already_uploaded_returns_already_published() {
 	);
 	let adapter =
 		recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::AlreadyPublished);
 }
 
-#[test]
-fn publish_already_exists_returns_already_published() {
+#[tokio::test]
+async fn publish_already_exists_returns_already_published() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(
@@ -60,12 +60,12 @@ fn publish_already_exists_returns_already_published() {
 	);
 	let adapter =
 		recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::AlreadyPublished);
 }
 
-#[test]
-fn publish_other_failure_returns_error() {
+#[tokio::test]
+async fn publish_other_failure_returns_error() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(
@@ -74,7 +74,7 @@ fn publish_other_failure_returns_error() {
 	);
 	let adapter =
 		recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
-	let result = adapter.publish(&info);
+	let result = adapter.publish(&info).await;
 	assert!(result.is_err());
 	let msg = result.unwrap_err().to_string();
 	assert!(
@@ -83,14 +83,14 @@ fn publish_other_failure_returns_error() {
 	);
 }
 
-#[test]
-fn publish_passes_manifest_path_arg() {
+#[tokio::test]
+async fn publish_passes_manifest_path_arg() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter =
 		recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert!(
@@ -100,8 +100,8 @@ fn publish_passes_manifest_path_arg() {
 	);
 }
 
-#[test]
-fn publish_without_cargo_token_still_executes_publish() {
+#[tokio::test]
+async fn publish_without_cargo_token_still_executes_publish() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -115,15 +115,15 @@ fn publish_without_cargo_token_still_executes_publish() {
 	)
 	.with_cargo_registry_token_present(false);
 	let adapter = recording_adapter_with_env(dir.path(), env);
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	// Command must still be dispatched despite missing token
 	assert_eq!(runner.invocations()[0].program, "cargo");
 	assert_eq!(runner.invocations()[0].args[0], "publish");
 }
 
-#[test]
-fn publish_without_cargo_token_emits_warning() {
+#[tokio::test]
+async fn publish_without_cargo_token_emits_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
@@ -138,7 +138,7 @@ fn publish_without_cargo_token_emits_warning() {
 	)
 	.with_cargo_registry_token_present(false);
 	let adapter = recording_adapter_with_env(dir.path(), env);
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let logs = crate::test_logging::take_logs();
 	let warn_msgs: Vec<_> = logs
 		.iter()
@@ -152,8 +152,8 @@ fn publish_without_cargo_token_emits_warning() {
 	);
 }
 
-#[test]
-fn publish_with_cargo_token_no_warning() {
+#[tokio::test]
+async fn publish_with_cargo_token_no_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
@@ -168,7 +168,7 @@ fn publish_with_cargo_token_no_warning() {
 	)
 	.with_cargo_registry_token_present(true);
 	let adapter = recording_adapter_with_env(dir.path(), env);
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let logs = crate::test_logging::take_logs();
 	assert!(
 		!logs
@@ -178,8 +178,8 @@ fn publish_with_cargo_token_no_warning() {
 	);
 }
 
-#[test]
-fn publish_with_cargo_token_executes_publish() {
+#[tokio::test]
+async fn publish_with_cargo_token_executes_publish() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -193,21 +193,21 @@ fn publish_with_cargo_token_executes_publish() {
 	)
 	.with_cargo_registry_token_present(true);
 	let adapter = recording_adapter_with_env(dir.path(), env);
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	assert_eq!(runner.invocations()[0].program, "cargo");
 }
 
-#[test]
-fn registry_name_is_crates_io() {
+#[tokio::test]
+async fn registry_name_is_crates_io() {
 	let dir = temp_dir();
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-	assert_eq!(adapter.registry_name(), "crates.io");
+	assert_eq!(adapter.registry_name().await, "crates.io");
 }
 
-#[test]
-fn manifest_filename_is_cargo_toml() {
+#[tokio::test]
+async fn manifest_filename_is_cargo_toml() {
 	let dir = temp_dir();
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
-	assert_eq!(adapter.manifest_filename(), "Cargo.toml");
+	assert_eq!(adapter.manifest_filename().await, "Cargo.toml");
 }

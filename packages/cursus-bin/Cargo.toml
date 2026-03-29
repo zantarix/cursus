@@ -15,6 +15,7 @@ clap.workspace = true
 log.workspace = true
 mutants.workspace = true
 sys-locale.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [features]
 default = ["nix-tests"]
@@ -25,6 +26,7 @@ test-support = []
 [dev-dependencies]
 cursus = { path = "../cursus", features = ["test-support"], default-features = false }
 httpmock = "=0.8.3"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 insta = "=1.46.3"
 jsonschema = "=0.45.0"
 proptest = "=1.10.0"

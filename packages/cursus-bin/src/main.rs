@@ -121,7 +121,8 @@ fn detect_locale() -> String {
 
 #[coverage(off)]
 #[mutants::skip]
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
 	// Parse args exactly once. Logging is initialised immediately after so
 	// that every subsequent operation benefits from the user-requested level.
 	let cli = match cursus::cli::Cli::try_parse() {
@@ -143,7 +144,7 @@ fn main() -> ExitCode {
 
 	init_logging(determine_log_level(&cli.global));
 
-	match try_main(cli) {
+	match try_main(cli).await {
 		Ok(code) => code,
 		Err(e) => {
 			log::error!("{e:#}");
@@ -156,7 +157,7 @@ fn main() -> ExitCode {
 ///
 /// Separated from [`main`] so that all fallible operations can use `?`
 /// with a single error-handling site in the caller.
-fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
+async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 	let cwd = std::env::current_dir()?;
 	let cwd_abs = cursus::path::AbsolutePath::new(&cwd)?;
 
@@ -173,8 +174,9 @@ fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 		runner
 	};
 
-	let git_workdir =
-		cursus::git::find_workdir(&cwd_abs, &*filesystem).context("No git repository found")?;
+	let git_workdir = cursus::git::find_workdir(&cwd_abs, &*filesystem)
+		.await
+		.context("No git repository found")?;
 	let git = Arc::new(cursus::git::GitWorkdir::new(
 		Arc::clone(&runner),
 		git_workdir,
@@ -198,5 +200,5 @@ fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 		.with_cargo_registry_token_present(cargo_registry_token_present)
 		.with_locale(locale);
 
-	cursus::run(cli, env)
+	cursus::run(cli, env).await
 }

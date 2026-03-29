@@ -6,8 +6,8 @@ fn make_member_info(dir: &std::path::Path, name: &str, member_path: &str) -> Pro
 	ProjectInfo::for_test(name, AbsolutePath::new(dir.join(member_path)).unwrap())
 }
 
-#[test]
-fn update_dep_version_string_format() {
+#[tokio::test]
+async fn update_dep_version_string_format() {
 	let dir = temp_dir();
 	// Create member with a string-format dependency
 	let member_dir = dir.path().join("pkg-a");
@@ -24,6 +24,7 @@ fn update_dep_version_string_format() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1, "Expected one file modified");
@@ -31,8 +32,8 @@ fn update_dep_version_string_format() {
 	assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
 }
 
-#[test]
-fn update_dep_version_table_format_with_features() {
+#[tokio::test]
+async fn update_dep_version_table_format_with_features() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -48,6 +49,7 @@ fn update_dep_version_table_format_with_features() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1);
@@ -56,8 +58,8 @@ fn update_dep_version_table_format_with_features() {
 	assert!(content.contains("features = [\"foo\"]"), "got: {content}");
 }
 
-#[test]
-fn update_dep_version_table_format_preserves_prefix() {
+#[tokio::test]
+async fn update_dep_version_table_format_preserves_prefix() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -73,6 +75,7 @@ fn update_dep_version_table_format_preserves_prefix() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1);
@@ -83,8 +86,8 @@ fn update_dep_version_table_format_preserves_prefix() {
 	);
 }
 
-#[test]
-fn update_dep_version_in_dev_dependencies() {
+#[tokio::test]
+async fn update_dep_version_in_dev_dependencies() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -100,6 +103,7 @@ fn update_dep_version_in_dev_dependencies() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1);
@@ -107,8 +111,8 @@ fn update_dep_version_in_dev_dependencies() {
 	assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
 }
 
-#[test]
-fn update_dep_version_in_build_dependencies() {
+#[tokio::test]
+async fn update_dep_version_in_build_dependencies() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -124,6 +128,7 @@ fn update_dep_version_in_build_dependencies() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1);
@@ -131,8 +136,8 @@ fn update_dep_version_in_build_dependencies() {
 	assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
 }
 
-#[test]
-fn update_dep_version_path_only_dep_not_modified() {
+#[tokio::test]
+async fn update_dep_version_path_only_dep_not_modified() {
 	// A table dep with only `path = "..."` and no `version` key should not be touched.
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
@@ -149,6 +154,7 @@ fn update_dep_version_path_only_dep_not_modified() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	// Path-only dependency — no version field to update
@@ -165,8 +171,8 @@ fn update_dep_version_path_only_dep_not_modified() {
 	);
 }
 
-#[test]
-fn update_dep_version_no_member_toml_returns_empty() {
+#[tokio::test]
+async fn update_dep_version_no_member_toml_returns_empty() {
 	let dir = temp_dir();
 	// Create workspace root but no member directory
 	write_cargo_toml(dir.path(), "[workspace]\nmembers = []\n");
@@ -180,13 +186,14 @@ fn update_dep_version_no_member_toml_returns_empty() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert!(modified.is_empty());
 }
 
-#[test]
-fn update_dep_version_preserves_prefix() {
+#[tokio::test]
+async fn update_dep_version_preserves_prefix() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -202,6 +209,7 @@ fn update_dep_version_preserves_prefix() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1);
@@ -209,8 +217,8 @@ fn update_dep_version_preserves_prefix() {
 	assert!(content.contains("pkg-b = \"^1.0.0\""), "got: {content}");
 }
 
-#[test]
-fn update_dep_version_workspace_dep_in_root() {
+#[tokio::test]
+async fn update_dep_version_workspace_dep_in_root() {
 	let dir = temp_dir();
 	// Root Cargo.toml with [workspace.dependencies]
 	write_cargo_toml(
@@ -231,6 +239,7 @@ fn update_dep_version_workspace_dep_in_root() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	assert_eq!(modified.len(), 1);
@@ -239,8 +248,8 @@ fn update_dep_version_workspace_dep_in_root() {
 	assert!(content.contains("pkg-b = \"0.3.0\""), "got: {content}");
 }
 
-#[test]
-fn update_dep_version_skips_workspace_true_in_member() {
+#[tokio::test]
+async fn update_dep_version_skips_workspace_true_in_member() {
 	let dir = temp_dir();
 	// Root with workspace.dependencies
 	write_cargo_toml(
@@ -261,6 +270,7 @@ fn update_dep_version_skips_workspace_true_in_member() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, false)
+		.await
 		.unwrap();
 
 	// Only the root workspace Cargo.toml should be modified, not the member
@@ -275,8 +285,8 @@ fn update_dep_version_skips_workspace_true_in_member() {
 	);
 }
 
-#[test]
-fn update_dep_version_not_found_returns_empty() {
+#[tokio::test]
+async fn update_dep_version_not_found_returns_empty() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -292,13 +302,14 @@ fn update_dep_version_not_found_returns_empty() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "nonexistent-dep", &new_version, false)
+		.await
 		.unwrap();
 
 	assert!(modified.is_empty());
 }
 
-#[test]
-fn update_dep_version_dry_run_does_not_write_file() {
+#[tokio::test]
+async fn update_dep_version_dry_run_does_not_write_file() {
 	let dir = temp_dir();
 	let member_dir = dir.path().join("pkg-a");
 	std::fs::create_dir_all(&member_dir).unwrap();
@@ -314,6 +325,7 @@ fn update_dep_version_dry_run_does_not_write_file() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, true)
+		.await
 		.unwrap();
 
 	// Should still report the file as modified (would-be), but not write it
@@ -333,8 +345,8 @@ fn update_dep_version_dry_run_does_not_write_file() {
 	);
 }
 
-#[test]
-fn update_dep_version_workspace_dep_dry_run_does_not_write_file() {
+#[tokio::test]
+async fn update_dep_version_workspace_dep_dry_run_does_not_write_file() {
 	let dir = temp_dir();
 	write_cargo_toml(
 		dir.path(),
@@ -354,6 +366,7 @@ fn update_dep_version_workspace_dep_dry_run_does_not_write_file() {
 
 	let modified = adapter
 		.update_dependency_version(&info, "pkg-b", &new_version, true)
+		.await
 		.unwrap();
 
 	assert_eq!(
@@ -368,22 +381,22 @@ fn update_dep_version_workspace_dep_dry_run_does_not_write_file() {
 	);
 }
 
-#[test]
-fn semver_range_prefix_extracts_caret() {
+#[tokio::test]
+async fn semver_range_prefix_extracts_caret() {
 	assert_eq!(crate::package_manager::semver_range_prefix("^1.0.0"), "^");
 }
 
-#[test]
-fn semver_range_prefix_extracts_tilde() {
+#[tokio::test]
+async fn semver_range_prefix_extracts_tilde() {
 	assert_eq!(crate::package_manager::semver_range_prefix("~1.0.0"), "~");
 }
 
-#[test]
-fn semver_range_prefix_empty_for_bare_version() {
+#[tokio::test]
+async fn semver_range_prefix_empty_for_bare_version() {
 	assert_eq!(crate::package_manager::semver_range_prefix("1.0.0"), "");
 }
 
-#[test]
-fn semver_range_prefix_extracts_gte() {
+#[tokio::test]
+async fn semver_range_prefix_extracts_gte() {
 	assert_eq!(crate::package_manager::semver_range_prefix(">=1.0.0"), ">=");
 }

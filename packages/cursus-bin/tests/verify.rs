@@ -27,8 +27,8 @@ fn setup_verify_repo() -> (TempDir, TempDir) {
 	(working, remote)
 }
 
-#[test]
-fn verify_exits_0_when_changeset_added() {
+#[tokio::test]
+async fn verify_exits_0_when_changeset_added() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -41,12 +41,14 @@ fn verify_exits_0_when_changeset_added() {
 	git_cmd(dir, &["add", ".cursus/test.md"]);
 	git_cmd(dir, &["commit", "-m", "feat: add changeset"]);
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::SUCCESS);
 }
 
-#[test]
-fn verify_exits_2_when_no_changeset() {
+#[tokio::test]
+async fn verify_exits_2_when_no_changeset() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -54,21 +56,25 @@ fn verify_exits_2_when_no_changeset() {
 	git_cmd(dir, &["add", "some-file.txt"]);
 	git_cmd(dir, &["commit", "-m", "feat: add non-changeset file"]);
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::from(2));
 }
 
-#[test]
-fn verify_exits_2_on_empty_branch() {
+#[tokio::test]
+async fn verify_exits_2_on_empty_branch() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::from(2));
 }
 
-#[test]
-fn verify_ignores_readme_md() {
+#[tokio::test]
+async fn verify_ignores_readme_md() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -77,12 +83,14 @@ fn verify_ignores_readme_md() {
 	git_cmd(dir, &["add", ".cursus/README.md"]);
 	git_cmd(dir, &["commit", "-m", "docs: add README to .cursus"]);
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::from(2));
 }
 
-#[test]
-fn verify_ignores_readme_case_insensitive() {
+#[tokio::test]
+async fn verify_ignores_readme_case_insensitive() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -91,12 +99,14 @@ fn verify_ignores_readme_case_insensitive() {
 	git_cmd(dir, &["add", ".cursus/Readme.md"]);
 	git_cmd(dir, &["commit", "-m", "docs: add readme variant"]);
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::from(2));
 }
 
-#[test]
-fn verify_custom_base_ref() {
+#[tokio::test]
+async fn verify_custom_base_ref() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -113,12 +123,13 @@ fn verify_custom_base_ref() {
 		["cursus", "--no-interactive", "verify", "--base", "main"],
 		dir,
 	)
+	.await
 	.unwrap();
 	assert_eq!(result, ExitCode::SUCCESS);
 }
 
-#[test]
-fn verify_error_on_invalid_base_ref() {
+#[tokio::test]
+async fn verify_error_on_invalid_base_ref() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -131,12 +142,13 @@ fn verify_error_on_invalid_base_ref() {
 			"nonexistent-ref",
 		],
 		dir,
-	);
+	)
+	.await;
 	assert!(result.is_err());
 }
 
-#[test]
-fn verify_ignores_modified_changesets() {
+#[tokio::test]
+async fn verify_ignores_modified_changesets() {
 	// Build a repo where an existing changeset is committed to main BEFORE branching.
 	let working = temp_real_git_repo();
 	let dir = working.path();
@@ -169,12 +181,13 @@ fn verify_ignores_modified_changesets() {
 		["cursus", "--no-interactive", "verify", "--base", "main"],
 		dir,
 	)
+	.await
 	.unwrap();
 	assert_eq!(result, ExitCode::from(2));
 }
 
-#[test]
-fn verify_works_without_config() {
+#[tokio::test]
+async fn verify_works_without_config() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -188,12 +201,14 @@ fn verify_works_without_config() {
 	git_cmd(dir, &["add", ".cursus/change.md"]);
 	git_cmd(dir, &["commit", "-m", "feat: add changeset"]);
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::SUCCESS);
 }
 
-#[test]
-fn verify_dry_run_behaves_identically() {
+#[tokio::test]
+async fn verify_dry_run_behaves_identically() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -206,14 +221,17 @@ fn verify_dry_run_behaves_identically() {
 	git_cmd(dir, &["add", ".cursus/change.md"]);
 	git_cmd(dir, &["commit", "-m", "feat: add changeset"]);
 
-	let result_normal = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
-	let result_dry =
-		run_cursus(["cursus", "--no-interactive", "--dry-run", "verify"], dir).unwrap();
+	let result_normal = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
+	let result_dry = run_cursus(["cursus", "--no-interactive", "--dry-run", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result_normal, result_dry);
 }
 
-#[test]
-fn verify_exits_2_when_on_default_branch() {
+#[tokio::test]
+async fn verify_exits_2_when_on_default_branch() {
 	// When verify runs from the default branch itself (HEAD == origin/HEAD),
 	// there can be no new changesets relative to origin, so it must exit 2.
 	let working = temp_real_git_repo();
@@ -224,12 +242,14 @@ fn verify_exits_2_when_on_default_branch() {
 	git_set_remote_head(dir, "main");
 
 	// Remain on main — do NOT check out a feature branch.
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::from(2));
 }
 
-#[test]
-fn verify_lists_multiple_changesets() {
+#[tokio::test]
+async fn verify_lists_multiple_changesets() {
 	let (working, _remote) = setup_verify_repo();
 	let dir = working.path();
 
@@ -247,6 +267,8 @@ fn verify_lists_multiple_changesets() {
 	git_cmd(dir, &["add", ".cursus/change-a.md", ".cursus/change-b.md"]);
 	git_cmd(dir, &["commit", "-m", "feat: add two changesets"]);
 
-	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir).unwrap();
+	let result = run_cursus(["cursus", "--no-interactive", "verify"], dir)
+		.await
+		.unwrap();
 	assert_eq!(result, ExitCode::SUCCESS);
 }

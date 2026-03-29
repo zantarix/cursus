@@ -106,8 +106,8 @@ fn validate(instance: &Value, schema: &Value) -> Result<(), String> {
 
 // ── create_release tests ──────────────────────────────────────────────────────
 
-#[test]
-fn create_release_sends_correct_request() {
+#[tokio::test]
+async fn create_release_sends_correct_request() {
 	let server = MockServer::start();
 	let mock = server.mock(|when, then| {
 		when.method(POST)
@@ -123,19 +123,21 @@ fn create_release_sends_correct_request() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.create_release(
-		&GitHubRepo::new("owner", "repo").unwrap(),
-		"v1.0.0",
-		"Release v1.0.0",
-		"Changelog body",
-	);
+	let result = client
+		.create_release(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"v1.0.0",
+			"Release v1.0.0",
+			"Changelog body",
+		)
+		.await;
 	assert!(result.is_ok(), "create_release failed: {:?}", result.err());
 	assert_eq!(result.unwrap(), "12345");
 	mock.assert();
 }
 
-#[test]
-fn create_release_sends_spec_compliant_request() {
+#[tokio::test]
+async fn create_release_sends_spec_compliant_request() {
 	let spec = match try_load_spec() {
 		Some(s) => s,
 		None => {
@@ -174,6 +176,7 @@ fn create_release_sends_spec_compliant_request() {
 			"Release v1.0.0",
 			"Changelog",
 		)
+		.await
 		.expect("create_release should succeed against mock server");
 
 	let body_str = captured_body.lock().unwrap().clone();
@@ -185,8 +188,8 @@ fn create_release_sends_spec_compliant_request() {
 		.unwrap_or_else(|e| panic!("create_release request body is not spec-compliant:\n{e}"));
 }
 
-#[test]
-fn create_release_handles_api_error() {
+#[tokio::test]
+async fn create_release_handles_api_error() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(POST).path("/repos/owner/repo/releases");
@@ -198,12 +201,14 @@ fn create_release_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.create_release(
-		&GitHubRepo::new("owner", "repo").unwrap(),
-		"v1.0.0",
-		"Release",
-		"Body",
-	);
+	let result = client
+		.create_release(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"v1.0.0",
+			"Release",
+			"Body",
+		)
+		.await;
 	assert!(result.is_err(), "Expected error on 422 response");
 	let err = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -212,8 +217,8 @@ fn create_release_handles_api_error() {
 	);
 }
 
-#[test]
-fn response_with_extra_fields_still_deserializes() {
+#[tokio::test]
+async fn response_with_extra_fields_still_deserializes() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(POST).path("/repos/owner/repo/releases");
@@ -245,12 +250,14 @@ fn response_with_extra_fields_still_deserializes() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.create_release(
-		&GitHubRepo::new("owner", "repo").unwrap(),
-		"v1.0.0",
-		"Release v1.0.0",
-		"Changelog body",
-	);
+	let result = client
+		.create_release(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"v1.0.0",
+			"Release v1.0.0",
+			"Changelog body",
+		)
+		.await;
 	assert!(
 		result.is_ok(),
 		"Should handle extra fields gracefully, got: {:?}",
@@ -261,8 +268,8 @@ fn response_with_extra_fields_still_deserializes() {
 
 // ── create_pull_request tests ─────────────────────────────────────────────────
 
-#[test]
-fn create_pull_request_sends_correct_request() {
+#[tokio::test]
+async fn create_pull_request_sends_correct_request() {
 	let server = MockServer::start();
 	let mock = server.mock(|when, then| {
 		when.method(POST)
@@ -286,13 +293,14 @@ fn create_pull_request_sends_correct_request() {
 			"release-branch",
 			"main",
 		)
+		.await
 		.unwrap();
 	assert_eq!(url, "https://github.com/acme/app/pull/1");
 	mock.assert();
 }
 
-#[test]
-fn create_pull_request_sends_spec_compliant_request() {
+#[tokio::test]
+async fn create_pull_request_sends_spec_compliant_request() {
 	let spec = match try_load_spec() {
 		Some(s) => s,
 		None => {
@@ -331,6 +339,7 @@ fn create_pull_request_sends_spec_compliant_request() {
 			"cursus-release/main",
 			"main",
 		)
+		.await
 		.expect("create_pull_request should succeed against mock server");
 
 	let body_str = captured_body.lock().unwrap().clone();
@@ -342,8 +351,8 @@ fn create_pull_request_sends_spec_compliant_request() {
 		.unwrap_or_else(|e| panic!("create_pull_request request body is not spec-compliant:\n{e}"));
 }
 
-#[test]
-fn create_pull_request_handles_api_error() {
+#[tokio::test]
+async fn create_pull_request_handles_api_error() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(POST).path("/repos/acme/app/pulls");
@@ -355,13 +364,15 @@ fn create_pull_request_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.create_pull_request(
-		&GitHubRepo::new("acme", "app").unwrap(),
-		"Release updates",
-		"body",
-		"release-branch",
-		"main",
-	);
+	let result = client
+		.create_pull_request(
+			&GitHubRepo::new("acme", "app").unwrap(),
+			"Release updates",
+			"body",
+			"release-branch",
+			"main",
+		)
+		.await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -372,8 +383,8 @@ fn create_pull_request_handles_api_error() {
 
 // ── find_open_pull_request tests ──────────────────────────────────────────────
 
-#[test]
-fn find_open_pull_request_returns_none_when_empty_list() {
+#[tokio::test]
+async fn find_open_pull_request_returns_none_when_empty_list() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(GET)
@@ -390,12 +401,13 @@ fn find_open_pull_request_returns_none_when_empty_list() {
 
 	let result = client
 		.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
+		.await
 		.unwrap();
 	assert!(result.is_none());
 }
 
-#[test]
-fn find_open_pull_request_returns_first_match() {
+#[tokio::test]
+async fn find_open_pull_request_returns_first_match() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(GET)
@@ -415,14 +427,15 @@ fn find_open_pull_request_returns_first_match() {
 
 	let result = client
 		.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
+		.await
 		.unwrap();
 	let pr = result.expect("Expected a PR to be found");
 	assert_eq!(pr.number, 3);
 	assert!(pr.html_url.contains("pull/3"));
 }
 
-#[test]
-fn find_open_pull_request_sends_correct_headers() {
+#[tokio::test]
+async fn find_open_pull_request_sends_correct_headers() {
 	let server = MockServer::start();
 	let mock = server.mock(|when, then| {
 		when.method(GET)
@@ -442,12 +455,13 @@ fn find_open_pull_request_sends_correct_headers() {
 
 	client
 		.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
+		.await
 		.unwrap();
 	mock.assert();
 }
 
-#[test]
-fn find_open_pull_request_encodes_colon_and_slash_in_head_param() {
+#[tokio::test]
+async fn find_open_pull_request_encodes_colon_and_slash_in_head_param() {
 	// Proves that percent_encode produces the right bytes and ureq does not
 	// double-encode them: httpmock matches the URL-decoded query param value,
 	// so if "acme%3Arelease%2Fmain" were re-encoded to "acme%253Arelease%252Fmain"
@@ -468,13 +482,14 @@ fn find_open_pull_request_encodes_colon_and_slash_in_head_param() {
 
 	let result = client
 		.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release/main")
+		.await
 		.unwrap();
 	let pr = result.expect("Expected a PR to be found");
 	assert_eq!(pr.number, 5);
 }
 
-#[test]
-fn find_open_pull_request_handles_api_error() {
+#[tokio::test]
+async fn find_open_pull_request_handles_api_error() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(GET).path("/repos/acme/app/pulls");
@@ -484,8 +499,9 @@ fn find_open_pull_request_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result =
-		client.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch");
+	let result = client
+		.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
+		.await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -496,8 +512,8 @@ fn find_open_pull_request_handles_api_error() {
 
 // ── update_pull_request tests ─────────────────────────────────────────────────
 
-#[test]
-fn update_pull_request_sends_correct_request() {
+#[tokio::test]
+async fn update_pull_request_sends_correct_request() {
 	let server = MockServer::start();
 	let mock = server.mock(|when, then| {
 		when.method(PATCH)
@@ -522,13 +538,14 @@ fn update_pull_request_sends_correct_request() {
 			"Updated Title",
 			"Updated body",
 		)
+		.await
 		.unwrap();
 	assert_eq!(url, "https://github.com/acme/app/pull/7");
 	mock.assert();
 }
 
-#[test]
-fn update_pull_request_sends_spec_compliant_request() {
+#[tokio::test]
+async fn update_pull_request_sends_spec_compliant_request() {
 	let spec = match try_load_spec() {
 		Some(s) => s,
 		None => {
@@ -566,6 +583,7 @@ fn update_pull_request_sends_spec_compliant_request() {
 			"Release updates",
 			"Changelog body",
 		)
+		.await
 		.expect("update_pull_request should succeed against mock server");
 
 	let body_str = captured_body.lock().unwrap().clone();
@@ -577,8 +595,8 @@ fn update_pull_request_sends_spec_compliant_request() {
 		.unwrap_or_else(|e| panic!("update_pull_request request body is not spec-compliant:\n{e}"));
 }
 
-#[test]
-fn update_pull_request_handles_api_error() {
+#[tokio::test]
+async fn update_pull_request_handles_api_error() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(PATCH).path("/repos/acme/app/pulls/7");
@@ -590,8 +608,9 @@ fn update_pull_request_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result =
-		client.update_pull_request(&GitHubRepo::new("acme", "app").unwrap(), 7, "Title", "body");
+	let result = client
+		.update_pull_request(&GitHubRepo::new("acme", "app").unwrap(), 7, "Title", "body")
+		.await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -602,8 +621,8 @@ fn update_pull_request_handles_api_error() {
 
 // ── publish_release tests ─────────────────────────────────────────────────────
 
-#[test]
-fn publish_release_sends_correct_request() {
+#[tokio::test]
+async fn publish_release_sends_correct_request() {
 	let server = MockServer::start();
 	let mock = server.mock(|when, then| {
 		when.method(PATCH)
@@ -619,13 +638,15 @@ fn publish_release_sends_correct_request() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+	let result = client
+		.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345")
+		.await;
 	assert!(result.is_ok(), "publish_release failed: {:?}", result.err());
 	mock.assert();
 }
 
-#[test]
-fn publish_release_handles_api_error() {
+#[tokio::test]
+async fn publish_release_handles_api_error() {
 	let server = MockServer::start();
 	let _mock = server.mock(|when, then| {
 		when.method(PATCH).path("/repos/owner/repo/releases/12345");
@@ -637,7 +658,9 @@ fn publish_release_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+	let result = client
+		.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345")
+		.await;
 	assert!(result.is_err(), "Expected error on 404 response");
 	let err = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -648,8 +671,8 @@ fn publish_release_handles_api_error() {
 
 // ── upload_asset tests ────────────────────────────────────────────────────────
 
-#[test]
-fn upload_asset_percent_encodes_filename_in_url() {
+#[tokio::test]
+async fn upload_asset_percent_encodes_filename_in_url() {
 	let mut file = NamedTempFile::new().unwrap();
 	file.write_all(b"data").unwrap();
 	let file_path = file.path().to_path_buf();
@@ -673,12 +696,14 @@ fn upload_asset_percent_encodes_filename_in_url() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.upload_asset(
-		&GitHubRepo::new("owner", "repo").unwrap(),
-		"12345",
-		"my app (1).tar.gz",
-		&file_path,
-	);
+	let result = client
+		.upload_asset(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"12345",
+			"my app (1).tar.gz",
+			&file_path,
+		)
+		.await;
 	assert!(result.is_ok(), "upload_asset failed: {:?}", result.err());
 	mock.assert();
 
@@ -689,8 +714,8 @@ fn upload_asset_percent_encodes_filename_in_url() {
 	);
 }
 
-#[test]
-fn upload_asset_sends_correct_request() {
+#[tokio::test]
+async fn upload_asset_sends_correct_request() {
 	let mut file = NamedTempFile::new().unwrap();
 	file.write_all(b"binary content").unwrap();
 	let file_path = file.path().to_path_buf();
@@ -718,12 +743,14 @@ fn upload_asset_sends_correct_request() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.upload_asset(
-		&GitHubRepo::new("owner", "repo").unwrap(),
-		"12345",
-		"app.tar.gz",
-		&file_path,
-	);
+	let result = client
+		.upload_asset(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"12345",
+			"app.tar.gz",
+			&file_path,
+		)
+		.await;
 	assert!(result.is_ok(), "upload_asset failed: {:?}", result.err());
 	mock.assert();
 
@@ -734,8 +761,8 @@ fn upload_asset_sends_correct_request() {
 	);
 }
 
-#[test]
-fn upload_asset_handles_api_error() {
+#[tokio::test]
+async fn upload_asset_handles_api_error() {
 	let mut file = NamedTempFile::new().unwrap();
 	file.write_all(b"data").unwrap();
 	let file_path = file.path().to_path_buf();
@@ -750,12 +777,14 @@ fn upload_asset_handles_api_error() {
 	let client = RestGitHubClient::new("test-token".to_string())
 		.with_base_urls(server.base_url(), server.base_url());
 
-	let result = client.upload_asset(
-		&GitHubRepo::new("owner", "repo").unwrap(),
-		"12345",
-		"file.tar.gz",
-		&file_path,
-	);
+	let result = client
+		.upload_asset(
+			&GitHubRepo::new("owner", "repo").unwrap(),
+			"12345",
+			"file.tar.gz",
+			&file_path,
+		)
+		.await;
 	assert!(result.is_err(), "Expected error on 500 response");
 	let err = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -805,13 +834,14 @@ fn create_release_always_spec_compliant() {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		client
-			.create_release(
+		tokio::runtime::Runtime::new().unwrap().block_on(
+			client.create_release(
 				&GitHubRepo::new("owner", "repo").unwrap(),
 				&tag_name,
 				&name,
 				&changelog_body,
-			)
+			),
+		)
 			.expect("create_release should succeed against mock server");
 
 		let body_str = captured_body.lock().unwrap().clone();
@@ -863,14 +893,15 @@ fn create_pull_request_always_spec_compliant() {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		client
-			.create_pull_request(
+		tokio::runtime::Runtime::new().unwrap().block_on(
+			client.create_pull_request(
 				&GitHubRepo::new("acme", "app").unwrap(),
 				&title,
 				&body,
 				&head,
 				&base,
-			)
+			),
+		)
 			.expect("create_pull_request should succeed against mock server");
 
 		let body_str = captured_body.lock().unwrap().clone();
@@ -924,13 +955,14 @@ fn update_pull_request_always_spec_compliant() {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		client
-			.update_pull_request(
+		tokio::runtime::Runtime::new().unwrap().block_on(
+			client.update_pull_request(
 				&GitHubRepo::new("acme", "app").unwrap(),
 				pull_number,
 				&title,
 				&body,
-			)
+			),
+		)
 			.expect("update_pull_request should succeed against mock server");
 
 		let body_str = captured_body.lock().unwrap().clone();
@@ -980,11 +1012,12 @@ fn publish_release_always_spec_compliant() {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		client
-			.publish_release(
+		tokio::runtime::Runtime::new().unwrap().block_on(
+			client.publish_release(
 				&GitHubRepo::new("owner", "repo").unwrap(),
 				&release_id.to_string(),
-			)
+			),
+		)
 			.expect("publish_release should succeed against mock server");
 
 		let body_str = captured_body.lock().unwrap().clone();

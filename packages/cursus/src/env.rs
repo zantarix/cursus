@@ -211,20 +211,22 @@ impl Env {
 	///
 	/// On Windows, checks for `notepad` via `where.exe`. On Unix, checks for
 	/// `nano`, `vim`, `vi`, and `emacs` via `which`.
-	fn find_default_editor(&self, cwd: &Path) -> Option<String> {
+	async fn find_default_editor(&self, cwd: &Path) -> Option<String> {
 		let (probe_cmd, candidates): (&str, &[&str]) = if cfg!(windows) {
 			("where.exe", &["notepad"])
 		} else {
 			("which", &["nano", "vim", "vi", "emacs"])
 		};
-		candidates
-			.iter()
-			.copied()
-			.find(|cmd| {
-				self.run(probe_cmd, &[cmd], cwd)
-					.is_ok_and(|o| o.status.success())
-			})
-			.map(String::from)
+		for cmd in candidates {
+			if self
+				.run(probe_cmd, &[cmd], cwd)
+				.await
+				.is_ok_and(|o| o.status.success())
+			{
+				return Some((*cmd).to_string());
+			}
+		}
+		None
 	}
 
 	/// Opens the user's editor on the specified file.
@@ -242,18 +244,20 @@ impl Env {
 	/// # Errors
 	///
 	/// Returns an error if no editor is found or the editor process fails.
-	pub fn run_editor_on(&self, path: &Path, cwd: &Path) -> anyhow::Result<()> {
+	pub async fn run_editor_on(&self, path: &Path, cwd: &Path) -> anyhow::Result<()> {
 		use anyhow::Context as _;
-		let editor = self
-			.editor()
-			.filter(|v| !v.is_empty())
-			.map(String::from)
-			.or_else(|| self.find_default_editor(cwd))
-			.context("No editor found. Set the VISUAL or EDITOR environment variable.")?;
+		let editor = match self.editor().filter(|v| !v.is_empty()).map(String::from) {
+			Some(e) => e,
+			None => self
+				.find_default_editor(cwd)
+				.await
+				.context("No editor found. Set the VISUAL or EDITOR environment variable.")?,
+		};
 		let path_str = path.to_string_lossy();
 		let shell_cmd = format!("{editor} {}", crate::shell::shell_quote(&path_str));
 		let status = self
 			.run_shell_interactive(&shell_cmd, cwd)
+			.await
 			.with_context(|| format!("Failed to open editor: {editor}"))?;
 		if !status.success() {
 			anyhow::bail!("Editor exited with status: {status}");
@@ -264,48 +268,57 @@ impl Env {
 	/// Runs a program with the given arguments in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Read-only.
-	pub fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-		self.runner.run(program, args, cwd)
+	pub async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		self.runner.run(program, args, cwd).await
 	}
 
 	/// Runs a shell command via the platform shell in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Read-only.
-	pub fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.runner.run_shell(command, cwd)
+	pub async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		self.runner.run_shell(command, cwd).await
 	}
 
 	/// Runs a mutating program with the given arguments in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
-	pub fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-		self.runner.run_mut(program, args, cwd)
+	pub async fn run_mut(
+		&self,
+		program: &str,
+		args: &[&str],
+		cwd: &Path,
+	) -> anyhow::Result<Output> {
+		self.runner.run_mut(program, args, cwd).await
 	}
 
 	/// Runs a mutating shell command via the platform shell in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
-	pub fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.runner.run_shell_mut(command, cwd)
+	pub async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		self.runner.run_shell_mut(command, cwd).await
 	}
 
 	/// Runs a program with inherited stdin/stdout/stderr for interactive use.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
-	pub fn run_interactive(
+	pub async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
 		cwd: &Path,
 	) -> anyhow::Result<ExitStatus> {
-		self.runner.run_interactive(program, args, cwd)
+		self.runner.run_interactive(program, args, cwd).await
 	}
 
 	/// Runs a shell command via the platform shell with inherited stdin/stdout/stderr.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
-	pub fn run_shell_interactive(&self, command: &str, cwd: &Path) -> anyhow::Result<ExitStatus> {
-		self.runner.run_shell_interactive(command, cwd)
+	pub async fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<ExitStatus> {
+		self.runner.run_shell_interactive(command, cwd).await
 	}
 }
 
@@ -461,68 +474,77 @@ mod tests {
 		assert!(env.github_client().is_none());
 	}
 
-	#[test]
-	fn run_delegates_to_runner() {
+	#[tokio::test]
+	async fn run_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
-		env.run("echo", &["hello"], Path::new(".")).unwrap();
+		env.run("echo", &["hello"], Path::new(".")).await.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, "echo");
 		assert_eq!(invocations[0].args, ["hello"]);
 	}
 
-	#[test]
-	fn run_shell_delegates_to_runner() {
+	#[tokio::test]
+	async fn run_shell_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
-		env.run_shell("echo hello", Path::new(".")).unwrap();
+		env.run_shell("echo hello", Path::new(".")).await.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, shell_program());
 		assert_eq!(invocations[0].args, [shell_flag(), "echo hello"]);
 	}
 
-	#[test]
-	fn run_mut_delegates_to_runner() {
+	#[tokio::test]
+	async fn run_mut_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
 		env.run_mut("git", &["commit", "-m", "msg"], Path::new("."))
+			.await
 			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, "git");
 		assert_eq!(invocations[0].args, ["commit", "-m", "msg"]);
 	}
 
-	#[test]
-	fn run_shell_mut_delegates_to_runner() {
+	#[tokio::test]
+	async fn run_shell_mut_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
-		env.run_shell_mut("npm install", Path::new(".")).unwrap();
+		env.run_shell_mut("npm install", Path::new("."))
+			.await
+			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, shell_program());
 		assert!(invocations[0].is_shell);
 	}
 
-	#[test]
-	fn run_interactive_delegates_to_runner() {
+	#[tokio::test]
+	async fn run_interactive_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
-		env.run_interactive("vim", &[], Path::new(".")).unwrap();
+		env.run_interactive("vim", &[], Path::new("."))
+			.await
+			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, "vim");
 		assert!(invocations[0].is_interactive);
 	}
 
-	#[test]
-	fn with_dry_run_runner_suppresses_run_mut() {
+	#[tokio::test]
+	async fn with_dry_run_runner_suppresses_run_mut() {
 		let (runner, env, _dir) = recording_env(0);
 		let dry_env = env.with_dry_run_runner();
 		dry_env
 			.run_mut("git", &["push", "origin", "HEAD"], Path::new("."))
+			.await
 			.unwrap();
 		// The inner recording runner must NOT have been called (DryRunCommandRunner intercepts)
 		assert!(runner.invocations().is_empty());
 	}
 
-	#[test]
-	fn with_dry_run_runner_still_forwards_run() {
+	#[tokio::test]
+	async fn with_dry_run_runner_still_forwards_run() {
 		let (runner, env, _dir) = recording_env(0);
 		let dry_env = env.with_dry_run_runner();
-		dry_env.run("git", &["status"], Path::new(".")).unwrap();
+		dry_env
+			.run("git", &["status"], Path::new("."))
+			.await
+			.unwrap();
 		// Read-only run is forwarded to the inner runner
 		assert_eq!(runner.invocations().len(), 1);
 		assert_eq!(runner.invocations()[0].program, "git");
@@ -530,15 +552,15 @@ mod tests {
 
 	// run_editor_on tests
 
-	#[test]
-	fn run_editor_on_uses_editor_when_set() {
+	#[tokio::test]
+	async fn run_editor_on_uses_editor_when_set() {
 		let workdir = tempfile::tempdir().unwrap();
 		let path = workdir.path().join("config.toml");
 		std::fs::write(&path, "").unwrap();
 
 		let (runner, env, _dir) = recording_env(0);
 		let env = env.with_editor("vim".to_string());
-		env.run_editor_on(&path, workdir.path()).unwrap();
+		env.run_editor_on(&path, workdir.path()).await.unwrap();
 
 		let invocations = runner.invocations();
 		let editor_call = invocations
@@ -549,8 +571,8 @@ mod tests {
 		assert_eq!(editor_call.args[1], expected);
 	}
 
-	#[test]
-	fn run_editor_on_ignores_empty_editor_string() {
+	#[tokio::test]
+	async fn run_editor_on_ignores_empty_editor_string() {
 		let workdir = tempfile::tempdir().unwrap();
 		let path = workdir.path().join("config.toml");
 		std::fs::write(&path, "").unwrap();
@@ -558,7 +580,7 @@ mod tests {
 		// Empty editor → falls back to find_default_editor → runner returns 0 → "nano"
 		let (runner, env, _dir) = recording_env(0);
 		let env = env.with_editor(String::new());
-		env.run_editor_on(&path, workdir.path()).unwrap();
+		env.run_editor_on(&path, workdir.path()).await.unwrap();
 
 		let invocations = runner.invocations();
 		let editor_call = invocations
@@ -572,15 +594,15 @@ mod tests {
 		assert_eq!(editor_call.args[1], expected, "Should fall back to nano");
 	}
 
-	#[test]
-	fn run_editor_on_nonzero_exit_returns_error() {
+	#[tokio::test]
+	async fn run_editor_on_nonzero_exit_returns_error() {
 		let workdir = tempfile::tempdir().unwrap();
 		let path = workdir.path().join("config.toml");
 		std::fs::write(&path, "").unwrap();
 
 		let (_, env, _dir) = recording_env(1);
 		let env = env.with_editor("vim".to_string());
-		let result = env.run_editor_on(&path, workdir.path());
+		let result = env.run_editor_on(&path, workdir.path()).await;
 
 		assert!(result.is_err());
 		assert!(
@@ -591,15 +613,15 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn run_editor_on_falls_back_to_default_editor() {
+	#[tokio::test]
+	async fn run_editor_on_falls_back_to_default_editor() {
 		let workdir = tempfile::tempdir().unwrap();
 		let path = workdir.path().join("config.toml");
 		std::fs::write(&path, "").unwrap();
 
 		// No editor set, runner exit_code=0 → which nano succeeds → "nano"
 		let (runner, env, _dir) = recording_env(0);
-		env.run_editor_on(&path, workdir.path()).unwrap();
+		env.run_editor_on(&path, workdir.path()).await.unwrap();
 
 		let invocations = runner.invocations();
 		let editor_call = invocations
@@ -613,22 +635,22 @@ mod tests {
 		assert_eq!(editor_call.args[1], expected);
 	}
 
-	#[test]
-	fn run_editor_on_no_editor_found_returns_error() {
+	#[tokio::test]
+	async fn run_editor_on_no_editor_found_returns_error() {
 		let workdir = tempfile::tempdir().unwrap();
 		let path = workdir.path().join("config.toml");
 		std::fs::write(&path, "").unwrap();
 
 		// Runner exit_code=1 → all which calls fail → no default found
 		let (_, env, _dir) = recording_env(1);
-		let result = env.run_editor_on(&path, workdir.path());
+		let result = env.run_editor_on(&path, workdir.path()).await;
 
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("No editor found"));
 	}
 
-	#[test]
-	fn run_editor_on_uses_provided_cwd() {
+	#[tokio::test]
+	async fn run_editor_on_uses_provided_cwd() {
 		let workdir = tempfile::tempdir().unwrap();
 		let cursus_dir = workdir.path().join(".cursus");
 		std::fs::create_dir_all(&cursus_dir).unwrap();
@@ -637,7 +659,7 @@ mod tests {
 
 		let (runner, env, _dir) = recording_env(0);
 		let env = env.with_editor("vim".to_string());
-		env.run_editor_on(&path, workdir.path()).unwrap();
+		env.run_editor_on(&path, workdir.path()).await.unwrap();
 
 		let invocations = runner.invocations();
 		let editor_call = invocations
@@ -651,15 +673,15 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn run_editor_on_handles_multi_word_editor() {
+	#[tokio::test]
+	async fn run_editor_on_handles_multi_word_editor() {
 		let workdir = tempfile::tempdir().unwrap();
 		let path = workdir.path().join("config.toml");
 		std::fs::write(&path, "").unwrap();
 
 		let (runner, env, _dir) = recording_env(0);
 		let env = env.with_editor("code --wait".to_string());
-		env.run_editor_on(&path, workdir.path()).unwrap();
+		env.run_editor_on(&path, workdir.path()).await.unwrap();
 
 		let invocations = runner.invocations();
 		let editor_call = invocations
@@ -673,8 +695,8 @@ mod tests {
 		assert_eq!(editor_call.args[1], expected);
 	}
 
-	#[test]
-	fn run_editor_on_handles_path_with_single_quote() {
+	#[tokio::test]
+	async fn run_editor_on_handles_path_with_single_quote() {
 		let workdir = tempfile::tempdir().unwrap();
 		// Path whose name contains a single quote — tests the '\\'' escaping logic.
 		let path = workdir.path().join("it's a file.toml");
@@ -682,7 +704,7 @@ mod tests {
 
 		let (runner, env, _dir) = recording_env(0);
 		let env = env.with_editor("vim".to_string());
-		env.run_editor_on(&path, workdir.path()).unwrap();
+		env.run_editor_on(&path, workdir.path()).await.unwrap();
 
 		let invocations = runner.invocations();
 		let editor_call = invocations
@@ -693,11 +715,13 @@ mod tests {
 		assert_eq!(editor_call.args[1], expected);
 	}
 
-	#[test]
-	fn run_shell_interactive_delegates_to_runner() {
+	#[tokio::test]
+	async fn run_shell_interactive_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
 		let cwd = tempfile::tempdir().unwrap();
-		env.run_shell_interactive("echo hello", cwd.path()).unwrap();
+		env.run_shell_interactive("echo hello", cwd.path())
+			.await
+			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);

@@ -55,10 +55,10 @@ fn setup_single_cargo_package(dir: &std::path::Path, name: &str, version: &str) 
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-#[test]
-fn prepare_git_disabled_by_default() {
+#[tokio::test]
+async fn prepare_git_disabled_by_default() {
 	// Without [git] enabled, a release should succeed without touching git state.
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change.md",
@@ -66,13 +66,13 @@ fn prepare_git_disabled_by_default() {
 	);
 
 	// Uses a fake .git dir, not a real repo — verifies nothing panics when enabled=false.
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 }
 
-#[test]
-fn prepare_git_creates_commit() {
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+#[tokio::test]
+async fn prepare_git_creates_commit() {
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -83,7 +83,7 @@ fn prepare_git_creates_commit() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -98,11 +98,11 @@ fn prepare_git_creates_commit() {
 	);
 }
 
-#[test]
-fn prepare_git_custom_commit_message() {
+#[tokio::test]
+async fn prepare_git_custom_commit_message() {
 	let config = git_enabled_config()
 		.with_prepare_commit_message("chore(ci): bump package versions".to_string());
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -113,7 +113,7 @@ fn prepare_git_custom_commit_message() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -124,10 +124,10 @@ fn prepare_git_custom_commit_message() {
 	);
 }
 
-#[test]
-fn prepare_git_does_not_create_tags() {
+#[tokio::test]
+async fn prepare_git_does_not_create_tags() {
 	// Tags are now created during publish, not release.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -138,7 +138,7 @@ fn prepare_git_does_not_create_tags() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Release no longer creates tags — publish does.
@@ -149,11 +149,11 @@ fn prepare_git_does_not_create_tags() {
 	);
 }
 
-#[test]
-fn prepare_git_tag_format_config_no_tags_at_release() {
+#[tokio::test]
+async fn prepare_git_tag_format_config_no_tags_at_release() {
 	// Tag format only affects publish step now; release just commits.
 	let config = GitConfig::enabled_config().with_tag_format(TagFormat::Prefixed);
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config);
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, config).await;
 	setup_single_cargo_package(dir.path(), "solo", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -164,7 +164,7 @@ fn prepare_git_tag_format_config_no_tags_at_release() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	assert!(
@@ -174,13 +174,14 @@ fn prepare_git_tag_format_config_no_tags_at_release() {
 	);
 }
 
-#[test]
-fn prepare_git_multi_package_creates_single_commit() {
+#[tokio::test]
+async fn prepare_git_multi_package_creates_single_commit() {
 	// When multiple packages are released simultaneously, a single commit is created.
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 	write_changeset(
 		dir.path(),
 		"change.md",
@@ -190,7 +191,7 @@ fn prepare_git_multi_package_creates_single_commit() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let log = git_log(dir.path());
@@ -207,9 +208,9 @@ fn prepare_git_multi_package_creates_single_commit() {
 	);
 }
 
-#[test]
-fn prepare_no_git_flag_skips_git() {
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+#[tokio::test]
+async fn prepare_no_git_flag_skips_git() {
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -221,7 +222,8 @@ fn prepare_no_git_flag_skips_git() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 
 	let log = git_log(dir.path());
@@ -236,11 +238,11 @@ fn prepare_no_git_flag_skips_git() {
 	);
 }
 
-#[test]
-fn prepare_git_stages_only_cursus_files() {
+#[tokio::test]
+async fn prepare_git_stages_only_cursus_files() {
 	// Cursus uses `git add -- <files>` for selective staging, so tracked
 	// but unmodified files are never included in the release commit.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 
 	// Commit an unrelated tracked file so the tree stays clean for the pre-flight check.
@@ -256,7 +258,7 @@ fn prepare_git_stages_only_cursus_files() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	// The release commit should not contain the unrelated file (it was not modified)
@@ -272,11 +274,11 @@ fn prepare_git_stages_only_cursus_files() {
 	);
 }
 
-#[test]
-fn prepare_git_filesystem_changes_persist_after_lifecycle() {
+#[tokio::test]
+async fn prepare_git_filesystem_changes_persist_after_lifecycle() {
 	// Version bumps (filesystem) happen before git ops; a successful git lifecycle
 	// should leave the bumped version in place.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -287,7 +289,7 @@ fn prepare_git_filesystem_changes_persist_after_lifecycle() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	let cargo_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -297,9 +299,9 @@ fn prepare_git_filesystem_changes_persist_after_lifecycle() {
 	);
 }
 
-#[test]
-fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+#[tokio::test]
+async fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -311,7 +313,8 @@ fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 
 	let log = git_log(dir.path());
@@ -326,13 +329,13 @@ fn prepare_dry_run_with_git_enabled_does_not_create_commit_or_tags() {
 	);
 }
 
-#[test]
-fn prepare_git_extra_files_are_staged() {
+#[tokio::test]
+async fn prepare_git_extra_files_are_staged() {
 	// An extra file produced by a custom lock_command should be staged in the release
 	// commit. We use an npm project with a lock_command that writes custom.lock so the
 	// file is created WITHIN cursus's execution (after the dirty-tree check).
 	let git_config = GitConfig::enabled_config().with_extra_files(vec!["custom.lock".to_string()]);
-	let dir = temp_real_git_repo_with_config(PackageManager::Npm, git_config);
+	let dir = temp_real_git_repo_with_config(PackageManager::Npm, git_config).await;
 
 	// Write config with a lock_command that produces custom.lock during the release.
 	std::fs::write(
@@ -361,7 +364,7 @@ fn prepare_git_extra_files_are_staged() {
 	git_push_to_remote(dir.path());
 
 	// Tree is clean; lock_command will write custom.lock during cursus's execution.
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Verify custom.lock was included in the release commit
@@ -384,10 +387,10 @@ fn branch_strategy_config() -> GitConfig {
 	GitConfig::enabled_config().with_strategy(Strategy::Branch)
 }
 
-#[test]
-fn prepare_dirty_tree_fails_when_git_enabled() {
+#[tokio::test]
+async fn prepare_dirty_tree_fails_when_git_enabled() {
 	// A dirty working tree should abort the release before making any changes.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -399,7 +402,7 @@ fn prepare_dirty_tree_fails_when_git_enabled() {
 	// Make the tree dirty with an untracked file
 	std::fs::write(dir.path().join("dirty.txt"), "untracked change").unwrap();
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_err());
 	assert!(
 		result.unwrap_err().to_string().contains("dirty"),
@@ -407,10 +410,10 @@ fn prepare_dirty_tree_fails_when_git_enabled() {
 	);
 }
 
-#[test]
-fn prepare_dirty_tree_ignored_when_no_git() {
+#[tokio::test]
+async fn prepare_dirty_tree_ignored_when_no_git() {
 	// --no-git bypasses the dirty tree check.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "1.0.0");
 	write_changeset(
 		dir.path(),
@@ -425,17 +428,18 @@ fn prepare_dirty_tree_ignored_when_no_git() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_ok(),
 		"release --no-git should succeed even with dirty tree: {result:?}"
 	);
 }
 
-#[test]
-fn prepare_push_strategy_commits_and_pushes() {
+#[tokio::test]
+async fn prepare_push_strategy_commits_and_pushes() {
 	// Push strategy: commit is pushed directly to origin.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -450,7 +454,7 @@ fn prepare_push_strategy_commits_and_pushes() {
 
 	let initial_branch = git_current_branch(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Verify the release commit was pushed to origin
@@ -466,10 +470,10 @@ fn prepare_push_strategy_commits_and_pushes() {
 	);
 }
 
-#[test]
-fn prepare_push_strategy_dry_run_does_not_push() {
+#[tokio::test]
+async fn prepare_push_strategy_dry_run_does_not_push() {
 	// Dry-run must not push (no remote → would fail if push were attempted).
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -482,7 +486,8 @@ fn prepare_push_strategy_dry_run_does_not_push() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "dry-run should succeed: {result:?}");
 
 	// No release commit
@@ -493,10 +498,10 @@ fn prepare_push_strategy_dry_run_does_not_push() {
 	);
 }
 
-#[test]
-fn prepare_branch_strategy_creates_branch_and_returns() {
+#[tokio::test]
+async fn prepare_branch_strategy_creates_branch_and_returns() {
 	// Branch strategy: release commit lands on a new branch; current branch is restored.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -511,7 +516,7 @@ fn prepare_branch_strategy_creates_branch_and_returns() {
 	let initial_branch = git_current_branch(dir.path());
 	let expected_release_branch = format!("cursus-release/{initial_branch}");
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Current branch is back to original
@@ -540,10 +545,10 @@ fn prepare_branch_strategy_creates_branch_and_returns() {
 	);
 }
 
-#[test]
-fn prepare_branch_strategy_dry_run_does_not_checkout() {
+#[tokio::test]
+async fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	// Dry-run branch strategy must not switch branches.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -557,7 +562,8 @@ fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "dry-run should succeed: {result:?}");
 
 	// Still on original branch
@@ -575,10 +581,10 @@ fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	);
 }
 
-#[test]
-fn prepare_branch_flag_overrides_prefix() {
+#[tokio::test]
+async fn prepare_branch_flag_overrides_prefix() {
 	// --branch overrides the computed release branch name.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -601,7 +607,8 @@ fn prepare_branch_flag_overrides_prefix() {
 			"custom-release-branch",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	// Back on original branch
@@ -622,13 +629,13 @@ fn prepare_branch_flag_overrides_prefix() {
 ///
 /// This guards against a mutation that inverts the strategy equality check (`== Push` →
 /// `!= Push`), which would incorrectly warn whenever `--branch` is used with branch strategy.
-#[test]
-fn prepare_branch_arg_with_branch_strategy_no_warning() {
+#[tokio::test]
+async fn prepare_branch_arg_with_branch_strategy_no_warning() {
 	use cursus::test_logging::{init_test_logger, take_logs};
 	init_test_logger();
 	let _ = take_logs();
 
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -649,7 +656,8 @@ fn prepare_branch_arg_with_branch_strategy_no_warning() {
 			"custom-release-branch",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "release failed: {result:?}");
 
 	let logs = take_logs();
@@ -661,8 +669,8 @@ fn prepare_branch_arg_with_branch_strategy_no_warning() {
 	);
 }
 
-#[test]
-fn prepare_git_config_old_run_until_field_fails_to_load() {
+#[tokio::test]
+async fn prepare_git_config_old_run_until_field_fails_to_load() {
 	// Old configs with run_until must produce a clear parse error.
 	let dir = tempfile::tempdir().unwrap();
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
@@ -679,15 +687,15 @@ fn prepare_git_config_old_run_until_field_fails_to_load() {
 	)
 	.unwrap();
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_err(), "Expected error for old run_until field");
 }
 
-#[test]
-fn prepare_branch_strategy_rerun_is_idempotent() {
+#[tokio::test]
+async fn prepare_branch_strategy_rerun_is_idempotent() {
 	// Running prepare twice with branch strategy should succeed both times.
 	// The second run resets the existing release branch and force-pushes it.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -703,7 +711,7 @@ fn prepare_branch_strategy_rerun_is_idempotent() {
 	let expected_release_branch = format!("cursus-release/{initial_branch}");
 
 	// First run
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "first prepare failed: {result:?}");
 
 	// Back on original branch after first run
@@ -714,7 +722,7 @@ fn prepare_branch_strategy_rerun_is_idempotent() {
 	);
 
 	// Second run — should succeed even though the release branch already exists
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "second prepare failed: {result:?}");
 
 	// Still on original branch after second run
@@ -754,8 +762,8 @@ fn prepare_branch_strategy_rerun_is_idempotent() {
 	);
 }
 
-#[test]
-fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
+#[tokio::test]
+async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	// Full end-to-end test: prepare with branch strategy + GitHub enabled.
 	// First run creates a PR; second run finds the existing PR and updates it.
 	// Uses httpmock to intercept the GitHub REST API calls made by RestGitHubClient.
@@ -773,7 +781,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	let api_url = server.base_url();
 
 	// Create a repo with branch strategy + GitHub config (owner = "acme", repo = "app")
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	Config::new(&common::test_env(dir.path()))
 		.with_cargo(CargoConfig::enabled())
 		.with_git(branch_strategy_config())
@@ -783,6 +791,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 				.with_repo("app".into()),
 		)
 		.save()
+		.await
 		.unwrap();
 
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
@@ -831,7 +840,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	});
 
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
-	let result = cursus::run(cli, make_env());
+	let result = cursus::run(cli, make_env()).await;
 	assert!(result.is_ok(), "first prepare failed: {result:?}");
 	mock_find_empty.assert_calls(1);
 	mock_create.assert_calls(1);
@@ -858,7 +867,7 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	});
 
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
-	let result = cursus::run(cli, make_env());
+	let result = cursus::run(cli, make_env()).await;
 	assert!(result.is_ok(), "second prepare (update) failed: {result:?}");
 	mock_find_existing.assert_calls(1);
 	mock_update.assert_calls(1);
@@ -866,10 +875,10 @@ fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 
 // ── Commit reference integration tests ────────────────────────────────────────
 
-#[test]
-fn prepare_with_git_adds_commit_references() {
+#[tokio::test]
+async fn prepare_with_git_adds_commit_references() {
 	// A changeset committed to the repo should get its SHA added to the changelog.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -882,7 +891,7 @@ fn prepare_with_git_adds_commit_references() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "prepare failed: {result:?}");
 
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -906,11 +915,11 @@ fn prepare_with_git_adds_commit_references() {
 	);
 }
 
-#[test]
-fn prepare_with_squash_merge_includes_pr_number() {
+#[tokio::test]
+async fn prepare_with_squash_merge_includes_pr_number() {
 	// A changeset introduced by a squash-merge commit (subject has `(#NN)`) should
 	// include the PR number in the changelog entry.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -923,7 +932,7 @@ fn prepare_with_squash_merge_includes_pr_number() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "prepare failed: {result:?}");
 
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -933,11 +942,11 @@ fn prepare_with_squash_merge_includes_pr_number() {
 	);
 }
 
-#[test]
-fn prepare_with_merge_commit_includes_pr_number() {
+#[tokio::test]
+async fn prepare_with_merge_commit_includes_pr_number() {
 	// A changeset introduced by a classic merge commit (subject starts with
 	// "Merge pull request #NNN") should include the PR number in the changelog entry.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -952,7 +961,7 @@ fn prepare_with_merge_commit_includes_pr_number() {
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "prepare failed: {result:?}");
 
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -962,10 +971,10 @@ fn prepare_with_merge_commit_includes_pr_number() {
 	);
 }
 
-#[test]
-fn prepare_without_git_no_references() {
+#[tokio::test]
+async fn prepare_without_git_no_references() {
 	// When git is disabled, no commit references should appear in the changelog.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -977,7 +986,8 @@ fn prepare_without_git_no_references() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "prepare --no-git failed: {result:?}");
 
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();

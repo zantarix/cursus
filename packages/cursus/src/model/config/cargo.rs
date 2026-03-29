@@ -32,12 +32,12 @@ impl CargoConfig {
 	///
 	/// If a `path` is configured, returns `adapter_root` joined with that path.
 	/// Otherwise, returns a copy of `adapter_root`.
-	pub(crate) fn resolve_root(
+	pub(crate) async fn resolve_root(
 		&self,
 		git_workdir: &AbsolutePath,
 		fs: &dyn crate::filesystem::Filesystem,
 	) -> anyhow::Result<AbsolutePath> {
-		super::resolve_root(&self.path, git_workdir, fs)
+		super::resolve_root(&self.path, git_workdir, fs).await
 	}
 }
 
@@ -59,8 +59,8 @@ mod tests {
 		assert_eq!(config.path, None);
 	}
 
-	#[test]
-	fn cargo_config_resolve_root_without_path() {
+	#[tokio::test]
+	async fn cargo_config_resolve_root_without_path() {
 		let config = CargoConfig {
 			enabled: true,
 			path: None,
@@ -69,12 +69,13 @@ mod tests {
 		let git_workdir = AbsolutePath::new(dir.path()).unwrap();
 		let resolved = config
 			.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem)
+			.await
 			.unwrap();
 		assert_eq!(resolved, git_workdir);
 	}
 
-	#[test]
-	fn cargo_config_resolve_root_with_path() {
+	#[tokio::test]
+	async fn cargo_config_resolve_root_with_path() {
 		let dir = tempfile::tempdir().unwrap();
 		let subdir = dir.path().join("rust-workspace");
 		std::fs::create_dir(&subdir).unwrap();
@@ -85,12 +86,13 @@ mod tests {
 		let git_workdir = AbsolutePath::new(dir.path()).unwrap();
 		let resolved = config
 			.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem)
+			.await
 			.unwrap();
 		assert_eq!(*resolved, *AbsolutePath::new(&subdir).unwrap());
 	}
 
-	#[test]
-	fn cargo_config_resolve_root_rejects_traversal() {
+	#[tokio::test]
+	async fn cargo_config_resolve_root_rejects_traversal() {
 		let outer = tempfile::tempdir().unwrap();
 		let repo = outer.path().join("repo");
 		std::fs::create_dir(&repo).unwrap();
@@ -101,7 +103,9 @@ mod tests {
 		let escape_dir = outer.path().join("escape");
 		std::fs::create_dir(&escape_dir).unwrap();
 		let git_workdir = AbsolutePath::new(&repo).unwrap();
-		let result = config.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem);
+		let result = config
+			.resolve_root(&git_workdir, &crate::filesystem::LocalFilesystem)
+			.await;
 		assert!(result.is_err());
 		assert!(
 			result

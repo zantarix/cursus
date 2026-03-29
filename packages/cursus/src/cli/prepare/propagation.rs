@@ -79,7 +79,7 @@ pub(super) fn mark_propagation_bumps(
 }
 
 /// Writes or logs a changeset for an out-of-scope dependent package.
-pub(super) fn write_out_of_scope_changeset(
+pub(super) async fn write_out_of_scope_changeset(
 	pkg_name: &str,
 	effective_ct: ChangeType,
 	dep_msgs: &[String],
@@ -99,6 +99,7 @@ pub(super) fn write_out_of_scope_changeset(
 	}
 	let path = changeset
 		.write(env.git(), env.fs())
+		.await
 		.with_context(|| format!("Failed to write propagation changeset for '{pkg_name}'"))?;
 	info!(
 		"Wrote dependency propagation changeset for '{pkg_name}': {}",
@@ -121,7 +122,7 @@ pub(super) fn write_out_of_scope_changeset(
 /// # Errors
 ///
 /// Returns an error if writing a changeset file for an out-of-scope dependent fails.
-pub(super) fn apply_dependency_propagation(
+pub(super) async fn apply_dependency_propagation(
 	projects: &[Project],
 	aggregated: &mut BTreeMap<String, ChangeType>,
 	version_overrides: &BTreeMap<String, semver::Version>,
@@ -172,7 +173,7 @@ pub(super) fn apply_dependency_propagation(
 				);
 			}
 		} else if let Some(path) =
-			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, env, dry_run)?
+			write_out_of_scope_changeset(pkg_name, *effective_ct, &dep_msgs, env, dry_run).await?
 		{
 			new_changeset_paths.push(path);
 		}

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::process::ExitCode;
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use clap::Args;
 use log::info;
 
@@ -112,16 +112,16 @@ fn match_files_to_projects(
 ///
 /// Falls back to `vec![true; projects.len()]` if all three diff sources fail
 /// (e.g. no git repo or a completely uninitialised environment).
-fn classify_changed_projects(
+async fn classify_changed_projects(
 	git: &dyn Git,
 	projects: &[crate::package_manager::Project],
 ) -> Vec<bool> {
 	// Collect changed file paths from committed, staged, and unstaged sources.
 	// Each call is independent; failures are treated as empty (no files from that source).
 	let sources = [
-		git.diff_names(&["origin/HEAD..HEAD"]),
-		git.diff_names(&["--cached"]),
-		git.diff_names(&[]),
+		git.diff_names(&["origin/HEAD..HEAD"]).await,
+		git.diff_names(&["--cached"]).await,
+		git.diff_names(&[]).await,
 	];
 	let any_succeeded = sources.iter().any(|r| r.is_ok());
 	if !any_succeeded {
@@ -165,8 +165,8 @@ fn resolve_project_indices(
 /// Returns `Ok(Some(message))` when exactly one commit is ahead.
 /// Returns `Ok(None)` when more than one commit is ahead (caller should skip).
 /// Returns an error when zero commits are ahead.
-fn validate_single_commit(git: &dyn Git) -> anyhow::Result<Option<String>> {
-	let count = git.rev_list_count("origin/HEAD..HEAD")?;
+async fn validate_single_commit(git: &dyn Git) -> anyhow::Result<Option<String>> {
+	let count = git.rev_list_count("origin/HEAD..HEAD").await?;
 	if count == 0 {
 		bail!("No commits ahead of origin/HEAD — nothing to derive a changeset from");
 	}
@@ -177,7 +177,7 @@ fn validate_single_commit(git: &dyn Git) -> anyhow::Result<Option<String>> {
 		);
 		return Ok(None);
 	}
-	Ok(Some(git.log_message("HEAD")?))
+	Ok(Some(git.log_message("HEAD").await?))
 }
 
 /// Runs `cursus change --auto`: derives a changeset from the single
@@ -191,19 +191,19 @@ fn validate_single_commit(git: &dyn Git) -> anyhow::Result<Option<String>> {
 /// # Errors
 ///
 /// Returns an error when zero commits are ahead or the message is invalid.
-fn cmd_change_auto(
+async fn cmd_change_auto(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	let env = config.env();
 	let git = env.git();
-	let Some(message) = validate_single_commit(git)? else {
+	let Some(message) = validate_single_commit(git).await? else {
 		return Ok(ExitCode::SUCCESS);
 	};
 
-	let projects = config.load_projects()?;
-	let changed_files: HashSet<String> = git.diff_tree_names("HEAD")?.into_iter().collect();
+	let projects = config.load_projects().await?;
+	let changed_files: HashSet<String> = git.diff_tree_names("HEAD").await?.into_iter().collect();
 	let matched_flags = match_files_to_projects(&projects, git.path(), &changed_files);
 	let matched: Vec<_> = projects
 		.iter()
@@ -234,17 +234,19 @@ fn cmd_change_auto(
 		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
 		println!("{}", changeset.format()?);
 		if config.git.enabled() && !args.no_git {
-			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])?;
+			git.add(&[git.path().join(".cursus/changeset-dry-run.md")])
+				.await?;
 		}
 	} else {
-		let path = changeset.write(git, env.fs())?;
+		let path = changeset.write(git, env.fs()).await?;
 		if config.git.enabled() && !args.no_git {
-			git.add(&[path])?;
+			git.add(&[path]).await?;
 		}
 	}
 	if config.git.enabled() && !args.no_git {
-		git.commit(&format!("chore: add changeset for {description}"))?;
-		git.push()?;
+		git.commit(&format!("chore: add changeset for {description}"))
+			.await?;
+		git.push().await?;
 	}
 	Ok(ExitCode::SUCCESS)
 }
@@ -271,18 +273,18 @@ fn resolve_non_interactive(
 	})
 }
 
-pub(crate) fn cmd_change(
+pub(crate) async fn cmd_change(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	if args.auto {
-		return cmd_change_auto(args, global, config);
+		return cmd_change_auto(args, global, config).await;
 	}
 
 	let env = config.env();
 	let git = env.git();
-	let projects = config.load_projects()?;
+	let projects = config.load_projects().await?;
 
 	let project_indices = resolve_project_indices(&projects, &args.projects)?;
 
@@ -291,10 +293,16 @@ pub(crate) fn cmd_change(
 	} else {
 		let options = change::ChangeOptions {
 			change_type: args.change_type,
-			projects: project_indices,
+			projects: project_indices.clone(),
 		};
-		let changed = classify_changed_projects(git, &projects);
-		let mut r = match change::run(&projects, &options, &changed)? {
+		let changed = classify_changed_projects(git, &projects).await;
+		let projects_clone = projects.clone();
+		let mut r = match tokio::task::spawn_blocking(move || {
+			change::run(&projects_clone, &options, &changed)
+		})
+		.await
+		.context("TUI task panicked")??
+		{
 			Some(r) => r,
 			None => return Ok(ExitCode::from(2)),
 		};
@@ -319,9 +327,9 @@ pub(crate) fn cmd_change(
 		// content, making it safe to redirect (e.g. `cursus change --dry-run > file`).
 		println!("{}", changeset.format()?);
 	} else {
-		let path = changeset.write(git, env.fs())?;
+		let path = changeset.write(git, env.fs()).await?;
 		if result.message.is_none() {
-			env.run_editor_on(&path, git.path())?;
+			env.run_editor_on(&path, git.path()).await?;
 		}
 	}
 
@@ -333,6 +341,8 @@ mod tests {
 	use std::path::Path;
 	use std::process::Output;
 	use std::sync::{Arc, Mutex};
+
+	use async_trait::async_trait;
 
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
@@ -369,8 +379,9 @@ mod tests {
 		}
 	}
 
+	#[async_trait]
 	impl CommandRunner for SequencedRunner {
-		fn run(&self, _program: &str, _args: &[&str], _cwd: &Path) -> anyhow::Result<Output> {
+		async fn run(&self, _program: &str, _args: &[&str], _cwd: &Path) -> anyhow::Result<Output> {
 			#[cfg(unix)]
 			fn make_status(code: i32) -> std::process::ExitStatus {
 				use std::os::unix::process::ExitStatusExt;
@@ -395,23 +406,29 @@ mod tests {
 			})
 		}
 
-		fn run_shell(&self, _command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		async fn run_shell(&self, _command: &str, cwd: &Path) -> anyhow::Result<Output> {
 			self.run(
 				crate::command::shell_program(),
 				&[crate::command::shell_flag(), ""],
 				cwd,
 			)
+			.await
 		}
 
-		fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-			self.run(program, args, cwd)
+		async fn run_mut(
+			&self,
+			program: &str,
+			args: &[&str],
+			cwd: &Path,
+		) -> anyhow::Result<Output> {
+			self.run(program, args, cwd).await
 		}
 
-		fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-			self.run_shell(command, cwd)
+		async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+			self.run_shell(command, cwd).await
 		}
 
-		fn run_interactive(
+		async fn run_interactive(
 			&self,
 			_program: &str,
 			_args: &[&str],
@@ -429,7 +446,7 @@ mod tests {
 			}
 		}
 
-		fn run_shell_interactive(
+		async fn run_shell_interactive(
 			&self,
 			_command: &str,
 			_cwd: &Path,
@@ -452,8 +469,8 @@ mod tests {
 		crate::git::GitWorkdir::new(runner, AbsolutePath::new("/nonexistent").unwrap())
 	}
 
-	#[test]
-	fn default_change_args() {
+	#[tokio::test]
+	async fn default_change_args() {
 		let args = ChangeArgs::default();
 		assert!(args.change_type.is_none());
 		assert!(args.projects.is_empty());
@@ -462,66 +479,66 @@ mod tests {
 		assert!(!args.no_git);
 	}
 
-	#[test]
-	fn classify_changed_projects_matches_by_prefix() {
+	#[tokio::test]
+	async fn classify_changed_projects_matches_by_prefix() {
 		let git = make_git_with_diff_output(b"packages/a/src/lib.rs\n");
 		let projects = vec![
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true, false]);
 	}
 
-	#[test]
-	fn classify_changed_projects_does_not_match_prefix_without_separator() {
+	#[tokio::test]
+	async fn classify_changed_projects_does_not_match_prefix_without_separator() {
 		// "packages/a-extra/foo.rs" must not match project "packages/a"
 		let git = make_git_with_diff_output(b"packages/a-extra/foo.rs\n");
 		let projects = vec![
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("a-extra", "/nonexistent/packages/a-extra"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![false, true]);
 	}
 
-	#[test]
-	fn classify_changed_projects_fallback_on_failure() {
+	#[tokio::test]
+	async fn classify_changed_projects_fallback_on_failure() {
 		let git = make_git_failing();
 		let projects = vec![
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true, true]);
 	}
 
-	#[test]
-	fn classify_changed_projects_empty_diff_returns_unchanged() {
+	#[tokio::test]
+	async fn classify_changed_projects_empty_diff_returns_unchanged() {
 		let git = make_git_with_diff_output(b"");
 		let projects = vec![Project::new_test("a", "/nonexistent/packages/a")];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![false]);
 	}
 
-	#[test]
-	fn classify_changed_projects_root_project_changed_when_any_file_changed() {
+	#[tokio::test]
+	async fn classify_changed_projects_root_project_changed_when_any_file_changed() {
 		let git = make_git_with_diff_output(b"src/main.rs\n");
 		let projects = vec![Project::new_test("root", "/nonexistent")];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true]);
 	}
 
-	#[test]
-	fn classify_changed_projects_root_project_unchanged_when_empty_diff() {
+	#[tokio::test]
+	async fn classify_changed_projects_root_project_unchanged_when_empty_diff() {
 		let git = make_git_with_diff_output(b"");
 		let projects = vec![Project::new_test("root", "/nonexistent")];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![false]);
 	}
 
-	#[test]
-	fn classify_changed_projects_detects_staged_only_changes() {
+	#[tokio::test]
+	async fn classify_changed_projects_detects_staged_only_changes() {
 		// committed diff fails (no remote), staged diff has a file, unstaged is empty
 		let git = make_git_sequenced(vec![
 			(1, vec![]),                          // committed: fails
@@ -532,12 +549,12 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true, false]);
 	}
 
-	#[test]
-	fn classify_changed_projects_detects_unstaged_only_changes() {
+	#[tokio::test]
+	async fn classify_changed_projects_detects_unstaged_only_changes() {
 		// committed diff fails, staged is empty, unstaged has a file
 		let git = make_git_sequenced(vec![
 			(1, vec![]),                            // committed: fails
@@ -548,12 +565,12 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![false, true]);
 	}
 
-	#[test]
-	fn classify_changed_projects_unions_all_sources() {
+	#[tokio::test]
+	async fn classify_changed_projects_unions_all_sources() {
 		// Each source covers a different project
 		let git = make_git_sequenced(vec![
 			(0, b"packages/a/lib.rs\n".to_vec()),   // committed: project a
@@ -565,12 +582,12 @@ mod tests {
 			Project::new_test("b", "/nonexistent/packages/b"),
 			Project::new_test("c", "/nonexistent/packages/c"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true, true, true]);
 	}
 
-	#[test]
-	fn classify_changed_projects_fallback_only_when_all_fail() {
+	#[tokio::test]
+	async fn classify_changed_projects_fallback_only_when_all_fail() {
 		// All three diffs fail → all-changed fallback
 		let git = make_git_sequenced(vec![
 			(1, vec![]), // committed: fails
@@ -581,14 +598,14 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects);
+		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true, true]);
 	}
 
 	// --- match_files_to_projects ---
 
-	#[test]
-	fn match_files_to_projects_basic_prefix_match() {
+	#[tokio::test]
+	async fn match_files_to_projects_basic_prefix_match() {
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
 			Project::new_test("a", "/repo/packages/a"),
@@ -602,8 +619,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_no_match_for_different_project() {
+	#[tokio::test]
+	async fn match_files_to_projects_no_match_for_different_project() {
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
 			Project::new_test("a", "/repo/packages/a"),
@@ -617,8 +634,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_no_prefix_match_without_separator() {
+	#[tokio::test]
+	async fn match_files_to_projects_no_prefix_match_without_separator() {
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
 			Project::new_test("a", "/repo/packages/a"),
@@ -632,8 +649,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_nested_file_goes_to_child() {
+	#[tokio::test]
+	async fn match_files_to_projects_nested_file_goes_to_child() {
 		// A file inside the child project must only match the child, not the parent.
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
@@ -648,8 +665,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_nested_parent_file_goes_to_parent() {
+	#[tokio::test]
+	async fn match_files_to_projects_nested_parent_file_goes_to_parent() {
 		// A file inside the parent but outside the child must go to the parent.
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
@@ -664,8 +681,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_root_project_matches_unowned_file() {
+	#[tokio::test]
+	async fn match_files_to_projects_root_project_matches_unowned_file() {
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
 			Project::new_test("root", "/repo"),
@@ -680,8 +697,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_root_does_not_steal_from_subproject() {
+	#[tokio::test]
+	async fn match_files_to_projects_root_does_not_steal_from_subproject() {
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
 			Project::new_test("root", "/repo"),
@@ -696,8 +713,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_empty_files() {
+	#[tokio::test]
+	async fn match_files_to_projects_empty_files() {
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![Project::new_test("root", "/repo")];
 		let files = HashSet::new();
@@ -707,8 +724,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_outside_git_root_always_unchanged() {
+	#[tokio::test]
+	async fn match_files_to_projects_outside_git_root_always_unchanged() {
 		// Git cannot track files outside the repo, so out-of-root projects are always unchanged.
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![Project::new_test("outside", "/other/path")];
@@ -719,8 +736,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_outside_git_root_unchanged_even_with_files() {
+	#[tokio::test]
+	async fn match_files_to_projects_outside_git_root_unchanged_even_with_files() {
 		// Out-of-root project is not attributed any files; in-repo project is still matched.
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
@@ -735,8 +752,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_unowned_file_with_no_root() {
+	#[tokio::test]
+	async fn match_files_to_projects_unowned_file_with_no_root() {
 		// A file that doesn't fall under any project's path should not mark any project.
 		let path = AbsolutePath::new("/repo").unwrap();
 		let projects = vec![
@@ -751,8 +768,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_multiple_at_same_path_all_marked() {
+	#[tokio::test]
+	async fn match_files_to_projects_multiple_at_same_path_all_marked() {
 		// When multiple projects share the same path (e.g. Cargo and npm at the repo root),
 		// all of them are marked changed when a file in their shared directory changes.
 		let path = AbsolutePath::new("/repo").unwrap();
@@ -771,8 +788,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_exact_path_length_match() {
+	#[tokio::test]
+	async fn match_files_to_projects_exact_path_length_match() {
 		// A changed file whose path is exactly equal to the project's relative path
 		// (e.g. "my-pkg" as a changed file, project at "/repo/my-pkg").
 		// Guards `==`→`!=` on `file.len() == rel.len()` boundary check.
@@ -786,8 +803,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn match_files_to_projects_multiple_at_same_path_subproject_wins() {
+	#[tokio::test]
+	async fn match_files_to_projects_multiple_at_same_path_subproject_wins() {
 		// When multiple projects share the same root path, a deeper subproject
 		// still wins for files inside it — the shared-root projects are not marked.
 		let path = AbsolutePath::new("/repo").unwrap();

@@ -4,18 +4,18 @@ use std::sync::Arc;
 use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 use crate::filesystem::LocalFilesystem;
 
-#[test]
-fn update_lock_file_no_op_when_no_lock_file() {
+#[tokio::test]
+async fn update_lock_file_no_op_when_no_lock_file() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 
 	// Should succeed and return None when there is no lock file
-	assert_eq!(adapter.update_lock_file().unwrap(), None);
+	assert_eq!(adapter.update_lock_file().await.unwrap(), None);
 }
 
-#[test]
-fn update_lock_file_custom_command_empty_fails() {
+#[tokio::test]
+async fn update_lock_file_custom_command_empty_fails() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let adapter = recording_adapter_default(
@@ -24,7 +24,7 @@ fn update_lock_file_custom_command_empty_fails() {
 		0,
 	);
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert!(result.is_err());
 	assert!(
 		result
@@ -34,8 +34,8 @@ fn update_lock_file_custom_command_empty_fails() {
 	);
 }
 
-#[test]
-fn update_lock_file_custom_command_nonexistent_fails() {
+#[tokio::test]
+async fn update_lock_file_custom_command_nonexistent_fails() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let runner =
@@ -46,13 +46,13 @@ fn update_lock_file_custom_command_nonexistent_fails() {
 		runner,
 	);
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert!(result.is_err());
 	assert!(result.unwrap_err().to_string().contains("Lock command"));
 }
 
-#[test]
-fn update_lock_file_custom_command_with_exit_code_fails() {
+#[tokio::test]
+async fn update_lock_file_custom_command_with_exit_code_fails() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"exit status 1".to_vec()));
@@ -62,13 +62,13 @@ fn update_lock_file_custom_command_with_exit_code_fails() {
 		runner,
 	);
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert!(result.is_err());
 	assert!(result.unwrap_err().to_string().contains("Lock command"));
 }
 
-#[test]
-fn update_lock_file_custom_command_succeeds() {
+#[tokio::test]
+async fn update_lock_file_custom_command_succeeds() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let adapter = recording_adapter_default(
@@ -78,20 +78,20 @@ fn update_lock_file_custom_command_succeeds() {
 	);
 
 	// Custom command succeeds but returns None (we don't know which file it wrote)
-	assert_eq!(adapter.update_lock_file().unwrap(), None);
+	assert_eq!(adapter.update_lock_file().await.unwrap(), None);
 }
 
-#[test]
-fn update_lock_file_no_lock_file_returns_none() {
+#[tokio::test]
+async fn update_lock_file_no_lock_file_returns_none() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	// No lock file present — update_lock_file should return Ok(None)
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-	assert_eq!(adapter.update_lock_file().unwrap(), None);
+	assert_eq!(adapter.update_lock_file().await.unwrap(), None);
 }
 
-#[test]
-fn update_lock_file_npm_passes_correct_args() {
+#[tokio::test]
+async fn update_lock_file_npm_passes_correct_args() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
@@ -99,7 +99,7 @@ fn update_lock_file_npm_passes_correct_args() {
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert_eq!(result.unwrap(), Some(dir.path().join("package-lock.json")));
 
 	let invocations = runner.invocations();
@@ -111,19 +111,19 @@ fn update_lock_file_npm_passes_correct_args() {
 	);
 }
 
-#[test]
-fn update_lock_file_npm_failure_propagates() {
+#[tokio::test]
+async fn update_lock_file_npm_failure_propagates() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
 
 	let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"npm error".to_vec()));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
-	assert!(adapter.update_lock_file().is_err());
+	assert!(adapter.update_lock_file().await.is_err());
 }
 
-#[test]
-fn update_lock_file_pnpm_passes_correct_args() {
+#[tokio::test]
+async fn update_lock_file_pnpm_passes_correct_args() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(
@@ -135,7 +135,7 @@ fn update_lock_file_pnpm_passes_correct_args() {
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert_eq!(result.unwrap(), Some(dir.path().join("pnpm-lock.yaml")));
 
 	let invocations = runner.invocations();
@@ -147,8 +147,8 @@ fn update_lock_file_pnpm_passes_correct_args() {
 	);
 }
 
-#[test]
-fn update_lock_file_pnpm_failure_propagates() {
+#[tokio::test]
+async fn update_lock_file_pnpm_failure_propagates() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(
@@ -159,11 +159,11 @@ fn update_lock_file_pnpm_failure_propagates() {
 
 	let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(b"pnpm error".to_vec()));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
-	assert!(adapter.update_lock_file().is_err());
+	assert!(adapter.update_lock_file().await.is_err());
 }
 
-#[test]
-fn update_lock_file_yarn_classic_passes_correct_args() {
+#[tokio::test]
+async fn update_lock_file_yarn_classic_passes_correct_args() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
@@ -178,7 +178,7 @@ fn update_lock_file_yarn_classic_passes_correct_args() {
 	));
 	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert_eq!(result.unwrap(), Some(dir.path().join("yarn.lock")));
 
 	let invocations = runner.invocations();
@@ -187,8 +187,8 @@ fn update_lock_file_yarn_classic_passes_correct_args() {
 	assert_eq!(invocations[1].args, ["install", "--ignore-scripts"]);
 }
 
-#[test]
-fn update_lock_file_yarn_berry_passes_correct_args() {
+#[tokio::test]
+async fn update_lock_file_yarn_berry_passes_correct_args() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
@@ -202,7 +202,7 @@ fn update_lock_file_yarn_berry_passes_correct_args() {
 	));
 	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert_eq!(result.unwrap(), Some(dir.path().join("yarn.lock")));
 
 	let invocations = runner.invocations();
@@ -214,8 +214,8 @@ fn update_lock_file_yarn_berry_passes_correct_args() {
 	);
 }
 
-#[test]
-fn update_lock_file_yarn_version_detection_failure_propagates() {
+#[tokio::test]
+async fn update_lock_file_yarn_version_detection_failure_propagates() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
@@ -227,11 +227,11 @@ fn update_lock_file_yarn_version_detection_failure_propagates() {
 		b"command not found".to_vec(),
 	));
 	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), runner);
-	assert!(adapter.update_lock_file().is_err());
+	assert!(adapter.update_lock_file().await.is_err());
 }
 
-#[test]
-fn update_lock_file_yarn_failure_propagates() {
+#[tokio::test]
+async fn update_lock_file_yarn_failure_propagates() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
@@ -242,11 +242,11 @@ fn update_lock_file_yarn_failure_propagates() {
 			.on_with_args_stderr("yarn", vec!["install".into()], 1, b"yarn error".to_vec()),
 	);
 	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), runner);
-	assert!(adapter.update_lock_file().is_err());
+	assert!(adapter.update_lock_file().await.is_err());
 }
 
-#[test]
-fn update_lock_file_custom_command_uses_shell_execution() {
+#[tokio::test]
+async fn update_lock_file_custom_command_uses_shell_execution() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -255,7 +255,7 @@ fn update_lock_file_custom_command_uses_shell_execution() {
 		dir.path(),
 		Arc::clone(&runner),
 	);
-	adapter.update_lock_file().unwrap();
+	adapter.update_lock_file().await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert!(
@@ -265,8 +265,8 @@ fn update_lock_file_custom_command_uses_shell_execution() {
 	assert_eq!(invocations[0].args[1], "custom-lock-cmd --flag");
 }
 
-#[test]
-fn update_lock_file_custom_command_failure_propagates() {
+#[tokio::test]
+async fn update_lock_file_custom_command_failure_propagates() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "my-app", "version": "1.0.0"}"#);
 	let runner =
@@ -276,7 +276,7 @@ fn update_lock_file_custom_command_failure_propagates() {
 		dir.path(),
 		runner,
 	);
-	let result = adapter.update_lock_file();
+	let result = adapter.update_lock_file().await;
 	assert!(result.is_err());
 	assert!(result.unwrap_err().to_string().contains("Lock command"));
 }
@@ -298,47 +298,47 @@ fn dry_run_adapter(config: NpmConfig, dir: &std::path::Path) -> NpmAdapter {
 	NpmAdapter::new(config, crate::path::AbsolutePath::new(dir).unwrap(), env)
 }
 
-#[test]
-fn update_lock_file_dry_run_custom_command_returns_none() {
+#[tokio::test]
+async fn update_lock_file_dry_run_custom_command_returns_none() {
 	let dir = temp_dir();
 	let adapter = dry_run_adapter(
 		NpmConfig::enabled().with_lock_command("my-lock-cmd".to_string()),
 		dir.path(),
 	);
-	assert_eq!(adapter.update_lock_file().unwrap(), None);
+	assert_eq!(adapter.update_lock_file().await.unwrap(), None);
 }
 
-#[test]
-fn update_lock_file_dry_run_no_lock_file_returns_none() {
+#[tokio::test]
+async fn update_lock_file_dry_run_no_lock_file_returns_none() {
 	let dir = temp_dir();
 	let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
-	assert_eq!(adapter.update_lock_file().unwrap(), None);
+	assert_eq!(adapter.update_lock_file().await.unwrap(), None);
 }
 
-#[test]
-fn update_lock_file_dry_run_package_lock_json_returns_path() {
+#[tokio::test]
+async fn update_lock_file_dry_run_package_lock_json_returns_path() {
 	let dir = temp_dir();
 	std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
 	let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
 	assert_eq!(
-		adapter.update_lock_file().unwrap(),
+		adapter.update_lock_file().await.unwrap(),
 		Some(dir.path().join("package-lock.json"))
 	);
 }
 
-#[test]
-fn update_lock_file_dry_run_pnpm_lock_yaml_returns_path() {
+#[tokio::test]
+async fn update_lock_file_dry_run_pnpm_lock_yaml_returns_path() {
 	let dir = temp_dir();
 	std::fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
 	let adapter = dry_run_adapter(NpmConfig::default(), dir.path());
 	assert_eq!(
-		adapter.update_lock_file().unwrap(),
+		adapter.update_lock_file().await.unwrap(),
 		Some(dir.path().join("pnpm-lock.yaml"))
 	);
 }
 
-#[test]
-fn update_lock_file_dry_run_yarn_lock_returns_path() {
+#[tokio::test]
+async fn update_lock_file_dry_run_yarn_lock_returns_path() {
 	use crate::command::DryRunCommandRunner;
 	let dir = temp_dir();
 	std::fs::write(dir.path().join("yarn.lock"), "").unwrap();
@@ -367,13 +367,13 @@ fn update_lock_file_dry_run_yarn_lock_returns_path() {
 		env,
 	);
 	assert_eq!(
-		adapter.update_lock_file().unwrap(),
+		adapter.update_lock_file().await.unwrap(),
 		Some(dir.path().join("yarn.lock"))
 	);
 }
 
-#[test]
-fn update_lock_file_yarn_version_failure_includes_stderr_in_error() {
+#[tokio::test]
+async fn update_lock_file_yarn_version_failure_includes_stderr_in_error() {
 	let dir = temp_dir();
 	write_package_json(dir.path(), r#"{"name": "test-app", "version": "1.0.0"}"#);
 	std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
@@ -386,7 +386,7 @@ fn update_lock_file_yarn_version_failure_includes_stderr_in_error() {
 	));
 	let adapter = dispatching_adapter(NpmConfig::default(), dir.path(), runner);
 
-	let err = adapter.update_lock_file().unwrap_err();
+	let err = adapter.update_lock_file().await.unwrap_err();
 	assert!(
 		err.to_string().contains("yarn: command not found"),
 		"error should include stderr from failed yarn --version: {err}"

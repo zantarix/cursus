@@ -1,10 +1,10 @@
 use super::*;
 
-#[test]
-fn load_projects_succeeds_with_cargo_manifest() {
+#[tokio::test]
+async fn load_projects_succeeds_with_cargo_manifest() {
 	let dir = temp_dir();
 	let config = Config::new(&make_env_with_git(dir.path())).with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"test-package\"\nversion = \"0.1.0\"\n",
@@ -12,17 +12,17 @@ fn load_projects_succeeds_with_cargo_manifest() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let config = load(&env).unwrap();
-	let projects = config.load_projects().unwrap();
+	let config = load(&env).await.unwrap();
+	let projects = config.load_projects().await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "test-package");
 }
 
-#[test]
-fn load_projects_succeeds_with_npm_manifest() {
+#[tokio::test]
+async fn load_projects_succeeds_with_npm_manifest() {
 	let dir = temp_dir();
 	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	std::fs::write(
 		dir.path().join("package.json"),
 		r#"{"name": "test-package", "version": "0.1.0"}"#,
@@ -30,22 +30,22 @@ fn load_projects_succeeds_with_npm_manifest() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let config = load(&env).unwrap();
-	let projects = config.load_projects().unwrap();
+	let config = load(&env).await.unwrap();
+	let projects = config.load_projects().await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].name(), "test-package");
 }
 
-#[test]
-fn load_projects_fails_when_no_projects_found() {
+#[tokio::test]
+async fn load_projects_fails_when_no_projects_found() {
 	let dir = temp_dir();
 	let config = Config::new(&make_env_with_git(dir.path())).with_cargo(CargoConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	// No Cargo.toml file, so no projects will be found
 
 	let env = make_env_with_git(dir.path());
-	let config = load(&env).unwrap();
-	let result = config.load_projects();
+	let config = load(&env).await.unwrap();
+	let result = config.load_projects().await;
 	assert!(result.is_err());
 	assert!(
 		result

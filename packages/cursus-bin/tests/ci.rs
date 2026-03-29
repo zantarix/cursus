@@ -31,12 +31,12 @@ fn git_tag(dir: &std::path::Path, tag: &str) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// When pending changesets exist, `ci` should delegate to `prepare`.
-#[test]
-fn ci_with_changesets_runs_release() {
+#[tokio::test]
+async fn ci_with_changesets_runs_release() {
 	init_test_logger();
 	let _ = take_logs();
 	// Use a simple fake-git repo with git disabled to avoid real git ops.
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change.md",
@@ -47,7 +47,8 @@ fn ci_with_changesets_runs_release() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -67,11 +68,12 @@ fn ci_with_changesets_runs_release() {
 }
 
 /// When no changesets exist and all tags are present, `ci` does nothing.
-#[test]
-fn ci_when_all_tags_present_nothing_to_do() {
+#[tokio::test]
+async fn ci_when_all_tags_present_nothing_to_do() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 
 	// No changesets created; tag the current version manually.
 	git_tag(dir.path(), "v1.0.0");
@@ -79,7 +81,8 @@ fn ci_when_all_tags_present_nothing_to_do() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -95,17 +98,18 @@ fn ci_when_all_tags_present_nothing_to_do() {
 }
 
 /// When there are no changesets and git is disabled, `ci` does nothing.
-#[test]
-fn ci_git_disabled_no_changesets_nothing_to_do() {
+#[tokio::test]
+async fn ci_git_disabled_no_changesets_nothing_to_do() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	// No changesets. Git is not enabled in config (no [git] section).
 
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -117,11 +121,12 @@ fn ci_git_disabled_no_changesets_nothing_to_do() {
 }
 
 /// When no changesets exist but tags are missing, `ci` delegates to `publish` (dry-run).
-#[test]
-fn ci_tags_missing_triggers_publish_dry_run() {
+#[tokio::test]
+async fn ci_tags_missing_triggers_publish_dry_run() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 
 	// Add CHANGELOG.md so the package is considered prepared and tag check applies.
 	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
@@ -133,7 +138,8 @@ fn ci_tags_missing_triggers_publish_dry_run() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -154,14 +160,15 @@ fn ci_tags_missing_triggers_publish_dry_run() {
 
 /// With --no-git, `ci` never checks for missing tags and does nothing when there
 /// are no changesets.
-#[test]
-fn ci_no_git_skips_tag_detection() {
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+#[tokio::test]
+async fn ci_no_git_skips_tag_detection() {
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 
 	// No changesets, tag missing — but --no-git should prevent tag detection.
 	assert!(!git_tag_exists(dir.path(), "v1.0.0"));
 
-	let result = run_cursus(["cursus", "--no-interactive", "ci", "--no-git"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "ci", "--no-git"], dir.path()).await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	// No tags should have been created.
@@ -174,19 +181,19 @@ fn ci_no_git_skips_tag_detection() {
 
 /// `ci` accepts `--no-interactive` (consistent with other subcommands) but does not
 /// require it — it is always non-interactive by design.
-#[test]
-fn ci_is_always_non_interactive() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn ci_is_always_non_interactive() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 
 	// No changesets, no git. Should succeed without --no-interactive.
-	let result = run_cursus(["cursus", "ci", "--dry-run"], dir.path());
+	let result = run_cursus(["cursus", "ci", "--dry-run"], dir.path()).await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
 /// `ci --dry-run` with changesets does not consume the changesets.
-#[test]
-fn ci_dry_run_does_not_consume_changesets() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn ci_dry_run_does_not_consume_changesets() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	write_changeset(
 		dir.path(),
 		"change.md",
@@ -196,7 +203,8 @@ fn ci_dry_run_does_not_consume_changesets() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let changeset_exists = dir.path().join(".cursus").join("change.md").exists();
@@ -204,27 +212,29 @@ fn ci_dry_run_does_not_consume_changesets() {
 }
 
 /// The `ci` subcommand parses correctly via the CLI.
-#[test]
-fn ci_parses_from_cli() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn ci_parses_from_cli() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	// Just verify the CLI parses `ci` as a valid subcommand with its flags.
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
 /// Multi-package: `ci` uses all packages when determining tag presence.
-#[test]
-fn ci_multi_package_partial_tags_triggers_publish() {
+#[tokio::test]
+async fn ci_multi_package_partial_tags_triggers_publish() {
 	init_test_logger();
 	let _ = take_logs();
 
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	// Add CHANGELOG.md to both packages so they are considered prepared.
 	std::fs::write(dir.path().join("pkg-a/CHANGELOG.md"), "# Changelog\n").unwrap();
@@ -237,7 +247,8 @@ fn ci_multi_package_partial_tags_triggers_publish() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -250,12 +261,13 @@ fn ci_multi_package_partial_tags_triggers_publish() {
 }
 
 /// Multi-package: `ci` does nothing when ALL packages are tagged.
-#[test]
-fn ci_multi_package_all_tags_present_nothing_to_do() {
+#[tokio::test]
+async fn ci_multi_package_all_tags_present_nothing_to_do() {
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	git_tag(dir.path(), "pkg-a@1.0.0");
 	git_tag(dir.path(), "pkg-b@2.0.0");
@@ -263,7 +275,8 @@ fn ci_multi_package_all_tags_present_nothing_to_do() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	// No additional tags created.
@@ -272,12 +285,13 @@ fn ci_multi_package_all_tags_present_nothing_to_do() {
 }
 
 /// `ci` with a package filter only checks the selected package's tag.
-#[test]
-fn ci_package_filter_only_checks_selected_packages() {
+#[tokio::test]
+async fn ci_package_filter_only_checks_selected_packages() {
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	// Tag pkg-a only; filter to pkg-a → should see "nothing to do" since pkg-a is tagged.
 	git_tag(dir.path(), "pkg-a@1.0.0");
@@ -293,7 +307,8 @@ fn ci_package_filter_only_checks_selected_packages() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	// Only the original tag should exist (nothing triggered).
@@ -302,9 +317,9 @@ fn ci_package_filter_only_checks_selected_packages() {
 }
 
 /// `ci --no-git` with changesets delegates to `prepare --no-git`.
-#[test]
-fn ci_no_git_with_changesets_runs_release_no_git() {
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+#[tokio::test]
+async fn ci_no_git_with_changesets_runs_release_no_git() {
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"my-pkg\"\nversion = \"1.0.0\"\nedition = \"2024\"\n",
@@ -321,16 +336,17 @@ fn ci_no_git_with_changesets_runs_release_no_git() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
 /// `ci` returns an error when the config file is missing.
-#[test]
-fn ci_fails_when_no_config() {
+#[tokio::test]
+async fn ci_fails_when_no_config() {
 	let dir = temp_git_repo();
 	// No .cursus/config.toml present.
-	let result = run_cursus(["cursus", "--no-interactive", "ci"], dir.path());
+	let result = run_cursus(["cursus", "--no-interactive", "ci"], dir.path()).await;
 	assert!(result.is_err(), "Expected Err when config is missing");
 }
 
@@ -339,14 +355,15 @@ fn ci_fails_when_no_config() {
 /// This test verifies that `is_multi` is computed as `projects.len() > 1` (not `< 1`).
 /// With two packages both tagged in `pkg@version` format, CI should detect all tags present
 /// and log "nothing to do" — not trigger a "running publish" dispatch.
-#[test]
-fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
+#[tokio::test]
+async fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	// Both packages tagged in multi-package (pkg@version) format.
 	git_tag(dir.path(), "pkg-a@1.0.0");
@@ -355,7 +372,8 @@ fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -372,20 +390,22 @@ fn ci_multi_package_all_tags_present_logs_nothing_to_do() {
 
 /// Multi-package workspace with no changesets and no `CHANGELOG.md` in any package:
 /// `ci` should do nothing (all packages excluded from tag check).
-#[test]
-fn ci_all_packages_lack_changelog_nothing_to_do() {
+#[tokio::test]
+async fn ci_all_packages_lack_changelog_nothing_to_do() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	// No changesets, no CHANGELOG.md in either package — tag check skipped for all.
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -402,14 +422,15 @@ fn ci_all_packages_lack_changelog_nothing_to_do() {
 
 /// When one package has `CHANGELOG.md` (and its tag is missing) and another does not,
 /// `ci` should trigger publish (the prepared package qualifies).
-#[test]
-fn ci_no_changelog_package_excluded_from_tag_check() {
+#[tokio::test]
+async fn ci_no_changelog_package_excluded_from_tag_check() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	// pkg-a has CHANGELOG.md and its tag is missing → qualifies for publish.
 	// pkg-b has no CHANGELOG.md → excluded from tag check.
@@ -421,7 +442,8 @@ fn ci_no_changelog_package_excluded_from_tag_check() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -434,9 +456,10 @@ fn ci_no_changelog_package_excluded_from_tag_check() {
 }
 
 /// `ci` returns an error when a requested package does not exist (with git enabled).
-#[test]
-fn ci_fails_when_package_filter_names_unknown_package() {
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+#[tokio::test]
+async fn ci_fails_when_package_filter_names_unknown_package() {
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 
 	// No changesets; git enabled; tag missing → would try to publish, but -p nonexistent fails.
 	let result = run_cursus(
@@ -449,7 +472,8 @@ fn ci_fails_when_package_filter_names_unknown_package() {
 			"nonexistent",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(
 		result.is_err(),
 		"Expected Err for unknown package filter, got: {result:?}"
@@ -458,12 +482,13 @@ fn ci_fails_when_package_filter_names_unknown_package() {
 
 /// `ci` finds changesets but the `--package` filter doesn't match any changeset package.
 /// Release should succeed with "nothing to release" for the filtered package.
-#[test]
-fn ci_changesets_present_but_package_filter_matches_no_changeset() {
+#[tokio::test]
+async fn ci_changesets_present_but_package_filter_matches_no_changeset() {
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 
 	// Changeset only mentions pkg-a, but we filter for pkg-b.
 	write_changeset(
@@ -485,7 +510,8 @@ fn ci_changesets_present_but_package_filter_matches_no_changeset() {
 			"pkg-b",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	// No version should have changed.
@@ -501,11 +527,12 @@ fn ci_changesets_present_but_package_filter_matches_no_changeset() {
 /// Guards `&&`→`||` on `config.git.enabled() && !args.no_git` (line 72): if that becomes `||`,
 /// the tag check would run even though git is disabled, find the tag missing (since we wrote
 /// CHANGELOG.md but no tag), and trigger publish instead of "nothing to do".
-#[test]
-fn ci_git_disabled_with_changelog_no_changesets_nothing_to_do() {
+#[tokio::test]
+async fn ci_git_disabled_with_changelog_no_changesets_nothing_to_do() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	// Override config to disable git.
 	let config_dir = dir.path().join(".cursus");
 	std::fs::write(config_dir.join("config.toml"), "[cargo]\nenabled = true\n").unwrap();
@@ -515,7 +542,8 @@ fn ci_git_disabled_with_changelog_no_changesets_nothing_to_do() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -532,11 +560,12 @@ fn ci_git_disabled_with_changelog_no_changesets_nothing_to_do() {
 /// `is_multi` would be true for a single package, the tag format would change from `v1.0.0`
 /// to `my-app@1.0.0`, the tag check would fail to find the existing tag, and publish would
 /// be triggered instead of "nothing to do".
-#[test]
-fn ci_single_package_with_changelog_and_tag_nothing_to_do() {
+#[tokio::test]
+async fn ci_single_package_with_changelog_and_tag_nothing_to_do() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	// Write CHANGELOG.md so the package is "prepared" and tag checking applies.
 	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
 	// Tag the single package in single-package format.
@@ -545,7 +574,8 @@ fn ci_single_package_with_changelog_and_tag_nothing_to_do() {
 	let result = run_cursus(
 		["cursus", "--no-interactive", "ci", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();

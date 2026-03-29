@@ -30,7 +30,7 @@ impl Default for VerifyArgs {
 /// - `ExitCode::SUCCESS` (0) if at least one changeset was added.
 /// - `ExitCode::from(2)` if no changeset was added.
 /// - Propagates errors as `Err` (exit code 1 from the caller).
-pub(crate) fn cmd_verify(args: &VerifyArgs, env: &crate::Env) -> anyhow::Result<ExitCode> {
+pub(crate) async fn cmd_verify(args: &VerifyArgs, env: &crate::Env) -> anyhow::Result<ExitCode> {
 	let git = env.git();
 	debug!("Verifying changesets against base ref: {}", args.base);
 
@@ -45,7 +45,9 @@ pub(crate) fn cmd_verify(args: &VerifyArgs, env: &crate::Env) -> anyhow::Result<
 	}
 
 	let range = format!("{}..HEAD", args.base);
-	let names = git.diff_names(&["--diff-filter=A", &range, "--", ".cursus/"])?;
+	let names = git
+		.diff_names(&["--diff-filter=A", &range, "--", ".cursus/"])
+		.await?;
 
 	let changesets: Vec<&str> = filter_changeset_paths(&names);
 
@@ -93,14 +95,14 @@ mod tests {
 		(env, dir)
 	}
 
-	#[test]
-	fn verify_args_default() {
+	#[tokio::test]
+	async fn verify_args_default() {
 		let args = VerifyArgs::default();
 		assert_eq!(args.base, "origin/HEAD");
 	}
 
-	#[test]
-	fn verify_parses_default_base() {
+	#[tokio::test]
+	async fn verify_parses_default_base() {
 		let cli = Cli::try_parse_from(["cursus", "--no-interactive", "verify"]).unwrap();
 		match cli.command {
 			Some(crate::cli::Command::Verify(args)) => {
@@ -110,8 +112,8 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn verify_parses_custom_base() {
+	#[tokio::test]
+	async fn verify_parses_custom_base() {
 		let cli = Cli::try_parse_from(["cursus", "--no-interactive", "verify", "--base", "main"])
 			.unwrap();
 		match cli.command {
@@ -122,26 +124,26 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn verify_rejects_dash_prefix_base() {
+	#[tokio::test]
+	async fn verify_rejects_dash_prefix_base() {
 		let (env, _dir) = make_env();
 		let args = VerifyArgs {
 			base: "--output=/tmp/pwned".to_string(),
 		};
-		let err = cmd_verify(&args, &env).unwrap_err();
+		let err = cmd_verify(&args, &env).await.unwrap_err();
 		assert!(
 			err.to_string().contains("must not start with '-'"),
 			"unexpected error: {err}"
 		);
 	}
 
-	#[test]
-	fn verify_rejects_empty_base() {
+	#[tokio::test]
+	async fn verify_rejects_empty_base() {
 		let (env, _dir) = make_env();
 		let args = VerifyArgs {
 			base: String::new(),
 		};
-		let err = cmd_verify(&args, &env).unwrap_err();
+		let err = cmd_verify(&args, &env).await.unwrap_err();
 		assert!(
 			err.to_string().contains("must not be empty"),
 			"unexpected error: {err}"

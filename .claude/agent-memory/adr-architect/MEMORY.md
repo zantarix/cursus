@@ -70,7 +70,7 @@ Key differences from old style:
 - ADR-034: Accepted (compile-time embedded localisation via fluent-templates)
 - ADR-035: Accepted (Git trait abstraction for all git operations)
 - ADR-036: Accepted (Filesystem trait for file I/O abstraction)
-- ADR-037: Proposed (async library with tokio runtime)
+- ADR-037: Accepted (async library with tokio runtime)
 - ADR-038: Proposed (octocrab-based shared GitHubClient)
 - Next ADR number: 039
 

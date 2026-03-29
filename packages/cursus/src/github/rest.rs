@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use anyhow::Context;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::client::{GitHubClient, PullRequest};
@@ -235,8 +236,12 @@ fn percent_encode(s: &str) -> String {
 	encoded
 }
 
+// NOTE: ureq is synchronous and blocks the tokio worker thread.
+// This is acceptable as a transitional state; ADR-038 replaces ureq
+// with octocrab for native async HTTP.
+#[async_trait]
 impl GitHubClient for RestGitHubClient {
-	fn create_release(
+	async fn create_release(
 		&self,
 		gh_repo: &GitHubRepo,
 		tag_name: &str,
@@ -272,7 +277,7 @@ impl GitHubClient for RestGitHubClient {
 		Ok(release.id.to_string())
 	}
 
-	fn upload_asset(
+	async fn upload_asset(
 		&self,
 		gh_repo: &GitHubRepo,
 		release_id: &str,
@@ -305,7 +310,7 @@ impl GitHubClient for RestGitHubClient {
 		Ok(())
 	}
 
-	fn create_pull_request(
+	async fn create_pull_request(
 		&self,
 		gh_repo: &GitHubRepo,
 		title: &str,
@@ -341,7 +346,7 @@ impl GitHubClient for RestGitHubClient {
 		Ok(pr.html_url)
 	}
 
-	fn find_open_pull_request(
+	async fn find_open_pull_request(
 		&self,
 		gh_repo: &GitHubRepo,
 		head: &str,
@@ -368,7 +373,7 @@ impl GitHubClient for RestGitHubClient {
 		}))
 	}
 
-	fn update_pull_request(
+	async fn update_pull_request(
 		&self,
 		gh_repo: &GitHubRepo,
 		pull_number: u64,
@@ -398,7 +403,7 @@ impl GitHubClient for RestGitHubClient {
 		Ok(pr.html_url)
 	}
 
-	fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
+	async fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
 		if release_id.is_empty() || !release_id.chars().all(|c| c.is_ascii_digit()) {
 			anyhow::bail!("Invalid GitHub release_id: {release_id:?}");
 		}
@@ -460,11 +465,13 @@ mod tests {
 		assert_eq!(json["draft"], false);
 	}
 
-	#[test]
-	fn publish_release_rejects_invalid_release_id() {
+	#[tokio::test]
+	async fn publish_release_rejects_invalid_release_id() {
 		let client = RestGitHubClient::new("token".to_string());
 		for bad_id in &["", "abc", "12-34", "../evil", "12 34"] {
-			let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), bad_id);
+			let result = client
+				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), bad_id)
+				.await;
 			assert!(
 				result.is_err(),
 				"Expected error for release_id={bad_id:?}, but got Ok"
@@ -494,15 +501,17 @@ mod tests {
 		assert_eq!(response.name, "app.tar.gz");
 	}
 
-	#[test]
-	fn upload_asset_returns_error_when_file_does_not_exist() {
+	#[tokio::test]
+	async fn upload_asset_returns_error_when_file_does_not_exist() {
 		let client = RestGitHubClient::new("token".to_string());
-		let result = client.upload_asset(
-			&GitHubRepo::new("owner", "repo").unwrap(),
-			"12345678",
-			"missing.tar.gz",
-			Path::new("/nonexistent/path/to/missing.tar.gz"),
-		);
+		let result = client
+			.upload_asset(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				"12345678",
+				"missing.tar.gz",
+				Path::new("/nonexistent/path/to/missing.tar.gz"),
+			)
+			.await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -511,16 +520,18 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn upload_asset_rejects_invalid_release_id() {
+	#[tokio::test]
+	async fn upload_asset_rejects_invalid_release_id() {
 		let client = RestGitHubClient::new("token".to_string());
 		for bad_id in &["", "abc", "12-34", "../evil", "12 34"] {
-			let result = client.upload_asset(
-				&GitHubRepo::new("owner", "repo").unwrap(),
-				bad_id,
-				"file.tar.gz",
-				Path::new("/tmp/file.tar.gz"),
-			);
+			let result = client
+				.upload_asset(
+					&GitHubRepo::new("owner", "repo").unwrap(),
+					bad_id,
+					"file.tar.gz",
+					Path::new("/tmp/file.tar.gz"),
+				)
+				.await;
 			assert!(
 				result.is_err(),
 				"Expected error for release_id={bad_id:?}, but got Ok"
@@ -533,16 +544,18 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn upload_asset_accepts_numeric_release_id() {
+	#[tokio::test]
+	async fn upload_asset_accepts_numeric_release_id() {
 		// Validation should pass for a numeric release ID; the error is the missing file.
 		let client = RestGitHubClient::new("token".to_string());
-		let result = client.upload_asset(
-			&GitHubRepo::new("owner", "repo").unwrap(),
-			"987654321",
-			"file.tar.gz",
-			Path::new("/nonexistent/file.tar.gz"),
-		);
+		let result = client
+			.upload_asset(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				"987654321",
+				"file.tar.gz",
+				Path::new("/nonexistent/file.tar.gz"),
+			)
+			.await;
 		assert!(result.is_err());
 		// Error should be about the file, not the release_id.
 		let msg = format!("{:#}", result.unwrap_err());
@@ -575,8 +588,8 @@ mod tests {
 		assert_eq!(percent_encode(""), "");
 	}
 
-	#[test]
-	fn create_release_error_logs_debug_message_on_422() {
+	#[tokio::test]
+	async fn create_release_error_logs_debug_message_on_422() {
 		init_test_logger();
 		let _ = take_logs();
 
@@ -591,12 +604,14 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let result = client.create_release(
-			&GitHubRepo::new("owner", "repo").unwrap(),
-			"v1.0.0",
-			"Release",
-			"Body",
-		);
+		let result = client
+			.create_release(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				"v1.0.0",
+				"Release",
+				"Body",
+			)
+			.await;
 		assert!(result.is_err());
 
 		let logs = take_logs();
@@ -614,8 +629,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn create_release_error_logs_trace_with_request_and_response_body() {
+	#[tokio::test]
+	async fn create_release_error_logs_trace_with_request_and_response_body() {
 		init_test_logger();
 		let _ = take_logs();
 
@@ -630,12 +645,14 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let _ = client.create_release(
-			&GitHubRepo::new("owner", "repo").unwrap(),
-			"v1.0.0",
-			"Release",
-			"Body",
-		);
+		let _ = client
+			.create_release(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				"v1.0.0",
+				"Release",
+				"Body",
+			)
+			.await;
 
 		let logs = take_logs();
 		let trace_msgs: Vec<&str> = logs
@@ -657,8 +674,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn upload_asset_error_logs_debug_message_on_500() {
+	#[tokio::test]
+	async fn upload_asset_error_logs_debug_message_on_500() {
 		init_test_logger();
 		let _ = take_logs();
 
@@ -675,12 +692,14 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let result = client.upload_asset(
-			&GitHubRepo::new("owner", "repo").unwrap(),
-			"12345",
-			"file.tar.gz",
-			file.path(),
-		);
+		let result = client
+			.upload_asset(
+				&GitHubRepo::new("owner", "repo").unwrap(),
+				"12345",
+				"file.tar.gz",
+				file.path(),
+			)
+			.await;
 		assert!(result.is_err());
 
 		let logs = take_logs();
@@ -781,8 +800,8 @@ mod tests {
 		assert_eq!(response.id, 42);
 	}
 
-	#[test]
-	fn publish_release_sends_correct_request() {
+	#[tokio::test]
+	async fn publish_release_sends_correct_request() {
 		let server = MockServer::start();
 		let mock = server.mock(|when, then| {
 			when.method(PATCH)
@@ -798,13 +817,15 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+		let result = client
+			.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345")
+			.await;
 		assert!(result.is_ok(), "publish_release failed: {:?}", result.err());
 		mock.assert();
 	}
 
-	#[test]
-	fn publish_release_handles_api_error() {
+	#[tokio::test]
+	async fn publish_release_handles_api_error() {
 		let server = MockServer::start();
 		let _mock = server.mock(|when, then| {
 			when.method(PATCH).path("/repos/owner/repo/releases/12345");
@@ -816,7 +837,9 @@ mod tests {
 		let client = RestGitHubClient::new("test-token".to_string())
 			.with_base_urls(server.base_url(), server.base_url());
 
-		let result = client.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345");
+		let result = client
+			.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "12345")
+			.await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

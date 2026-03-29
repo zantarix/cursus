@@ -13,8 +13,8 @@ use cursus::command::RealCommandRunner;
 use cursus::filesystem::LocalFilesystem;
 use cursus::model::config::PackageManager;
 
-#[test]
-fn change_fails_when_no_config() {
+#[tokio::test]
+async fn change_fails_when_no_config() {
 	let dir = temp_git_repo();
 	let result = common::run_cursus(
 		[
@@ -27,7 +27,8 @@ fn change_fails_when_no_config() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -37,9 +38,9 @@ fn change_fails_when_no_config() {
 	);
 }
 
-#[test]
-fn change_fails_when_no_projects_found() {
-	let dir = temp_git_repo_with_config(PackageManager::Npm);
+#[tokio::test]
+async fn change_fails_when_no_projects_found() {
+	let dir = temp_git_repo_with_config(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -51,7 +52,8 @@ fn change_fails_when_no_projects_found() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -61,9 +63,9 @@ fn change_fails_when_no_projects_found() {
 	);
 }
 
-#[test]
-fn change_succeeds_with_major() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_succeeds_with_major() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -75,7 +77,8 @@ fn change_succeeds_with_major() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -97,9 +100,9 @@ fn change_succeeds_with_major() {
 	);
 }
 
-#[test]
-fn change_succeeds_with_minor() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_succeeds_with_minor() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -111,7 +114,8 @@ fn change_succeeds_with_minor() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -133,9 +137,9 @@ fn change_succeeds_with_minor() {
 	);
 }
 
-#[test]
-fn change_succeeds_with_patch() {
-	let dir = temp_git_repo_with_project(PackageManager::Cargo);
+#[tokio::test]
+async fn change_succeeds_with_patch() {
+	let dir = temp_git_repo_with_project(PackageManager::Cargo).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -147,19 +151,21 @@ fn change_succeeds_with_patch() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
-#[test]
-fn change_no_interactive_requires_change_type() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_no_interactive_requires_change_type() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "-m", "test"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -169,12 +175,12 @@ fn change_no_interactive_requires_change_type() {
 	);
 }
 
-#[test]
-fn change_is_default_command() {
+#[tokio::test]
+async fn change_is_default_command() {
 	// Running without a subcommand should behave like `change`,
 	// which fails when no config exists
 	let dir = temp_git_repo();
-	let result = common::run_cursus(["cursus", "--no-interactive"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive"], dir.path()).await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -184,9 +190,9 @@ fn change_is_default_command() {
 	);
 }
 
-#[test]
-fn change_with_project_flag_selects_specific_project() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_with_project_flag_selects_specific_project() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -200,15 +206,16 @@ fn change_with_project_flag_selects_specific_project() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
-#[test]
-fn change_with_unknown_project_fails() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_with_unknown_project_fails() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -222,7 +229,8 @@ fn change_with_unknown_project_fails() {
 			"test",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -232,13 +240,14 @@ fn change_with_unknown_project_fails() {
 	);
 }
 
-#[test]
-fn change_no_interactive_requires_message() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_no_interactive_requires_message() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "-t", "minor"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
@@ -248,9 +257,9 @@ fn change_no_interactive_requires_message() {
 	);
 }
 
-#[test]
-fn change_with_message_creates_changeset_file() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_with_message_creates_changeset_file() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -262,7 +271,8 @@ fn change_with_message_creates_changeset_file() {
 			"Added a new feature",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -292,9 +302,9 @@ fn change_with_message_creates_changeset_file() {
 	);
 }
 
-#[test]
-fn change_with_message_and_project() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_with_message_and_project() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -308,7 +318,8 @@ fn change_with_message_and_project() {
 			"Fixed a bug",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -333,9 +344,9 @@ fn change_with_message_and_project() {
 	);
 }
 
-#[test]
-fn change_succeeds_with_npm_project_in_subfolder() {
-	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Npm, "frontend");
+#[tokio::test]
+async fn change_succeeds_with_npm_project_in_subfolder() {
+	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Npm, "frontend").await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -347,15 +358,16 @@ fn change_succeeds_with_npm_project_in_subfolder() {
 			"test subfolder",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
-#[test]
-fn change_succeeds_with_cargo_project_in_subfolder() {
-	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Cargo, "backend");
+#[tokio::test]
+async fn change_succeeds_with_cargo_project_in_subfolder() {
+	let dir = temp_git_repo_with_project_in_subfolder(PackageManager::Cargo, "backend").await;
 	let result = common::run_cursus(
 		[
 			"cursus",
@@ -367,14 +379,15 @@ fn change_succeeds_with_cargo_project_in_subfolder() {
 			"test subfolder",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 }
 
-#[test]
-fn change_interactive_with_message_does_not_open_editor() {
+#[tokio::test]
+async fn change_interactive_with_message_does_not_open_editor() {
 	// When --change-type is supplied, change::run() returns immediately without
 	// entering the TUI. This means we can reach the open-editor guard in
 	// cmd_change while in interactive mode (no --no-interactive) with a message
@@ -384,20 +397,20 @@ fn change_interactive_with_message_does_not_open_editor() {
 	// message is present. The Env contains a nonexistent VISUAL binary, so any
 	// call to open_editor returns an error — this catches mutations that would
 	// cause the editor to be opened unnecessarily.
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
 	let path = cursus::path::AbsolutePath::new(dir.path()).unwrap();
 	let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
 	let env = cursus::Env::new(runner, Arc::new(LocalFilesystem), git)
 		.with_editor("__cursus_test_nonexistent_editor__".to_string());
 	let cli = clap::Parser::parse_from(["cursus", "change", "-t", "minor", "-m", "bump"]);
-	let result = cursus::run(cli, env);
+	let result = cursus::run(cli, env).await;
 	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
 }
 
-#[test]
-fn change_dry_run_does_not_write_changeset_file() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm);
+#[tokio::test]
+async fn change_dry_run_does_not_write_changeset_file() {
+	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
 	let (success, stdout, _stderr) = run_cursus_subprocess(
 		&[
 			"--dry-run",

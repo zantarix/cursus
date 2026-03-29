@@ -35,18 +35,18 @@ fn make_env_with_git(dir: &std::path::Path) -> cursus::Env {
 }
 
 /// Saves a `[prepare]` config section to an existing cursus config.
-fn set_prepare_config(dir: &std::path::Path, prepare: PrepareConfig) {
+async fn set_prepare_config(dir: &std::path::Path, prepare: PrepareConfig) {
 	let env = make_env_with_git(dir);
-	let mut config = cursus::model::config::load(&env).unwrap();
+	let mut config = cursus::model::config::load(&env).await.unwrap();
 	config.prepare = prepare;
-	config.save().unwrap();
+	config.save().await.unwrap();
 }
 
 /// Creates a Cargo workspace with pkg-a at 1.0.0 and pkg-b depending on pkg-a.
 ///
 /// Returns the temp dir. pkg-b's Cargo.toml declares a dependency on pkg-a.
-fn workspace_with_dependency() -> tempfile::TempDir {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+async fn workspace_with_dependency() -> tempfile::TempDir {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	// Add a [dependencies] section to pkg-b that references pkg-a.
 	std::fs::write(
 		dir.path().join("pkg-b/Cargo.toml"),
@@ -57,12 +57,13 @@ fn workspace_with_dependency() -> tempfile::TempDir {
 }
 
 /// Creates a workspace with three packages in a chain: C depends on B, B depends on A.
-fn workspace_with_chain() -> tempfile::TempDir {
+async fn workspace_with_chain() -> tempfile::TempDir {
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("pkg-a", "1.0.0"),
 		("pkg-b", "1.0.0"),
 		("pkg-c", "1.0.0"),
-	]);
+	])
+	.await;
 	std::fs::write(
 		dir.path().join("pkg-b/Cargo.toml"),
 		"[package]\nname = \"pkg-b\"\nversion = \"1.0.0\"\nedition = \"2024\"\n\n[dependencies]\npkg-a = { path = \"../pkg-a\", version = \"1.0.0\" }\n",
@@ -78,11 +79,11 @@ fn workspace_with_chain() -> tempfile::TempDir {
 
 // ── Basic propagation ──────────────────────────────────────────────────────
 
-#[test]
-fn propagation_auto_minor_bump_produces_patch_in_dependent() {
+#[tokio::test]
+async fn propagation_auto_minor_bump_produces_patch_in_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	// pkg-a gets a minor bump; under "auto", pkg-b should receive a patch bump.
 	write_changeset(
 		dir.path(),
@@ -90,7 +91,7 @@ fn propagation_auto_minor_bump_produces_patch_in_dependent() {
 		"+++\npkg-a = \"minor\"\n+++\n\nNew feature in pkg-a\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -99,11 +100,11 @@ fn propagation_auto_minor_bump_produces_patch_in_dependent() {
 	assert_eq!(read_version(dir.path(), "pkg-b"), "1.0.1");
 }
 
-#[test]
-fn propagation_auto_major_bump_produces_major_in_dependent() {
+#[tokio::test]
+async fn propagation_auto_major_bump_produces_major_in_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	// pkg-a gets a major bump; under "auto", pkg-b should also receive a major bump.
 	write_changeset(
 		dir.path(),
@@ -111,7 +112,7 @@ fn propagation_auto_major_bump_produces_major_in_dependent() {
 		"+++\npkg-a = \"major\"\n+++\n\nBreaking change in pkg-a\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -120,24 +121,25 @@ fn propagation_auto_major_bump_produces_major_in_dependent() {
 	assert_eq!(read_version(dir.path(), "pkg-b"), "2.0.0");
 }
 
-#[test]
-fn propagation_patch_mode_always_patches_dependent() {
+#[tokio::test]
+async fn propagation_patch_mode_always_patches_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	set_prepare_config(
 		dir.path(),
 		PrepareConfig {
 			dependency_bump: DependencyBump::Patch,
 		},
-	);
+	)
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
 		"+++\npkg-a = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -146,24 +148,25 @@ fn propagation_patch_mode_always_patches_dependent() {
 	assert_eq!(read_version(dir.path(), "pkg-b"), "1.0.1");
 }
 
-#[test]
-fn propagation_match_mode_mirrors_upstream_level() {
+#[tokio::test]
+async fn propagation_match_mode_mirrors_upstream_level() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	set_prepare_config(
 		dir.path(),
 		PrepareConfig {
 			dependency_bump: DependencyBump::Match,
 		},
-	);
+	)
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
 		"+++\npkg-a = \"minor\"\n+++\n\nFeature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -172,24 +175,25 @@ fn propagation_match_mode_mirrors_upstream_level() {
 	assert_eq!(read_version(dir.path(), "pkg-b"), "1.1.0");
 }
 
-#[test]
-fn propagation_minor_mode_always_minors_dependent() {
+#[tokio::test]
+async fn propagation_minor_mode_always_minors_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	set_prepare_config(
 		dir.path(),
 		PrepareConfig {
 			dependency_bump: DependencyBump::Minor,
 		},
-	);
+	)
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nBug fix\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -198,24 +202,25 @@ fn propagation_minor_mode_always_minors_dependent() {
 	assert_eq!(read_version(dir.path(), "pkg-b"), "1.1.0");
 }
 
-#[test]
-fn propagation_major_mode_always_majors_dependent() {
+#[tokio::test]
+async fn propagation_major_mode_always_majors_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	set_prepare_config(
 		dir.path(),
 		PrepareConfig {
 			dependency_bump: DependencyBump::Major,
 		},
-	);
+	)
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nBug fix\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -226,11 +231,11 @@ fn propagation_major_mode_always_majors_dependent() {
 
 // ── Transitive propagation ─────────────────────────────────────────────────
 
-#[test]
-fn propagation_transitive_chain_all_bumped() {
+#[tokio::test]
+async fn propagation_transitive_chain_all_bumped() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_chain();
+	let dir = workspace_with_chain().await;
 	// A gets a minor bump. Under "auto": B gets patch, C gets patch (from B's patch).
 	write_changeset(
 		dir.path(),
@@ -238,7 +243,7 @@ fn propagation_transitive_chain_all_bumped() {
 		"+++\npkg-a = \"minor\"\n+++\n\nFeature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -247,11 +252,11 @@ fn propagation_transitive_chain_all_bumped() {
 	assert_eq!(read_version(dir.path(), "pkg-c"), "1.0.1");
 }
 
-#[test]
-fn propagation_transitive_major_propagates_through_chain() {
+#[tokio::test]
+async fn propagation_transitive_major_propagates_through_chain() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_chain();
+	let dir = workspace_with_chain().await;
 	// A gets a major bump. Under "auto": B gets major, C gets major (from B's major).
 	write_changeset(
 		dir.path(),
@@ -259,7 +264,7 @@ fn propagation_transitive_major_propagates_through_chain() {
 		"+++\npkg-a = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -270,11 +275,11 @@ fn propagation_transitive_major_propagates_through_chain() {
 
 // ── Existing changeset takes precedence ───────────────────────────────────
 
-#[test]
-fn propagation_does_not_downgrade_existing_higher_changeset() {
+#[tokio::test]
+async fn propagation_does_not_downgrade_existing_higher_changeset() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	// pkg-a gets a patch bump (would propagate patch to pkg-b).
 	// But pkg-b already has a major changeset — it should stay at major.
 	write_changeset(
@@ -288,7 +293,7 @@ fn propagation_does_not_downgrade_existing_higher_changeset() {
 		"+++\npkg-b = \"major\"\n+++\n\nBreaking change in b\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -297,11 +302,11 @@ fn propagation_does_not_downgrade_existing_higher_changeset() {
 	assert_eq!(read_version(dir.path(), "pkg-b"), "2.0.0");
 }
 
-#[test]
-fn propagation_upgrades_lower_existing_changeset_when_needed() {
+#[tokio::test]
+async fn propagation_upgrades_lower_existing_changeset_when_needed() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	// pkg-a gets a major bump (propagates major under "auto").
 	// pkg-b already has a patch changeset — propagation should upgrade to major.
 	write_changeset(
@@ -315,7 +320,7 @@ fn propagation_upgrades_lower_existing_changeset_when_needed() {
 		"+++\npkg-b = \"patch\"\n+++\n\nSmall fix in b\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -326,18 +331,18 @@ fn propagation_upgrades_lower_existing_changeset_when_needed() {
 
 // ── Changelog contains Dependencies section ───────────────────────────────
 
-#[test]
-fn propagation_only_package_gets_dependencies_section_in_changelog() {
+#[tokio::test]
+async fn propagation_only_package_gets_dependencies_section_in_changelog() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
 		"+++\npkg-a = \"minor\"\n+++\n\nNew feature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -354,19 +359,19 @@ fn propagation_only_package_gets_dependencies_section_in_changelog() {
 
 // ── No propagation when no workspace deps ────────────────────────────────
 
-#[test]
-fn no_propagation_for_packages_without_workspace_deps() {
+#[tokio::test]
+async fn no_propagation_for_packages_without_workspace_deps() {
 	init_test_logger();
 	let _ = take_logs();
 	// Use a workspace where packages do NOT depend on each other.
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
 		"+++\npkg-a = \"major\"\n+++\n\nBreaking\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -377,11 +382,11 @@ fn no_propagation_for_packages_without_workspace_deps() {
 
 // ── Scoped prepare generates changeset for out-of-scope dependents ────────
 
-#[test]
-fn scoped_prepare_generates_changeset_for_out_of_scope_dependent() {
+#[tokio::test]
+async fn scoped_prepare_generates_changeset_for_out_of_scope_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	// Only prepare pkg-a. pkg-b depends on pkg-a but is out of scope.
 	write_changeset(
 		dir.path(),
@@ -398,7 +403,8 @@ fn scoped_prepare_generates_changeset_for_out_of_scope_dependent() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -432,11 +438,11 @@ fn scoped_prepare_generates_changeset_for_out_of_scope_dependent() {
 
 // ── Dry-run ────────────────────────────────────────────────────────────────
 
-#[test]
-fn propagation_dry_run_does_not_modify_files() {
+#[tokio::test]
+async fn propagation_dry_run_does_not_modify_files() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = workspace_with_dependency();
+	let dir = workspace_with_dependency().await;
 	write_changeset(
 		dir.path(),
 		"cs.md",
@@ -446,7 +452,8 @@ fn propagation_dry_run_does_not_modify_files() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "prepare", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -471,10 +478,10 @@ fn propagation_dry_run_does_not_modify_files() {
 ///
 /// Unlike Cargo, npm does not reject circular workspace dependencies, so this
 /// exercises the BFS cycle-termination property of the propagation algorithm.
-fn npm_workspace_with_cycle() -> tempfile::TempDir {
+async fn npm_workspace_with_cycle() -> tempfile::TempDir {
 	let dir = temp_git_repo();
 	let config = Config::new(&common::test_env(dir.path())).with_npm(NpmConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),
@@ -506,11 +513,11 @@ fn read_npm_version(dir: &std::path::Path, pkg: &str) -> String {
 	v["version"].as_str().unwrap().to_string()
 }
 
-#[test]
-fn propagation_npm_circular_deps_terminates_and_bumps_dependent() {
+#[tokio::test]
+async fn propagation_npm_circular_deps_terminates_and_bumps_dependent() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = npm_workspace_with_cycle();
+	let dir = npm_workspace_with_cycle().await;
 	// Only pkg-a has a changeset; pkg-b should receive a propagated patch bump
 	// under the default "auto" mode (minor upstream → patch propagation).
 	write_changeset(
@@ -519,7 +526,7 @@ fn propagation_npm_circular_deps_terminates_and_bumps_dependent() {
 		"+++\npkg-a = \"minor\"\n+++\n\nNew feature\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "prepare failed: {result:?}");
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 

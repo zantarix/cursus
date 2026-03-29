@@ -20,15 +20,15 @@ fn config_deserializes_with_sections() {
 	assert!(config.cargo.enabled);
 }
 
-#[test]
-fn load_fails_on_unknown_top_level_field() {
+#[tokio::test]
+async fn load_fails_on_unknown_top_level_field() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
 	std::fs::write(config_dir.join("config.toml"), "[rust]\nenabled = true").unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let err = load(&env).unwrap_err();
+	let err = load(&env).await.unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -36,8 +36,8 @@ fn load_fails_on_unknown_top_level_field() {
 	);
 }
 
-#[test]
-fn load_fails_on_unknown_package_manager_field() {
+#[tokio::test]
+async fn load_fails_on_unknown_package_manager_field() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -48,7 +48,7 @@ fn load_fails_on_unknown_package_manager_field() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let err = load(&env).unwrap_err();
+	let err = load(&env).await.unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -90,19 +90,19 @@ fn serialize_config_includes_some_path() {
 	);
 }
 
-#[test]
-fn config_roundtrip_with_path() {
+#[tokio::test]
+async fn config_roundtrip_with_path() {
 	let dir = temp_dir();
 	let mut config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert_eq!(loaded.npm.path, Some("frontend".to_string()));
 }
 
-#[test]
-fn config_roundtrip() {
+#[tokio::test]
+async fn config_roundtrip() {
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
 
@@ -111,8 +111,8 @@ fn config_roundtrip() {
 			PackageManager::Npm => Config::new(&env).with_npm(NpmConfig::enabled()),
 			PackageManager::Cargo => Config::new(&env).with_cargo(CargoConfig::enabled()),
 		};
-		config.save().unwrap();
-		let loaded = load(&env).unwrap();
+		config.save().await.unwrap();
+		let loaded = load(&env).await.unwrap();
 		let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![pm]);
 	}
@@ -145,22 +145,22 @@ enabled = true
 	assert!(config.global.disable_dependency_cycle_warnings);
 }
 
-#[test]
-fn config_roundtrip_with_global() {
+#[tokio::test]
+async fn config_roundtrip_with_global() {
 	let dir = temp_dir();
 	let mut global = GlobalConfig::default();
 	global.disable_dependency_cycle_warnings = true;
 	let config = Config::new(&make_env_with_git(dir.path()))
 		.with_global(global)
 		.with_npm(NpmConfig::enabled());
-	config.save().unwrap();
+	config.save().await.unwrap();
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert!(loaded.global.disable_dependency_cycle_warnings);
 }
 
-#[test]
-fn global_config_unknown_field_fails() {
+#[tokio::test]
+async fn global_config_unknown_field_fails() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -171,7 +171,7 @@ fn global_config_unknown_field_fails() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let err = load(&env).unwrap_err();
+	let err = load(&env).await.unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -202,8 +202,8 @@ fn config_without_github_section_defaults_disabled() {
 	assert!(!config.github.enabled);
 }
 
-#[test]
-fn load_github_enabled_derives_git_enabled() {
+#[tokio::test]
+async fn load_github_enabled_derives_git_enabled() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -214,7 +214,7 @@ fn load_github_enabled_derives_git_enabled() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert!(loaded.github.enabled);
 	assert!(
 		loaded.git.enabled(),
@@ -222,8 +222,8 @@ fn load_github_enabled_derives_git_enabled() {
 	);
 }
 
-#[test]
-fn load_explicit_git_disabled_overrides_derived_default() {
+#[tokio::test]
+async fn load_explicit_git_disabled_overrides_derived_default() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -234,7 +234,7 @@ fn load_explicit_git_disabled_overrides_derived_default() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert!(loaded.github.enabled);
 	assert!(
 		!loaded.git.enabled(),
@@ -242,8 +242,8 @@ fn load_explicit_git_disabled_overrides_derived_default() {
 	);
 }
 
-#[test]
-fn load_derives_branch_strategy_when_github_enabled() {
+#[tokio::test]
+async fn load_derives_branch_strategy_when_github_enabled() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -254,7 +254,7 @@ fn load_derives_branch_strategy_when_github_enabled() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Branch,
@@ -262,8 +262,8 @@ fn load_derives_branch_strategy_when_github_enabled() {
 	);
 }
 
-#[test]
-fn load_derives_push_strategy_when_github_disabled() {
+#[tokio::test]
+async fn load_derives_push_strategy_when_github_disabled() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -274,7 +274,7 @@ fn load_derives_push_strategy_when_github_disabled() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Push,
@@ -282,8 +282,8 @@ fn load_derives_push_strategy_when_github_disabled() {
 	);
 }
 
-#[test]
-fn load_explicit_strategy_overrides_derived_default() {
+#[tokio::test]
+async fn load_explicit_strategy_overrides_derived_default() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");
 	std::fs::create_dir_all(&config_dir).unwrap();
@@ -294,7 +294,7 @@ fn load_explicit_strategy_overrides_derived_default() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).unwrap();
+	let loaded = load(&env).await.unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Push,

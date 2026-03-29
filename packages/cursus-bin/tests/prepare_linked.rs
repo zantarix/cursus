@@ -10,11 +10,11 @@ use cursus::path::AbsolutePath;
 use cursus::test_logging::{init_test_logger, take_logs};
 
 /// Adds a `[linked-versions]` block to the Cursus config saved in `dir`.
-fn add_linked_versions_to_config(dir: &std::path::Path, lv: LinkedVersionsConfig) {
+async fn add_linked_versions_to_config(dir: &std::path::Path, lv: LinkedVersionsConfig) {
 	let env = make_env_with_git(dir);
-	let mut config = cursus::model::config::load(&env).unwrap();
+	let mut config = cursus::model::config::load(&env).await.unwrap();
 	config.linked_versions = lv;
-	config.save().unwrap();
+	config.save().await.unwrap();
 }
 
 fn make_env_with_git(dir: &std::path::Path) -> cursus::Env {
@@ -59,24 +59,25 @@ fn group_config(packages: Vec<Vec<&str>>) -> LinkedVersionsConfig {
 
 // ── Global linking ─────────────────────────────────────────────────────────
 
-#[test]
-fn global_linking_bumps_all_to_max() {
+#[tokio::test]
+async fn global_linking_bumps_all_to_max() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("pkg-a", "1.0.0"),
 		("pkg-b", "1.0.0"),
 		("pkg-c", "1.0.0"),
-	]);
+	])
+	.await;
 	// Only pkg-a has a changeset (minor bump → 1.1.0).
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"minor\"\n+++\n\nA feature\n",
 	);
-	add_linked_versions_to_config(dir.path(), global_config());
+	add_linked_versions_to_config(dir.path(), global_config()).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 
@@ -86,15 +87,15 @@ fn global_linking_bumps_all_to_max() {
 	assert_eq!(read_pkg_version(dir.path(), "pkg-c"), "1.1.0");
 }
 
-#[test]
-fn global_linking_with_package_filter_errors() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn global_linking_with_package_filter_errors() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nA fix\n",
 	);
-	add_linked_versions_to_config(dir.path(), global_config());
+	add_linked_versions_to_config(dir.path(), global_config()).await;
 
 	let result = common::run_cursus(
 		[
@@ -105,7 +106,8 @@ fn global_linking_with_package_filter_errors() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_err());
 	assert!(
 		result
@@ -117,22 +119,23 @@ fn global_linking_with_package_filter_errors() {
 
 // ── Group-based linking ─────────────────────────────────────────────────────
 
-#[test]
-fn group_linking_bumps_only_group_members() {
+#[tokio::test]
+async fn group_linking_bumps_only_group_members() {
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("pkg-a", "1.0.0"),
 		("pkg-b", "1.0.0"),
 		("standalone", "2.0.0"),
-	]);
+	])
+	.await;
 	// pkg-a gets a minor changeset; pkg-b and standalone have none.
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"minor\"\n+++\n\nA feature\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	// pkg-a and pkg-b are linked, so both go to 1.1.0.
@@ -142,12 +145,13 @@ fn group_linking_bumps_only_group_members() {
 	assert_eq!(read_pkg_version(dir.path(), "standalone"), "2.0.0");
 }
 
-#[test]
-fn max_version_wins_with_diverged_versions() {
+#[tokio::test]
+async fn max_version_wins_with_diverged_versions() {
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("pkg-a", "2.1.0"),
 		("pkg-b", "2.0.0"), // already diverged
-	]);
+	])
+	.await;
 	// A patch changeset on pkg-a bumps it to 2.1.1.
 	// Group max among (2.1.1, 2.0.0) = 2.1.1 → pkg-b gets pulled to 2.1.1.
 	write_changeset(
@@ -155,9 +159,9 @@ fn max_version_wins_with_diverged_versions() {
 		"cs1.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nA fix\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	assert_eq!(read_pkg_version(dir.path(), "pkg-a"), "2.1.1");
@@ -169,20 +173,21 @@ fn max_version_wins_with_diverged_versions() {
 /// A@2.3.4 (no changeset) + B@1.2.3 (patch changeset) → both at 2.3.5.
 /// The algorithm must apply B's patch bump *to the group max current version*
 /// (2.3.4), not to B's own current version (which would give 1.2.4).
-#[test]
-fn changeset_on_lower_version_package_advances_whole_group() {
+#[tokio::test]
+async fn changeset_on_lower_version_package_advances_whole_group() {
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("pkg-a", "2.3.4"), // higher current version, no changeset
 		("pkg-b", "1.2.3"), // lower current version, has a patch changeset
-	]);
+	])
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-b = \"patch\"\n+++\n\nA fix\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	// Both packages must end up at 2.3.5 (max current 2.3.4 + patch).
@@ -190,15 +195,15 @@ fn changeset_on_lower_version_package_advances_whole_group() {
 	assert_eq!(read_pkg_version(dir.path(), "pkg-b"), "2.3.5");
 }
 
-#[test]
-fn scoped_prepare_partial_group_overlap_errors() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn scoped_prepare_partial_group_overlap_errors() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nA fix\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
 	let result = common::run_cursus(
 		[
@@ -209,7 +214,8 @@ fn scoped_prepare_partial_group_overlap_errors() {
 			"pkg-a",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_err());
 	let msg = result.unwrap_err().to_string();
 	assert!(
@@ -222,19 +228,20 @@ fn scoped_prepare_partial_group_overlap_errors() {
 	);
 }
 
-#[test]
-fn scoped_prepare_full_group_in_scope_succeeds() {
+#[tokio::test]
+async fn scoped_prepare_full_group_in_scope_succeeds() {
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("pkg-a", "1.0.0"),
 		("pkg-b", "1.0.0"),
 		("standalone", "1.0.0"),
-	]);
+	])
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nA fix\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
 	// Including both pkg-a and pkg-b (the full group) is valid.
 	let result = common::run_cursus(
@@ -248,7 +255,8 @@ fn scoped_prepare_full_group_in_scope_succeeds() {
 			"pkg-b",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected success: {result:?}");
 	assert_eq!(read_pkg_version(dir.path(), "pkg-a"), "1.0.1");
 	assert_eq!(read_pkg_version(dir.path(), "pkg-b"), "1.0.1");
@@ -256,17 +264,17 @@ fn scoped_prepare_full_group_in_scope_succeeds() {
 	assert_eq!(read_pkg_version(dir.path(), "standalone"), "1.0.0");
 }
 
-#[test]
-fn linked_packages_get_sync_changelog_entry() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn linked_packages_get_sync_changelog_entry() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"minor\"\n+++\n\nFeature for A\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	let changelog_b = std::fs::read_to_string(dir.path().join("pkg-b/CHANGELOG.md")).unwrap();
@@ -280,9 +288,9 @@ fn linked_packages_get_sync_changelog_entry() {
 	);
 }
 
-#[test]
-fn disabled_linking_does_not_sync() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn disabled_linking_does_not_sync() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
@@ -297,9 +305,10 @@ fn disabled_linking_does_not_sync() {
 				packages: vec!["pkg-a".to_string(), "pkg-b".to_string()],
 			}],
 		},
-	);
+	)
+	.await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	assert_eq!(read_pkg_version(dir.path(), "pkg-a"), "1.1.0");
@@ -307,9 +316,9 @@ fn disabled_linking_does_not_sync() {
 	assert_eq!(read_pkg_version(dir.path(), "pkg-b"), "1.0.0");
 }
 
-#[test]
-fn empty_packages_array_errors() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0")]);
+#[tokio::test]
+async fn empty_packages_array_errors() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
@@ -321,9 +330,10 @@ fn empty_packages_array_errors() {
 			enabled: None,
 			groups: vec![LinkedVersionGroup { packages: vec![] }],
 		},
-	);
+	)
+	.await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_err());
 	assert!(
 		result
@@ -333,9 +343,9 @@ fn empty_packages_array_errors() {
 	);
 }
 
-#[test]
-fn package_in_multiple_groups_errors() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn package_in_multiple_groups_errors() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
@@ -345,9 +355,10 @@ fn package_in_multiple_groups_errors() {
 	add_linked_versions_to_config(
 		dir.path(),
 		group_config(vec![vec!["pkg-a", "pkg-b"], vec!["pkg-*"]]),
-	);
+	)
+	.await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_err());
 	assert!(
 		result
@@ -357,20 +368,20 @@ fn package_in_multiple_groups_errors() {
 	);
 }
 
-#[test]
-fn pattern_matching_no_packages_warns_but_succeeds() {
+#[tokio::test]
+async fn pattern_matching_no_packages_warns_but_succeeds() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0")]);
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"patch\"\n+++\n\nA fix\n",
 	);
 	// The pattern "nonexistent-*" matches nothing — should warn, not fail.
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["nonexistent-*"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["nonexistent-*"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	let logs = take_logs();
@@ -383,20 +394,21 @@ fn pattern_matching_no_packages_warns_but_succeeds() {
 	assert_eq!(read_pkg_version(dir.path(), "pkg-a"), "1.0.1");
 }
 
-#[test]
-fn dry_run_with_linked_versions_does_not_write() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn dry_run_with_linked_versions_does_not_write() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\npkg-a = \"minor\"\n+++\n\nA feature\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "--dry-run", "prepare"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok());
 
 	// No versions should be changed in dry-run mode.
@@ -408,9 +420,9 @@ fn dry_run_with_linked_versions_does_not_write() {
 ///
 /// pkg-a has a minor changeset and pkg-b has a major changeset; the whole group
 /// should advance by a major bump applied to the max current version.
-#[test]
-fn highest_change_type_across_group_members_wins() {
-	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]);
+#[tokio::test]
+async fn highest_change_type_across_group_members_wins() {
+	let dir = temp_git_repo_with_cargo_workspace(&[("pkg-a", "1.0.0"), ("pkg-b", "1.0.0")]).await;
 	// Two changesets: one minor, one major.
 	write_changeset(
 		dir.path(),
@@ -422,9 +434,9 @@ fn highest_change_type_across_group_members_wins() {
 		"cs2.md",
 		"+++\npkg-b = \"major\"\n+++\n\nA breaking change\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "Expected success, got: {result:?}");
 
 	// max current = 1.0.0; highest_ct = Major → final = 2.0.0
@@ -432,21 +444,22 @@ fn highest_change_type_across_group_members_wins() {
 	assert_eq!(read_pkg_version(dir.path(), "pkg-b"), "2.0.0");
 }
 
-#[test]
-fn glob_pattern_matches_prefix() {
+#[tokio::test]
+async fn glob_pattern_matches_prefix() {
 	let dir = temp_git_repo_with_cargo_workspace(&[
 		("sdk-core", "1.0.0"),
 		("sdk-utils", "1.0.0"),
 		("other", "1.0.0"),
-	]);
+	])
+	.await;
 	write_changeset(
 		dir.path(),
 		"cs1.md",
 		"+++\nsdk-core = \"minor\"\n+++\n\nCore update\n",
 	);
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["sdk-*"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["sdk-*"]])).await;
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok());
 
 	assert_eq!(read_pkg_version(dir.path(), "sdk-core"), "1.1.0");
@@ -456,8 +469,8 @@ fn glob_pattern_matches_prefix() {
 
 // ── Linked group + dependency propagation interaction ───────────────────────
 
-#[test]
-fn propagation_into_linked_group_bumps_all_group_members() {
+#[tokio::test]
+async fn propagation_into_linked_group_bumps_all_group_members() {
 	// Scenario: linked group [pkg-a@0.2.5, pkg-b@0.2.5], pkg-c@1.2.3.
 	// pkg-a depends on pkg-c. Changeset bumps only pkg-c (minor).
 	// Expected: pkg-c → 1.3.0, pkg-a → 0.2.6 (propagated patch), pkg-b → 0.2.6 (linked with pkg-a).
@@ -467,7 +480,8 @@ fn propagation_into_linked_group_bumps_all_group_members() {
 		("pkg-a", "0.2.5"),
 		("pkg-b", "0.2.5"),
 		("pkg-c", "1.2.3"),
-	]);
+	])
+	.await;
 	// pkg-a depends on pkg-c
 	std::fs::write(
 		dir.path().join("pkg-a/Cargo.toml"),
@@ -475,7 +489,7 @@ fn propagation_into_linked_group_bumps_all_group_members() {
 	)
 	.unwrap();
 
-	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]]));
+	add_linked_versions_to_config(dir.path(), group_config(vec![vec!["pkg-a", "pkg-b"]])).await;
 
 	write_changeset(
 		dir.path(),
@@ -483,7 +497,7 @@ fn propagation_into_linked_group_bumps_all_group_members() {
 		"+++\npkg-c = \"minor\"\n+++\n\nNew feature in pkg-c\n",
 	);
 
-	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path());
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
 	assert!(result.is_ok(), "prepare failed: {result:?}");
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
 

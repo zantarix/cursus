@@ -31,13 +31,13 @@ use crate::path::AbsolutePath;
 ///
 /// Used by package manager config types to locate their workspace root.
 /// Returns `git_workdir` unchanged when `path` is `None`.
-fn resolve_root(
+async fn resolve_root(
 	path: &Option<String>,
 	git_workdir: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<AbsolutePath> {
 	match path {
-		Some(p) => git_workdir.subpath(p, fs).with_context(|| {
+		Some(p) => git_workdir.subpath(p, fs).await.with_context(|| {
 			format!("resolve_root: path '{p}' does not exist or escapes repository root")
 		}),
 		None => Ok(git_workdir.clone()),
@@ -268,11 +268,11 @@ impl Config {
 	/// - Projects cannot be enumerated
 	/// - An ignore pattern is not valid glob syntax
 	/// - No projects are found after filtering
-	pub fn load_projects_for_adapters(
+	pub async fn load_projects_for_adapters(
 		&self,
 		adapters: &[Arc<dyn PackageManagerAdapter>],
 	) -> anyhow::Result<Vec<Project>> {
-		let all_projects = package_manager::enumerate_projects(adapters.to_vec())?;
+		let all_projects = package_manager::enumerate_projects(adapters.to_vec()).await?;
 
 		// Validate that workspace-version-inherited projects are covered by linked versions.
 		validate_workspace_version_linking(&all_projects, &self.data.linked_versions)?;
@@ -338,9 +338,9 @@ impl Config {
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
 	/// - No projects are found
-	pub fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
+	pub async fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
 		let adapters = self.create_adapters()?;
-		self.load_projects_for_adapters(&adapters)
+		self.load_projects_for_adapters(&adapters).await
 	}
 
 	/// Saves the configuration to `.cursus/config.toml`.
@@ -350,15 +350,17 @@ impl Config {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub fn save(&self) -> anyhow::Result<PathBuf> {
+	pub async fn save(&self) -> anyhow::Result<PathBuf> {
 		let workdir = self.git_workdir();
 		let fs = self.env.fs();
 		let config_path = config_path(workdir);
 		let parent = workdir.child(".cursus");
 		fs.create_dir_all(&parent)
+			.await
 			.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
 		let contents = toml::to_string_pretty(&self.data).context("Failed to serialize config")?;
 		fs.write(&config_path, contents.as_bytes())
+			.await
 			.with_context(|| format!("Failed to create config: {}", config_path.display()))?;
 		Ok(config_path.into_path_buf())
 	}
@@ -371,15 +373,15 @@ fn config_path(git_workdir: &AbsolutePath) -> AbsolutePath {
 /// Checks if a Cursus configuration file exists in the repository.
 ///
 /// Returns `true` if `.cursus/config.toml` exists at the given git root.
-pub fn exists(env: &crate::Env) -> bool {
-	env.fs().exists(&config_path(env.git().path()))
+pub async fn exists(env: &crate::Env) -> anyhow::Result<bool> {
+	env.fs().exists(&config_path(env.git().path())).await
 }
 
-fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
+async fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
 	let git = env.git();
 	let git_workdir = git.path();
 
-	if !env.fs().exists(&config_path(git_workdir)) {
+	if !env.fs().exists(&config_path(git_workdir)).await? {
 		bail!("No configuration found. Run 'cursus init' to create one.");
 	}
 
@@ -387,6 +389,7 @@ fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
 	let contents = env
 		.fs()
 		.read_to_string(&path)
+		.await
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
 	let data: ConfigData =
 		toml::from_str(&contents).with_context(|| "Failed to parse config.toml")?;
@@ -415,8 +418,8 @@ fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
 ///
 /// Returns an error if the config file cannot be read or parsed.
 #[cfg(feature = "test-support")]
-pub fn load(env: &crate::Env) -> anyhow::Result<Config> {
-	load_impl(env)
+pub async fn load(env: &crate::Env) -> anyhow::Result<Config> {
+	load_impl(env).await
 }
 
 /// Loads the Cursus configuration from the repository.
@@ -427,8 +430,8 @@ pub fn load(env: &crate::Env) -> anyhow::Result<Config> {
 ///
 /// Returns an error if the config file cannot be read or parsed.
 #[cfg(not(feature = "test-support"))]
-pub(crate) fn load(env: &crate::Env) -> anyhow::Result<Config> {
-	load_impl(env)
+pub(crate) async fn load(env: &crate::Env) -> anyhow::Result<Config> {
+	load_impl(env).await
 }
 
 /// Validates that projects inheriting workspace versions are properly covered

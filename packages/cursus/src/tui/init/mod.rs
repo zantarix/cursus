@@ -9,7 +9,7 @@ use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
 use crate::github::GitHubRepo;
-use crate::model::config::{PackageManager, Strategy, exists as config_exists};
+use crate::model::config::{PackageManager, Strategy};
 use crate::path::AbsolutePath;
 
 mod confirm_overwrite;
@@ -163,12 +163,9 @@ fn complete(state: WizardState, open_editor: bool) -> InitResult {
 /// Detects which package managers have manifest files at the git root.
 ///
 /// Returns `(cargo_detected, npm_detected)`.
-fn detect_package_managers(
-	git_workdir: &AbsolutePath,
-	fs: &dyn crate::filesystem::Filesystem,
-) -> (bool, bool) {
-	let cargo = fs.exists(&git_workdir.child("Cargo.toml"));
-	let npm = fs.exists(&git_workdir.child("package.json"));
+fn detect_package_managers(git_workdir: &AbsolutePath) -> (bool, bool) {
+	let cargo = git_workdir.child("Cargo.toml").as_path().exists();
+	let npm = git_workdir.child("package.json").as_path().exists();
 	(cargo, npm)
 }
 
@@ -313,13 +310,13 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
-pub fn run(env: &Env, dry_run: bool) -> anyhow::Result<Option<InitResult>> {
+pub fn run(
+	env: &Env,
+	dry_run: bool,
+	detected_github: Option<crate::github::remote::GitHubRepo>,
+) -> anyhow::Result<Option<InitResult>> {
 	let git = env.git();
-	let (cargo_detected, npm_detected) = detect_package_managers(git.path(), env.fs());
-
-	let detected_github = crate::github::remote::GitHubRepo::detect_in(git)
-		.ok()
-		.flatten();
+	let (cargo_detected, npm_detected) = detect_package_managers(git.path());
 
 	let initial_state = WizardState {
 		env: env.clone(),
@@ -337,7 +334,8 @@ pub fn run(env: &Env, dry_run: bool) -> anyhow::Result<Option<InitResult>> {
 		remaining_manifest_pms: Vec::new(),
 	};
 
-	let initial_screen = if !dry_run && config_exists(env) {
+	let config_path = git.path().child(".cursus/config.toml");
+	let initial_screen = if !dry_run && config_path.as_path().exists() {
 		Screen::ConfirmOverwrite(false)
 	} else {
 		Screen::SelectPackageManagers {
@@ -483,10 +481,8 @@ mod tests {
 	#[test]
 	fn detect_package_managers_defaults_to_neither() {
 		let dir = temp_dir();
-		let (cargo, npm) = detect_package_managers(
-			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-			&crate::filesystem::LocalFilesystem,
-		);
+		let (cargo, npm) =
+			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		assert!(!cargo);
 		assert!(!npm);
 	}
@@ -495,10 +491,8 @@ mod tests {
 	fn detect_package_managers_detects_cargo() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let (cargo, npm) = detect_package_managers(
-			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-			&crate::filesystem::LocalFilesystem,
-		);
+		let (cargo, npm) =
+			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		assert!(cargo);
 		assert!(!npm);
 	}
@@ -507,10 +501,8 @@ mod tests {
 	fn detect_package_managers_detects_npm() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-		let (cargo, npm) = detect_package_managers(
-			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-			&crate::filesystem::LocalFilesystem,
-		);
+		let (cargo, npm) =
+			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		assert!(!cargo);
 		assert!(npm);
 	}
@@ -520,10 +512,8 @@ mod tests {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
 		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-		let (cargo, npm) = detect_package_managers(
-			&crate::path::AbsolutePath::new(dir.path()).unwrap(),
-			&crate::filesystem::LocalFilesystem,
-		);
+		let (cargo, npm) =
+			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
 		assert!(cargo);
 		assert!(npm);
 	}

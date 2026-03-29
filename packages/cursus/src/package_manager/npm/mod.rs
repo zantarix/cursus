@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use async_trait::async_trait;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use log::warn;
@@ -37,8 +38,10 @@ impl NpmAdapter {
 	}
 
 	/// Returns the resolved root directory for this package manager.
-	fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
-		self.config.resolve_root(&self.adapter_root, self.env.fs())
+	async fn resolve_root(&self) -> anyhow::Result<AbsolutePath> {
+		self.config
+			.resolve_root(&self.adapter_root, self.env.fs())
+			.await
 	}
 }
 
@@ -96,16 +99,17 @@ struct PnpmWorkspace {
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(package))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_package_json(
+async fn read_package_json(
 	dir: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Option<PackageJson>> {
 	let path = dir.child("package.json");
-	if !fs.exists(&path) {
+	if !fs.exists(&path).await? {
 		return Ok(None);
 	}
 	let contents = fs
 		.read_to_string(&path)
+		.await
 		.with_context(|| format!("Failed to read {}", path.display()))?;
 	let package: PackageJson = serde_json::from_str(&contents)
 		.with_context(|| format!("Failed to parse {}", path.display()))?;
@@ -116,16 +120,17 @@ fn read_package_json(
 ///
 /// Returns `Ok(None)` if the file doesn't exist, `Ok(Some(workspace))` if parsed
 /// successfully, or an error if the file exists but cannot be parsed.
-fn read_pnpm_workspace(
+async fn read_pnpm_workspace(
 	dir: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Option<PnpmWorkspace>> {
 	let path = dir.child("pnpm-workspace.yaml");
-	if !fs.exists(&path) {
+	if !fs.exists(&path).await? {
 		return Ok(None);
 	}
 	let contents = fs
 		.read_to_string(&path)
+		.await
 		.with_context(|| format!("Failed to read {}", path.display()))?;
 	let workspace: PnpmWorkspace = serde_saphyr::from_str(&contents)
 		.with_context(|| format!("Failed to parse {}", path.display()))?;
@@ -194,15 +199,15 @@ fn extract_project_metadata(
 /// Attempts to create a ProjectInfo from a workspace directory path.
 ///
 /// Returns `Ok(None)` if the path is not a valid workspace (not a directory or no package.json).
-fn read_workspace_project(
+async fn read_workspace_project(
 	workspace_path: &AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Option<ProjectInfo>> {
-	if !fs.is_dir(workspace_path) {
+	if !fs.is_dir(workspace_path).await? {
 		return Ok(None);
 	}
 
-	let Some(package) = read_package_json(workspace_path, fs)? else {
+	let Some(package) = read_package_json(workspace_path, fs).await? else {
 		return Ok(None);
 	};
 
@@ -238,17 +243,19 @@ fn read_workspace_project(
 /// [`ProjectInfo`] are absolute paths to each workspace directory. Only paths
 /// that remain within `pm_root` are returned; paths that escape via `..` or
 /// symlinks are rejected with an error.
-fn expand_workspace_pattern(
+async fn expand_workspace_pattern(
 	pm_root: &AbsolutePath,
 	pattern: &str,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
-	pm_root
-		.safe_glob(pattern, fs)?
-		.into_iter()
-		.map(|workspace_path| read_workspace_project(&workspace_path, fs))
-		.filter_map(Result::transpose)
-		.collect()
+	let paths = pm_root.safe_glob(pattern, fs).await?;
+	let mut projects = Vec::new();
+	for workspace_path in paths {
+		if let Some(info) = read_workspace_project(&workspace_path, fs).await? {
+			projects.push(info);
+		}
+	}
+	Ok(projects)
 }
 
 /// Builds a `ProjectInfo` for an npm root package.
@@ -289,7 +296,7 @@ fn build_npm_root_project_info(
 /// # Errors
 ///
 /// Returns an error if the command fails.
-fn run_lock_update(
+async fn run_lock_update(
 	env: &crate::Env,
 	program: &str,
 	args: &[&str],
@@ -297,11 +304,12 @@ fn run_lock_update(
 	lock_filename: &str,
 ) -> anyhow::Result<Option<PathBuf>> {
 	let lock_path = workspace_root.child(lock_filename);
-	if !env.fs().exists(&lock_path) {
+	if !env.fs().exists(&lock_path).await? {
 		return Ok(None);
 	}
 	let output = env
 		.run_mut(program, args, workspace_root)
+		.await
 		.with_context(|| {
 			format!(
 				"Failed to execute {} {} in {}",
@@ -327,9 +335,13 @@ fn run_lock_update(
 ///
 /// Returns the major version as a `u32`, or an error if the version cannot be
 /// determined.
-fn yarn_major_version(env: &crate::Env, workspace_root: &AbsolutePath) -> anyhow::Result<u32> {
+async fn yarn_major_version(
+	env: &crate::Env,
+	workspace_root: &AbsolutePath,
+) -> anyhow::Result<u32> {
 	let output = env
 		.run("yarn", &["--version"], workspace_root)
+		.await
 		.context("Failed to run 'yarn --version'")?;
 	if !output.status.success() {
 		let stderr = String::from_utf8_lossy(&output.stderr);
@@ -356,27 +368,30 @@ fn yarn_major_version(env: &crate::Env, workspace_root: &AbsolutePath) -> anyhow
 ///   detected explicitly.
 ///
 /// Returns `Ok(None)` when `yarn.lock` does not exist in `workspace_root`.
-fn run_yarn_lock_update(
+async fn run_yarn_lock_update(
 	env: &crate::Env,
 	workspace_root: &AbsolutePath,
 ) -> anyhow::Result<Option<PathBuf>> {
 	let lock_path = workspace_root.child("yarn.lock");
-	if !env.fs().exists(&lock_path) {
+	if !env.fs().exists(&lock_path).await? {
 		return Ok(None);
 	}
-	let major = yarn_major_version(env, workspace_root)?;
+	let major = yarn_major_version(env, workspace_root).await?;
 	let args: &[&str] = if major >= 2 {
 		&["install", "--mode", "update-lockfile"]
 	} else {
 		&["install", "--ignore-scripts"]
 	};
-	let output = env.run_mut("yarn", args, workspace_root).with_context(|| {
-		format!(
-			"Failed to execute yarn {} in {}",
-			args.join(" "),
-			workspace_root.display()
-		)
-	})?;
+	let output = env
+		.run_mut("yarn", args, workspace_root)
+		.await
+		.with_context(|| {
+			format!(
+				"Failed to execute yarn {} in {}",
+				args.join(" "),
+				workspace_root.display()
+			)
+		})?;
 	if !output.status.success() {
 		let stderr = String::from_utf8_lossy(&output.stderr);
 		anyhow::bail!(
@@ -392,7 +407,7 @@ fn run_yarn_lock_update(
 /// Executes a custom lock file command via the shell.
 ///
 /// Returns an error if the command fails. Used when `lock_command` is set in config.
-fn run_custom_lock_command(
+async fn run_custom_lock_command(
 	env: &crate::Env,
 	lock_command: &str,
 	workspace_root: &AbsolutePath,
@@ -402,6 +417,7 @@ fn run_custom_lock_command(
 	}
 	let output = env
 		.run_shell_mut(lock_command, workspace_root)
+		.await
 		.with_context(|| {
 			format!(
 				"Failed to execute lock command '{}' in {}",
@@ -466,8 +482,9 @@ fn update_dep_in_section(
 	true
 }
 
+#[async_trait]
 impl PackageManagerAdapter for NpmAdapter {
-	fn write_version(
+	async fn write_version(
 		&self,
 		project: &ProjectInfo,
 		version: &Version,
@@ -478,34 +495,40 @@ impl PackageManagerAdapter for NpmAdapter {
 			.env
 			.fs()
 			.read_to_string(&manifest_path)
+			.await
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let root = CstRootNode::parse(&contents, &ParseOptions::default())
-			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		let obj = root
-			.object_value()
-			.with_context(|| format!("Root is not an object in {}", manifest_path.display()))?;
-		let prop = obj
-			.get("version")
-			.with_context(|| format!("Missing 'version' field in {}", manifest_path.display()))?;
-		prop.set_value(CstInputValue::String(version.to_string()));
-		if !dry_run {
+		// Compute the output string in a block so the non-Send CstRootNode is
+		// dropped before the next `.await`.
+		let output = {
+			let root = CstRootNode::parse(&contents, &ParseOptions::default())
+				.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+			let obj = root
+				.object_value()
+				.with_context(|| format!("Root is not an object in {}", manifest_path.display()))?;
+			let prop = obj.get("version").with_context(|| {
+				format!("Missing 'version' field in {}", manifest_path.display())
+			})?;
+			prop.set_value(CstInputValue::String(version.to_string()));
 			// Ensure the file always ends with exactly one newline.
-			let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
+			format!("{}\n", root.to_string().trim_end_matches('\n'))
+		};
+		if !dry_run {
 			self.env
 				.fs()
 				.write(&manifest_path, output.as_bytes())
+				.await
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		}
 		Ok(())
 	}
 
-	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
-		let pm_root = self.resolve_root()?;
+	async fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {
+		let pm_root = self.resolve_root().await?;
 		let fs = self.env.fs();
-		let Some(root_package) = read_package_json(&pm_root, fs)? else {
+		let Some(root_package) = read_package_json(&pm_root, fs).await? else {
 			return Ok(Vec::new());
 		};
-		let pnpm_workspace = read_pnpm_workspace(&pm_root, fs)?;
+		let pnpm_workspace = read_pnpm_workspace(&pm_root, fs).await?;
 
 		let root_manifest_path = pm_root.child("package.json");
 
@@ -522,16 +545,12 @@ impl PackageManagerAdapter for NpmAdapter {
 		let root_project =
 			build_npm_root_project_info(&root_package, pm_root.clone(), &root_manifest_path)?;
 
-		let mut projects: Vec<ProjectInfo> = std::iter::once(root_project)
-			.chain(
-				workspace_patterns
-					.iter()
-					.map(|pattern| expand_workspace_pattern(&pm_root, pattern, self.env.fs()))
-					.collect::<anyhow::Result<Vec<_>>>()?
-					.into_iter()
-					.flatten(),
-			)
-			.collect();
+		let mut projects: Vec<ProjectInfo> = vec![root_project];
+		for pattern in &workspace_patterns {
+			let workspace_projects =
+				expand_workspace_pattern(&pm_root, pattern, self.env.fs()).await?;
+			projects.extend(workspace_projects);
+		}
 
 		// Sort by path for consistent ordering
 		projects.sort_by(|a, b| a.path.cmp(&b.path));
@@ -539,12 +558,12 @@ impl PackageManagerAdapter for NpmAdapter {
 		Ok(projects)
 	}
 
-	fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
-		let workspace_root = self.resolve_root()?;
+	async fn update_lock_file(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
+		let workspace_root = self.resolve_root().await?;
 		// If a custom lock command is configured, execute it via the shell (ADR-011).
 		// We can't know which file the custom command writes, so return None.
 		if let Some(ref lock_command) = self.config.lock_command {
-			run_custom_lock_command(&self.env, lock_command, &workspace_root)?;
+			run_custom_lock_command(&self.env, lock_command, &workspace_root).await?;
 			return Ok(None);
 		}
 		// Auto-detect lock file and run appropriate command.
@@ -554,7 +573,9 @@ impl PackageManagerAdapter for NpmAdapter {
 			&["install", "--package-lock-only", "--ignore-scripts"],
 			&workspace_root,
 			"package-lock.json",
-		)? {
+		)
+		.await?
+		{
 			return Ok(Some(path));
 		}
 		if let Some(path) = run_lock_update(
@@ -563,13 +584,15 @@ impl PackageManagerAdapter for NpmAdapter {
 			&["install", "--lockfile-only", "--ignore-scripts"],
 			&workspace_root,
 			"pnpm-lock.yaml",
-		)? {
+		)
+		.await?
+		{
 			return Ok(Some(path));
 		}
-		run_yarn_lock_update(&self.env, &workspace_root)
+		run_yarn_lock_update(&self.env, &workspace_root).await
 	}
 
-	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
+	async fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		let project_dir = project.path.clone();
 		let oidc = self.env.oidc_environment();
 		let node_auth = self.env.node_auth_token_present();
@@ -612,6 +635,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		let output = self
 			.env
 			.run_mut("npm", &args, &project_dir)
+			.await
 			.with_context(|| format!("Failed to execute npm publish for {}", project.name))?;
 
 		if output.status.success() {
@@ -630,15 +654,15 @@ impl PackageManagerAdapter for NpmAdapter {
 		anyhow::bail!("npm publish failed for {}: {}", project.name, stderr);
 	}
 
-	fn registry_name(&self) -> &str {
+	async fn registry_name(&self) -> &str {
 		"npm"
 	}
 
-	fn manifest_filename(&self) -> &str {
+	async fn manifest_filename(&self) -> &str {
 		"package.json"
 	}
 
-	fn update_dependency_version(
+	async fn update_dependency_version(
 		&self,
 		project: &ProjectInfo,
 		dependency_name: &str,
@@ -647,35 +671,45 @@ impl PackageManagerAdapter for NpmAdapter {
 	) -> anyhow::Result<Vec<PathBuf>> {
 		let fs = self.env.fs();
 		let manifest_path = project.path.child("package.json");
-		if !fs.exists(&manifest_path) {
+		if !fs.exists(&manifest_path).await? {
 			return Ok(Vec::new());
 		}
 
 		let contents = fs
 			.read_to_string(&manifest_path)
+			.await
 			.with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-		let root = CstRootNode::parse(&contents, &ParseOptions::default())
-			.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-		let obj = root
-			.object_value()
-			.with_context(|| format!("Root is not an object in {}", manifest_path.display()))?;
+		// Compute the output in a block so the non-Send CstRootNode is dropped
+		// before the next `.await`.
+		let output = {
+			let root = CstRootNode::parse(&contents, &ParseOptions::default())
+				.with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+			let obj = root
+				.object_value()
+				.with_context(|| format!("Root is not an object in {}", manifest_path.display()))?;
 
-		let sections = [
-			"dependencies",
-			"devDependencies",
-			"peerDependencies",
-			"optionalDependencies",
-		];
-		let mut modified = false;
-		for s in &sections {
-			modified |=
-				update_dep_in_section(&obj, s, dependency_name, new_version, &manifest_path);
-		}
+			let sections = [
+				"dependencies",
+				"devDependencies",
+				"peerDependencies",
+				"optionalDependencies",
+			];
+			let mut modified = false;
+			for s in &sections {
+				modified |=
+					update_dep_in_section(&obj, s, dependency_name, new_version, &manifest_path);
+			}
+			if modified {
+				Some(format!("{}\n", root.to_string().trim_end_matches('\n')))
+			} else {
+				None
+			}
+		};
 
-		if modified {
+		if let Some(output) = output {
 			if !dry_run {
-				let output = format!("{}\n", root.to_string().trim_end_matches('\n'));
 				fs.write(&manifest_path, output.as_bytes())
+					.await
 					.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 			}
 			return Ok(vec![manifest_path.into_path_buf()]);

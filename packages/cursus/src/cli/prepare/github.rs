@@ -17,7 +17,7 @@ use super::ReleaseInfo;
 /// # Errors
 ///
 /// Returns an error if the find, create, or update API call fails.
-pub(super) fn upsert_pull_request(
+pub(super) async fn upsert_pull_request(
 	client: &dyn GitHubClient,
 	gh_repo: &GitHubRepo,
 	title: &str,
@@ -25,14 +25,18 @@ pub(super) fn upsert_pull_request(
 	head: &str,
 	base: &str,
 ) -> anyhow::Result<String> {
-	match client.find_open_pull_request(gh_repo, head)? {
+	match client.find_open_pull_request(gh_repo, head).await? {
 		Some(pr) => {
-			let url = client.update_pull_request(gh_repo, pr.number, title, body)?;
+			let url = client
+				.update_pull_request(gh_repo, pr.number, title, body)
+				.await?;
 			info!("Updated pull request: {url}");
 			Ok(url)
 		}
 		None => {
-			let url = client.create_pull_request(gh_repo, title, body, head, base)?;
+			let url = client
+				.create_pull_request(gh_repo, title, body, head, base)
+				.await?;
 			info!("Created pull request: {url}");
 			Ok(url)
 		}
@@ -65,7 +69,7 @@ pub(super) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> Stri
 /// No-ops in dry-run mode or when no GitHub client is available. The dry-run
 /// short-circuit is intentional per ADR-017: the PR upsert is the side-effecting
 /// operation being guarded, so the check lives here rather than at the call site.
-pub(super) fn upsert_release_pull_request(
+pub(super) async fn upsert_release_pull_request(
 	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
@@ -83,10 +87,12 @@ pub(super) fn upsert_release_pull_request(
 	};
 	let base = original_branch.context("HEAD is detached; cannot determine PR base branch")?;
 	let gh_repo = GitHubRepo::resolve(&config.github, git)
+		.await
 		.context("Could not resolve GitHub repository for PR creation")?;
 	let title = config.github.pull_request_title();
 	let pr_body = build_pr_body(release_infos, base);
 	upsert_pull_request(client, &gh_repo, title, &pr_body, branch, base)
+		.await
 		.context("Failed to create or update pull request")?;
 	Ok(())
 }
@@ -95,16 +101,16 @@ pub(super) fn upsert_release_pull_request(
 mod tests {
 	use super::*;
 
-	#[test]
-	fn build_pr_body_empty_releases() {
+	#[tokio::test]
+	async fn build_pr_body_empty_releases() {
 		let body = build_pr_body(&[], "main");
 		assert!(body.contains("# Releases"));
 		assert!(body.contains("`main`"));
 		assert!(body.contains("Cursus"));
 	}
 
-	#[test]
-	fn build_pr_body_formats_single_release() {
+	#[tokio::test]
+	async fn build_pr_body_formats_single_release() {
 		let releases = vec![ReleaseInfo {
 			package_name: "my-pkg".to_string(),
 			new_version: "1.2.0".parse().unwrap(),
@@ -117,8 +123,8 @@ mod tests {
 		assert!(body.contains("`main`"));
 	}
 
-	#[test]
-	fn build_pr_body_formats_multiple_releases() {
+	#[tokio::test]
+	async fn build_pr_body_formats_multiple_releases() {
 		let releases = vec![
 			ReleaseInfo {
 				package_name: "pkg-a".to_string(),
@@ -143,14 +149,14 @@ mod tests {
 		assert!(pos_a < pos_b);
 	}
 
-	#[test]
-	fn build_pr_body_includes_base_branch_in_intro() {
+	#[tokio::test]
+	async fn build_pr_body_includes_base_branch_in_intro() {
 		let body = build_pr_body(&[], "my-feature-branch");
 		assert!(body.contains("`my-feature-branch`"));
 	}
 
-	#[test]
-	fn build_pr_body_snapshot() {
+	#[tokio::test]
+	async fn build_pr_body_snapshot() {
 		let releases = vec![
 			ReleaseInfo {
 				package_name: "pkg-a".to_string(),
@@ -174,8 +180,8 @@ mod tests {
 
 	// ── upsert_pull_request ───────────────────────────────────────────────────
 
-	#[test]
-	fn upsert_pull_request_creates_when_no_existing() {
+	#[tokio::test]
+	async fn upsert_pull_request_creates_when_no_existing() {
 		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 		let client = RecordingGitHubClient::new(); // no existing PR
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
@@ -186,7 +192,8 @@ mod tests {
 			"body",
 			"cursus-release/main",
 			"main",
-		);
+		)
+		.await;
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 		let invocations = client.invocations();
 		// Should have called find then create
@@ -204,8 +211,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn upsert_pull_request_updates_when_existing() {
+	#[tokio::test]
+	async fn upsert_pull_request_updates_when_existing() {
 		use crate::github::client::PullRequest;
 		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
 		let existing_pr = PullRequest {
@@ -221,7 +228,8 @@ mod tests {
 			"updated body",
 			"cursus-release/main",
 			"main",
-		);
+		)
+		.await;
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 		let invocations = client.invocations();
 		assert!(
@@ -245,8 +253,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn upsert_pull_request_propagates_find_error() {
+	#[tokio::test]
+	async fn upsert_pull_request_propagates_find_error() {
 		use crate::github::client::test_support::RecordingGitHubClient;
 		let client = RecordingGitHubClient::new().with_find_pr_failure();
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
@@ -257,7 +265,8 @@ mod tests {
 			"body",
 			"release-branch",
 			"main",
-		);
+		)
+		.await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -266,8 +275,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn upsert_pull_request_propagates_update_error() {
+	#[tokio::test]
+	async fn upsert_pull_request_propagates_update_error() {
 		use crate::github::client::PullRequest;
 		use crate::github::client::test_support::RecordingGitHubClient;
 		let existing_pr = PullRequest {
@@ -285,7 +294,8 @@ mod tests {
 			"body",
 			"release-branch",
 			"main",
-		);
+		)
+		.await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -294,8 +304,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn upsert_pull_request_propagates_create_error() {
+	#[tokio::test]
+	async fn upsert_pull_request_propagates_create_error() {
 		use crate::github::client::test_support::RecordingGitHubClient;
 		let client = RecordingGitHubClient::new().with_create_pr_failure();
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
@@ -306,7 +316,8 @@ mod tests {
 			"body",
 			"release-branch",
 			"main",
-		);
+		)
+		.await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

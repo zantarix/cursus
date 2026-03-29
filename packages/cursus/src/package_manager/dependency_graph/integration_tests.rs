@@ -9,8 +9,8 @@ use crate::package_manager::{
 };
 use crate::path::AbsolutePath;
 
-#[test]
-fn build_dependency_graph_empty_for_single_package() {
+#[tokio::test]
+async fn build_dependency_graph_empty_for_single_package() {
 	let dir = tempfile::tempdir().unwrap();
 	std::fs::write(
 		dir.path().join("package.json"),
@@ -33,7 +33,7 @@ fn build_dependency_graph_empty_for_single_package() {
 			)
 		},
 	));
-	let projects = enumerate_projects([adapter]).unwrap();
+	let projects = enumerate_projects([adapter]).await.unwrap();
 	let graph = build_dependency_graph(&projects).unwrap();
 
 	// Single package with no dependencies should result in trivial sorting
@@ -41,8 +41,8 @@ fn build_dependency_graph_empty_for_single_package() {
 	assert_eq!(sorted, vec!["test-package"]);
 }
 
-#[test]
-fn build_dependency_graph_with_workspace_dependencies() {
+#[tokio::test]
+async fn build_dependency_graph_with_workspace_dependencies() {
 	let dir = tempfile::tempdir().unwrap();
 
 	// Create workspace with dependencies
@@ -81,7 +81,7 @@ fn build_dependency_graph_with_workspace_dependencies() {
 			)
 		},
 	));
-	let projects = enumerate_projects([adapter]).unwrap();
+	let projects = enumerate_projects([adapter]).await.unwrap();
 	let graph = build_dependency_graph(&projects).unwrap();
 
 	// app depends on lib, so lib should come before app
@@ -93,8 +93,8 @@ fn build_dependency_graph_with_workspace_dependencies() {
 	assert!(lib_index < app_index, "lib should come before app");
 }
 
-#[test]
-fn build_dependency_graph_excludes_external_dependencies() {
+#[tokio::test]
+async fn build_dependency_graph_excludes_external_dependencies() {
 	let dir = tempfile::tempdir().unwrap();
 
 	// Create workspace where app depends on both workspace lib and external react
@@ -133,7 +133,7 @@ fn build_dependency_graph_excludes_external_dependencies() {
 			)
 		},
 	));
-	let projects = enumerate_projects([adapter]).unwrap();
+	let projects = enumerate_projects([adapter]).await.unwrap();
 	let graph = build_dependency_graph(&projects).unwrap();
 
 	// Verify that app's adjacency list only includes lib, not react

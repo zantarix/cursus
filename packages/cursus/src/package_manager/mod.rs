@@ -13,6 +13,7 @@ pub use npm::NpmAdapter;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use semver::Version;
 
 use crate::path::AbsolutePath;
@@ -139,22 +140,24 @@ impl Project {
 	///
 	/// When `dry_run` is `true`, detects changes but does not write to disk.
 	/// Delegates to the underlying package manager adapter.
-	pub fn write_version(&self, version: &Version, dry_run: bool) -> anyhow::Result<()> {
-		self.adapter.write_version(&self.info, version, dry_run)
+	pub async fn write_version(&self, version: &Version, dry_run: bool) -> anyhow::Result<()> {
+		self.adapter
+			.write_version(&self.info, version, dry_run)
+			.await
 	}
 
 	/// Publishes this project to its package registry.
 	///
 	/// Delegates to the underlying package manager adapter.
-	pub fn publish(&self) -> anyhow::Result<PublishOutcome> {
-		self.adapter.publish(&self.info)
+	pub async fn publish(&self) -> anyhow::Result<PublishOutcome> {
+		self.adapter.publish(&self.info).await
 	}
 
 	/// Returns the name of the registry this project would be published to.
 	///
 	/// Delegates to the underlying package manager adapter.
-	pub fn registry_name(&self) -> &str {
-		self.adapter.registry_name()
+	pub async fn registry_name(&self) -> &str {
+		self.adapter.registry_name().await
 	}
 
 	/// Returns whether this project is publishable (not marked as private).
@@ -180,7 +183,7 @@ impl Project {
 	///
 	/// When `dry_run` is `true`, detects which files would change but does not write them.
 	/// Delegates to the underlying package manager adapter.
-	pub fn update_dependency_version(
+	pub async fn update_dependency_version(
 		&self,
 		dependency_name: &str,
 		new_version: &Version,
@@ -188,14 +191,15 @@ impl Project {
 	) -> anyhow::Result<Vec<PathBuf>> {
 		self.adapter
 			.update_dependency_version(&self.info, dependency_name, new_version, dry_run)
+			.await
 	}
 
 	/// Returns the absolute path to this project's manifest file.
 	///
 	/// Combines the project's absolute path with the adapter-specific manifest
 	/// filename (e.g., `Cargo.toml` or `package.json`).
-	pub fn manifest_path(&self) -> std::path::PathBuf {
-		self.info.path.join(self.adapter.manifest_filename())
+	pub async fn manifest_path(&self) -> std::path::PathBuf {
+		self.info.path.join(self.adapter.manifest_filename().await)
 	}
 
 	/// Creates a minimal `Project` with a dummy adapter for use in unit tests.
@@ -287,6 +291,7 @@ impl Project {
 ///
 /// Implementations of this trait provide package-manager-specific functionality
 /// for discovering and managing projects within a repository.
+#[async_trait]
 pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// Enumerates all projects managed by this package manager.
 	///
@@ -301,7 +306,7 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if project enumeration fails (e.g., invalid manifest files).
-	fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>>;
+	async fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>>;
 
 	/// Writes a new version to a project's manifest file, preserving formatting.
 	///
@@ -316,7 +321,7 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the manifest file cannot be read or written.
-	fn write_version(
+	async fn write_version(
 		&self,
 		project: &ProjectInfo,
 		version: &Version,
@@ -340,7 +345,7 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the lock file update command fails.
-	fn update_lock_file(&self) -> anyhow::Result<Option<PathBuf>>;
+	async fn update_lock_file(&self) -> anyhow::Result<Option<PathBuf>>;
 
 	/// Publishes a project to its package registry.
 	///
@@ -362,15 +367,15 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// subprocess. However, the synthetic success output causes `publish()` to return
 	/// `PublishOutcome::Published`. Callers that need dry-run semantics **must** gate
 	/// this call themselves — see `publish_projects()` in `src/cli/publish.rs`.
-	fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome>;
+	async fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome>;
 
 	/// Returns the name of the registry this adapter publishes to.
 	///
 	/// Used for display purposes in CLI output (e.g., "crates.io", "npm").
-	fn registry_name(&self) -> &str;
+	async fn registry_name(&self) -> &str;
 
 	/// Returns the filename of the package manifest (e.g., `"Cargo.toml"` or `"package.json"`).
-	fn manifest_filename(&self) -> &str;
+	async fn manifest_filename(&self) -> &str;
 
 	/// Updates a dependency version in a project's manifest file.
 	///
@@ -387,7 +392,7 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if a manifest file cannot be read or (when `dry_run` is false) written.
-	fn update_dependency_version(
+	async fn update_dependency_version(
 		&self,
 		project: &ProjectInfo,
 		dependency_name: &str,
@@ -469,24 +474,20 @@ pub fn filter_projects_by_name(
 /// # Errors
 ///
 /// Returns an error if any adapter fails to enumerate its projects.
-pub fn enumerate_projects(
+pub async fn enumerate_projects(
 	adapters: impl IntoIterator<Item = Arc<dyn PackageManagerAdapter>>,
 ) -> anyhow::Result<Vec<Project>> {
-	adapters
-		.into_iter()
-		.map(|adapter| {
-			adapter.enumerate_projects().map(|infos| {
-				infos
-					.into_iter()
-					.map(|info| Project {
-						info,
-						adapter: Arc::clone(&adapter),
-					})
-					.collect::<Vec<_>>()
-			})
-		})
-		.collect::<anyhow::Result<Vec<_>>>()
-		.map(|nested| nested.into_iter().flatten().collect())
+	let mut all_projects = Vec::new();
+	for adapter in adapters {
+		let infos = adapter.enumerate_projects().await?;
+		for info in infos {
+			all_projects.push(Project {
+				info,
+				adapter: Arc::clone(&adapter),
+			});
+		}
+	}
+	Ok(all_projects)
 }
 
 /// Builds a dependency graph for the given projects.
@@ -564,15 +565,15 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn project_registry_name_delegates_to_adapter() {
+	#[tokio::test]
+	async fn project_registry_name_delegates_to_adapter() {
 		// new_test uses NpmAdapter, which returns "npm"
 		let project = Project::new_test("my-app", "/nonexistent");
-		assert_eq!(project.registry_name(), "npm");
+		assert_eq!(project.registry_name().await, "npm");
 	}
 
-	#[test]
-	fn enumerate_projects_attaches_adapter() {
+	#[tokio::test]
+	async fn enumerate_projects_attaches_adapter() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::write(
 			dir.path().join("package.json"),
@@ -592,7 +593,7 @@ mod tests {
 				)),
 			),
 		));
-		let projects = enumerate_projects([adapter.clone()]).unwrap();
+		let projects = enumerate_projects([adapter.clone()]).await.unwrap();
 
 		assert_eq!(projects.len(), 1);
 		assert_eq!(projects[0].name(), "test");
@@ -600,8 +601,8 @@ mod tests {
 		assert!(Arc::strong_count(&projects[0].adapter) >= 2);
 	}
 
-	#[test]
-	fn enumerate_projects_flattens_multiple_adapters() {
+	#[tokio::test]
+	async fn enumerate_projects_flattens_multiple_adapters() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::write(
 			dir.path().join("package.json"),
@@ -635,7 +636,7 @@ mod tests {
 			),
 		));
 
-		let projects = enumerate_projects([adapter1, adapter2]).unwrap();
+		let projects = enumerate_projects([adapter1, adapter2]).await.unwrap();
 
 		// Both adapters find the same package, so we get 2 projects
 		assert_eq!(projects.len(), 2);
@@ -643,11 +644,11 @@ mod tests {
 		assert_eq!(projects[1].name(), "npm-pkg");
 	}
 
-	#[test]
-	fn enumerate_projects_empty_adapters_returns_empty() {
+	#[tokio::test]
+	async fn enumerate_projects_empty_adapters_returns_empty() {
 		let _dir = tempfile::tempdir().unwrap();
 		let adapters: [Arc<dyn PackageManagerAdapter>; 0] = [];
-		let projects = enumerate_projects(adapters).unwrap();
+		let projects = enumerate_projects(adapters).await.unwrap();
 		assert!(projects.is_empty());
 	}
 

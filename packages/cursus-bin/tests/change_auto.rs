@@ -13,8 +13,8 @@ use cursus::model::config::{CargoConfig, GitConfig, PackageManager};
 /// Sets up a real git repo with a remote and origin/HEAD configured, ready for --auto tests.
 ///
 /// Returns `(repo_dir, remote_dir)`. Keep `remote_dir` alive for the test duration.
-fn setup_auto_repo(pm: PackageManager) -> (tempfile::TempDir, tempfile::TempDir) {
-	let dir = temp_real_git_repo_with_project(pm);
+async fn setup_auto_repo(pm: PackageManager) -> (tempfile::TempDir, tempfile::TempDir) {
+	let dir = temp_real_git_repo_with_project(pm).await;
 	let remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 	let branch = git_current_branch(dir.path());
@@ -43,15 +43,16 @@ fn find_changesets(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 		.collect()
 }
 
-#[test]
-fn change_auto_fix_commit_creates_patch_changeset() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_fix_commit_creates_patch_changeset() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: resolve null pointer");
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -69,15 +70,16 @@ fn change_auto_fix_commit_creates_patch_changeset() {
 	);
 }
 
-#[test]
-fn change_auto_feat_commit_creates_minor_changeset() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_feat_commit_creates_minor_changeset() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "feat: add new feature");
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	let changesets = find_changesets(dir.path());
@@ -89,15 +91,16 @@ fn change_auto_feat_commit_creates_minor_changeset() {
 	);
 }
 
-#[test]
-fn change_auto_breaking_bang_creates_major_changeset() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_breaking_bang_creates_major_changeset() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "feat!: redesign public API");
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	let changesets = find_changesets(dir.path());
@@ -109,15 +112,16 @@ fn change_auto_breaking_bang_creates_major_changeset() {
 	);
 }
 
-#[test]
-fn change_auto_chore_commit_skips_changeset() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_chore_commit_skips_changeset() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "chore: update dependencies");
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -128,16 +132,17 @@ fn change_auto_chore_commit_skips_changeset() {
 	);
 }
 
-#[test]
-fn change_auto_multiple_commits_skips() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_multiple_commits_skips() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: first fix");
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: second fix");
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -148,14 +153,15 @@ fn change_auto_multiple_commits_skips() {
 	);
 }
 
-#[test]
-fn change_auto_zero_commits_ahead_fails() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_zero_commits_ahead_fails() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 	let err = result.unwrap_err().to_string();
@@ -165,22 +171,23 @@ fn change_auto_zero_commits_ahead_fails() {
 	);
 }
 
-#[test]
-fn change_auto_invalid_commit_message_fails() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_invalid_commit_message_fails() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "not a conventional commit");
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_err());
 }
 
-#[test]
-fn change_auto_dry_run_writes_nothing() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_dry_run_writes_nothing() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: fix a bug");
 
 	let result = common::run_cursus(
@@ -193,7 +200,8 @@ fn change_auto_dry_run_writes_nothing() {
 			"--no-git",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -204,9 +212,9 @@ fn change_auto_dry_run_writes_nothing() {
 	);
 }
 
-#[test]
-fn change_auto_changeset_includes_body() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_changeset_includes_body() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	std::fs::write(dir.path().join("src/lib.rs"), "// modified").unwrap();
 	git_cmd(dir.path(), &["add", "."]);
 	git_cmd(
@@ -221,7 +229,8 @@ fn change_auto_changeset_includes_body() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	let changesets = find_changesets(dir.path());
@@ -237,11 +246,12 @@ fn change_auto_changeset_includes_body() {
 	);
 }
 
-#[test]
-fn change_auto_no_matching_projects_skips() {
+#[tokio::test]
+async fn change_auto_no_matching_projects_skips() {
 	// Use a cargo workspace with a package in a subfolder; modify only a file
 	// at the root (outside any package) so no project matches.
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0")], GitConfig::default());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("pkg-a", "0.1.0")], GitConfig::default()).await;
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 	let branch = git_current_branch(dir.path());
@@ -254,7 +264,8 @@ fn change_auto_no_matching_projects_skips() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	assert_eq!(result.unwrap(), ExitCode::SUCCESS);
@@ -265,12 +276,13 @@ fn change_auto_no_matching_projects_skips() {
 	);
 }
 
-#[test]
-fn change_auto_monorepo_only_affected_project_in_changeset() {
+#[tokio::test]
+async fn change_auto_monorepo_only_affected_project_in_changeset() {
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "0.1.0"), ("pkg-b", "0.1.0")],
 		GitConfig::default(),
-	);
+	)
+	.await;
 	let _remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
 	let branch = git_current_branch(dir.path());
@@ -283,7 +295,8 @@ fn change_auto_monorepo_only_affected_project_in_changeset() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	let changesets = find_changesets(dir.path());
@@ -299,16 +312,17 @@ fn change_auto_monorepo_only_affected_project_in_changeset() {
 	);
 }
 
-#[test]
-fn change_auto_no_git_skips_commit() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_no_git_skips_commit() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: a small bugfix");
 	let commits_before = git_log(dir.path()).len();
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok());
 	let changesets = find_changesets(dir.path());
@@ -321,20 +335,21 @@ fn change_auto_no_git_skips_commit() {
 	);
 }
 
-#[test]
-fn change_auto_with_git_commits_and_pushes() {
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+#[tokio::test]
+async fn change_auto_with_git_commits_and_pushes() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: another fix");
 
 	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
 		.with_cargo(CargoConfig::enabled())
 		.with_git(GitConfig::enabled_config());
-	config.save().unwrap();
+	config.save().await.unwrap();
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok(), "Expected success, got: {:?}", result.err());
 	let changesets = find_changesets(dir.path());
@@ -347,8 +362,8 @@ fn change_auto_with_git_commits_and_pushes() {
 	);
 }
 
-#[test]
-fn change_auto_conflicts_with_change_type() {
+#[tokio::test]
+async fn change_auto_conflicts_with_change_type() {
 	let (success, _stdout, stderr) = common::run_cursus_subprocess(
 		&["--no-interactive", "change", "--auto", "-t", "minor"],
 		std::env::temp_dir().as_path(),
@@ -360,8 +375,8 @@ fn change_auto_conflicts_with_change_type() {
 	);
 }
 
-#[test]
-fn change_auto_conflicts_with_message() {
+#[tokio::test]
+async fn change_auto_conflicts_with_message() {
 	let (success, _stdout, stderr) = common::run_cursus_subprocess(
 		&["--no-interactive", "change", "--auto", "-m", "hello"],
 		std::env::temp_dir().as_path(),
@@ -378,10 +393,10 @@ fn change_auto_conflicts_with_message() {
 /// Guards `&&`→`||` on `commit_to_git = config.git.enabled() && !args.no_git`: if that
 /// becomes `||`, a disabled-git config with no `--no-git` flag would still commit
 /// (since `!args.no_git` is true), creating an unexpected commit.
-#[test]
-fn change_auto_git_disabled_in_config_no_commit() {
+#[tokio::test]
+async fn change_auto_git_disabled_in_config_no_commit() {
 	// setup_auto_repo uses temp_real_git_repo_with_project which saves config WITHOUT git enabled.
-	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo);
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: small fix for config test");
 	let commits_before = git_log(dir.path()).len();
 
@@ -389,7 +404,8 @@ fn change_auto_git_disabled_in_config_no_commit() {
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto"],
 		dir.path(),
-	);
+	)
+	.await;
 
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 	let changesets = find_changesets(dir.path());

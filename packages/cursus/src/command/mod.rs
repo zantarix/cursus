@@ -12,6 +12,7 @@ use std::process::Output;
 use std::sync::Arc;
 
 use anyhow::Context;
+use async_trait::async_trait;
 
 /// Returns the platform shell executable: `cmd.exe` on Windows, `/bin/sh` on Unix.
 pub(crate) fn shell_program() -> &'static str {
@@ -32,37 +33,38 @@ pub(crate) fn shell_flag() -> &'static str {
 /// (`run_mut`, `run_shell_mut`, `run_interactive`, `run_shell_interactive`) variants. The
 /// [`DryRunCommandRunner`] decorator intercepts mutating variants and
 /// suppresses them, while read-only variants always execute.
+#[async_trait]
 pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	/// Runs a program with the given arguments in the specified directory.
 	///
 	/// Read-only — always executes, even in dry-run mode.
-	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
+	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
 
 	/// Runs a shell command via the platform shell in the specified directory.
 	///
 	/// Read-only — always executes, even in dry-run mode. Used for user-configurable
 	/// commands that may use shell features such as pipes, redirects, or variable
 	/// expansion (e.g. custom `lock_command`s that only read state).
-	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
+	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
 
 	/// Runs a program with the given arguments and records it as a mutating operation.
 	///
 	/// Mutating — skipped by [`DryRunCommandRunner`]. Use this for commands that
 	/// modify state (e.g. `git add`, `git commit`, `cargo publish`).
-	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
+	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
 
 	/// Runs a shell command via the platform shell and records it as a mutating operation.
 	///
 	/// Mutating — skipped by [`DryRunCommandRunner`]. Use this for shell commands that
 	/// write files or modify state (e.g. custom lock file update commands).
-	fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
+	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
 
 	/// Runs a program with inherited stdin/stdout/stderr for interactive use (e.g. editors).
 	///
 	/// Mutating — skipped by [`DryRunCommandRunner`]. Unlike [`run`], this does not
 	/// capture output — the child process shares the terminal directly. Returns the
 	/// exit status of the child process.
-	fn run_interactive(
+	async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
@@ -75,7 +77,7 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	/// of [`run_shell`] with the inherited terminal of [`run_interactive`]. Use this for
 	/// user-supplied commands that must be shell-interpreted (e.g. `EDITOR="code --wait"`)
 	/// and need to interact with the terminal directly.
-	fn run_shell_interactive(
+	async fn run_shell_interactive(
 		&self,
 		command: &str,
 		cwd: &Path,
@@ -125,32 +127,33 @@ impl<R: CommandRunner> VerboseCommandRunner<R> {
 	}
 }
 
+#[async_trait]
 impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
-	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		log::debug!("run: {program} {} (cwd: {})", args.join(" "), cwd.display());
-		self.inner.run(program, args, cwd)
+		self.inner.run(program, args, cwd).await
 	}
 
-	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		log::debug!("run_shell: {command:?} (cwd: {})", cwd.display());
-		self.inner.run_shell(command, cwd)
+		self.inner.run_shell(command, cwd).await
 	}
 
-	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		log::debug!(
 			"run_mut: {program} {} (cwd: {})",
 			args.join(" "),
 			cwd.display()
 		);
-		self.inner.run_mut(program, args, cwd)
+		self.inner.run_mut(program, args, cwd).await
 	}
 
-	fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		log::debug!("run_shell_mut: {command:?} (cwd: {})", cwd.display());
-		self.inner.run_shell_mut(command, cwd)
+		self.inner.run_shell_mut(command, cwd).await
 	}
 
-	fn run_interactive(
+	async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
@@ -161,10 +164,10 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 			args.join(" "),
 			cwd.display()
 		);
-		self.inner.run_interactive(program, args, cwd)
+		self.inner.run_interactive(program, args, cwd).await
 	}
 
-	fn run_shell_interactive(
+	async fn run_shell_interactive(
 		&self,
 		command: &str,
 		cwd: &Path,
@@ -173,7 +176,7 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 			"run_shell_interactive: {command:?} (cwd: {})",
 			cwd.display()
 		);
-		self.inner.run_shell_interactive(command, cwd)
+		self.inner.run_shell_interactive(command, cwd).await
 	}
 }
 
@@ -184,54 +187,70 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 #[derive(Debug)]
 pub struct RealCommandRunner;
 
+#[async_trait]
 impl CommandRunner for RealCommandRunner {
-	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-		std::process::Command::new(program)
+	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		tokio::process::Command::new(program)
 			.args(args)
 			.current_dir(cwd)
 			.output()
+			.await
 			.with_context(|| format!("Failed to run '{program}'"))
 	}
 
-	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		std::process::Command::new(shell_program())
+	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		tokio::process::Command::new(shell_program())
 			.args([shell_flag(), command])
 			.current_dir(cwd)
 			.output()
+			.await
 			.with_context(|| format!("Failed to run shell command: '{command}'"))
 	}
 
-	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-		self.run(program, args, cwd)
+	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		self.run(program, args, cwd).await
 	}
 
-	fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.run_shell(command, cwd)
+	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		self.run_shell(command, cwd).await
 	}
 
-	fn run_interactive(
+	async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus> {
-		std::process::Command::new(program)
-			.args(args)
-			.current_dir(cwd)
-			.status()
-			.with_context(|| format!("Failed to run '{program}'"))
+		let program = program.to_string();
+		let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+		let cwd = cwd.to_path_buf();
+		tokio::task::spawn_blocking(move || {
+			std::process::Command::new(&program)
+				.args(&args)
+				.current_dir(&cwd)
+				.status()
+				.with_context(|| format!("Failed to run '{program}'"))
+		})
+		.await
+		.context("spawn_blocking panicked")?
 	}
 
-	fn run_shell_interactive(
+	async fn run_shell_interactive(
 		&self,
 		command: &str,
 		cwd: &Path,
 	) -> anyhow::Result<std::process::ExitStatus> {
-		std::process::Command::new(shell_program())
-			.args([shell_flag(), command])
-			.current_dir(cwd)
-			.status()
-			.with_context(|| format!("Failed to run shell command: '{command}'"))
+		let command = command.to_string();
+		let cwd = cwd.to_path_buf();
+		tokio::task::spawn_blocking(move || {
+			std::process::Command::new(shell_program())
+				.args([shell_flag(), &command])
+				.current_dir(&cwd)
+				.status()
+				.with_context(|| format!("Failed to run shell command: '{command}'"))
+		})
+		.await
+		.context("spawn_blocking panicked")?
 	}
 }
 
@@ -255,16 +274,17 @@ impl DryRunCommandRunner {
 	}
 }
 
+#[async_trait]
 impl CommandRunner for DryRunCommandRunner {
-	fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
-		self.inner.run(program, args, cwd)
+	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+		self.inner.run(program, args, cwd).await
 	}
 
-	fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.inner.run_shell(command, cwd)
+	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+		self.inner.run_shell(command, cwd).await
 	}
 
-	fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		log::info!(
 			"[dry-run] would run: {program} {} (cwd: {})",
 			args.join(" "),
@@ -273,12 +293,12 @@ impl CommandRunner for DryRunCommandRunner {
 		Ok(make_success_output())
 	}
 
-	fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
+	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
 		log::info!("[dry-run] would run: {command:?} (cwd: {})", cwd.display());
 		Ok(make_success_output())
 	}
 
-	fn run_interactive(
+	async fn run_interactive(
 		&self,
 		program: &str,
 		args: &[&str],
@@ -292,7 +312,7 @@ impl CommandRunner for DryRunCommandRunner {
 		Ok(make_success_exit_status())
 	}
 
-	fn run_shell_interactive(
+	async fn run_shell_interactive(
 		&self,
 		command: &str,
 		cwd: &Path,
@@ -313,77 +333,77 @@ mod verbose_tests {
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::test_logging::{init_test_logger, take_logs};
 
-	#[test]
-	fn verbose_runner_delegates_run_to_inner() {
+	#[tokio::test]
+	async fn verbose_runner_delegates_run_to_inner() {
 		init_test_logger();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run("git", &["status"], cwd);
+		let _ = runner.run("git", &["status"], cwd).await;
 		let invocations = runner.inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
 		assert_eq!(invocations[0].args, vec!["status"]);
 	}
 
-	#[test]
-	fn verbose_runner_delegates_run_shell_to_inner() {
+	#[tokio::test]
+	async fn verbose_runner_delegates_run_shell_to_inner() {
 		init_test_logger();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell("echo hello", cwd);
+		let _ = runner.run_shell("echo hello", cwd).await;
 		let invocations = runner.inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
 	}
 
-	#[test]
-	fn verbose_runner_delegates_run_interactive_to_inner() {
+	#[tokio::test]
+	async fn verbose_runner_delegates_run_interactive_to_inner() {
 		init_test_logger();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_interactive("vim", &["file.txt"], cwd);
+		let _ = runner.run_interactive("vim", &["file.txt"], cwd).await;
 		let invocations = runner.inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_interactive);
 		assert_eq!(invocations[0].program, "vim");
 	}
 
-	#[test]
-	fn verbose_runner_delegates_run_mut_to_inner() {
+	#[tokio::test]
+	async fn verbose_runner_delegates_run_mut_to_inner() {
 		init_test_logger();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_mut("git", &["commit", "-m", "msg"], cwd);
+		let _ = runner.run_mut("git", &["commit", "-m", "msg"], cwd).await;
 		let invocations = runner.inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
 		assert_eq!(invocations[0].args, vec!["commit", "-m", "msg"]);
 	}
 
-	#[test]
-	fn verbose_runner_delegates_run_shell_mut_to_inner() {
+	#[tokio::test]
+	async fn verbose_runner_delegates_run_shell_mut_to_inner() {
 		init_test_logger();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell_mut("npm install", cwd);
+		let _ = runner.run_shell_mut("npm install", cwd).await;
 		let invocations = runner.inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
 	}
 
-	#[test]
-	fn verbose_runner_logs_run_with_program_and_args() {
+	#[tokio::test]
+	async fn verbose_runner_logs_run_with_program_and_args() {
 		init_test_logger();
 		let _ = take_logs(); // clear any accumulated messages
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/some/dir");
-		let _ = runner.run("cargo", &["build", "--release"], cwd);
+		let _ = runner.run("cargo", &["build", "--release"], cwd).await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -394,14 +414,14 @@ mod verbose_tests {
 		assert!(msg.contains("/some/dir"), "log should contain cwd: {msg}");
 	}
 
-	#[test]
-	fn verbose_runner_logs_run_shell_with_command_and_cwd() {
+	#[tokio::test]
+	async fn verbose_runner_logs_run_shell_with_command_and_cwd() {
 		init_test_logger();
 		let _ = take_logs();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/workspace");
-		let _ = runner.run_shell("npm install", cwd);
+		let _ = runner.run_shell("npm install", cwd).await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -411,14 +431,14 @@ mod verbose_tests {
 		assert!(msg.contains("/workspace"), "log should contain cwd: {msg}");
 	}
 
-	#[test]
-	fn verbose_runner_logs_run_interactive_with_program_and_cwd() {
+	#[tokio::test]
+	async fn verbose_runner_logs_run_interactive_with_program_and_cwd() {
 		init_test_logger();
 		let _ = take_logs();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/edit");
-		let _ = runner.run_interactive("nano", &["CHANGELOG.md"], cwd);
+		let _ = runner.run_interactive("nano", &["CHANGELOG.md"], cwd).await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -432,14 +452,16 @@ mod verbose_tests {
 		assert!(msg.contains("/edit"), "log should contain cwd: {msg}");
 	}
 
-	#[test]
-	fn verbose_runner_logs_run_mut_with_program_and_args() {
+	#[tokio::test]
+	async fn verbose_runner_logs_run_mut_with_program_and_args() {
 		init_test_logger();
 		let _ = take_logs();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/repo");
-		let _ = runner.run_mut("git", &["push", "origin", "HEAD"], cwd);
+		let _ = runner
+			.run_mut("git", &["push", "origin", "HEAD"], cwd)
+			.await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -449,27 +471,31 @@ mod verbose_tests {
 		assert!(msg.contains("/repo"), "log should contain cwd: {msg}");
 	}
 
-	#[test]
-	fn verbose_runner_delegates_run_shell_interactive_to_inner() {
+	#[tokio::test]
+	async fn verbose_runner_delegates_run_shell_interactive_to_inner() {
 		init_test_logger();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell_interactive("code --wait file.txt", cwd);
+		let _ = runner
+			.run_shell_interactive("code --wait file.txt", cwd)
+			.await;
 		let invocations = runner.inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
 		assert!(invocations[0].is_interactive);
 	}
 
-	#[test]
-	fn verbose_runner_logs_run_shell_interactive_with_command_and_cwd() {
+	#[tokio::test]
+	async fn verbose_runner_logs_run_shell_interactive_with_command_and_cwd() {
 		init_test_logger();
 		let _ = take_logs();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/edit");
-		let _ = runner.run_shell_interactive("code --wait CHANGELOG.md", cwd);
+		let _ = runner
+			.run_shell_interactive("code --wait CHANGELOG.md", cwd)
+			.await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -479,14 +505,16 @@ mod verbose_tests {
 		assert!(msg.contains("/edit"), "log should contain cwd: {msg}");
 	}
 
-	#[test]
-	fn verbose_runner_logs_run_shell_mut_with_command_and_cwd() {
+	#[tokio::test]
+	async fn verbose_runner_logs_run_shell_mut_with_command_and_cwd() {
 		init_test_logger();
 		let _ = take_logs();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/workspace");
-		let _ = runner.run_shell_mut("pnpm install --lockfile-only", cwd);
+		let _ = runner
+			.run_shell_mut("pnpm install --lockfile-only", cwd)
+			.await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -510,69 +538,71 @@ mod dry_run_tests {
 		DryRunCommandRunner::new(Arc::new(RecordingCommandRunner::new(0)))
 	}
 
-	#[test]
-	fn dry_run_runner_forwards_run_to_inner() {
+	#[tokio::test]
+	async fn dry_run_runner_forwards_run_to_inner() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run("git", &["status"], cwd);
+		let _ = runner.run("git", &["status"], cwd).await;
 		let invocations = inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
 	}
 
-	#[test]
-	fn dry_run_runner_forwards_run_shell_to_inner() {
+	#[tokio::test]
+	async fn dry_run_runner_forwards_run_shell_to_inner() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell("echo hello", cwd);
+		let _ = runner.run_shell("echo hello", cwd).await;
 		let invocations = inner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
 	}
 
-	#[test]
-	fn dry_run_runner_suppresses_run_mut() {
+	#[tokio::test]
+	async fn dry_run_runner_suppresses_run_mut() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let cwd = Path::new("/tmp");
-		let result = runner.run_mut("git", &["commit", "-m", "msg"], cwd);
+		let result = runner.run_mut("git", &["commit", "-m", "msg"], cwd).await;
 		assert!(result.is_ok());
 		assert!(result.unwrap().status.success());
 		// Inner runner must NOT have been called
 		assert!(inner.invocations().is_empty());
 	}
 
-	#[test]
-	fn dry_run_runner_suppresses_run_shell_mut() {
+	#[tokio::test]
+	async fn dry_run_runner_suppresses_run_shell_mut() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let cwd = Path::new("/tmp");
-		let result = runner.run_shell_mut("npm install", cwd);
+		let result = runner.run_shell_mut("npm install", cwd).await;
 		assert!(result.is_ok());
 		assert!(result.unwrap().status.success());
 		assert!(inner.invocations().is_empty());
 	}
 
-	#[test]
-	fn dry_run_runner_suppresses_run_interactive() {
+	#[tokio::test]
+	async fn dry_run_runner_suppresses_run_interactive() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let cwd = Path::new("/tmp");
-		let result = runner.run_interactive("vim", &["file.txt"], cwd);
+		let result = runner.run_interactive("vim", &["file.txt"], cwd).await;
 		assert!(result.is_ok());
 		assert!(result.unwrap().success());
 		assert!(inner.invocations().is_empty());
 	}
 
-	#[test]
-	fn dry_run_runner_logs_run_mut_at_info() {
+	#[tokio::test]
+	async fn dry_run_runner_logs_run_mut_at_info() {
 		init_test_logger();
 		let _ = take_logs();
 		let runner = make_dry_run_runner();
 		let cwd = Path::new("/repo");
-		let _ = runner.run_mut("git", &["push", "origin", "HEAD"], cwd);
+		let _ = runner
+			.run_mut("git", &["push", "origin", "HEAD"], cwd)
+			.await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -582,13 +612,15 @@ mod dry_run_tests {
 		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
 	}
 
-	#[test]
-	fn dry_run_runner_logs_run_shell_mut_at_info() {
+	#[tokio::test]
+	async fn dry_run_runner_logs_run_shell_mut_at_info() {
 		init_test_logger();
 		let _ = take_logs();
 		let runner = make_dry_run_runner();
 		let cwd = Path::new("/workspace");
-		let _ = runner.run_shell_mut("npm install --package-lock-only", cwd);
+		let _ = runner
+			.run_shell_mut("npm install --package-lock-only", cwd)
+			.await;
 		let logs = take_logs();
 		let msg = logs
 			.iter()
@@ -598,24 +630,28 @@ mod dry_run_tests {
 		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
 	}
 
-	#[test]
-	fn dry_run_runner_suppresses_run_shell_interactive() {
+	#[tokio::test]
+	async fn dry_run_runner_suppresses_run_shell_interactive() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
 		let cwd = Path::new("/tmp");
-		let result = runner.run_shell_interactive("code --wait file.txt", cwd);
+		let result = runner
+			.run_shell_interactive("code --wait file.txt", cwd)
+			.await;
 		assert!(result.is_ok());
 		assert!(result.unwrap().success());
 		assert!(inner.invocations().is_empty());
 	}
 
-	#[test]
-	fn dry_run_runner_logs_run_shell_interactive_at_info() {
+	#[tokio::test]
+	async fn dry_run_runner_logs_run_shell_interactive_at_info() {
 		init_test_logger();
 		let _ = take_logs();
 		let runner = make_dry_run_runner();
 		let cwd = Path::new("/edit");
-		let _ = runner.run_shell_interactive("code --wait README.md", cwd);
+		let _ = runner
+			.run_shell_interactive("code --wait README.md", cwd)
+			.await;
 		let logs = take_logs();
 		let (level, msg) = logs
 			.iter()
@@ -625,13 +661,13 @@ mod dry_run_tests {
 		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
 	}
 
-	#[test]
-	fn dry_run_runner_logs_run_interactive_at_info() {
+	#[tokio::test]
+	async fn dry_run_runner_logs_run_interactive_at_info() {
 		init_test_logger();
 		let _ = take_logs();
 		let runner = make_dry_run_runner();
 		let cwd = Path::new("/edit");
-		let _ = runner.run_interactive("vim", &["README.md"], cwd);
+		let _ = runner.run_interactive("vim", &["README.md"], cwd).await;
 		let logs = take_logs();
 		let (level, msg) = logs
 			.iter()
@@ -653,14 +689,14 @@ pub mod test_support;
 mod real_command_tests {
 	use super::*;
 
-	#[test]
-	fn real_runner_run_interactive_returns_success() {
+	#[tokio::test]
+	async fn real_runner_run_interactive_returns_success() {
 		// Exercises RealCommandRunner::run_interactive so the .status() call is
 		// covered — mutations that replace it with something else would break this.
 		// git is a prerequisite on all platforms and is a real executable.
 		let runner = RealCommandRunner;
 		let cwd = std::env::temp_dir();
-		let result = runner.run_interactive("git", &["--version"], &cwd);
+		let result = runner.run_interactive("git", &["--version"], &cwd).await;
 		assert!(result.is_ok(), "run_interactive should succeed: {result:?}");
 		assert!(
 			result.unwrap().success(),
@@ -668,14 +704,14 @@ mod real_command_tests {
 		);
 	}
 
-	#[test]
-	fn real_runner_run_shell_interactive_returns_success() {
+	#[tokio::test]
+	async fn real_runner_run_shell_interactive_returns_success() {
 		// Exercises RealCommandRunner::run_shell_interactive so the .status() call is
 		// covered — mutations that replace it with something else would break this.
 		// "echo ok" works on both /bin/sh and cmd.exe.
 		let runner = RealCommandRunner;
 		let cwd = std::env::temp_dir();
-		let result = runner.run_shell_interactive("echo ok", &cwd);
+		let result = runner.run_shell_interactive("echo ok", &cwd).await;
 		assert!(
 			result.is_ok(),
 			"run_shell_interactive should succeed: {result:?}"

@@ -19,9 +19,9 @@ fn write_config(dir: &std::path::Path, toml: &str) {
 
 // --- Flag parsing ---
 
-#[test]
-fn publish_no_git_flag_parses_without_error() {
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+#[tokio::test]
+async fn publish_no_git_flag_parses_without_error() {
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	std::fs::write(
 		dir.path().join("Cargo.toml"),
 		"[package]\nname = \"my-app\"\nversion = \"1.0.0\"\n",
@@ -39,20 +39,23 @@ fn publish_no_git_flag_parses_without_error() {
 			"--no-git",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 }
 
 // --- Dry-run does not create actual tags ---
 
-#[test]
-fn publish_git_enabled_dry_run_does_not_create_tags() {
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+#[tokio::test]
+async fn publish_git_enabled_dry_run_does_not_create_tags() {
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	// Dry-run should report what would happen but not touch the git repository.
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 	assert!(
 		git_tags(dir.path()).is_empty(),
@@ -60,9 +63,10 @@ fn publish_git_enabled_dry_run_does_not_create_tags() {
 	);
 }
 
-#[test]
-fn publish_no_git_dry_run_does_not_create_tags() {
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+#[tokio::test]
+async fn publish_no_git_dry_run_does_not_create_tags() {
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	let result = run_cursus(
 		[
 			"cursus",
@@ -72,7 +76,8 @@ fn publish_no_git_dry_run_does_not_create_tags() {
 			"--no-git",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 	assert!(
 		git_tags(dir.path()).is_empty(),
@@ -82,11 +87,11 @@ fn publish_no_git_dry_run_does_not_create_tags() {
 
 // --- --no-git skips GitHub Releases token check ---
 
-#[test]
-fn publish_no_git_skips_github_token_check() {
+#[tokio::test]
+async fn publish_no_git_skips_github_token_check() {
 	// With github enabled but no token, the command should fail.
 	// With --no-git, GitHub Releases are skipped entirely, so no token is needed.
-	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config());
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
 	write_config(
 		dir.path(),
 		"[cargo]\nenabled = true\n[git]\nenabled = true\n[github]\nenabled = true\n",
@@ -108,7 +113,8 @@ fn publish_no_git_skips_github_token_check() {
 			"--no-git",
 		],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok with --no-git, got: {result:?}");
 }
 
@@ -119,21 +125,23 @@ fn publish_no_git_skips_github_token_check() {
 /// This guards against `replace > with <` on `projects.len() > 1` (line ~109),
 /// which would treat a multi-package repo as single-package and use the wrong
 /// tag format.
-#[test]
-fn publish_multi_package_dry_run_logs_prefixed_tag_format() {
+#[tokio::test]
+async fn publish_multi_package_dry_run_logs_prefixed_tag_format() {
 	init_test_logger();
 	let _ = take_logs();
 	let dir = temp_real_git_repo_with_cargo_workspace(
 		&[("pkg-a", "1.0.0"), ("pkg-b", "2.0.0")],
 		git_enabled_config(),
-	);
+	)
+	.await;
 	std::fs::write(dir.path().join("pkg-a/CHANGELOG.md"), "# Changelog\n").unwrap();
 	std::fs::write(dir.path().join("pkg-b/CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -154,17 +162,19 @@ fn publish_multi_package_dry_run_logs_prefixed_tag_format() {
 ///
 /// Guards against `delete !` on `git_enabled = config.git.enabled() && !args.no_git`
 /// (line ~115), which would make git_enabled false when no_git is false.
-#[test]
-fn publish_git_enabled_dry_run_logs_would_create_tag_and_summary_tag_note() {
+#[tokio::test]
+async fn publish_git_enabled_dry_run_logs_would_create_tag_and_summary_tag_note() {
 	init_test_logger();
 	let _ = take_logs();
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -185,18 +195,20 @@ fn publish_git_enabled_dry_run_logs_would_create_tag_and_summary_tag_note() {
 /// Guards against `replace && with ||` on `git_enabled = config.git.enabled() && !args.no_git`
 /// (line ~115), which would make git_enabled true even when git is disabled.
 /// Also guards against `replace && with ||` on the tag_note guard (line ~171).
-#[test]
-fn publish_git_disabled_dry_run_no_would_create_tag_in_logs_or_summary() {
+#[tokio::test]
+async fn publish_git_disabled_dry_run_no_would_create_tag_in_logs_or_summary() {
 	init_test_logger();
 	let _ = take_logs();
 	// Use write_config to set up a Cargo-only config (no git section → git disabled).
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	write_config(dir.path(), "[cargo]\nenabled = true\n");
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -214,17 +226,19 @@ fn publish_git_disabled_dry_run_no_would_create_tag_in_logs_or_summary() {
 ///
 /// Guards against `replace && with ||` on `config.github.enabled && !args.no_git`
 /// (line ~134), which would log GitHub Release messages even when GitHub is disabled.
-#[test]
-fn publish_github_disabled_dry_run_no_would_create_github_release() {
+#[tokio::test]
+async fn publish_github_disabled_dry_run_no_would_create_github_release() {
 	init_test_logger();
 	let _ = take_logs();
 	// git enabled but github not configured → github.enabled = false
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();
@@ -240,12 +254,13 @@ fn publish_github_disabled_dry_run_no_would_create_github_release() {
 ///
 /// Guards `&&`→`||` on the tag_note condition: with git disabled but published packages,
 /// a `||` mutation would produce a non-empty tag_note even though git is off.
-#[test]
-fn publish_git_disabled_with_changelog_dry_run_no_tag_note_in_summary() {
+#[tokio::test]
+async fn publish_git_disabled_with_changelog_dry_run_no_tag_note_in_summary() {
 	init_test_logger();
 	let _ = take_logs();
 	// Set up workspace with git-disabled config.
-	let dir = temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config());
+	let dir =
+		temp_real_git_repo_with_cargo_workspace(&[("my-app", "1.0.0")], git_enabled_config()).await;
 	write_config(dir.path(), "[cargo]\nenabled = true\n");
 	// Write CHANGELOG.md so the package is "prepared" and would appear in published list.
 	std::fs::write(dir.path().join("my-app/CHANGELOG.md"), "# Changelog\n").unwrap();
@@ -253,7 +268,8 @@ fn publish_git_disabled_with_changelog_dry_run_no_tag_note_in_summary() {
 	let result = run_cursus(
 		["cursus", "publish", "--no-interactive", "--dry-run"],
 		dir.path(),
-	);
+	)
+	.await;
 	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 	let logs = take_logs();

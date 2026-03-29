@@ -57,7 +57,7 @@ pub(super) fn aggregate_changesets(
 /// subject line when available.
 ///
 /// Never fails — always returns a map entry (possibly `None`) for every path.
-pub(super) fn resolve_commit_references(
+pub(super) async fn resolve_commit_references(
 	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	git: &dyn Git,
 	git_enabled: bool,
@@ -67,25 +67,27 @@ pub(super) fn resolve_commit_references(
 		return changesets.iter().map(|(p, _)| (p.clone(), None)).collect();
 	}
 
-	changesets
-		.iter()
-		.map(|(path, _)| {
-			let commit_ref = resolve_one_commit_reference(path, git);
-			(path.clone(), commit_ref)
-		})
-		.collect()
+	let mut result = BTreeMap::new();
+	for (path, _) in changesets {
+		let commit_ref = resolve_one_commit_reference(path, git).await;
+		result.insert(path.clone(), commit_ref);
+	}
+	result
 }
 
 /// Resolves the commit reference for a single changeset path.
 ///
 /// Returns `None` on any failure or when the commit cannot be found,
 /// logging warnings for unexpected errors.
-pub(super) fn resolve_one_commit_reference(path: &Path, git: &dyn Git) -> Option<CommitReference> {
+pub(super) async fn resolve_one_commit_reference(
+	path: &Path,
+	git: &dyn Git,
+) -> Option<CommitReference> {
 	// Make the path relative to the git root for the git log command.
 	let repo_root = git.path();
 	let rel_path = path.strip_prefix(repo_root).unwrap_or(path);
 
-	let sha = match git.log_added_commit(rel_path) {
+	let sha = match git.log_added_commit(rel_path).await {
 		Ok(Some(sha)) => sha,
 		Ok(None) => {
 			log::debug!("No introducing commit found for {}", path.display());
@@ -97,7 +99,7 @@ pub(super) fn resolve_one_commit_reference(path: &Path, git: &dyn Git) -> Option
 		}
 	};
 
-	let subject = match git.log_subject(&sha) {
+	let subject = match git.log_subject(&sha).await {
 		Ok(s) => s,
 		Err(e) => {
 			log::warn!("Failed to get commit subject for {sha}: {e:#}");
@@ -128,8 +130,8 @@ mod tests {
 
 	// ── resolve_commit_references ─────────────────────────────────────────────
 
-	#[test]
-	fn resolve_commit_references_git_disabled_does_not_call_git() {
+	#[tokio::test]
+	async fn resolve_commit_references_git_disabled_does_not_call_git() {
 		let dir = tempfile::tempdir().unwrap();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -146,7 +148,7 @@ mod tests {
 			message: None,
 		};
 		let changesets = vec![(changeset_path.clone(), fake_cs)];
-		let result = resolve_commit_references(&changesets, &git, false);
+		let result = resolve_commit_references(&changesets, &git, false).await;
 		assert_eq!(result.len(), 1);
 		assert_eq!(result[&changeset_path], None);
 		assert!(
@@ -155,8 +157,8 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn resolve_commit_references_git_enabled_no_commit_returns_none() {
+	#[tokio::test]
+	async fn resolve_commit_references_git_enabled_no_commit_returns_none() {
 		// When git log returns empty output, reference is None (no error).
 		let dir = tempfile::tempdir().unwrap();
 		let runner = Arc::new(RecordingCommandRunner::new(0)); // empty stdout
@@ -172,12 +174,12 @@ mod tests {
 			message: None,
 		};
 		let changesets = vec![(changeset_path.clone(), fake_cs)];
-		let result = resolve_commit_references(&changesets, &git, true);
+		let result = resolve_commit_references(&changesets, &git, true).await;
 		assert_eq!(result[&changeset_path], None);
 	}
 
-	#[test]
-	fn resolve_commit_references_git_failure_is_nonfatal() {
+	#[tokio::test]
+	async fn resolve_commit_references_git_failure_is_nonfatal() {
 		// A git failure should produce None, not propagate an error.
 		let dir = tempfile::tempdir().unwrap();
 		let runner =
@@ -195,7 +197,7 @@ mod tests {
 		};
 		let changesets = vec![(changeset_path.clone(), fake_cs)];
 		// Should not panic or return an error — just None
-		let result = resolve_commit_references(&changesets, &git, true);
+		let result = resolve_commit_references(&changesets, &git, true).await;
 		assert_eq!(result[&changeset_path], None);
 	}
 
@@ -213,8 +215,8 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn aggregate_changesets_filter_retains_only_matching_packages() {
+	#[tokio::test]
+	async fn aggregate_changesets_filter_retains_only_matching_packages() {
 		let projects = vec![
 			crate::package_manager::Project::new_test("alpha", "/nonexistent/alpha"),
 			crate::package_manager::Project::new_test("beta", "/nonexistent/beta"),
@@ -257,13 +259,14 @@ mod tests {
 		)
 	}
 
-	#[test]
-	fn aggregate_changesets_unknown_package_filter_returns_error() {
+	#[tokio::test]
+	async fn aggregate_changesets_unknown_package_filter_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
@@ -278,9 +281,9 @@ mod tests {
 			Arc::new(LocalFilesystem),
 			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		let config = crate::model::config::load(&env).unwrap();
+		let config = crate::model::config::load(&env).await.unwrap();
 		let adapters = config.create_adapters().unwrap();
-		let projects = config.load_projects_for_adapters(&adapters).unwrap();
+		let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 		let commit_refs = BTreeMap::new();
 		let result =
@@ -291,13 +294,14 @@ mod tests {
 
 	// ── aggregate_changesets with commit_refs ─────────────────────────────────
 
-	#[test]
-	fn aggregate_changesets_with_empty_refs_produces_none_references() {
+	#[tokio::test]
+	async fn aggregate_changesets_with_empty_refs_produces_none_references() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
 		crate::model::config::Config::new(&make_test_env(dir.path()))
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.save()
+			.await
 			.unwrap();
 
 		let path = crate::path::AbsolutePath::new("/test.md").unwrap();
@@ -320,14 +324,14 @@ mod tests {
 			Arc::new(LocalFilesystem),
 			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		let config = crate::model::config::load(&env).unwrap();
+		let config = crate::model::config::load(&env).await.unwrap();
 		let adapters = config.create_adapters().unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"my-pkg\"\nversion = \"0.1.0\"\n",
 		)
 		.unwrap();
-		let projects = config.load_projects_for_adapters(&adapters).unwrap();
+		let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 		let (_, changes_per_package) =
 			aggregate_changesets(&changesets, &[], &projects, &commit_refs).unwrap();

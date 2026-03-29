@@ -28,17 +28,20 @@ fn project_info_with_provenance(
 	info
 }
 
-#[test]
-fn publish_success_returns_published() {
+#[tokio::test]
+async fn publish_success_returns_published() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
 	let info = project_info(dir.path(), "my-app", "");
-	assert_eq!(adapter.publish(&info).unwrap(), PublishOutcome::Published);
+	assert_eq!(
+		adapter.publish(&info).await.unwrap(),
+		PublishOutcome::Published
+	);
 }
 
-#[test]
-fn publish_epublishconflict_returns_already_published() {
+#[tokio::test]
+async fn publish_epublishconflict_returns_already_published() {
 	let dir = temp_dir();
 	let runner = Arc::new(
 		RecordingCommandRunner::new(1).with_stderr(b"npm error code EPUBLISHCONFLICT".to_vec()),
@@ -46,13 +49,13 @@ fn publish_epublishconflict_returns_already_published() {
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
 	let info = project_info(dir.path(), "my-app", "");
 	assert_eq!(
-		adapter.publish(&info).unwrap(),
+		adapter.publish(&info).await.unwrap(),
 		PublishOutcome::AlreadyPublished
 	);
 }
 
-#[test]
-fn publish_cannot_publish_over_returns_already_published() {
+#[tokio::test]
+async fn publish_cannot_publish_over_returns_already_published() {
 	let dir = temp_dir();
 	let runner =
 		Arc::new(RecordingCommandRunner::new(1).with_stderr(
@@ -61,28 +64,28 @@ fn publish_cannot_publish_over_returns_already_published() {
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
 	let info = project_info(dir.path(), "my-app", "");
 	assert_eq!(
-		adapter.publish(&info).unwrap(),
+		adapter.publish(&info).await.unwrap(),
 		PublishOutcome::AlreadyPublished
 	);
 }
 
-#[test]
-fn publish_other_failure_returns_error() {
+#[tokio::test]
+async fn publish_other_failure_returns_error() {
 	let dir = temp_dir();
 	let runner =
 		Arc::new(RecordingCommandRunner::new(1).with_stderr(b"npm error 403 Forbidden".to_vec()));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
 	let info = project_info(dir.path(), "my-app", "");
-	assert!(adapter.publish(&info).is_err());
+	assert!(adapter.publish(&info).await.is_err());
 }
 
-#[test]
-fn publish_scoped_package_uses_restricted_access_by_default() {
+#[tokio::test]
+async fn publish_scoped_package_uses_restricted_access_by_default() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 	let info = project_info(dir.path(), "@scope/my-pkg", "");
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	let args = &invocations[0].args;
@@ -96,8 +99,8 @@ fn publish_scoped_package_uses_restricted_access_by_default() {
 	);
 }
 
-#[test]
-fn publish_scoped_package_respects_custom_access() {
+#[tokio::test]
+async fn publish_scoped_package_respects_custom_access() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter = recording_adapter(
@@ -106,7 +109,7 @@ fn publish_scoped_package_respects_custom_access() {
 		Arc::clone(&runner),
 	);
 	let info = project_info(dir.path(), "@scope/my-pkg", "");
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	let args = &invocations[0].args;
@@ -114,13 +117,13 @@ fn publish_scoped_package_respects_custom_access() {
 	assert!(args.contains(&"public".to_string()));
 }
 
-#[test]
-fn publish_non_scoped_package_omits_access_flag() {
+#[tokio::test]
+async fn publish_non_scoped_package_omits_access_flag() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let adapter = recording_adapter(NpmConfig::default(), dir.path(), Arc::clone(&runner));
 	let info = project_info(dir.path(), "my-app", "");
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	let args = &invocations[0].args;
@@ -130,8 +133,8 @@ fn publish_non_scoped_package_omits_access_flag() {
 	);
 }
 
-#[test]
-fn publish_no_auth_still_executes_command() {
+#[tokio::test]
+async fn publish_no_auth_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let env = crate::Env::new(
@@ -146,13 +149,13 @@ fn publish_no_auth_still_executes_command() {
 	.with_node_auth_token_present(false);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	let info = project_info(dir.path(), "my-app", "");
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	assert_eq!(runner.invocations()[0].program, "npm");
 }
 
-#[test]
-fn publish_no_auth_emits_no_auth_warning() {
+#[tokio::test]
+async fn publish_no_auth_emits_no_auth_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -169,6 +172,7 @@ fn publish_no_auth_emits_no_auth_warning() {
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
+		.await
 		.unwrap();
 	let logs = crate::test_logging::take_logs();
 	let warn_msgs: Vec<_> = logs
@@ -183,8 +187,8 @@ fn publish_no_auth_emits_no_auth_warning() {
 	);
 }
 
-#[test]
-fn publish_oidc_with_node_auth_token_still_executes_command() {
+#[tokio::test]
+async fn publish_oidc_with_node_auth_token_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let env = crate::Env::new(
@@ -199,13 +203,13 @@ fn publish_oidc_with_node_auth_token_still_executes_command() {
 	.with_node_auth_token_present(true);
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	let info = project_info(dir.path(), "my-app", "");
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	assert_eq!(runner.invocations()[0].program, "npm");
 }
 
-#[test]
-fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
+#[tokio::test]
+async fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -222,6 +226,7 @@ fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
+		.await
 		.unwrap();
 	let logs = crate::test_logging::take_logs();
 	let warn_msgs: Vec<_> = logs
@@ -236,8 +241,8 @@ fn publish_oidc_with_node_auth_token_emits_token_override_warning() {
 	);
 }
 
-#[test]
-fn publish_oidc_without_provenance_still_executes_command() {
+#[tokio::test]
+async fn publish_oidc_without_provenance_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let env = crate::Env::new(
@@ -257,13 +262,13 @@ fn publish_oidc_without_provenance_still_executes_command() {
 	);
 	// publishconfig_provenance is None — provenance warning should fire but publish proceeds
 	let info = project_info_with_provenance(dir.path(), "my-app", None);
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	assert_eq!(runner.invocations()[0].program, "npm");
 }
 
-#[test]
-fn publish_oidc_public_without_provenance_emits_provenance_warning() {
+#[tokio::test]
+async fn publish_oidc_public_without_provenance_emits_provenance_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -283,7 +288,7 @@ fn publish_oidc_public_without_provenance_emits_provenance_warning() {
 		env,
 	);
 	let info = project_info_with_provenance(dir.path(), "my-app", None);
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let logs = crate::test_logging::take_logs();
 	let warn_msgs: Vec<_> = logs
 		.iter()
@@ -297,8 +302,8 @@ fn publish_oidc_public_without_provenance_emits_provenance_warning() {
 	);
 }
 
-#[test]
-fn publish_oidc_with_provenance_true_still_executes_command() {
+#[tokio::test]
+async fn publish_oidc_with_provenance_true_still_executes_command() {
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let env = crate::Env::new(
@@ -317,13 +322,13 @@ fn publish_oidc_with_provenance_true_still_executes_command() {
 		env,
 	);
 	let info = project_info_with_provenance(dir.path(), "my-app", Some(true));
-	let result = adapter.publish(&info).unwrap();
+	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	assert_eq!(runner.invocations()[0].program, "npm");
 }
 
-#[test]
-fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
+#[tokio::test]
+async fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -343,7 +348,7 @@ fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
 		env,
 	);
 	let info = project_info_with_provenance(dir.path(), "my-app", Some(true));
-	adapter.publish(&info).unwrap();
+	adapter.publish(&info).await.unwrap();
 	let logs = crate::test_logging::take_logs();
 	assert!(
 		!logs
@@ -355,8 +360,8 @@ fn publish_oidc_public_with_provenance_true_no_provenance_warning() {
 
 /// Catches the `&&`→`||` mutation at the override-warning guard: when only OIDC
 /// is active (no NODE_AUTH_TOKEN), no override warning should fire.
-#[test]
-fn publish_oidc_only_does_not_emit_override_warning() {
+#[tokio::test]
+async fn publish_oidc_only_does_not_emit_override_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -373,6 +378,7 @@ fn publish_oidc_only_does_not_emit_override_warning() {
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
+		.await
 		.unwrap();
 	let logs = crate::test_logging::take_logs();
 	assert!(
@@ -385,8 +391,8 @@ fn publish_oidc_only_does_not_emit_override_warning() {
 
 /// Catches the `&&`→`||` mutation at the no-auth-warning guard: when NODE_AUTH_TOKEN
 /// is present (no OIDC), no "no auth" warning should fire.
-#[test]
-fn publish_node_auth_only_does_not_emit_no_auth_warning() {
+#[tokio::test]
+async fn publish_node_auth_only_does_not_emit_no_auth_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -403,6 +409,7 @@ fn publish_node_auth_only_does_not_emit_no_auth_warning() {
 	let adapter = recording_adapter_with_env(NpmConfig::default(), dir.path(), env);
 	adapter
 		.publish(&project_info(dir.path(), "my-app", ""))
+		.await
 		.unwrap();
 	let logs = crate::test_logging::take_logs();
 	assert!(
@@ -413,16 +420,16 @@ fn publish_node_auth_only_does_not_emit_no_auth_warning() {
 	);
 }
 
-#[test]
-fn registry_name_is_npm() {
+#[tokio::test]
+async fn registry_name_is_npm() {
 	let dir = temp_dir();
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-	assert_eq!(adapter.registry_name(), "npm");
+	assert_eq!(adapter.registry_name().await, "npm");
 }
 
-#[test]
-fn manifest_filename_is_package_json() {
+#[tokio::test]
+async fn manifest_filename_is_package_json() {
 	let dir = temp_dir();
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
-	assert_eq!(adapter.manifest_filename(), "package.json");
+	assert_eq!(adapter.manifest_filename().await, "package.json");
 }

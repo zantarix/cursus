@@ -56,17 +56,20 @@ pub(super) fn dispatching_adapter(
 }
 
 /// Helper to enumerate projects using the adapter with no configured path.
-pub(super) fn enumerate(dir: &std::path::Path) -> anyhow::Result<Vec<ProjectInfo>> {
-	recording_adapter_default(NpmConfig::default(), dir, 0).enumerate_projects()
+pub(super) async fn enumerate(dir: &std::path::Path) -> anyhow::Result<Vec<ProjectInfo>> {
+	recording_adapter_default(NpmConfig::default(), dir, 0)
+		.enumerate_projects()
+		.await
 }
 
 /// Helper to enumerate projects using the adapter with a configured path.
-pub(super) fn enumerate_with_path(
+pub(super) async fn enumerate_with_path(
 	dir: &std::path::Path,
 	path: &str,
 ) -> anyhow::Result<Vec<ProjectInfo>> {
 	recording_adapter_default(NpmConfig::enabled().with_path(path.to_string()), dir, 0)
 		.enumerate_projects()
+		.await
 }
 
 pub(super) mod dependency_version;

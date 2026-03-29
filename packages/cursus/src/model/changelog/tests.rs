@@ -145,8 +145,8 @@ fn split_at_first_h2_empty() {
 	assert_eq!(rest, "");
 }
 
-#[test]
-fn update_changelog_preserves_custom_preamble() {
+#[tokio::test]
+async fn update_changelog_preserves_custom_preamble() {
 	let dir = tempfile::tempdir().unwrap();
 	std::fs::write(
 		dir.path().join("CHANGELOG.md"),
@@ -162,6 +162,7 @@ fn update_changelog_preserves_custom_preamble() {
 	);
 	changelog
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -309,8 +310,8 @@ fn format_changelog_entry_major_section() {
 	assert!(entry.contains("- Breaking API change"));
 }
 
-#[test]
-fn update_changelog_creates_new_file() {
+#[tokio::test]
+async fn update_changelog_creates_new_file() {
 	let dir = tempfile::tempdir().unwrap();
 	let changes = vec![(ChangeType::Minor, Some("Something new".to_string()), None)];
 	let changelog = Changelog::new(
@@ -321,6 +322,7 @@ fn update_changelog_creates_new_file() {
 	);
 	changelog
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -328,8 +330,8 @@ fn update_changelog_creates_new_file() {
 	assert!(content.contains("## 1.0.0 - 2024-01-15"));
 }
 
-#[test]
-fn update_changelog_prepends_to_existing() {
+#[tokio::test]
+async fn update_changelog_prepends_to_existing() {
 	let dir = tempfile::tempdir().unwrap();
 	std::fs::write(
 		dir.path().join("CHANGELOG.md"),
@@ -345,6 +347,7 @@ fn update_changelog_prepends_to_existing() {
 	);
 	changelog
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -358,8 +361,8 @@ fn update_changelog_prepends_to_existing() {
 	assert_eq!(content.matches("# Changelog").count(), 1);
 }
 
-#[test]
-fn update_changelog_successive_releases_snapshot() {
+#[tokio::test]
+async fn update_changelog_successive_releases_snapshot() {
 	let dir = tempfile::tempdir().unwrap();
 
 	let make = |version: &str, msg: &str| {
@@ -373,20 +376,23 @@ fn update_changelog_successive_releases_snapshot() {
 
 	make("1.0.0", "Initial release")
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 	make("1.0.1", "Second release")
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 	make("1.0.2", "Third release")
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	insta::assert_snapshot!(content);
 }
 
-#[test]
-fn update_changelog_no_duplicate_header_on_successive_releases() {
+#[tokio::test]
+async fn update_changelog_no_duplicate_header_on_successive_releases() {
 	let dir = tempfile::tempdir().unwrap();
 
 	let make = |version: &str, msg: &str| {
@@ -400,12 +406,15 @@ fn update_changelog_no_duplicate_header_on_successive_releases() {
 
 	make("1.0.0", "Initial release")
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 	make("1.0.1", "Second release")
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 	make("1.0.2", "Third release")
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 
 	let content = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
@@ -421,8 +430,8 @@ fn update_changelog_no_duplicate_header_on_successive_releases() {
 	assert!(p2 < p1 && p1 < p0);
 }
 
-#[test]
-fn update_changelog_in_subdir() {
+#[tokio::test]
+async fn update_changelog_in_subdir() {
 	let dir = tempfile::tempdir().unwrap();
 	let sub = dir.path().join("packages/my-pkg");
 	std::fs::create_dir_all(&sub).unwrap();
@@ -435,14 +444,15 @@ fn update_changelog_in_subdir() {
 	);
 	changelog
 		.update(false, &crate::filesystem::LocalFilesystem)
+		.await
 		.unwrap();
 
 	let content = std::fs::read_to_string(sub.join("CHANGELOG.md")).unwrap();
 	assert!(content.contains("## 1.0.0 - 2024-01-15"));
 }
 
-#[test]
-fn update_changelog_fails_when_cannot_read_existing() {
+#[tokio::test]
+async fn update_changelog_fails_when_cannot_read_existing() {
 	let dir = tempfile::tempdir().unwrap();
 	let changelog_path = dir.path().join("CHANGELOG.md");
 	// Create a directory with the same name as the file we want to read
@@ -455,15 +465,17 @@ fn update_changelog_fails_when_cannot_read_existing() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	let result = changelog.update(false, &crate::filesystem::LocalFilesystem);
+	let result = changelog
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.await;
 
 	// Should fail because CHANGELOG.md is a directory, not a file
 	assert!(result.is_err());
 }
 
 #[cfg(unix)]
-#[test]
-fn update_changelog_fails_when_cannot_write() {
+#[tokio::test]
+async fn update_changelog_fails_when_cannot_write() {
 	use std::os::unix::fs::PermissionsExt;
 	let dir = tempfile::tempdir().unwrap();
 	// Make directory read-only
@@ -478,7 +490,9 @@ fn update_changelog_fails_when_cannot_write() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	let result = changelog.update(false, &crate::filesystem::LocalFilesystem);
+	let result = changelog
+		.update(false, &crate::filesystem::LocalFilesystem)
+		.await;
 
 	// Restore permissions before assertions for cleanup
 	let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
@@ -511,8 +525,8 @@ const MULTI_VERSION_CHANGELOG: &str = "\
 Initial release
 ";
 
-#[test]
-fn extract_version_body_finds_middle_version() {
+#[tokio::test]
+async fn extract_version_body_finds_middle_version() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
@@ -522,14 +536,15 @@ fn extract_version_body_finds_middle_version() {
 		&"1.1.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(body.contains("### Bug Fixes"));
 	assert!(body.contains("- Fixed thing"));
 	assert!(!body.contains("### Features"));
 }
 
-#[test]
-fn extract_version_body_finds_first_version() {
+#[tokio::test]
+async fn extract_version_body_finds_first_version() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
@@ -539,13 +554,14 @@ fn extract_version_body_finds_first_version() {
 		&"1.2.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(body.contains("### Features"));
 	assert!(body.contains("- Added widget"));
 }
 
-#[test]
-fn extract_version_body_finds_version_at_eof() {
+#[tokio::test]
+async fn extract_version_body_finds_version_at_eof() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
@@ -555,12 +571,13 @@ fn extract_version_body_finds_version_at_eof() {
 		&"1.0.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert_eq!(body.trim(), "Initial release");
 }
 
-#[test]
-fn extract_version_body_returns_empty_for_missing_version() {
+#[tokio::test]
+async fn extract_version_body_returns_empty_for_missing_version() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
 	std::fs::write(&path, MULTI_VERSION_CHANGELOG).unwrap();
@@ -570,12 +587,13 @@ fn extract_version_body_returns_empty_for_missing_version() {
 		&"9.9.9".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(body.is_empty());
 }
 
-#[test]
-fn extract_version_body_returns_error_for_missing_file() {
+#[tokio::test]
+async fn extract_version_body_returns_error_for_missing_file() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
 
@@ -583,12 +601,13 @@ fn extract_version_body_returns_error_for_missing_file() {
 		&path,
 		&"1.0.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
-	);
+	)
+	.await;
 	assert!(result.is_err());
 }
 
-#[test]
-fn extract_version_body_does_not_match_version_prefix() {
+#[tokio::test]
+async fn extract_version_body_does_not_match_version_prefix() {
 	let changelog = "# Changelog\n\n## 1.2.0-beta - 2024-01-01\n\nbeta content\n\n## 1.2.0 - 2024-02-01\n\nstable content\n";
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
@@ -599,13 +618,14 @@ fn extract_version_body_does_not_match_version_prefix() {
 		&"1.2.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(body.contains("stable content"));
 	assert!(!body.contains("beta content"));
 }
 
-#[test]
-fn extract_version_body_with_date_suffix() {
+#[tokio::test]
+async fn extract_version_body_with_date_suffix() {
 	let changelog = "# Changelog\n\n## 2.0.0 - 2025-01-01\n\nMajor release\n";
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
@@ -616,12 +636,13 @@ fn extract_version_body_with_date_suffix() {
 		&"2.0.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(body.contains("Major release"));
 }
 
-#[test]
-fn extract_version_body_empty_body() {
+#[tokio::test]
+async fn extract_version_body_empty_body() {
 	let changelog = "# Changelog\n\n## 1.0.0\n\n## 0.9.0\n\nPrevious\n";
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("CHANGELOG.md");
@@ -632,12 +653,13 @@ fn extract_version_body_empty_body() {
 		&"1.0.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(body.is_empty());
 }
 
-#[test]
-fn extract_version_body_strips_leading_blank_lines() {
+#[tokio::test]
+async fn extract_version_body_strips_leading_blank_lines() {
 	// Multiple blank lines before content — the result must not start with a blank line.
 	let changelog = "# Changelog\n\n## 1.0.0\n\n\n\nContent here\n";
 	let dir = tempfile::tempdir().unwrap();
@@ -649,6 +671,7 @@ fn extract_version_body_strips_leading_blank_lines() {
 		&"1.0.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(
 		!body.starts_with('\n'),
@@ -657,8 +680,8 @@ fn extract_version_body_strips_leading_blank_lines() {
 	assert!(body.contains("Content here"));
 }
 
-#[test]
-fn extract_version_body_strips_trailing_blank_lines() {
+#[tokio::test]
+async fn extract_version_body_strips_trailing_blank_lines() {
 	// Trailing blank lines between sections — the result must not end with a blank line.
 	let changelog = "# Changelog\n\n## 1.0.0\n\nContent here\n\n\n## 0.9.0\n\nPrevious\n";
 	let dir = tempfile::tempdir().unwrap();
@@ -670,6 +693,7 @@ fn extract_version_body_strips_trailing_blank_lines() {
 		&"1.0.0".parse().unwrap(),
 		&crate::filesystem::LocalFilesystem,
 	)
+	.await
 	.unwrap();
 	assert!(
 		!body.ends_with('\n'),

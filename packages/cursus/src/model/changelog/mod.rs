@@ -180,16 +180,17 @@ impl Changelog {
 	/// # Errors
 	///
 	/// Returns an error if the file cannot be read or written.
-	pub fn update(
+	pub async fn update(
 		&self,
 		dry_run: bool,
 		fs: &dyn crate::filesystem::Filesystem,
 	) -> anyhow::Result<()> {
 		let changelog_path = self.project_path.child("CHANGELOG.md");
 		let entry = self.format_entry();
-		let content = if fs.exists(&changelog_path) {
+		let content = if fs.exists(&changelog_path).await? {
 			let existing = fs
 				.read_to_string(&changelog_path)
+				.await
 				.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
 			let (preamble, rest) = split_at_first_h2(&existing);
 			format!("{preamble}{entry}\n{rest}")
@@ -198,6 +199,7 @@ impl Changelog {
 		};
 		if !dry_run {
 			fs.write(&changelog_path, content.as_bytes())
+				.await
 				.with_context(|| format!("Failed to write {}", changelog_path.display()))?;
 		}
 		Ok(())
@@ -216,7 +218,7 @@ impl Changelog {
 /// # Errors
 ///
 /// Returns an error if the file cannot be read.
-pub fn extract_version_body(
+pub async fn extract_version_body(
 	changelog_path: &Path,
 	version: &semver::Version,
 	fs: &dyn crate::filesystem::Filesystem,
@@ -229,6 +231,7 @@ pub fn extract_version_body(
 	})?;
 	let content = fs
 		.read_to_string(&abs_path)
+		.await
 		.with_context(|| format!("Failed to read {}", changelog_path.display()))?;
 
 	let version_str = version.to_string();
