@@ -52,8 +52,10 @@
 					# is not available inside the Nix sandbox.
 					cargoTestFlags = [ "--workspace" "--no-default-features" ];
 
-					# Required for managing the node module in this project
+					# cacert provides SSL_CERT_FILE so rustls-native-certs can load the
+					# CA bundle when constructing TLS clients during tests.
 					nativeBuildInputs = with pkgs; [
+						cacert
 						git
 						nodejs
 					];
