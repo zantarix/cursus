@@ -1740,9 +1740,9 @@ dependencies = [
 
 [[package]]
 name = "jsonc-parser"
-version = "0.29.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9eb0774546269185d38da823d8583e94448ba0e158e3f50759d9c79aba946ca5"
+checksum = "8de0ffda8def4eb16ed430641db8056c2509b20e38f2dd327bdb4c83239f88c4"
 
 [[package]]
 name = "jsonwebtoken"
@@ -2818,9 +2818,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr-parser-bw"
-version = "0.0.608"
+version = "0.0.610"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d55ae5ea09894b6d5382621db78f586df37ef18ab581bf32c754e75076b124b1"
+checksum = "6d643f5e972f17219245b82f038c22cd3c74320bb17c6e8f7e8537de268b1bc6"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -2916,9 +2916,9 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.21"
+version = "0.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a6fc4aa0da972ba0f51cf5c1bb16e9dba35334adc6831b09b3ffb0ec20bb264"
+checksum = "546b4da4f679832602a8f8ab8ddc10b6b1d2e1a13b4f9dddcaee499436fa06ad"
 dependencies = [
  "ahash",
  "annotate-snippets",
