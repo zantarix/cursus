@@ -11,10 +11,8 @@ allow = [
 	"BSD-2-Clause",
 	"BSD-3-Clause",
 	"ISC",
-	"CDLA-Permissive-2.0",
 	"Unicode-3.0",
 	"Zlib",
-	"OpenSSL",
 ]
 
 # Warn on confidence level
@@ -25,7 +23,7 @@ confidence-threshold = 0.8
 multiple-versions = "warn"
 
 # Skip common crates that often have multiple versions in the ecosystem
-skip = []
+skip = ["getrandom", "windows-sys"]
 
 # Deny specific crates (empty by default)
 deny = []
