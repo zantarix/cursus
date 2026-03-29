@@ -35,10 +35,11 @@ test-support = []
 
 [dev-dependencies]
 cursus = { path = ".", features = ["test-support"], default-features = false }
+httpmock = "=0.8.3"
 insta = "=1.46.3"
 proptest = "=1.10.0"
 tempfile = "=3.27.0"
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

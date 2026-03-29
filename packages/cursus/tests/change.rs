@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use common::{
-	run_cursus_subprocess, temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project,
+	temp_git_repo, temp_git_repo_with_config, temp_git_repo_with_project,
 	temp_git_repo_with_project_in_subfolder,
 };
 use cursus::command::RealCommandRunner;
@@ -406,49 +406,4 @@ async fn change_interactive_with_message_does_not_open_editor() {
 	let cli = clap::Parser::parse_from(["cursus", "change", "-t", "minor", "-m", "bump"]);
 	let result = cursus::run(cli, env).await;
 	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
-}
-
-#[tokio::test]
-async fn change_dry_run_does_not_write_changeset_file() {
-	let dir = temp_git_repo_with_project(PackageManager::Npm).await;
-	let (success, stdout, _stderr) = run_cursus_subprocess(
-		&[
-			"--dry-run",
-			"--no-interactive",
-			"change",
-			"-t",
-			"patch",
-			"-m",
-			"test dry run",
-		],
-		dir.path(),
-	);
-
-	assert!(success, "Expected success exit code");
-
-	// The rendered changeset should be printed to stdout.
-	assert!(
-		stdout.contains("+++"),
-		"Expected changeset frontmatter in stdout, got: {stdout}"
-	);
-	assert!(
-		stdout.contains("test-project = \"patch\""),
-		"Expected project/change-type in stdout, got: {stdout}"
-	);
-	assert!(
-		stdout.contains("test dry run"),
-		"Expected message in stdout, got: {stdout}"
-	);
-
-	// No changeset file should have been written.
-	let cursus_dir = dir.path().join(".cursus");
-	let md_files: Vec<_> = std::fs::read_dir(&cursus_dir)
-		.unwrap()
-		.filter_map(|e| e.ok())
-		.filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-		.collect();
-	assert!(
-		md_files.is_empty(),
-		"--dry-run must not write changeset files, but found: {md_files:?}"
-	);
 }

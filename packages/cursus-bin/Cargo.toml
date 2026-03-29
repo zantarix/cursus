@@ -26,13 +26,8 @@ test-support = []
 
 [dev-dependencies]
 cursus = { path = "../cursus", features = ["test-support"], default-features = false }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-httpmock = "=0.8.3"
-insta = "=1.46.3"
-proptest = "=1.10.0"
-serde_json.workspace = true
 tempfile = "=3.27.0"
-toml.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true
