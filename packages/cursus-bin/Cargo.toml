@@ -10,13 +10,13 @@ path = "src/main.rs"
 
 [dependencies]
 cursus = { path = "../cursus" }
-anyhow.workspace = true
-clap.workspace = true
-log.workspace = true
-mutants.workspace = true
-octocrab.workspace = true
-sys-locale.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+anyhow = "=1.0.102"
+clap = { version = "=4.6.0", features = ["derive"] }
+log = "=0.4.29"
+mutants = "=0.0.4"
+octocrab = "=0.49.6"
+sys-locale = "=0.3.2"
+tokio = { version = "=1.50.0", default-features = false, features = ["rt-multi-thread", "macros"] }
 
 [features]
 default = ["nix-tests"]
@@ -27,7 +27,7 @@ test-support = []
 [dev-dependencies]
 cursus = { path = "../cursus", features = ["test-support"], default-features = false }
 tempfile = "=3.27.0"
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { version = "=1.50.0", features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

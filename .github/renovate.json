@@ -1,13 +1,30 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": [
-		"github>mscharley/renovate-config",
-		":pinDependencies"
+		"github>mscharley/renovate-config"
 	],
 	"nix": {
 		"enabled": true
 	},
 	"packageRules": [
+		{
+			"description": "Library production dependencies use caret ranges",
+			"matchFileNames": ["packages/cursus/Cargo.toml"],
+			"matchDepTypes": ["dependencies"],
+			"rangeStrategy": "replace"
+		},
+		{
+			"description": "Binary dependencies stay pinned",
+			"matchFileNames": ["packages/cursus-bin/Cargo.toml"],
+			"matchDepTypes": ["dependencies"],
+			"rangeStrategy": "pin"
+		},
+		{
+			"description": "Dev dependencies stay pinned everywhere",
+			"matchDepTypes": ["devDependencies"],
+			"matchManagers": ["cargo"],
+			"rangeStrategy": "pin"
+		},
 		{
 			"groupName": "serialisation dependencies",
 			"matchPackageNames": [
@@ -23,11 +40,6 @@
 			"groupName": "docs site dependencies",
 			"matchFileNames": ["docs/site/package.json"],
 			"matchPackageNames": ["*"]
-		},
-		{
-			"description": "Workspace dependency updates are fix-level (patch changeset)",
-			"matchDepTypes": ["workspace.dependencies"],
-			"semanticCommitType": "fix"
 		}
 	]
 }

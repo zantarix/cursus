@@ -72,7 +72,8 @@ Key differences from old style:
 - ADR-036: Accepted (Filesystem trait for file I/O abstraction)
 - ADR-037: Accepted (async library with tokio runtime)
 - ADR-038: Accepted (octocrab-based shared GitHubClient)
-- Next ADR number: 039
+- ADR-039: Accepted (split dependency versioning -- library caret, binary pinned)
+- Next ADR number: 040
 
 ## Project ADR Rules (from CLAUDE.md)
 
