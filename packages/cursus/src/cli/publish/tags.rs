@@ -71,7 +71,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::*;
-	use crate::cli::publish::tests_common::{make_github_config, make_test_env, workdir};
+	use crate::cli::publish::tests_common::make_test_env;
 	use crate::command::CommandRunner;
 	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 	use crate::model::config::Config;
@@ -439,12 +439,5 @@ mod tests {
 		assert_eq!(created, 0);
 		assert_eq!(skipped, 0);
 		assert_eq!(push_failed, 1);
-	}
-
-	// Suppress unused import warning for make_github_config which is used in other test modules
-	#[allow(dead_code)]
-	fn _use_make_github_config() {
-		let _ = make_github_config("", std::collections::BTreeMap::new());
-		let _ = workdir();
 	}
 }
