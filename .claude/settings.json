@@ -15,6 +15,17 @@
     ]
   },
   "enabledPlugins": {
-    "rust-analyzer-lsp@claude-plugins-official": true
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "rust@zantarix": true,
+    "base@zantarix": true
+  },
+  "extraKnownMarketplaces": {
+    "zantarix": {
+      "source": {
+        "source": "github",
+        "repo": "zantarix/claude-code"
+      },
+      "autoUpdate": true
+    }
   }
 }
