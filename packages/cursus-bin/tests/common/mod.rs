@@ -36,26 +36,24 @@ pub fn temp_git_repo() -> TempDir {
 /// Creates a temporary git repository with a Cursus config file.
 pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
+	let env = test_env(dir.path());
 	let config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
-		PackageManager::Cargo => {
-			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
-		}
+		PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 	};
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	dir
 }
 
 /// Creates a temporary git repository with a config and matching package manifest.
 pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
+	let env = test_env(dir.path());
 	let config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
-		PackageManager::Cargo => {
-			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
-		}
+		PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 	};
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(

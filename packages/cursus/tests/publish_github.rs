@@ -28,7 +28,8 @@ async fn run_cursus_with_token(
 	let env = cursus::Env::new(runner, Arc::new(LocalFilesystem), git)
 		.with_code_forge_client(forge_client);
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(args);
-	cursus::run(cli, env).await
+	let config = cursus::model::config::load(env.fs(), env.git().path()).await?;
+	cursus::run(cli, env, config).await
 }
 
 /// Helper: write a config file with the given TOML content under `.cursus/`.

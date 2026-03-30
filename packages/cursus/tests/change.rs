@@ -404,6 +404,9 @@ async fn change_interactive_with_message_does_not_open_editor() {
 	let env = cursus::Env::new(runner, Arc::new(LocalFilesystem), git)
 		.with_editor("__cursus_test_nonexistent_editor__".to_string());
 	let cli = clap::Parser::parse_from(["cursus", "change", "-t", "minor", "-m", "bump"]);
-	let result = cursus::run(cli, env).await;
+	let config = cursus::model::config::load(env.fs(), env.git().path())
+		.await
+		.unwrap();
+	let result = cursus::run(cli, env, config).await;
 	assert_eq!(result.expect("Expected success"), ExitCode::SUCCESS);
 }

@@ -12,9 +12,12 @@ use cursus::test_logging::{init_test_logger, take_logs};
 /// Adds a `[linked-versions]` block to the Cursus config saved in `dir`.
 async fn add_linked_versions_to_config(dir: &std::path::Path, lv: LinkedVersionsConfig) {
 	let env = make_env_with_git(dir);
-	let mut config = cursus::model::config::load(&env).await.unwrap();
+	let mut config = cursus::model::config::load(env.fs(), env.git().path())
+		.await
+		.unwrap()
+		.unwrap();
 	config.linked_versions = lv;
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 }
 
 fn make_env_with_git(dir: &std::path::Path) -> cursus::Env {

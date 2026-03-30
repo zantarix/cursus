@@ -265,11 +265,11 @@ async fn run_pre_publish_github_checks(
 pub(crate) async fn cmd_publish(
 	args: &PublishArgs,
 	dry_run: bool,
+	env: &crate::Env,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let env = config.env();
 	let git = env.git();
-	let projects = config.load_projects().await?;
+	let projects = config.load_projects(env).await?;
 	let selected_projects = filter_projects_by_name(&projects, &args.packages)?;
 	let (sorted_projects, graph) = sort_projects_by_dependency(
 		&projects,

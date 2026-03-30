@@ -92,12 +92,13 @@ pub(super) struct VersionPlan {
 async fn compute_version_plan(
 	changesets: &[(crate::path::AbsolutePath, Changeset)],
 	args: &PrepareArgs,
+	env: &crate::Env,
 	config: &Config,
 	projects: &[Project],
 	git_ctx: &GitContext,
 	dry_run: bool,
 ) -> anyhow::Result<VersionPlan> {
-	let git = config.env().git();
+	let git = env.git();
 	let commit_refs = resolve_commit_references(changesets, git, git_ctx.enabled).await;
 	let (mut aggregated, mut changes_per_package) =
 		aggregate_changesets(changesets, &args.packages, projects, &commit_refs)?;
@@ -109,7 +110,6 @@ async fn compute_version_plan(
 		&linked_groups,
 		projects,
 	);
-	let env = config.env();
 	let (dep_entries, propagation_changeset_paths) = apply_dependency_propagation(
 		projects,
 		&mut aggregated,
@@ -142,11 +142,11 @@ async fn compute_version_plan(
 pub(crate) async fn cmd_prepare(
 	args: &PrepareArgs,
 	dry_run: bool,
+	env: &crate::Env,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let env = config.env();
 	let git = env.git();
-	let adapters = config.create_adapters()?;
+	let adapters = config.create_adapters(env)?;
 	let projects = config.load_projects_for_adapters(&adapters).await?;
 	let changesets = Changeset::read_all(env).await?;
 
@@ -156,8 +156,16 @@ pub(crate) async fn cmd_prepare(
 	}
 
 	let git_ctx = setup_git_context(&config, args);
-	let plan =
-		compute_version_plan(&changesets, args, &config, &projects, &git_ctx, dry_run).await?;
+	let plan = compute_version_plan(
+		&changesets,
+		args,
+		env,
+		&config,
+		&projects,
+		&git_ctx,
+		dry_run,
+	)
+	.await?;
 	let branches = preflight_checks(git, &config, env, args, &git_ctx, dry_run).await?;
 	let output =
 		prepare_release_files(&adapters, &projects, &changesets, plan, dry_run, env.fs()).await?;
@@ -199,9 +207,10 @@ mod tests {
 	async fn cmd_prepare_no_changesets_succeeds() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -221,8 +230,11 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).await.unwrap();
-		let result = cmd_prepare(&args, false, config).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
+		let result = cmd_prepare(&args, false, &env, config).await.unwrap();
 		assert_eq!(result, ExitCode::SUCCESS);
 	}
 
@@ -230,9 +242,10 @@ mod tests {
 	async fn cmd_prepare_unknown_package_in_changeset_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -259,8 +272,11 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).await.unwrap();
-		let result = cmd_prepare(&args, false, config).await;
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
+		let result = cmd_prepare(&args, false, &env, config).await;
 		assert!(result.is_err());
 		assert!(
 			result
@@ -274,9 +290,10 @@ mod tests {
 	async fn cmd_prepare_unknown_package_flag_fails() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -302,13 +319,16 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
 		let args = PrepareArgs {
 			packages: vec!["nonexistent".to_string()],
 			no_git: true,
 			..PrepareArgs::default()
 		};
-		let result = cmd_prepare(&args, false, config).await;
+		let result = cmd_prepare(&args, false, &env, config).await;
 		assert!(result.is_err());
 		assert!(
 			result

@@ -101,48 +101,16 @@ pub struct ConfigData {
 
 /// Cursus configuration for a repository.
 ///
-/// Combines the TOML-persisted [`ConfigData`] with the runtime execution
-/// environment ([`Env`][crate::Env]).  The `env` field is always set — there
-/// is no `Option`, no hidden invariant, and no runtime unwrapping.
+/// Contains only TOML-persisted data — the runtime execution environment
+/// ([`Env`][crate::Env]) is passed separately by callers.
 ///
 /// Field access to the persisted data is provided via [`Deref`] to
 /// [`ConfigData`], so `config.npm`, `config.cargo`, etc. work directly.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Config {
 	/// The TOML-persisted configuration data.
 	pub(crate) data: ConfigData,
-	/// Runtime environment (command runner, filesystem, git, etc.).
-	env: crate::Env,
 }
-
-// Debug and Clone are derived-equivalent but implemented manually because
-// Env doesn't participate in PartialEq (two configs are equal when their
-// persisted data matches, regardless of runtime environment).
-
-impl std::fmt::Debug for Config {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("Config")
-			.field("data", &self.data)
-			.field("env", &self.env)
-			.finish()
-	}
-}
-
-impl Clone for Config {
-	fn clone(&self) -> Self {
-		Self {
-			data: self.data.clone(),
-			env: self.env.clone(),
-		}
-	}
-}
-
-impl PartialEq for Config {
-	fn eq(&self, other: &Self) -> bool {
-		self.data == other.data
-	}
-}
-
-impl Eq for Config {}
 
 impl Deref for Config {
 	type Target = ConfigData;
@@ -160,10 +128,9 @@ impl DerefMut for Config {
 
 impl Config {
 	/// Creates a new config with all package managers disabled.
-	pub fn new(env: &crate::Env) -> Self {
+	pub fn new() -> Self {
 		Self {
 			data: ConfigData::default(),
-			env: env.clone(),
 		}
 	}
 
@@ -209,18 +176,6 @@ impl Config {
 		self
 	}
 
-	/// Returns the runtime environment.
-	pub fn env(&self) -> &crate::Env {
-		&self.env
-	}
-
-	/// Returns the git repository root path.
-	///
-	/// Derived from `env.git().path()`.
-	pub fn git_workdir(&self) -> &AbsolutePath {
-		self.env.git().path()
-	}
-
 	/// Returns an iterator over all enabled package managers.
 	pub fn enabled_package_managers(&self) -> impl Iterator<Item = PackageManager> {
 		let mut managers = Vec::new();
@@ -236,8 +191,11 @@ impl Config {
 	/// Creates package manager adapters for all enabled package managers.
 	///
 	/// Returns a vector of adapter instances wrapped in `Arc` for shared ownership.
-	pub fn create_adapters(&self) -> anyhow::Result<Vec<Arc<dyn PackageManagerAdapter>>> {
-		let workdir = self.git_workdir();
+	pub fn create_adapters(
+		&self,
+		env: &crate::Env,
+	) -> anyhow::Result<Vec<Arc<dyn PackageManagerAdapter>>> {
+		let workdir = env.git().path();
 		Ok(self
 			.enabled_package_managers()
 			.map(|pm| -> Arc<dyn PackageManagerAdapter> {
@@ -245,12 +203,12 @@ impl Config {
 					PackageManager::Npm => Arc::new(NpmAdapter::new(
 						self.data.npm.clone(),
 						workdir.clone(),
-						self.env.clone(),
+						env.clone(),
 					)),
 					PackageManager::Cargo => Arc::new(CargoAdapter::new(
 						self.data.cargo.clone(),
 						workdir.clone(),
-						self.env.clone(),
+						env.clone(),
 					)),
 				}
 			})
@@ -338,8 +296,8 @@ impl Config {
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
 	/// - No projects are found
-	pub async fn load_projects(&self) -> anyhow::Result<Vec<Project>> {
-		let adapters = self.create_adapters()?;
+	pub async fn load_projects(&self, env: &crate::Env) -> anyhow::Result<Vec<Project>> {
+		let adapters = self.create_adapters(env)?;
 		self.load_projects_for_adapters(&adapters).await
 	}
 
@@ -350,11 +308,13 @@ impl Config {
 	/// # Errors
 	///
 	/// Returns an error if the directory cannot be created or the file cannot be written.
-	pub async fn save(&self) -> anyhow::Result<PathBuf> {
-		let workdir = self.git_workdir();
-		let fs = self.env.fs();
-		let config_path = config_path(workdir);
-		let parent = workdir.child(".cursus");
+	pub async fn save(
+		&self,
+		fs: &dyn crate::filesystem::Filesystem,
+		git_root: &AbsolutePath,
+	) -> anyhow::Result<PathBuf> {
+		let config_path = config_path(git_root);
+		let parent = git_root.child(".cursus");
 		fs.create_dir_all(&parent)
 			.await
 			.with_context(|| format!("Failed to create directory: {}", parent.display()))?;
@@ -373,31 +333,38 @@ fn config_path(git_workdir: &AbsolutePath) -> AbsolutePath {
 /// Checks if a Cursus configuration file exists in the repository.
 ///
 /// Returns `true` if `.cursus/config.toml` exists at the given git root.
-pub async fn exists(env: &crate::Env) -> anyhow::Result<bool> {
-	env.fs().exists(&config_path(env.git().path())).await
+pub async fn exists(
+	fs: &dyn crate::filesystem::Filesystem,
+	git_root: &AbsolutePath,
+) -> anyhow::Result<bool> {
+	fs.exists(&config_path(git_root)).await
 }
 
-async fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
-	let git = env.git();
-	let git_workdir = git.path();
-
-	if !env.fs().exists(&config_path(git_workdir)).await? {
-		bail!("No configuration found. Run 'cursus init' to create one.");
+/// Loads the Cursus configuration from the repository.
+///
+/// Reads and parses `.cursus/config.toml` from the given git root.
+/// Returns `Ok(None)` when no configuration file exists.
+///
+/// # Errors
+///
+/// Returns an error if the config file cannot be read or parsed.
+pub async fn load(
+	fs: &dyn crate::filesystem::Filesystem,
+	git_root: &AbsolutePath,
+) -> anyhow::Result<Option<Config>> {
+	if !fs.exists(&config_path(git_root)).await? {
+		return Ok(None);
 	}
 
-	let path = config_path(git_workdir);
-	let contents = env
-		.fs()
+	let path = config_path(git_root);
+	let contents = fs
 		.read_to_string(&path)
 		.await
 		.with_context(|| format!("Failed to read config file: {}", path.display()))?;
 	let data: ConfigData =
 		toml::from_str(&contents).with_context(|| "Failed to parse config.toml")?;
 
-	let mut config = Config {
-		data,
-		env: env.clone(),
-	};
+	let mut config = Config { data };
 
 	// Validate that at least one package manager is enabled
 	if config.enabled_package_managers().next().is_none() {
@@ -407,31 +374,7 @@ async fn load_impl(env: &crate::Env) -> anyhow::Result<Config> {
 	// Apply cross-config derived defaults (git.enabled, git.strategy).
 	config.data.git.resolve_defaults(config.data.github.enabled);
 
-	Ok(config)
-}
-
-/// Loads the Cursus configuration from the repository.
-///
-/// Reads and parses `.cursus/config.toml` from the given git root.
-///
-/// # Errors
-///
-/// Returns an error if the config file cannot be read or parsed.
-#[cfg(feature = "test-support")]
-pub async fn load(env: &crate::Env) -> anyhow::Result<Config> {
-	load_impl(env).await
-}
-
-/// Loads the Cursus configuration from the repository.
-///
-/// Reads and parses `.cursus/config.toml` from the given git root.
-///
-/// # Errors
-///
-/// Returns an error if the config file cannot be read or parsed.
-#[cfg(not(feature = "test-support"))]
-pub(crate) async fn load(env: &crate::Env) -> anyhow::Result<Config> {
-	load_impl(env).await
+	Ok(Some(config))
 }
 
 /// Validates that projects inheriting workspace versions are properly covered

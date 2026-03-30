@@ -263,9 +263,10 @@ mod tests {
 	async fn aggregate_changesets_unknown_package_filter_returns_error() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -281,8 +282,11 @@ mod tests {
 			Arc::new(LocalFilesystem),
 			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		let config = crate::model::config::load(&env).await.unwrap();
-		let adapters = config.create_adapters().unwrap();
+		let config = crate::model::config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
+		let adapters = config.create_adapters(&env).unwrap();
 		let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 		let commit_refs = BTreeMap::new();
@@ -298,9 +302,10 @@ mod tests {
 	async fn aggregate_changesets_with_empty_refs_produces_none_references() {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 
@@ -324,8 +329,11 @@ mod tests {
 			Arc::new(LocalFilesystem),
 			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		let config = crate::model::config::load(&env).await.unwrap();
-		let adapters = config.create_adapters().unwrap();
+		let config = crate::model::config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
+		let adapters = config.create_adapters(&env).unwrap();
 		std::fs::write(
 			dir.path().join("Cargo.toml"),
 			"[package]\nname = \"my-pkg\"\nversion = \"0.1.0\"\n",

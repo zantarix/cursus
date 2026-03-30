@@ -194,15 +194,15 @@ async fn validate_single_commit(git: &dyn Git) -> anyhow::Result<Option<String>>
 async fn cmd_change_auto(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
+	env: &crate::Env,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let env = config.env();
 	let git = env.git();
 	let Some(message) = validate_single_commit(git).await? else {
 		return Ok(ExitCode::SUCCESS);
 	};
 
-	let projects = config.load_projects().await?;
+	let projects = config.load_projects(env).await?;
 	let changed_files: HashSet<String> = git.diff_tree_names("HEAD").await?.into_iter().collect();
 	let matched_flags = match_files_to_projects(&projects, git.path(), &changed_files);
 	let matched: Vec<_> = projects
@@ -276,15 +276,15 @@ fn resolve_non_interactive(
 pub(crate) async fn cmd_change(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
+	env: &crate::Env,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
 	if args.auto {
-		return cmd_change_auto(args, global, config).await;
+		return cmd_change_auto(args, global, env, config).await;
 	}
 
-	let env = config.env();
 	let git = env.git();
-	let projects = config.load_projects().await?;
+	let projects = config.load_projects(env).await?;
 
 	let project_indices = resolve_project_indices(&projects, &args.projects)?;
 

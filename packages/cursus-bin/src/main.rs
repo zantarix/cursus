@@ -206,5 +206,7 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 		.with_cargo_registry_token_present(cargo_registry_token_present)
 		.with_locale(locale);
 
-	cursus::run(cli, env).await
+	let config = cursus::model::config::load(env.fs(), env.git().path()).await?;
+
+	cursus::run(cli, env, config).await
 }

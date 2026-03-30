@@ -59,7 +59,8 @@ pub async fn run_cursus(
 	));
 	let env = cursus::Env::new(runner, filesystem, git);
 
-	cursus::run(cli, env).await
+	let config = cursus::model::config::load(env.fs(), env.git().path()).await?;
+	cursus::run(cli, env, config).await
 }
 
 /// Runs a git command in the given directory and panics on failure.
@@ -104,15 +105,16 @@ pub fn temp_real_git_repo() -> TempDir {
 /// Creates a real git repository with a Cursus config that has git lifecycle enabled.
 pub async fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig) -> TempDir {
 	let dir = temp_real_git_repo();
+	let env = test_env(dir.path());
 	let config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path()))
+		PackageManager::Npm => Config::new()
 			.with_npm(NpmConfig::enabled())
 			.with_git(git_config),
-		PackageManager::Cargo => Config::new(&test_env(dir.path()))
+		PackageManager::Cargo => Config::new()
 			.with_cargo(CargoConfig::enabled())
 			.with_git(git_config),
 	};
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	dir
 }
 
@@ -124,10 +126,11 @@ pub async fn temp_real_git_repo_with_cargo_workspace(
 	git_config: GitConfig,
 ) -> TempDir {
 	let dir = temp_real_git_repo();
-	let config = Config::new(&test_env(dir.path()))
+	let env = test_env(dir.path());
+	let config = Config::new()
 		.with_cargo(CargoConfig::enabled())
 		.with_git(git_config);
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 
 	let member_list = members
 		.iter()
@@ -271,26 +274,24 @@ pub fn temp_git_repo() -> TempDir {
 /// Creates a temporary git repository with a Cursus config file.
 pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
+	let env = test_env(dir.path());
 	let config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
-		PackageManager::Cargo => {
-			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
-		}
+		PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 	};
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	dir
 }
 
 /// Creates a temporary git repository with a config and matching package manifest.
 pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
+	let env = test_env(dir.path());
 	let config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
-		PackageManager::Cargo => {
-			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
-		}
+		PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 	};
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(
@@ -320,8 +321,9 @@ pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 /// an empty `src/lib.rs`.
 pub async fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 	let dir = temp_git_repo();
-	let config = Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled());
-	config.save().await.unwrap();
+	let env = test_env(dir.path());
+	let config = Config::new().with_cargo(CargoConfig::enabled());
+	config.save(env.fs(), env.git().path()).await.unwrap();
 
 	let member_list = members
 		.iter()
@@ -354,17 +356,16 @@ pub async fn temp_git_repo_with_project_in_subfolder(
 	subfolder: &str,
 ) -> TempDir {
 	let dir = temp_git_repo();
+	let env = test_env(dir.path());
 	let mut config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
-		PackageManager::Cargo => {
-			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
-		}
+		PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 	};
 	match pm {
 		PackageManager::Npm => config.npm.path = Some(subfolder.to_string()),
 		PackageManager::Cargo => config.cargo.path = Some(subfolder.to_string()),
 	}
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	let sub_path = dir.path().join(subfolder);
 	std::fs::create_dir_all(&sub_path).unwrap();
 	match pm {
@@ -416,13 +417,12 @@ pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
 /// `rev-list` and `diff-tree` work correctly.
 pub async fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_real_git_repo();
+	let env = test_env(dir.path());
 	let config = match pm {
-		PackageManager::Npm => Config::new(&test_env(dir.path())).with_npm(NpmConfig::enabled()),
-		PackageManager::Cargo => {
-			Config::new(&test_env(dir.path())).with_cargo(CargoConfig::enabled())
-		}
+		PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+		PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 	};
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 	match pm {
 		PackageManager::Npm => {
 			std::fs::write(

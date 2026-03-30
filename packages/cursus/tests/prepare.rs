@@ -779,9 +779,10 @@ async fn prepare_no_branch_arg_with_push_strategy_no_warning() {
 async fn prepare_updates_npm_intra_workspace_dep_version() {
 	// pkg-a depends on pkg-b; when pkg-b is bumped, pkg-a's package.json should be updated
 	let dir = temp_git_repo();
-	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
-		.with_npm(cursus::model::config::NpmConfig::enabled());
-	config.save().await.unwrap();
+	let env = common::test_env(dir.path());
+	let config =
+		cursus::model::config::Config::new().with_npm(cursus::model::config::NpmConfig::enabled());
+	config.save(env.fs(), env.git().path()).await.unwrap();
 
 	// Root package.json with workspace config
 	std::fs::write(
@@ -833,9 +834,10 @@ async fn prepare_skips_workspace_protocol_dep_version() {
 	// pkg-a depends on pkg-b via workspace: protocol; that dep must NOT be rewritten
 	// (ADR-012: workspace: entries auto-resolve at publish time via the package manager)
 	let dir = temp_git_repo();
-	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
-		.with_npm(cursus::model::config::NpmConfig::enabled());
-	config.save().await.unwrap();
+	let env = common::test_env(dir.path());
+	let config =
+		cursus::model::config::Config::new().with_npm(cursus::model::config::NpmConfig::enabled());
+	config.save(env.fs(), env.git().path()).await.unwrap();
 
 	std::fs::write(
 		dir.path().join("package.json"),

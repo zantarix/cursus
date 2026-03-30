@@ -27,14 +27,14 @@ enabled = true
 #[tokio::test]
 async fn config_roundtrip_with_global_ignore() {
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["example-*".to_string(), "internal-tool".to_string()];
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.save().await.unwrap();
-	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert_eq!(
 		loaded.global.ignore,
 		vec!["example-*".to_string(), "internal-tool".to_string()]
@@ -45,9 +45,10 @@ async fn config_roundtrip_with_global_ignore() {
 async fn load_projects_filters_ignored_packages() {
 	// Set up a workspace with two packages; ignore one by exact name.
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["internal-tool".to_string()];
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
 
@@ -68,7 +69,7 @@ async fn load_projects_filters_ignored_packages() {
 		std::fs::write(pkg_dir.join("src/lib.rs"), "").unwrap();
 	}
 
-	let adapters = config.create_adapters().unwrap();
+	let adapters = config.create_adapters(&env).unwrap();
 	let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
@@ -79,9 +80,10 @@ async fn load_projects_filters_ignored_packages() {
 async fn load_projects_filters_by_glob_pattern() {
 	// Wildcard pattern: ignore all packages matching "example-*".
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["example-*".to_string()];
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
 
@@ -105,7 +107,7 @@ async fn load_projects_filters_by_glob_pattern() {
 		std::fs::write(pkg_dir.join("src/lib.rs"), "").unwrap();
 	}
 
-	let adapters = config.create_adapters().unwrap();
+	let adapters = config.create_adapters(&env).unwrap();
 	let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 	assert_eq!(projects.len(), 1);
@@ -115,9 +117,10 @@ async fn load_projects_filters_by_glob_pattern() {
 #[tokio::test]
 async fn load_projects_ignore_invalid_glob_fails() {
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["[invalid".to_string()];
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
 
@@ -127,7 +130,7 @@ async fn load_projects_ignore_invalid_glob_fails() {
 	)
 	.unwrap();
 
-	let adapters = config.create_adapters().unwrap();
+	let adapters = config.create_adapters(&env).unwrap();
 	let result = config.load_projects_for_adapters(&adapters).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err().to_string();
@@ -141,9 +144,10 @@ async fn load_projects_ignore_invalid_glob_fails() {
 async fn load_projects_ignore_no_match_warns() {
 	// A pattern that matches nothing should succeed (just log a warning).
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["nonexistent-package".to_string()];
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
 
@@ -153,7 +157,7 @@ async fn load_projects_ignore_no_match_warns() {
 	)
 	.unwrap();
 
-	let adapters = config.create_adapters().unwrap();
+	let adapters = config.create_adapters(&env).unwrap();
 	let projects = config.load_projects_for_adapters(&adapters).await.unwrap();
 
 	// app is still returned; the no-match pattern just warns
@@ -166,9 +170,10 @@ async fn load_projects_ignoring_all_packages_fails_with_informative_error() {
 	// When all projects are filtered by ignore patterns, the error message
 	// should mention the ignore patterns rather than the package manager config.
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.ignore = vec!["app".to_string()];
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
 
@@ -178,7 +183,7 @@ async fn load_projects_ignoring_all_packages_fails_with_informative_error() {
 	)
 	.unwrap();
 
-	let adapters = config.create_adapters().unwrap();
+	let adapters = config.create_adapters(&env).unwrap();
 	let result = config.load_projects_for_adapters(&adapters).await;
 
 	assert!(result.is_err());

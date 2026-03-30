@@ -51,9 +51,9 @@ pub struct CiArgs {
 pub(crate) async fn cmd_ci(
 	args: &CiArgs,
 	dry_run: bool,
+	env: &crate::Env,
 	config: Config,
 ) -> anyhow::Result<ExitCode> {
-	let env = config.env();
 	let git = env.git();
 
 	// Step 1: check for pending changesets.
@@ -65,13 +65,13 @@ pub(crate) async fn cmd_ci(
 			no_git: args.no_git,
 			branch: args.branch.clone(),
 		};
-		return cmd_prepare(&prepare_args, dry_run, config).await;
+		return cmd_prepare(&prepare_args, dry_run, env, config).await;
 	}
 
 	// Step 2: when git is enabled and --no-git is not set, check for packages that
 	// have not yet been tagged (post-release, pre-publish state).
 	if config.git.enabled() && !args.no_git {
-		let projects = config.load_projects().await?;
+		let projects = config.load_projects(env).await?;
 		let selected = filter_projects_by_name(&projects, &args.packages)?;
 		let is_multi = projects.len() > 1;
 
@@ -100,7 +100,7 @@ pub(crate) async fn cmd_ci(
 				packages: args.packages.clone(),
 				no_git: args.no_git,
 			};
-			return cmd_publish(&publish_args, dry_run, config).await;
+			return cmd_publish(&publish_args, dry_run, env, config).await;
 		}
 	}
 

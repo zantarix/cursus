@@ -19,10 +19,11 @@ async fn run_change_with_ignore(
 	// Overwrite the config with the ignore list.
 	let mut global = GlobalConfig::default();
 	global.ignore = ignore_patterns;
-	let config = Config::new(&common::test_env(dir.path()))
+	let env = common::test_env(dir.path());
+	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 
 	let mut args = vec![
 		"cursus",

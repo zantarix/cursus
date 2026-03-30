@@ -340,10 +340,11 @@ async fn change_auto_with_git_commits_and_pushes() {
 	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
 	make_conventional_commit(dir.path(), "src/lib.rs", "fix: another fix");
 
-	let config = cursus::model::config::Config::new(&common::test_env(dir.path()))
+	let env = common::test_env(dir.path());
+	let config = cursus::model::config::Config::new()
 		.with_cargo(CargoConfig::enabled())
 		.with_git(GitConfig::enabled_config());
-	config.save().await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
 
 	let result = common::run_cursus(
 		["cursus", "--no-interactive", "change", "--auto"],

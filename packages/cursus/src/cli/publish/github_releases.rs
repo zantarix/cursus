@@ -210,9 +210,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::*;
-	use crate::cli::publish::tests_common::{
-		make_github_config, make_test_env, workdir, workdir_env,
-	};
+	use crate::cli::publish::tests_common::{make_github_config, workdir};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
@@ -223,8 +221,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn github_release_skipped_when_no_published_packages() {
-		let config =
-			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
@@ -249,8 +246,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn github_releases_created_for_published_packages() {
-		let config =
-			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -291,8 +287,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn github_releases_uses_prefixed_tag_for_monorepo() {
-		let config =
-			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -332,8 +327,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn github_release_create_failure_continues_other_packages() {
-		let config =
-			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new().with_create_failure();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -396,7 +390,7 @@ mod tests {
 				.with_repo("app".to_string())
 		};
 
-		let config = Config::new(&make_test_env(dir.path())).with_github(github_cfg);
+		let config = Config::new().with_github(github_cfg);
 		let client = RecordingCodeForgeClient::new().with_upload_failure();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -460,7 +454,7 @@ mod tests {
 			c.with_owner("acme".to_string())
 				.with_repo("app".to_string())
 		};
-		let config = Config::new(&make_test_env(dir.path())).with_github(github_cfg);
+		let config = Config::new().with_github(github_cfg);
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -507,8 +501,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn github_release_publish_failure_sets_github_failed() {
-		let config =
-			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new().with_publish_release_failure();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -565,7 +558,7 @@ mod tests {
 			c.with_owner("acme".to_string())
 				.with_repo("app".to_string())
 		};
-		let config = Config::new(&make_test_env(dir.path())).with_github(github_cfg);
+		let config = Config::new().with_github(github_cfg);
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
@@ -789,8 +782,7 @@ mod tests {
 		init_test_logger();
 		let _ = take_logs();
 
-		let config =
-			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
@@ -815,7 +807,7 @@ mod tests {
 
 		let mut artifacts = BTreeMap::new();
 		artifacts.insert("linux-amd64".to_string(), "target/app".to_string());
-		let config = Config::new(&workdir_env()).with_github(make_github_config("", artifacts));
+		let config = Config::new().with_github(make_github_config("", artifacts));
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),

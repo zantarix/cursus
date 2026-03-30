@@ -584,7 +584,8 @@ mod tests {
 	async fn setup_branch_strategy_with_github() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
 			.with_git(
 				crate::model::config::GitConfig::enabled_config()
@@ -596,7 +597,7 @@ mod tests {
 					.with_repo("app".to_string())
 					.with_pull_request_title("My Release PR".to_string()),
 			)
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -641,10 +642,13 @@ mod tests {
 			)),
 		)
 		.with_code_forge_client(Arc::clone(&client) as Arc<dyn CodeForgeClient>);
-		let config = config::load(&env).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
 		let args = PrepareArgs::default();
 
-		let result = super::super::cmd_prepare(&args, false, config).await;
+		let result = super::super::cmd_prepare(&args, false, &env, config).await;
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 
 		let invocations = client.invocations();
@@ -685,10 +689,13 @@ mod tests {
 			)),
 		)
 		.with_code_forge_client(Arc::clone(&client) as Arc<dyn CodeForgeClient>);
-		let config = config::load(&env).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
 		let args = PrepareArgs::default();
 
-		let result = super::super::cmd_prepare(&args, false, config).await;
+		let result = super::super::cmd_prepare(&args, false, &env, config).await;
 		assert!(
 			result.is_err(),
 			"PR failure should be fatal, got: {result:?}"
@@ -709,10 +716,13 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
 		let args = PrepareArgs::default();
 
-		let result = super::super::cmd_prepare(&args, false, config).await;
+		let result = super::super::cmd_prepare(&args, false, &env, config).await;
 		assert!(result.is_err(), "Expected Err without github client");
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

@@ -215,10 +215,11 @@ mod tests {
 			Arc::new(LocalFilesystem),
 			Arc::new(crate::git::GitWorkdir::new(runner, path)),
 		);
-		config::load(&env)
+		config::load(env.fs(), env.git().path())
 			.await
 			.unwrap()
-			.load_projects()
+			.unwrap()
+			.load_projects(&env)
 			.await
 			.unwrap()
 	}
@@ -240,9 +241,10 @@ mod tests {
 	async fn setup_two_package_workspace() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -272,9 +274,10 @@ mod tests {
 	async fn setup_workspace_with_dependency() -> tempfile::TempDir {
 		let dir = tempfile::tempdir().unwrap();
 		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		crate::model::config::Config::new(&make_test_env(dir.path()))
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
 			.with_cargo(crate::model::config::CargoConfig::enabled())
-			.save()
+			.save(setup_env.fs(), setup_env.git().path())
 			.await
 			.unwrap();
 		std::fs::write(
@@ -322,13 +325,16 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
 		let args = super::super::PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..super::super::PrepareArgs::default()
 		};
-		let result = super::super::cmd_prepare(&args, false, config).await;
+		let result = super::super::cmd_prepare(&args, false, &env, config).await;
 		assert!(result.is_ok());
 
 		// Changeset should be rewritten with only pkg-b remaining
@@ -389,13 +395,16 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		);
-		let config = config::load(&env).await.unwrap();
+		let config = config::load(env.fs(), env.git().path())
+			.await
+			.unwrap()
+			.unwrap();
 		let args = super::super::PrepareArgs {
 			packages: vec!["pkg-a".to_string()],
 			no_git: true,
 			..super::super::PrepareArgs::default()
 		};
-		let result = super::super::cmd_prepare(&args, true, config).await;
+		let result = super::super::cmd_prepare(&args, true, &env, config).await;
 		assert!(result.is_ok());
 
 		// Dry-run must not touch the changeset even when scoped

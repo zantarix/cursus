@@ -2,8 +2,7 @@ use super::*;
 
 #[test]
 fn config_serializes_with_sections() {
-	let dir = temp_dir();
-	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
+	let config = Config::new().with_npm(NpmConfig::enabled());
 	let toml_str = toml::to_string(&config.data).unwrap();
 	assert!(toml_str.contains("[npm]"));
 	assert!(toml_str.contains("enabled = true"));
@@ -28,7 +27,7 @@ async fn load_fails_on_unknown_top_level_field() {
 	std::fs::write(config_dir.join("config.toml"), "[rust]\nenabled = true").unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let err = load(&env).await.unwrap_err();
+	let err = load(env.fs(), env.git().path()).await.unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -48,7 +47,7 @@ async fn load_fails_on_unknown_package_manager_field() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let err = load(&env).await.unwrap_err();
+	let err = load(env.fs(), env.git().path()).await.unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -72,16 +71,14 @@ fn deserialize_config_without_path() {
 
 #[test]
 fn serialize_config_omits_none_path() {
-	let dir = temp_dir();
-	let config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
+	let config = Config::new().with_npm(NpmConfig::enabled());
 	let toml_str = toml::to_string(&config.data).unwrap();
 	assert!(!toml_str.contains("path"), "None path should be omitted");
 }
 
 #[test]
 fn serialize_config_includes_some_path() {
-	let dir = temp_dir();
-	let mut config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
+	let mut config = Config::new().with_npm(NpmConfig::enabled());
 	config.npm.path = Some("frontend".to_string());
 	let toml_str = toml::to_string(&config.data).unwrap();
 	assert!(
@@ -93,11 +90,11 @@ fn serialize_config_includes_some_path() {
 #[tokio::test]
 async fn config_roundtrip_with_path() {
 	let dir = temp_dir();
-	let mut config = Config::new(&make_env_with_git(dir.path())).with_npm(NpmConfig::enabled());
-	config.npm.path = Some("frontend".to_string());
-	config.save().await.unwrap();
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	let mut config = Config::new().with_npm(NpmConfig::enabled());
+	config.npm.path = Some("frontend".to_string());
+	config.save(env.fs(), env.git().path()).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert_eq!(loaded.npm.path, Some("frontend".to_string()));
 }
 
@@ -108,11 +105,11 @@ async fn config_roundtrip() {
 
 	for pm in [PackageManager::Npm, PackageManager::Cargo] {
 		let config = match pm {
-			PackageManager::Npm => Config::new(&env).with_npm(NpmConfig::enabled()),
-			PackageManager::Cargo => Config::new(&env).with_cargo(CargoConfig::enabled()),
+			PackageManager::Npm => Config::new().with_npm(NpmConfig::enabled()),
+			PackageManager::Cargo => Config::new().with_cargo(CargoConfig::enabled()),
 		};
-		config.save().await.unwrap();
-		let loaded = load(&env).await.unwrap();
+		config.save(env.fs(), env.git().path()).await.unwrap();
+		let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 		let enabled: Vec<_> = loaded.enabled_package_managers().collect();
 		assert_eq!(enabled, vec![pm]);
 	}
@@ -148,14 +145,14 @@ enabled = true
 #[tokio::test]
 async fn config_roundtrip_with_global() {
 	let dir = temp_dir();
+	let env = make_env_with_git(dir.path());
 	let mut global = GlobalConfig::default();
 	global.disable_dependency_cycle_warnings = true;
-	let config = Config::new(&make_env_with_git(dir.path()))
+	let config = Config::new()
 		.with_global(global)
 		.with_npm(NpmConfig::enabled());
-	config.save().await.unwrap();
-	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	config.save(env.fs(), env.git().path()).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert!(loaded.global.disable_dependency_cycle_warnings);
 }
 
@@ -171,7 +168,7 @@ async fn global_config_unknown_field_fails() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let err = load(&env).await.unwrap_err();
+	let err = load(env.fs(), env.git().path()).await.unwrap_err();
 	let chain = format!("{err:#}");
 	assert!(
 		chain.contains("unknown field"),
@@ -214,7 +211,7 @@ async fn load_github_enabled_derives_git_enabled() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert!(loaded.github.enabled);
 	assert!(
 		loaded.git.enabled(),
@@ -234,7 +231,7 @@ async fn load_explicit_git_disabled_overrides_derived_default() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert!(loaded.github.enabled);
 	assert!(
 		!loaded.git.enabled(),
@@ -254,7 +251,7 @@ async fn load_derives_branch_strategy_when_github_enabled() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Branch,
@@ -274,7 +271,7 @@ async fn load_derives_push_strategy_when_github_disabled() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Push,
@@ -294,7 +291,7 @@ async fn load_explicit_strategy_overrides_derived_default() {
 	.unwrap();
 
 	let env = make_env_with_git(dir.path());
-	let loaded = load(&env).await.unwrap();
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
 	assert_eq!(
 		loaded.git.strategy(),
 		Strategy::Push,

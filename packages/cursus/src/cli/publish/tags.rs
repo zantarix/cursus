@@ -71,7 +71,6 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::*;
-	use crate::cli::publish::tests_common::make_test_env;
 	use crate::command::CommandRunner;
 	use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 	use crate::model::config::Config;
@@ -80,7 +79,7 @@ mod tests {
 	#[tokio::test]
 	async fn create_and_push_tags_creates_annotated_tags_and_pushes() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 1 → tag_exists returns false (no existing tag)
 		// all other git commands succeed via default exit 0
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
@@ -127,7 +126,7 @@ mod tests {
 	#[tokio::test]
 	async fn create_and_push_tags_skips_existing_tag() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 0 → tag_exists returns true (tag already exists)
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
@@ -158,7 +157,7 @@ mod tests {
 	#[tokio::test]
 	async fn create_and_push_tags_empty_list_does_nothing() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git = crate::git::GitWorkdir::new(
@@ -186,7 +185,7 @@ mod tests {
 		let _ = take_logs();
 
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let git =
@@ -219,7 +218,7 @@ mod tests {
 		let _ = take_logs();
 
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 1 → tag_exists returns false → tag gets created
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
 			"git",
@@ -256,7 +255,7 @@ mod tests {
 		// Verifies that the `my-app@2.0.0` prefix format is used throughout
 		// the full create-and-push flow, not just the existence check.
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 1 (tag absent) so tag creation and push are exercised.
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args(
 			"git",
@@ -302,7 +301,7 @@ mod tests {
 	#[tokio::test]
 	async fn create_and_push_tags_push_failure_deletes_local_tag_and_counts_failed() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 1 (tag absent); push of v1.0.0 also fails; all else succeeds.
 		let runner = Arc::new(
 			DispatchingCommandRunner::new(0)
@@ -357,7 +356,7 @@ mod tests {
 	#[tokio::test]
 	async fn create_and_push_tags_push_failure_continues_to_next_package() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 1 (both tags absent); only the first push (v1.0.0) fails.
 		let runner = Arc::new(
 			DispatchingCommandRunner::new(0)
@@ -409,7 +408,7 @@ mod tests {
 	#[tokio::test]
 	async fn create_and_push_tags_delete_failure_after_push_failure_is_non_fatal() {
 		let dir = tempfile::tempdir().unwrap();
-		let config = Config::new(&make_test_env(dir.path()));
+		let config = Config::new();
 		// rev-parse exits 1 (tag absent); push and delete also fail.
 		let runner = Arc::new(
 			DispatchingCommandRunner::new(0)

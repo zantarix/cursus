@@ -782,7 +782,8 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 
 	// Create a repo with branch strategy + GitHub config (owner = "acme", repo = "app")
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
-	Config::new(&common::test_env(dir.path()))
+	let cfg_env = common::test_env(dir.path());
+	Config::new()
 		.with_cargo(CargoConfig::enabled())
 		.with_git(branch_strategy_config())
 		.with_github(
@@ -790,7 +791,7 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 				.with_owner("acme".into())
 				.with_repo("app".into()),
 		)
-		.save()
+		.save(cfg_env.fs(), cfg_env.git().path())
 		.await
 		.unwrap();
 
@@ -844,7 +845,11 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	});
 
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
-	let result = cursus::run(cli, make_env()).await;
+	let env1 = make_env();
+	let config1 = cursus::model::config::load(env1.fs(), env1.git().path())
+		.await
+		.unwrap();
+	let result = cursus::run(cli, env1, config1).await;
 	assert!(result.is_ok(), "first prepare failed: {result:?}");
 	mock_find_empty.assert_calls(1);
 	mock_create.assert_calls(1);
@@ -871,7 +876,11 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	});
 
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
-	let result = cursus::run(cli, make_env()).await;
+	let env2 = make_env();
+	let config2 = cursus::model::config::load(env2.fs(), env2.git().path())
+		.await
+		.unwrap();
+	let result = cursus::run(cli, env2, config2).await;
 	assert!(result.is_ok(), "second prepare (update) failed: {result:?}");
 	mock_find_existing.assert_calls(1);
 	mock_update.assert_calls(1);
