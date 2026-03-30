@@ -247,6 +247,44 @@ async fn change_auto_changeset_includes_body() {
 }
 
 #[tokio::test]
+async fn change_auto_strips_trailers_from_body() {
+	let (dir, _remote) = setup_auto_repo(PackageManager::Cargo).await;
+	std::fs::write(dir.path().join("src/lib.rs"), "// modified").unwrap();
+	git_cmd(dir.path(), &["add", "."]);
+	git_cmd(
+		dir.path(),
+		&[
+			"commit",
+			"-m",
+			"fix: fix the thing\n\nThis fixes the issue described in #42.\n\nSigned-off-by: Test User <test@example.com>\nCo-authored-by: Bot <bot@example.com>",
+		],
+	);
+
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "change", "--auto", "--no-git"],
+		dir.path(),
+	)
+	.await;
+
+	assert!(result.is_ok());
+	let changesets = find_changesets(dir.path());
+	assert_eq!(changesets.len(), 1);
+	let content = std::fs::read_to_string(&changesets[0]).unwrap();
+	assert!(
+		content.contains("fixes the issue"),
+		"Expected body prose in changeset, got: {content}"
+	);
+	assert!(
+		!content.contains("Signed-off-by"),
+		"Expected trailers stripped from changeset, got: {content}"
+	);
+	assert!(
+		!content.contains("Co-authored-by"),
+		"Expected trailers stripped from changeset, got: {content}"
+	);
+}
+
+#[tokio::test]
 async fn change_auto_no_matching_projects_skips() {
 	// Use a cargo workspace with a package in a subfolder; modify only a file
 	// at the root (outside any package) so no project matches.

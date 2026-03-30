@@ -102,6 +102,85 @@ fn parse_header(header: &str) -> anyhow::Result<(String, Option<String>, bool, S
 	Ok((commit_type, scope, breaking_bang, description))
 }
 
+/// Returns `true` if `line` matches the RFC 822-style git trailer format:
+///
+/// - `BREAKING CHANGE: <value>` or `BREAKING-CHANGE: <value>` (multi-word tokens from the
+///   Conventional Commits spec)
+/// - `<token>: <value>` where token is `[a-zA-Z0-9-]+`
+/// - `<token> #<value>` where token is `[a-zA-Z0-9-]+` (e.g. `Fixes #123`)
+fn is_trailer_line(line: &str) -> bool {
+	let line = line.trim_end();
+	if line.is_empty() {
+		return false;
+	}
+	if line.starts_with("BREAKING CHANGE: ") || line.starts_with("BREAKING-CHANGE: ") {
+		return true;
+	}
+	let token_end = line
+		.bytes()
+		.position(|b| !b.is_ascii_alphanumeric() && b != b'-')
+		.unwrap_or(line.len());
+	if token_end == 0 {
+		return false;
+	}
+	let after_token = &line[token_end..];
+	after_token.starts_with(": ") || after_token == ":" || after_token.starts_with(" #")
+}
+
+/// Strips RFC 822-style git trailers from the tail of `rest` (everything after the commit
+/// header's `\n\n`).
+///
+/// The trailer block is the maximal contiguous run of non-empty lines at the tail where every
+/// line matches the git trailer format. Blank lines between the prose body and the trailer block
+/// are trimmed. Returns `None` when the entire `rest` consists only of trailers (or is empty).
+fn strip_trailers(rest: &str) -> Option<String> {
+	let lines: Vec<&str> = rest.lines().collect();
+
+	// Skip trailing blank lines.
+	let mut end = lines.len();
+	while end > 0 && lines[end - 1].trim().is_empty() {
+		end -= 1;
+	}
+	if end == 0 {
+		return None;
+	}
+
+	// Walk backwards from the tail consuming trailer lines (stop at blank or non-trailer).
+	let mut trailer_start = end;
+	while trailer_start > 0 {
+		let line = lines[trailer_start - 1];
+		if line.trim().is_empty() || !is_trailer_line(line) {
+			break;
+		}
+		trailer_start -= 1;
+	}
+
+	// No trailers found — return the trimmed body as-is.
+	if trailer_start == end {
+		let s = lines[..end].join("\n").trim().to_string();
+		return if s.is_empty() { None } else { Some(s) };
+	}
+
+	// All content was trailers.
+	if trailer_start == 0 {
+		return None;
+	}
+
+	// Prose exists before the trailer block. Trim trailing blank lines from the prose section.
+	let prose_end = lines[..trailer_start]
+		.iter()
+		.rposition(|l| !l.trim().is_empty())
+		.map(|i| i + 1)
+		.unwrap_or(0);
+
+	if prose_end == 0 {
+		return None;
+	}
+
+	let prose = lines[..prose_end].join("\n").trim().to_string();
+	if prose.is_empty() { None } else { Some(prose) }
+}
+
 /// Parses a commit message string as a Conventional Commit.
 ///
 /// Splits at the first blank line (`\n\n`) to separate the header from the
@@ -111,6 +190,9 @@ fn parse_header(header: &str) -> anyhow::Result<(String, Option<String>, bool, S
 /// Breaking changes are detected via:
 /// - A `!` before the `: ` separator in the header, or
 /// - A `BREAKING CHANGE:` or `BREAKING-CHANGE:` token in the footer.
+///
+/// RFC 822-style git trailers (e.g. `Signed-off-by:`, `Co-authored-by:`, `Fixes #123`) are
+/// stripped from the tail of the body per ADR-040, so `body` contains only prose text.
 ///
 /// # Errors
 ///
@@ -129,7 +211,7 @@ pub fn parse(message: &str) -> anyhow::Result<ConventionalCommit> {
 			line.starts_with("BREAKING CHANGE:") || line.starts_with("BREAKING-CHANGE:")
 		})
 	});
-	let body = rest.map(|r| r.trim().to_string()).filter(|s| !s.is_empty());
+	let body = rest.and_then(strip_trailers);
 
 	Ok(ConventionalCommit {
 		commit_type,
@@ -297,6 +379,105 @@ mod tests {
 	#[test]
 	fn parse_invalid_char_in_type_is_error() {
 		assert!(parse("feat@scope: desc").is_err());
+	}
+
+	// --- strip_trailers ---
+
+	#[test]
+	fn strip_trailers_only_trailers_returns_none() {
+		assert_eq!(
+			strip_trailers(
+				"Signed-off-by: Alice <alice@example.com>\nCo-authored-by: Bob <bob@example.com>"
+			),
+			None
+		);
+	}
+
+	#[test]
+	fn strip_trailers_body_with_trailers_strips_them() {
+		let input = "This fixes the crash.\n\nSigned-off-by: Alice <alice@example.com>";
+		assert_eq!(
+			strip_trailers(input),
+			Some("This fixes the crash.".to_string())
+		);
+	}
+
+	#[test]
+	fn strip_trailers_body_without_trailers_unchanged() {
+		let input = "This is a normal body.\nWith multiple lines.";
+		assert_eq!(
+			strip_trailers(input),
+			Some("This is a normal body.\nWith multiple lines.".to_string())
+		);
+	}
+
+	#[test]
+	fn strip_trailers_mixed_colon_and_hash_trailers() {
+		let input = "Prose.\n\nSigned-off-by: Alice\nFixes #42\nCloses #99";
+		assert_eq!(strip_trailers(input), Some("Prose.".to_string()));
+	}
+
+	#[test]
+	fn strip_trailers_breaking_change_trailer_stripped() {
+		let input = "Some details.\n\nBREAKING CHANGE: old API removed";
+		assert_eq!(strip_trailers(input), Some("Some details.".to_string()));
+	}
+
+	#[test]
+	fn strip_trailers_github_keyword_trailers() {
+		let input = "Fix the crash.\n\nFixes #123\nCloses #456";
+		assert_eq!(strip_trailers(input), Some("Fix the crash.".to_string()));
+	}
+
+	#[test]
+	fn strip_trailers_prose_resembling_trailer_in_middle_preserved() {
+		// "Example: some value" is NOT at the tail — a non-trailer line follows it.
+		let input = "Example: some value\nThis is a normal line.\n\nSigned-off-by: Alice";
+		assert_eq!(
+			strip_trailers(input),
+			Some("Example: some value\nThis is a normal line.".to_string())
+		);
+	}
+
+	#[test]
+	fn strip_trailers_all_blank_returns_none() {
+		assert_eq!(strip_trailers("   \n  \n"), None);
+	}
+
+	// --- parse (trailer stripping) ---
+
+	#[test]
+	fn parse_body_with_trailers_strips_them() {
+		let msg =
+			"fix: resolve null pointer\n\nThis was important.\n\nSigned-off-by: Foo <foo@bar.com>";
+		let c = parse(msg).unwrap();
+		assert_eq!(c.body, Some("This was important.".to_string()));
+	}
+
+	#[test]
+	fn parse_trailers_only_body_becomes_none() {
+		let msg = "feat: add feature\n\nSigned-off-by: Foo <foo@bar.com>";
+		let c = parse(msg).unwrap();
+		assert_eq!(c.body, None);
+	}
+
+	#[test]
+	fn parse_breaking_footer_still_detected_with_trailers() {
+		let msg = "feat: new thing\n\nBREAKING CHANGE: old API removed\nSigned-off-by: Foo";
+		let c = parse(msg).unwrap();
+		assert!(c.breaking);
+		assert_eq!(c.body, None);
+	}
+
+	#[test]
+	fn parse_body_with_inline_colon_not_stripped() {
+		// "The config key: value" has a multi-word token before `: ` — not a trailer.
+		let msg = "fix: thing\n\nThe config key: value format changed";
+		let c = parse(msg).unwrap();
+		assert_eq!(
+			c.body,
+			Some("The config key: value format changed".to_string())
+		);
 	}
 
 	// --- change_type ---

@@ -73,7 +73,7 @@ Key differences from old style:
 - ADR-037: Accepted (async library with tokio runtime)
 - ADR-038: Accepted (octocrab-based shared CodeForgeClient)
 - ADR-039: Accepted (split dependency versioning -- library caret, binary pinned)
-- ADR-040: Proposed (strip git trailers from conventional commit body during parsing)
+- ADR-040: Accepted (strip git trailers from conventional commit body during parsing)
 - ADR-041: Accepted (rename GitHubClient trait to CodeForgeClient)
 - ADR-042: Accepted (repo identity in CodeForgeClient constructor)
 - Next ADR number: 043
