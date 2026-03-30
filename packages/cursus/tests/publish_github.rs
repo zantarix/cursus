@@ -20,13 +20,13 @@ async fn run_cursus_with_token(
 		.personal_token(token.to_string())
 		.build()
 		.unwrap();
-	let github_client = Arc::new(cursus::github::OctocrabGitHubClient::new(octocrab_client))
-		as Arc<dyn cursus::github::client::GitHubClient>;
+	let forge_client = Arc::new(cursus::github::OctocrabGitHubClient::new(octocrab_client))
+		as Arc<dyn cursus::github::client::CodeForgeClient>;
 	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
 	let path = cursus::path::AbsolutePath::new(cwd).unwrap();
 	let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
-	let env =
-		cursus::Env::new(runner, Arc::new(LocalFilesystem), git).with_github_client(github_client);
+	let env = cursus::Env::new(runner, Arc::new(LocalFilesystem), git)
+		.with_code_forge_client(forge_client);
 	let cli: cursus::cli::Cli = clap::Parser::parse_from(args);
 	cursus::run(cli, env).await
 }

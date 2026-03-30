@@ -111,3 +111,4 @@ Accept generic `&Path` in trait method signatures, allowing both absolute and re
 ## Errata
 
 - **2026-03-29**: The `rest.rs` streaming upload exception noted in the Neutral consequences changed character with [ADR-038](038-octocrab-github-client.md). `OctocrabGitHubClient.upload_asset` uses `tokio::fs::read()` (async in-memory read) instead of `std::fs::File::open` (sync streaming), but still accesses the filesystem directly rather than through the `Filesystem` trait. The exception remains because `GitHubClient` receives `&Path` and has no access to a `Filesystem` instance.
+- `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).

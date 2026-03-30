@@ -1,4 +1,4 @@
-//! Abstract GitHub API client trait and test support.
+//! Abstract code forge client trait and test support.
 
 use std::path::Path;
 
@@ -15,13 +15,13 @@ pub struct PullRequest {
 	pub html_url: String,
 }
 
-/// Abstract interface for GitHub API operations.
+/// Abstract interface for code forge API operations.
 ///
 /// All methods are async. The production implementation uses
 /// octocrab. The `test_support` module provides a recording fake
 /// for unit tests.
 #[async_trait]
-pub trait GitHubClient: Send + Sync + std::fmt::Debug {
+pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	/// Creates a GitHub Release for the given tag, returning the release ID.
 	///
 	/// The release is created as a draft. Call [`publish_release`](Self::publish_release)
@@ -121,7 +121,7 @@ pub mod test_support {
 	use anyhow::bail;
 	use async_trait::async_trait;
 
-	use super::{GitHubClient, PullRequest};
+	use super::{CodeForgeClient, PullRequest};
 	use crate::github::remote::GitHubRepo;
 
 	/// A recorded GitHub API invocation.
@@ -189,9 +189,9 @@ pub mod test_support {
 		},
 	}
 
-	/// A [`GitHubClient`] that records all invocations and returns configured responses.
+	/// A [`CodeForgeClient`] that records all invocations and returns configured responses.
 	#[derive(Debug)]
-	pub struct RecordingGitHubClient {
+	pub struct RecordingCodeForgeClient {
 		invocations: Mutex<Vec<GitHubInvocation>>,
 		release_id: String,
 		fail_create: bool,
@@ -203,7 +203,7 @@ pub mod test_support {
 		fail_publish_release: bool,
 	}
 
-	impl RecordingGitHubClient {
+	impl RecordingCodeForgeClient {
 		/// Creates a new recording client that succeeds with `release_id = "release-1"`.
 		pub fn new() -> Self {
 			Self {
@@ -219,51 +219,51 @@ pub mod test_support {
 			}
 		}
 
-		/// Configures the release ID returned by [`create_release`](GitHubClient::create_release).
+		/// Configures the release ID returned by [`create_release`](CodeForgeClient::create_release).
 		pub fn with_release_id(mut self, id: impl Into<String>) -> Self {
 			self.release_id = id.into();
 			self
 		}
 
-		/// Causes [`create_release`](GitHubClient::create_release) to return an error.
+		/// Causes [`create_release`](CodeForgeClient::create_release) to return an error.
 		pub fn with_create_failure(mut self) -> Self {
 			self.fail_create = true;
 			self
 		}
 
-		/// Causes [`upload_asset`](GitHubClient::upload_asset) to return an error.
+		/// Causes [`upload_asset`](CodeForgeClient::upload_asset) to return an error.
 		pub fn with_upload_failure(mut self) -> Self {
 			self.fail_upload = true;
 			self
 		}
 
-		/// Causes [`create_pull_request`](GitHubClient::create_pull_request) to return an error.
+		/// Causes [`create_pull_request`](CodeForgeClient::create_pull_request) to return an error.
 		pub fn with_create_pr_failure(mut self) -> Self {
 			self.fail_create_pr = true;
 			self
 		}
 
 		/// Configures an existing PR to be returned by
-		/// [`find_open_pull_request`](GitHubClient::find_open_pull_request).
+		/// [`find_open_pull_request`](CodeForgeClient::find_open_pull_request).
 		pub fn with_existing_pr(mut self, pr: PullRequest) -> Self {
 			self.existing_pr = Some(pr);
 			self
 		}
 
-		/// Causes [`find_open_pull_request`](GitHubClient::find_open_pull_request) to return an
+		/// Causes [`find_open_pull_request`](CodeForgeClient::find_open_pull_request) to return an
 		/// error.
 		pub fn with_find_pr_failure(mut self) -> Self {
 			self.fail_find_pr = true;
 			self
 		}
 
-		/// Causes [`update_pull_request`](GitHubClient::update_pull_request) to return an error.
+		/// Causes [`update_pull_request`](CodeForgeClient::update_pull_request) to return an error.
 		pub fn with_update_pr_failure(mut self) -> Self {
 			self.fail_update_pr = true;
 			self
 		}
 
-		/// Causes [`publish_release`](GitHubClient::publish_release) to return an error.
+		/// Causes [`publish_release`](CodeForgeClient::publish_release) to return an error.
 		pub fn with_publish_release_failure(mut self) -> Self {
 			self.fail_publish_release = true;
 			self
@@ -275,14 +275,14 @@ pub mod test_support {
 		}
 	}
 
-	impl Default for RecordingGitHubClient {
+	impl Default for RecordingCodeForgeClient {
 		fn default() -> Self {
 			Self::new()
 		}
 	}
 
 	#[async_trait]
-	impl GitHubClient for RecordingGitHubClient {
+	impl CodeForgeClient for RecordingCodeForgeClient {
 		async fn create_release(
 			&self,
 			gh_repo: &GitHubRepo,
@@ -419,7 +419,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_records_create_release() {
-			let client = RecordingGitHubClient::new().with_release_id("r-42");
+			let client = RecordingCodeForgeClient::new().with_release_id("r-42");
 			let id = client
 				.create_release(
 					&GitHubRepo::new("owner", "repo").unwrap(),
@@ -440,7 +440,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_records_upload_asset() {
-			let client = RecordingGitHubClient::new();
+			let client = RecordingCodeForgeClient::new();
 			let path = PathBuf::from("/tmp/app.tar.gz");
 			client
 				.upload_asset(
@@ -461,7 +461,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_create_failure_returns_error() {
-			let client = RecordingGitHubClient::new().with_create_failure();
+			let client = RecordingCodeForgeClient::new().with_create_failure();
 			let result = client
 				.create_release(
 					&GitHubRepo::new("owner", "repo").unwrap(),
@@ -477,7 +477,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_upload_failure_returns_error() {
-			let client = RecordingGitHubClient::new().with_upload_failure();
+			let client = RecordingCodeForgeClient::new().with_upload_failure();
 			let result = client
 				.upload_asset(
 					&GitHubRepo::new("owner", "repo").unwrap(),
@@ -492,7 +492,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_records_create_pull_request() {
-			let client = RecordingGitHubClient::new();
+			let client = RecordingCodeForgeClient::new();
 			let url = client
 				.create_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
@@ -518,7 +518,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_create_pr_failure_returns_error() {
-			let client = RecordingGitHubClient::new().with_create_pr_failure();
+			let client = RecordingCodeForgeClient::new().with_create_pr_failure();
 			let result = client
 				.create_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
@@ -535,7 +535,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_find_open_pr_returns_none_when_not_configured() {
-			let client = RecordingGitHubClient::new();
+			let client = RecordingCodeForgeClient::new();
 			let result = client
 				.find_open_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
@@ -559,7 +559,7 @@ pub mod test_support {
 				number: 42,
 				html_url: "https://github.com/acme/app/pull/42".to_string(),
 			};
-			let client = RecordingGitHubClient::new().with_existing_pr(pr);
+			let client = RecordingCodeForgeClient::new().with_existing_pr(pr);
 			let result = client
 				.find_open_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
@@ -575,7 +575,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_find_pr_failure_returns_error() {
-			let client = RecordingGitHubClient::new().with_find_pr_failure();
+			let client = RecordingCodeForgeClient::new().with_find_pr_failure();
 			let result = client
 				.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
 				.await;
@@ -585,7 +585,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_update_pull_request_records_invocation() {
-			let client = RecordingGitHubClient::new();
+			let client = RecordingCodeForgeClient::new();
 			let url = client
 				.update_pull_request(
 					&GitHubRepo::new("acme", "app").unwrap(),
@@ -607,7 +607,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_update_pr_failure_returns_error() {
-			let client = RecordingGitHubClient::new().with_update_pr_failure();
+			let client = RecordingCodeForgeClient::new().with_update_pr_failure();
 			let result = client
 				.update_pull_request(&GitHubRepo::new("acme", "app").unwrap(), 1, "Title", "body")
 				.await;
@@ -617,7 +617,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_records_publish_release() {
-			let client = RecordingGitHubClient::new();
+			let client = RecordingCodeForgeClient::new();
 			client
 				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
 				.await
@@ -632,7 +632,7 @@ pub mod test_support {
 
 		#[tokio::test]
 		async fn recording_client_publish_release_failure_returns_error() {
-			let client = RecordingGitHubClient::new().with_publish_release_failure();
+			let client = RecordingCodeForgeClient::new().with_publish_release_failure();
 			let result = client
 				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
 				.await;

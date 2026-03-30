@@ -7,14 +7,14 @@ use std::sync::Arc;
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::Filesystem;
 use crate::git::Git;
-use crate::github::client::GitHubClient;
+use crate::github::client::CodeForgeClient;
 
 /// Environment variables and runtime dependencies used by Cursus.
 ///
 /// Populated from the process environment at the binary boundary and threaded
 /// into the library so that internal functions never read `std::env` directly.
 /// Carries the [`CommandRunner`], [`Filesystem`], [`Git`], and optional
-/// [`GitHubClient`] so that all I/O can be intercepted or replaced.
+/// [`CodeForgeClient`] so that all I/O can be intercepted or replaced.
 #[derive(Debug, Clone)]
 pub struct Env {
 	/// The configured editor for opening changeset files.
@@ -32,7 +32,7 @@ pub struct Env {
 	/// [`CommandRunner`].
 	git: Arc<dyn Git>,
 	/// The GitHub client for API operations, if a token was provided.
-	github_client: Option<Arc<dyn GitHubClient>>,
+	code_forge_client: Option<Arc<dyn CodeForgeClient>>,
 	/// Whether an OIDC-capable CI environment is detected.
 	///
 	/// `true` when `ACTIONS_ID_TOKEN_REQUEST_URL` (GitHub Actions) or
@@ -54,7 +54,7 @@ impl Env {
 	/// Creates an `Env` with the given command runner, filesystem, and git implementation.
 	///
 	/// Use the builder methods ([`with_editor`][Self::with_editor],
-	/// [`with_github_client`][Self::with_github_client]) to add optional configuration.
+	/// [`with_code_forge_client`][Self::with_code_forge_client]) to add optional configuration.
 	pub fn new(
 		runner: Arc<dyn CommandRunner>,
 		filesystem: Arc<dyn Filesystem>,
@@ -65,7 +65,7 @@ impl Env {
 			filesystem,
 			git,
 			editor: None,
-			github_client: None,
+			code_forge_client: None,
 			oidc_environment: false,
 			node_auth_token_present: false,
 			cargo_registry_token_present: false,
@@ -97,9 +97,9 @@ impl Env {
 		self
 	}
 
-	/// Sets the GitHub client for API operations.
-	pub fn with_github_client(mut self, client: Arc<dyn GitHubClient>) -> Self {
-		self.github_client = Some(client);
+	/// Sets the code forge client for API operations.
+	pub fn with_code_forge_client(mut self, client: Arc<dyn CodeForgeClient>) -> Self {
+		self.code_forge_client = Some(client);
 		self
 	}
 
@@ -111,11 +111,11 @@ impl Env {
 		self
 	}
 
-	/// Sets the GitHub client from an `Option`, overwriting any previously set value.
+	/// Sets the code forge client from an `Option`, overwriting any previously set value.
 	///
 	/// Passing `None` clears a previously set client.
-	pub fn with_github_client_opt(mut self, client: Option<Arc<dyn GitHubClient>>) -> Self {
-		self.github_client = client;
+	pub fn with_code_forge_client_opt(mut self, client: Option<Arc<dyn CodeForgeClient>>) -> Self {
+		self.code_forge_client = client;
 		self
 	}
 
@@ -142,7 +142,7 @@ impl Env {
 			filesystem: self.filesystem,
 			editor: self.editor,
 			git: self.git,
-			github_client: self.github_client,
+			code_forge_client: self.code_forge_client,
 			oidc_environment: self.oidc_environment,
 			node_auth_token_present: self.node_auth_token_present,
 			cargo_registry_token_present: self.cargo_registry_token_present,
@@ -182,9 +182,9 @@ impl Env {
 		&*self.git
 	}
 
-	/// Returns the GitHub client, if one was configured.
-	pub(crate) fn github_client(&self) -> Option<&dyn GitHubClient> {
-		self.github_client.as_deref()
+	/// Returns the code forge client, if one was configured.
+	pub(crate) fn code_forge_client(&self) -> Option<&dyn CodeForgeClient> {
+		self.code_forge_client.as_deref()
 	}
 
 	/// Returns `true` when an OIDC-capable CI environment is detected.
@@ -330,8 +330,8 @@ mod tests {
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::command::{CommandRunner, shell_flag, shell_program};
 	use crate::filesystem::LocalFilesystem;
-	use crate::github::client::GitHubClient;
-	use crate::github::client::test_support::RecordingGitHubClient;
+	use crate::github::client::CodeForgeClient;
+	use crate::github::client::test_support::RecordingCodeForgeClient;
 
 	use super::*;
 
@@ -352,10 +352,10 @@ mod tests {
 	}
 
 	#[test]
-	fn new_has_no_editor_or_github_client() {
+	fn new_has_no_editor_or_code_forge_client() {
 		let (_, env, _dir) = recording_env(0);
 		assert!(env.editor().is_none());
-		assert!(env.github_client().is_none());
+		assert!(env.code_forge_client().is_none());
 	}
 
 	#[test]
@@ -437,11 +437,11 @@ mod tests {
 	}
 
 	#[test]
-	fn with_github_client_sets_client() {
+	fn with_code_forge_client_sets_client() {
 		let (_, env, _dir) = recording_env(0);
-		let client = Arc::new(RecordingGitHubClient::new()) as Arc<dyn GitHubClient>;
-		let env = env.with_github_client(Arc::clone(&client));
-		assert!(env.github_client().is_some());
+		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
+		let env = env.with_code_forge_client(Arc::clone(&client));
+		assert!(env.code_forge_client().is_some());
 	}
 
 	#[test]
@@ -459,19 +459,21 @@ mod tests {
 	}
 
 	#[test]
-	fn with_github_client_opt_some_sets_client() {
+	fn with_code_forge_client_opt_some_sets_client() {
 		let (_, env, _dir) = recording_env(0);
-		let client = Arc::new(RecordingGitHubClient::new()) as Arc<dyn GitHubClient>;
-		let env = env.with_github_client_opt(Some(client));
-		assert!(env.github_client().is_some());
+		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
+		let env = env.with_code_forge_client_opt(Some(client));
+		assert!(env.code_forge_client().is_some());
 	}
 
 	#[test]
-	fn with_github_client_opt_none_clears_client() {
+	fn with_code_forge_client_opt_none_clears_client() {
 		let (_, env, _dir) = recording_env(0);
-		let client = Arc::new(RecordingGitHubClient::new()) as Arc<dyn GitHubClient>;
-		let env = env.with_github_client(client).with_github_client_opt(None);
-		assert!(env.github_client().is_none());
+		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
+		let env = env
+			.with_code_forge_client(client)
+			.with_code_forge_client_opt(None);
+		assert!(env.code_forge_client().is_none());
 	}
 
 	#[tokio::test]

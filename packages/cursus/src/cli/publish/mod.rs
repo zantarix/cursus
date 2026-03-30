@@ -223,7 +223,7 @@ async fn maybe_orchestrate_github_releases(
 		log_dry_run_github_releases(published_packages, config, is_multi_package);
 		return Ok((0, false));
 	}
-	let client = match env.github_client() {
+	let client = match env.code_forge_client() {
 		Some(c) => c,
 		None => bail!("GitHub client not available despite token being set"),
 	};
@@ -252,7 +252,7 @@ async fn run_pre_publish_github_checks(
 	if !config.github.enabled || no_git {
 		return Ok(false);
 	}
-	if !dry_run && env.github_client().is_none() {
+	if !dry_run && env.code_forge_client().is_none() {
 		bail!(
 			"GitHub Releases is enabled but no GitHub token found. \
 			 Set GH_TOKEN or GITHUB_TOKEN environment variable."

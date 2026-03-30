@@ -183,14 +183,14 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 	));
 
 	let editor = env_first(&["VISUAL", "EDITOR"]);
-	let github_client = env_first(&["GH_TOKEN", "GITHUB_TOKEN"])
+	let forge_client = env_first(&["GH_TOKEN", "GITHUB_TOKEN"])
 		.map(|token| {
 			let client = octocrab::Octocrab::builder()
 				.personal_token(token)
 				.build()
 				.context("Failed to build GitHub client")?;
 			Ok::<_, anyhow::Error>(Arc::new(cursus::github::OctocrabGitHubClient::new(client))
-				as Arc<dyn cursus::github::client::GitHubClient>)
+				as Arc<dyn cursus::github::client::CodeForgeClient>)
 		})
 		.transpose()?;
 	let oidc_environment = env_first(&["ACTIONS_ID_TOKEN_REQUEST_URL", "CI_JOB_JWT_V2"]).is_some();
@@ -200,7 +200,7 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 
 	let env = cursus::Env::new(runner, filesystem, git)
 		.with_editor_opt(editor)
-		.with_github_client_opt(github_client)
+		.with_code_forge_client_opt(forge_client)
 		.with_oidc_environment(oidc_environment)
 		.with_node_auth_token_present(node_auth_token_present)
 		.with_cargo_registry_token_present(cargo_registry_token_present)

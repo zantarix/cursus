@@ -5,7 +5,7 @@ use log::{error, info, warn};
 
 use crate::git::Git;
 use crate::github::GitHubRepo;
-use crate::github::client::GitHubClient;
+use crate::github::client::CodeForgeClient;
 use crate::model::changelog::extract_version_body;
 use crate::model::config::Config;
 
@@ -80,7 +80,7 @@ pub(super) async fn read_changelog_body(
 ///
 /// Returns `true` if any step failed (the release is left as a draft on upload failure).
 pub(super) async fn publish_draft_release(
-	github_client: &dyn GitHubClient,
+	code_forge_client: &dyn CodeForgeClient,
 	gh_repo: &GitHubRepo,
 	tag: &str,
 	release_id: &str,
@@ -88,11 +88,20 @@ pub(super) async fn publish_draft_release(
 	git_root: &crate::path::AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> bool {
-	if upload_release_artifacts(github_client, gh_repo, release_id, artifacts, git_root, fs).await {
+	if upload_release_artifacts(
+		code_forge_client,
+		gh_repo,
+		release_id,
+		artifacts,
+		git_root,
+		fs,
+	)
+	.await
+	{
 		warn!("Artifact uploads failed for {tag}; leaving release as a draft");
 		return true;
 	}
-	match github_client.publish_release(gh_repo, release_id).await {
+	match code_forge_client.publish_release(gh_repo, release_id).await {
 		Ok(()) => {
 			info!("Created GitHub Release for {tag}");
 			false
@@ -106,14 +115,14 @@ pub(super) async fn publish_draft_release(
 
 /// Orchestrates GitHub Release creation for all successfully published packages.
 ///
-/// The caller must ensure that a GitHub token is available and that `github_client`
+/// The caller must ensure that a GitHub token is available and that `code_forge_client`
 /// is `Some` before calling this function (enforced by the early check in `cmd_publish`).
 ///
 /// Returns `(releases_created, any_failed)`.
 pub(super) async fn orchestrate_github_releases(
 	git: &dyn Git,
 	config: &Config,
-	github_client: &dyn GitHubClient,
+	code_forge_client: &dyn CodeForgeClient,
 	published_packages: &[PublishedPackage],
 	is_multi_package: bool,
 	fs: &dyn crate::filesystem::Filesystem,
@@ -130,13 +139,13 @@ pub(super) async fn orchestrate_github_releases(
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 		let body = read_changelog_body(pkg, fs).await;
-		match github_client
+		match code_forge_client
 			.create_release(&gh_repo, &tag, &tag, &body)
 			.await
 		{
 			Ok(release_id) => {
 				if publish_draft_release(
-					github_client,
+					code_forge_client,
 					&gh_repo,
 					&tag,
 					&release_id,
@@ -164,7 +173,7 @@ pub(super) async fn orchestrate_github_releases(
 ///
 /// Returns `true` if any upload failed, `false` if all succeeded.
 pub(super) async fn upload_release_artifacts(
-	github_client: &dyn GitHubClient,
+	code_forge_client: &dyn CodeForgeClient,
 	gh_repo: &GitHubRepo,
 	release_id: &str,
 	artifacts: &std::collections::BTreeMap<String, String>,
@@ -181,7 +190,7 @@ pub(super) async fn upload_release_artifacts(
 				continue;
 			}
 		};
-		match github_client
+		match code_forge_client
 			.upload_asset(gh_repo, release_id, display_name, &full_path)
 			.await
 		{
@@ -206,7 +215,7 @@ mod tests {
 	};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+	use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
 	use crate::model::config::{Config, GitHubConfig};
 	use crate::path::AbsolutePath;
 
@@ -216,7 +225,7 @@ mod tests {
 	async fn github_release_skipped_when_no_published_packages() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		let wd = workdir();
 		let git =
@@ -242,7 +251,7 @@ mod tests {
 	async fn github_releases_created_for_published_packages() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
@@ -284,7 +293,7 @@ mod tests {
 	async fn github_releases_uses_prefixed_tag_for_monorepo() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
@@ -325,7 +334,7 @@ mod tests {
 	async fn github_release_create_failure_continues_other_packages() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
-		let client = RecordingGitHubClient::new().with_create_failure();
+		let client = RecordingCodeForgeClient::new().with_create_failure();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![
@@ -388,7 +397,7 @@ mod tests {
 		};
 
 		let config = Config::new(&make_test_env(dir.path())).with_github(github_cfg);
-		let client = RecordingGitHubClient::new().with_upload_failure();
+		let client = RecordingCodeForgeClient::new().with_upload_failure();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
@@ -452,7 +461,7 @@ mod tests {
 				.with_repo("app".to_string())
 		};
 		let config = Config::new(&make_test_env(dir.path())).with_github(github_cfg);
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![
@@ -500,7 +509,7 @@ mod tests {
 	async fn github_release_publish_failure_sets_github_failed() {
 		let config =
 			Config::new(&workdir_env()).with_github(make_github_config("", BTreeMap::new()));
-		let client = RecordingGitHubClient::new().with_publish_release_failure();
+		let client = RecordingCodeForgeClient::new().with_publish_release_failure();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
@@ -557,7 +566,7 @@ mod tests {
 				.with_repo("app".to_string())
 		};
 		let config = Config::new(&make_test_env(dir.path())).with_github(github_cfg);
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 
 		let packages = vec![PublishedPackage {
@@ -606,7 +615,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn publish_draft_release_success_returns_false() {
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let failed = publish_draft_release(
 			&client,
@@ -639,7 +648,7 @@ mod tests {
 			artifact_path.to_string_lossy().into_owned(),
 		);
 
-		let client = RecordingGitHubClient::new().with_upload_failure();
+		let client = RecordingCodeForgeClient::new().with_upload_failure();
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let dir_abs = AbsolutePath::new(dir.path()).unwrap();
 		let failed = publish_draft_release(
@@ -669,7 +678,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn publish_draft_release_publish_failure_returns_true() {
-		let client = RecordingGitHubClient::new().with_publish_release_failure();
+		let client = RecordingCodeForgeClient::new().with_publish_release_failure();
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let failed = publish_draft_release(
 			&client,
@@ -750,7 +759,7 @@ mod tests {
 		let mut artifacts = BTreeMap::new();
 		artifacts.insert("secret".to_string(), secret.to_string_lossy().into_owned());
 
-		let client = RecordingGitHubClient::new();
+		let client = RecordingCodeForgeClient::new();
 		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let git_root = AbsolutePath::new(&inner).unwrap();
 

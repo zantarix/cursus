@@ -78,3 +78,7 @@ This would avoid putting git on `Env` by threading a `&dyn Git` argument through
 ### Make Git optional on `Env`
 
 Store git as `Option<Arc<dyn Git>>` with a `.with_git()` builder method, so commands that do not need git (such as `init`) can skip constructing a `Git` implementation. This was rejected because in practice every code path that reaches `run_with()` has a discovered git workdir, and the `init` command constructs its own `Env` with a `GitWorkdir` pointed at the project root. Making git optional would add `None`-handling boilerplate at every call site for a case that does not arise in practice.
+
+## Errata
+
+`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).

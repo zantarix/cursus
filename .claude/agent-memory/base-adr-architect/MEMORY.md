@@ -71,10 +71,10 @@ Key differences from old style:
 - ADR-035: Accepted (Git trait abstraction for all git operations)
 - ADR-036: Accepted (Filesystem trait for file I/O abstraction)
 - ADR-037: Accepted (async library with tokio runtime)
-- ADR-038: Accepted (octocrab-based shared GitHubClient)
+- ADR-038: Accepted (octocrab-based shared CodeForgeClient)
 - ADR-039: Accepted (split dependency versioning -- library caret, binary pinned)
 - ADR-040: Proposed (strip git trailers from conventional commit body during parsing)
-- ADR-041: Proposed (rename GitHubClient trait to CodeForgeClient)
+- ADR-041: Accepted (rename GitHubClient trait to CodeForgeClient)
 - Next ADR number: 042
 
 ## Project ADR Rules (from CLAUDE.md)

@@ -89,3 +89,7 @@ Only parallelise specific CPU-bound or I/O-bound operations (e.g., publishing mu
 ### Make only GitHubClient async
 
 Convert only the `GitHubClient` trait to async since it is the most obviously network-bound trait. This is the minimal change but leaves `Git`, `Filesystem`, `CommandRunner`, and `PackageManagerAdapter` synchronous. cursus-bot would still need `block_in_place` bridges for those traits, reducing the benefit from ten bridge sites to perhaps six or seven. Rejected because it creates an inconsistent API surface (some traits async, others not) and does not justify the migration effort if most of the bridging pain remains.
+
+## Errata
+
+`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).

@@ -83,3 +83,7 @@ Each project continues to maintain its own `GitHubClient` implementation -- curs
 ### Runtime-agnostic HTTP client
 
 Use an HTTP client that does not depend on tokio (e.g. `surf` or a custom trait abstracting over HTTP). This was already considered and rejected in [ADR-037](037-async-library-with-tokio-runtime.md) -- the Rust async ecosystem has standardised on tokio, both consumers use it, and no mainstream GitHub API client is runtime-agnostic. Rejected for the same reasons as in ADR-037.
+
+## Errata
+
+`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).

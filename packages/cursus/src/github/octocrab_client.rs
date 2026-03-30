@@ -1,6 +1,6 @@
 //! Production GitHub API client using octocrab.
 //!
-//! Wraps an [`octocrab::Octocrab`] instance to implement the [`GitHubClient`]
+//! Wraps an [`octocrab::Octocrab`] instance to implement the [`CodeForgeClient`]
 //! trait. The `Octocrab` is constructed and configured by the consumer (binary
 //! or bot), so authentication strategy stays outside the library.
 
@@ -9,7 +9,7 @@ use std::path::Path;
 use anyhow::Context;
 use async_trait::async_trait;
 
-use super::client::{GitHubClient, PullRequest};
+use super::client::{CodeForgeClient, PullRequest};
 use super::remote::GitHubRepo;
 
 /// GitHub API client backed by octocrab.
@@ -36,7 +36,7 @@ impl OctocrabGitHubClient {
 }
 
 #[async_trait]
-impl GitHubClient for OctocrabGitHubClient {
+impl CodeForgeClient for OctocrabGitHubClient {
 	async fn create_release(
 		&self,
 		gh_repo: &GitHubRepo,

@@ -3,7 +3,7 @@ use log::info;
 
 use crate::git::Git;
 use crate::github::GitHubRepo;
-use crate::github::client::GitHubClient;
+use crate::github::client::CodeForgeClient;
 use crate::model::config::Config;
 
 use super::ReleaseInfo;
@@ -18,7 +18,7 @@ use super::ReleaseInfo;
 ///
 /// Returns an error if the find, create, or update API call fails.
 pub(super) async fn upsert_pull_request(
-	client: &dyn GitHubClient,
+	client: &dyn CodeForgeClient,
 	gh_repo: &GitHubRepo,
 	title: &str,
 	body: &str,
@@ -82,7 +82,7 @@ pub(super) async fn upsert_release_pull_request(
 		info!("Would attempt to create or update a PR in GitHub.");
 		return Ok(());
 	}
-	let Some(client) = env.github_client() else {
+	let Some(client) = env.code_forge_client() else {
 		return Ok(());
 	};
 	let base = original_branch.context("HEAD is detached; cannot determine PR base branch")?;
@@ -182,8 +182,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_creates_when_no_existing() {
-		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
-		let client = RecordingGitHubClient::new(); // no existing PR
+		use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
+		let client = RecordingCodeForgeClient::new(); // no existing PR
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
 		let result = upsert_pull_request(
 			&client,
@@ -214,12 +214,12 @@ mod tests {
 	#[tokio::test]
 	async fn upsert_pull_request_updates_when_existing() {
 		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+		use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
 		let existing_pr = PullRequest {
 			number: 7,
 			html_url: "https://github.com/acme/app/pull/7".to_string(),
 		};
-		let client = RecordingGitHubClient::new().with_existing_pr(existing_pr);
+		let client = RecordingCodeForgeClient::new().with_existing_pr(existing_pr);
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
 		let result = upsert_pull_request(
 			&client,
@@ -255,8 +255,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_propagates_find_error() {
-		use crate::github::client::test_support::RecordingGitHubClient;
-		let client = RecordingGitHubClient::new().with_find_pr_failure();
+		use crate::github::client::test_support::RecordingCodeForgeClient;
+		let client = RecordingCodeForgeClient::new().with_find_pr_failure();
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
 		let result = upsert_pull_request(
 			&client,
@@ -278,12 +278,12 @@ mod tests {
 	#[tokio::test]
 	async fn upsert_pull_request_propagates_update_error() {
 		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::RecordingGitHubClient;
+		use crate::github::client::test_support::RecordingCodeForgeClient;
 		let existing_pr = PullRequest {
 			number: 1,
 			html_url: "https://github.com/acme/app/pull/1".to_string(),
 		};
-		let client = RecordingGitHubClient::new()
+		let client = RecordingCodeForgeClient::new()
 			.with_existing_pr(existing_pr)
 			.with_update_pr_failure();
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
@@ -306,8 +306,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_propagates_create_error() {
-		use crate::github::client::test_support::RecordingGitHubClient;
-		let client = RecordingGitHubClient::new().with_create_pr_failure();
+		use crate::github::client::test_support::RecordingCodeForgeClient;
+		let client = RecordingCodeForgeClient::new().with_create_pr_failure();
 		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
 		let result = upsert_pull_request(
 			&client,

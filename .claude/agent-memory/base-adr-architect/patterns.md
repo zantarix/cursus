@@ -70,7 +70,7 @@ ADR-015 extends this with a CI-managed variant: `cursus ci` infers which step to
 - Cursus does NOT delegate dry-run to external tools (e.g., `cargo publish --dry-run`) — it skips the operation entirely and prints a summary
 - This is a safety/security invariant: users must be able to trust that `--dry-run` is completely non-destructive
 - Trade-off: loses local validation that external tools' dry-run modes provide (e.g., build checks from `cargo publish --dry-run`)
-- **Late guard pattern (ADR-017):** Run all logic unconditionally; guard only the final mutation at the lowest abstraction boundary. Three levels: `DryRunCommandRunner` decorator for subprocesses, `dry_run: bool` parameter for direct filesystem writes, orchestration-level gating for `GitHubClient` API calls
+- **Late guard pattern (ADR-017):** Run all logic unconditionally; guard only the final mutation at the lowest abstraction boundary. Three levels: `DryRunCommandRunner` decorator for subprocesses, `dry_run: bool` parameter for direct filesystem writes, orchestration-level gating for `CodeForgeClient` API calls
 - `--dry-run` is a global flag on `GlobalArgs`, not per-subcommand
 
 ## Command Execution Convention (ADR-011)

@@ -92,3 +92,7 @@ Making `--silent` stackable like `--verbose`, where each `-s` suppresses one add
 ### Modify CommandRunner trait to accept a verbose parameter
 
 Adding a `verbose: bool` parameter to every `CommandRunner` method. This was rejected because it would change the trait signature, requiring updates to all implementations (including test fakes), and it conflates execution with presentation. The decorator pattern achieves the same result without modifying the trait contract.
+
+## Errata
+
+`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).

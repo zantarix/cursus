@@ -144,7 +144,7 @@ pub(super) async fn preflight_checks(
 		&& git_ctx.strategy == Strategy::Branch
 		&& config.github.enabled
 		&& !dry_run
-		&& env.github_client().is_none()
+		&& env.code_forge_client().is_none()
 	{
 		anyhow::bail!(
 			"GitHub integration is enabled but no GitHub token found. \
@@ -617,8 +617,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn cmd_prepare_branch_strategy_with_github_creates_pr() {
-		use crate::github::client::GitHubClient;
-		use crate::github::client::test_support::{GitHubInvocation, RecordingGitHubClient};
+		use crate::github::client::CodeForgeClient;
+		use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
 		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
@@ -630,7 +630,7 @@ mod tests {
 			0,
 			b"main\n".to_vec(),
 		));
-		let client = Arc::new(RecordingGitHubClient::new());
+		let client = Arc::new(RecordingCodeForgeClient::new());
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
@@ -640,7 +640,7 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		)
-		.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
+		.with_code_forge_client(Arc::clone(&client) as Arc<dyn CodeForgeClient>);
 		let config = config::load(&env).await.unwrap();
 		let args = PrepareArgs::default();
 
@@ -661,8 +661,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn cmd_prepare_branch_strategy_pr_failure_is_fatal() {
-		use crate::github::client::GitHubClient;
-		use crate::github::client::test_support::RecordingGitHubClient;
+		use crate::github::client::CodeForgeClient;
+		use crate::github::client::test_support::RecordingCodeForgeClient;
 		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
@@ -674,7 +674,7 @@ mod tests {
 			0,
 			b"main\n".to_vec(),
 		));
-		let client = Arc::new(RecordingGitHubClient::new().with_create_pr_failure());
+		let client = Arc::new(RecordingCodeForgeClient::new().with_create_pr_failure());
 		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let env = crate::Env::new(
 			Arc::clone(&runner) as Arc<dyn CommandRunner>,
@@ -684,7 +684,7 @@ mod tests {
 				dir_abs.clone(),
 			)),
 		)
-		.with_github_client(Arc::clone(&client) as Arc<dyn GitHubClient>);
+		.with_code_forge_client(Arc::clone(&client) as Arc<dyn CodeForgeClient>);
 		let config = config::load(&env).await.unwrap();
 		let args = PrepareArgs::default();
 
@@ -696,7 +696,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn cmd_prepare_no_github_client_errors() {
+	async fn cmd_prepare_no_code_forge_client_errors() {
 		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(RecordingCommandRunner::new(0));
 		// No github client — pre-flight check should error

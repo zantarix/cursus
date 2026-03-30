@@ -1,14 +1,14 @@
 //! Integration tests for [`OctocrabGitHubClient`] against a mock HTTP server.
 //!
 //! These tests verify that the octocrab-based client correctly maps API
-//! responses to `GitHubClient` trait return values and propagates errors.
+//! responses to `CodeForgeClient` trait return values and propagates errors.
 
 use std::path::Path;
 
 use httpmock::prelude::*;
 
 use cursus::github::OctocrabGitHubClient;
-use cursus::github::client::GitHubClient;
+use cursus::github::client::CodeForgeClient;
 use cursus::github::remote::GitHubRepo;
 
 /// Builds an `OctocrabGitHubClient` pointing at the given mock server.

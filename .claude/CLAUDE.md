@@ -69,10 +69,10 @@ Cursus is a Rust CLI tool for release management. The library is fully async (to
   - `changelog/` - Changelog generation and formatting for releases
 - `package_manager/` - Adapter pattern (`PackageManagerAdapter` trait: `enumerate_projects`, `write_version`, `update_lock_file`, `publish`, `registry_name`) for Cargo and npm/yarn/pnpm workspace enumeration. Versions are returned via `ProjectInfo` from `enumerate_projects()`.
 - `git/` - `Git` trait abstracting all git operations; `GitWorkdir` is the production impl that delegates to the `git` binary via `CommandRunner`.
-- `github/` - `GitHubClient` trait; `OctocrabGitHubClient` is the production impl. Handles release creation, PRs, and asset uploads.
+- `github/` - `CodeForgeClient` trait; `OctocrabGitHubClient` is the production impl. Handles release creation, PRs, and asset uploads.
 - `filesystem.rs` - `Filesystem` trait abstracting all file I/O; `LocalFilesystem` is the production impl using `tokio::fs`.
 - `command/` - `CommandRunner` trait with `run`/`run_mut`/`run_shell` variants; `DryRunCommandRunner` decorator implements the ADR-017 late-guard dry-run pattern (skips mutating ops, forwards read-only); `VerboseCommandRunner` logs invocations.
-- `env.rs` - `Env` struct: dependency injection container holding `Arc<dyn CommandRunner>`, `Arc<dyn Filesystem>`, `Arc<dyn Git>`, `Option<Arc<dyn GitHubClient>>`, editor, locale, and environment flags. Builder methods compose runners (e.g. `with_dry_run_runner()`). All command execution and file I/O goes through `Env`.
+- `env.rs` - `Env` struct: dependency injection container holding `Arc<dyn CommandRunner>`, `Arc<dyn Filesystem>`, `Arc<dyn Git>`, `Option<Arc<dyn CodeForgeClient>>`, editor, locale, and environment flags. Builder methods compose runners (e.g. `with_dry_run_runner()`). All command execution and file I/O goes through `Env`.
 - `conventional_commit.rs` - Parser for Conventional Commits; maps `feat`→Minor, `fix`→Patch, breaking→Major via `ConventionalCommit::change_type()`
 - `locale.rs` - i18n via `fluent-templates`; messages are embedded at compile time (ADR-034).
 - `path.rs` - `AbsolutePath` newtype wrapping validated absolute `PathBuf`

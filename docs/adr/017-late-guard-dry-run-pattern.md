@@ -87,3 +87,7 @@ Make `GitWorkdir` accept `dry_run` at construction and skip command execution in
 ### Use a command/event pattern to record and replay operations
 
 Build a list of pending operations during execution and either execute or print them at the end. This was rejected because many operations depend on the results of previous ones (e.g., the new version must be computed before the changelog can reference it). A deferred execution model would require threading intermediate results through a command queue, adding significant complexity for a problem that the late guard pattern solves more directly.
+
+## Errata
+
+`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
