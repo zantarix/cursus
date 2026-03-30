@@ -20,8 +20,10 @@ async fn run_cursus_with_token(
 		.personal_token(token.to_string())
 		.build()
 		.unwrap();
-	let forge_client = Arc::new(cursus::github::OctocrabGitHubClient::new(octocrab_client))
-		as Arc<dyn cursus::github::client::CodeForgeClient>;
+	let forge_client = Arc::new(cursus::github::OctocrabGitHubClient::new(
+		octocrab_client,
+		cursus::github::remote::GitHubRepo::new("acme", "app").unwrap(),
+	)) as Arc<dyn cursus::github::client::CodeForgeClient>;
 	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
 	let path = cursus::path::AbsolutePath::new(cwd).unwrap();
 	let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
@@ -240,8 +242,8 @@ async fn publish_github_missing_token_fails() {
 	let err = result.unwrap_err();
 	let msg = format!("{err:#}");
 	assert!(
-		msg.contains("no GitHub token"),
-		"Expected token error in error message, got: {msg}"
+		msg.contains("code forge client is unavailable"),
+		"Expected forge client unavailable error, got: {msg}"
 	);
 }
 

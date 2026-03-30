@@ -1,8 +1,6 @@
 use anyhow::Context;
 use log::info;
 
-use crate::git::Git;
-use crate::github::GitHubRepo;
 use crate::github::client::CodeForgeClient;
 use crate::model::config::Config;
 
@@ -19,24 +17,19 @@ use super::ReleaseInfo;
 /// Returns an error if the find, create, or update API call fails.
 pub(super) async fn upsert_pull_request(
 	client: &dyn CodeForgeClient,
-	gh_repo: &GitHubRepo,
 	title: &str,
 	body: &str,
 	head: &str,
 	base: &str,
 ) -> anyhow::Result<String> {
-	match client.find_open_pull_request(gh_repo, head).await? {
+	match client.find_open_pull_request(head).await? {
 		Some(pr) => {
-			let url = client
-				.update_pull_request(gh_repo, pr.number, title, body)
-				.await?;
+			let url = client.update_pull_request(pr.number, title, body).await?;
 			info!("Updated pull request: {url}");
 			Ok(url)
 		}
 		None => {
-			let url = client
-				.create_pull_request(gh_repo, title, body, head, base)
-				.await?;
+			let url = client.create_pull_request(title, body, head, base).await?;
 			info!("Created pull request: {url}");
 			Ok(url)
 		}
@@ -70,7 +63,6 @@ pub(super) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> Stri
 /// short-circuit is intentional per ADR-017: the PR upsert is the side-effecting
 /// operation being guarded, so the check lives here rather than at the call site.
 pub(super) async fn upsert_release_pull_request(
-	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
 	release_infos: &[ReleaseInfo],
@@ -82,16 +74,13 @@ pub(super) async fn upsert_release_pull_request(
 		info!("Would attempt to create or update a PR in GitHub.");
 		return Ok(());
 	}
-	let Some(client) = env.code_forge_client() else {
+	let Ok(client) = env.code_forge_client() else {
 		return Ok(());
 	};
 	let base = original_branch.context("HEAD is detached; cannot determine PR base branch")?;
-	let gh_repo = GitHubRepo::resolve(&config.github, git)
-		.await
-		.context("Could not resolve GitHub repository for PR creation")?;
 	let title = config.github.pull_request_title();
 	let pr_body = build_pr_body(release_infos, base);
-	upsert_pull_request(client, &gh_repo, title, &pr_body, branch, base)
+	upsert_pull_request(client, title, &pr_body, branch, base)
 		.await
 		.context("Failed to create or update pull request")?;
 	Ok(())
@@ -182,31 +171,23 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_creates_when_no_existing() {
-		use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
+		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 		let client = RecordingCodeForgeClient::new(); // no existing PR
-		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
-		let result = upsert_pull_request(
-			&client,
-			&gh_repo,
-			"Release PR",
-			"body",
-			"cursus-release/main",
-			"main",
-		)
-		.await;
+		let result =
+			upsert_pull_request(&client, "Release PR", "body", "cursus-release/main", "main").await;
 		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
 		let invocations = client.invocations();
 		// Should have called find then create
 		assert!(
 			invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::FindOpenPullRequest { .. })),
+				.any(|i| matches!(i, CodeForgeInvocation::FindOpenPullRequest { .. })),
 			"Expected FindOpenPullRequest invocation"
 		);
 		assert!(
 			invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. })),
+				.any(|i| matches!(i, CodeForgeInvocation::CreatePullRequest { .. })),
 			"Expected CreatePullRequest invocation"
 		);
 	}
@@ -214,16 +195,14 @@ mod tests {
 	#[tokio::test]
 	async fn upsert_pull_request_updates_when_existing() {
 		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
+		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 		let existing_pr = PullRequest {
 			number: 7,
 			html_url: "https://github.com/acme/app/pull/7".to_string(),
 		};
 		let client = RecordingCodeForgeClient::new().with_existing_pr(existing_pr);
-		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
 		let result = upsert_pull_request(
 			&client,
-			&gh_repo,
 			"Release PR",
 			"updated body",
 			"cursus-release/main",
@@ -235,20 +214,20 @@ mod tests {
 		assert!(
 			invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::FindOpenPullRequest { .. })),
+				.any(|i| matches!(i, CodeForgeInvocation::FindOpenPullRequest { .. })),
 			"Expected FindOpenPullRequest invocation"
 		);
 		assert!(
 			invocations.iter().any(|i| matches!(
 				i,
-				GitHubInvocation::UpdatePullRequest { pull_number, .. } if *pull_number == 7
+				CodeForgeInvocation::UpdatePullRequest { pull_number, .. } if *pull_number == 7
 			)),
 			"Expected UpdatePullRequest invocation for PR #7"
 		);
 		assert!(
 			!invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. })),
+				.any(|i| matches!(i, CodeForgeInvocation::CreatePullRequest { .. })),
 			"Should NOT call CreatePullRequest when existing PR found"
 		);
 	}
@@ -257,16 +236,8 @@ mod tests {
 	async fn upsert_pull_request_propagates_find_error() {
 		use crate::github::client::test_support::RecordingCodeForgeClient;
 		let client = RecordingCodeForgeClient::new().with_find_pr_failure();
-		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
-		let result = upsert_pull_request(
-			&client,
-			&gh_repo,
-			"Release PR",
-			"body",
-			"release-branch",
-			"main",
-		)
-		.await;
+		let result =
+			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -286,16 +257,8 @@ mod tests {
 		let client = RecordingCodeForgeClient::new()
 			.with_existing_pr(existing_pr)
 			.with_update_pr_failure();
-		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
-		let result = upsert_pull_request(
-			&client,
-			&gh_repo,
-			"Release PR",
-			"body",
-			"release-branch",
-			"main",
-		)
-		.await;
+		let result =
+			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
@@ -308,16 +271,8 @@ mod tests {
 	async fn upsert_pull_request_propagates_create_error() {
 		use crate::github::client::test_support::RecordingCodeForgeClient;
 		let client = RecordingCodeForgeClient::new().with_create_pr_failure();
-		let gh_repo = crate::github::remote::GitHubRepo::new("acme", "app").unwrap();
-		let result = upsert_pull_request(
-			&client,
-			&gh_repo,
-			"Release PR",
-			"body",
-			"release-branch",
-			"main",
-		)
-		.await;
+		let result =
+			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
 		assert!(result.is_err());
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(

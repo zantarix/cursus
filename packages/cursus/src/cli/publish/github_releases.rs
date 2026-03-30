@@ -4,7 +4,6 @@ use anyhow::Context;
 use log::{error, info, warn};
 
 use crate::git::Git;
-use crate::github::GitHubRepo;
 use crate::github::client::CodeForgeClient;
 use crate::model::changelog::extract_version_body;
 use crate::model::config::Config;
@@ -81,27 +80,17 @@ pub(super) async fn read_changelog_body(
 /// Returns `true` if any step failed (the release is left as a draft on upload failure).
 pub(super) async fn publish_draft_release(
 	code_forge_client: &dyn CodeForgeClient,
-	gh_repo: &GitHubRepo,
 	tag: &str,
 	release_id: &str,
 	artifacts: &std::collections::BTreeMap<String, String>,
 	git_root: &crate::path::AbsolutePath,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> bool {
-	if upload_release_artifacts(
-		code_forge_client,
-		gh_repo,
-		release_id,
-		artifacts,
-		git_root,
-		fs,
-	)
-	.await
-	{
+	if upload_release_artifacts(code_forge_client, release_id, artifacts, git_root, fs).await {
 		warn!("Artifact uploads failed for {tag}; leaving release as a draft");
 		return true;
 	}
-	match code_forge_client.publish_release(gh_repo, release_id).await {
+	match code_forge_client.publish_release(release_id).await {
 		Ok(()) => {
 			info!("Created GitHub Release for {tag}");
 			false
@@ -115,8 +104,8 @@ pub(super) async fn publish_draft_release(
 
 /// Orchestrates GitHub Release creation for all successfully published packages.
 ///
-/// The caller must ensure that a GitHub token is available and that `code_forge_client`
-/// is `Some` before calling this function (enforced by the early check in `cmd_publish`).
+/// The caller must ensure that the code forge client is available (i.e. `code_forge_client`
+/// is `Ok`) before calling this function (enforced by the early check in `cmd_publish`).
 ///
 /// Returns `(releases_created, any_failed)`.
 pub(super) async fn orchestrate_github_releases(
@@ -130,7 +119,6 @@ pub(super) async fn orchestrate_github_releases(
 	if published_packages.is_empty() {
 		return Ok((0, false));
 	}
-	let gh_repo = GitHubRepo::resolve(&config.github, git).await?;
 	let mut github_failed = false;
 	let mut created_count = 0;
 	for pkg in published_packages {
@@ -139,14 +127,10 @@ pub(super) async fn orchestrate_github_releases(
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 		let body = read_changelog_body(pkg, fs).await;
-		match code_forge_client
-			.create_release(&gh_repo, &tag, &tag, &body)
-			.await
-		{
+		match code_forge_client.create_release(&tag, &tag, &body).await {
 			Ok(release_id) => {
 				if publish_draft_release(
 					code_forge_client,
-					&gh_repo,
 					&tag,
 					&release_id,
 					&config.github.artifacts,
@@ -174,7 +158,6 @@ pub(super) async fn orchestrate_github_releases(
 /// Returns `true` if any upload failed, `false` if all succeeded.
 pub(super) async fn upload_release_artifacts(
 	code_forge_client: &dyn CodeForgeClient,
-	gh_repo: &GitHubRepo,
 	release_id: &str,
 	artifacts: &std::collections::BTreeMap<String, String>,
 	git_root: &crate::path::AbsolutePath,
@@ -191,7 +174,7 @@ pub(super) async fn upload_release_artifacts(
 			}
 		};
 		match code_forge_client
-			.upload_asset(gh_repo, release_id, display_name, &full_path)
+			.upload_asset(release_id, display_name, &full_path)
 			.await
 		{
 			Ok(()) => info!("  Attached: {display_name}"),
@@ -213,7 +196,7 @@ mod tests {
 	use crate::cli::publish::tests_common::{make_github_config, workdir};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
+	use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 	use crate::model::config::{Config, GitHubConfig};
 	use crate::path::AbsolutePath;
 
@@ -276,12 +259,12 @@ mod tests {
 		assert_eq!(invocations.len(), 2);
 		assert!(matches!(
 			&invocations[0],
-			GitHubInvocation::CreateRelease { tag_name, gh_repo, .. }
-				if tag_name == "v1.2.0" && gh_repo.owner == "acme" && gh_repo.repo == "app"
+			CodeForgeInvocation::CreateRelease { tag_name, .. }
+				if tag_name == "v1.2.0"
 		));
 		assert!(matches!(
 			&invocations[1],
-			GitHubInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
+			CodeForgeInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
 		));
 	}
 
@@ -317,11 +300,11 @@ mod tests {
 		assert_eq!(invocations.len(), 2);
 		assert!(matches!(
 			&invocations[0],
-			GitHubInvocation::CreateRelease { tag_name, .. } if tag_name == "my-app@1.2.0"
+			CodeForgeInvocation::CreateRelease { tag_name, .. } if tag_name == "my-app@1.2.0"
 		));
 		assert!(matches!(
 			&invocations[1],
-			GitHubInvocation::PublishRelease { .. }
+			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
 
@@ -424,14 +407,14 @@ mod tests {
 		// Both artifacts were attempted despite first failure
 		let uploads: Vec<_> = invocations
 			.iter()
-			.filter(|i| matches!(i, GitHubInvocation::UploadAsset { .. }))
+			.filter(|i| matches!(i, CodeForgeInvocation::UploadAsset { .. }))
 			.collect();
 		assert_eq!(uploads.len(), 2);
 		// Release must NOT be published when uploads failed (left as draft)
 		assert!(
 			!invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::PublishRelease { .. })),
+				.any(|i| matches!(i, CodeForgeInvocation::PublishRelease { .. })),
 			"PublishRelease should not be called when uploads fail"
 		);
 	}
@@ -493,7 +476,7 @@ mod tests {
 		let invocations = client.invocations();
 		let upload_count = invocations
 			.iter()
-			.filter(|i| matches!(i, GitHubInvocation::UploadAsset { .. }))
+			.filter(|i| matches!(i, CodeForgeInvocation::UploadAsset { .. }))
 			.count();
 		// Each of 2 packages should have 1 artifact each
 		assert_eq!(upload_count, 2);
@@ -532,11 +515,11 @@ mod tests {
 		let invocations = client.invocations();
 		assert!(matches!(
 			&invocations[0],
-			GitHubInvocation::CreateRelease { .. }
+			CodeForgeInvocation::CreateRelease { .. }
 		));
 		assert!(matches!(
 			&invocations[1],
-			GitHubInvocation::PublishRelease { .. }
+			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
 
@@ -592,15 +575,15 @@ mod tests {
 		assert_eq!(invocations.len(), 3);
 		assert!(matches!(
 			&invocations[0],
-			GitHubInvocation::CreateRelease { .. }
+			CodeForgeInvocation::CreateRelease { .. }
 		));
 		assert!(matches!(
 			&invocations[1],
-			GitHubInvocation::UploadAsset { .. }
+			CodeForgeInvocation::UploadAsset { .. }
 		));
 		assert!(matches!(
 			&invocations[2],
-			GitHubInvocation::PublishRelease { .. }
+			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
 
@@ -609,10 +592,8 @@ mod tests {
 	#[tokio::test]
 	async fn publish_draft_release_success_returns_false() {
 		let client = RecordingCodeForgeClient::new();
-		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let failed = publish_draft_release(
 			&client,
-			&gh_repo,
 			"v1.0.0",
 			"release-1",
 			&BTreeMap::new(),
@@ -625,7 +606,7 @@ mod tests {
 		assert_eq!(invocations.len(), 1);
 		assert!(matches!(
 			&invocations[0],
-			GitHubInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
+			CodeForgeInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
 		));
 	}
 
@@ -642,11 +623,9 @@ mod tests {
 		);
 
 		let client = RecordingCodeForgeClient::new().with_upload_failure();
-		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let dir_abs = AbsolutePath::new(dir.path()).unwrap();
 		let failed = publish_draft_release(
 			&client,
-			&gh_repo,
 			"v1.0.0",
 			"release-1",
 			&artifacts,
@@ -660,22 +639,20 @@ mod tests {
 		assert!(
 			invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::UploadAsset { .. }))
+				.any(|i| matches!(i, CodeForgeInvocation::UploadAsset { .. }))
 		);
 		assert!(
 			!invocations
 				.iter()
-				.any(|i| matches!(i, GitHubInvocation::PublishRelease { .. }))
+				.any(|i| matches!(i, CodeForgeInvocation::PublishRelease { .. }))
 		);
 	}
 
 	#[tokio::test]
 	async fn publish_draft_release_publish_failure_returns_true() {
 		let client = RecordingCodeForgeClient::new().with_publish_release_failure();
-		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let failed = publish_draft_release(
 			&client,
-			&gh_repo,
 			"v1.0.0",
 			"release-1",
 			&BTreeMap::new(),
@@ -686,7 +663,7 @@ mod tests {
 		assert!(failed);
 		assert!(matches!(
 			&client.invocations()[0],
-			GitHubInvocation::PublishRelease { .. }
+			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
 
@@ -753,12 +730,10 @@ mod tests {
 		artifacts.insert("secret".to_string(), secret.to_string_lossy().into_owned());
 
 		let client = RecordingCodeForgeClient::new();
-		let gh_repo = GitHubRepo::new("acme", "app").unwrap();
 		let git_root = AbsolutePath::new(&inner).unwrap();
 
 		let failed = upload_release_artifacts(
 			&client,
-			&gh_repo,
 			"release-1",
 			&artifacts,
 			&git_root,

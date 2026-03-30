@@ -772,6 +772,7 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 	use cursus::command::RealCommandRunner;
 	use cursus::github::OctocrabGitHubClient;
 	use cursus::github::client::CodeForgeClient;
+	use cursus::github::remote::GitHubRepo;
 	use cursus::model::config::CargoConfig;
 	use cursus::model::config::{Config, GitHubConfig};
 	use cursus::path::AbsolutePath;
@@ -819,8 +820,10 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.unwrap()
 			.build()
 			.unwrap();
-		let client =
-			Arc::new(OctocrabGitHubClient::new(octocrab_client)) as Arc<dyn CodeForgeClient>;
+		let client = Arc::new(OctocrabGitHubClient::new(
+			octocrab_client,
+			GitHubRepo::new("acme", "app").unwrap(),
+		)) as Arc<dyn CodeForgeClient>;
 		let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
 		let path = AbsolutePath::new(dir.path()).unwrap();
 		let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));

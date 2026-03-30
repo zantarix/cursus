@@ -140,15 +140,13 @@ pub(super) async fn preflight_checks(
 	git_ctx: &GitContext,
 	dry_run: bool,
 ) -> anyhow::Result<BranchState> {
-	if git_ctx.enabled
+	let needs_forge = git_ctx.enabled
 		&& git_ctx.strategy == Strategy::Branch
 		&& config.github.enabled
-		&& !dry_run
-		&& env.code_forge_client().is_none()
-	{
+		&& !dry_run;
+	if needs_forge && let Err(reason) = env.code_forge_client() {
 		anyhow::bail!(
-			"GitHub integration is enabled but no GitHub token found. \
-			 Set GH_TOKEN or GITHUB_TOKEN environment variable."
+			"GitHub integration is enabled but the code forge client is unavailable: {reason}"
 		);
 	}
 	if !git_ctx.enabled {
@@ -206,7 +204,6 @@ async fn push_branch_and_pr(
 	})?;
 	let pr_result = if config.github.enabled {
 		super::github::upsert_release_pull_request(
-			git,
 			config,
 			env,
 			&output.release_infos,
@@ -619,7 +616,7 @@ mod tests {
 	#[tokio::test]
 	async fn cmd_prepare_branch_strategy_with_github_creates_pr() {
 		use crate::github::client::CodeForgeClient;
-		use crate::github::client::test_support::{GitHubInvocation, RecordingCodeForgeClient};
+		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
@@ -654,12 +651,10 @@ mod tests {
 		let invocations = client.invocations();
 		let pr = invocations
 			.iter()
-			.find(|i| matches!(i, GitHubInvocation::CreatePullRequest { .. }));
+			.find(|i| matches!(i, CodeForgeInvocation::CreatePullRequest { .. }));
 		assert!(pr.is_some(), "Expected PR creation, got: {invocations:?}");
-		if let Some(GitHubInvocation::CreatePullRequest { title, gh_repo, .. }) = pr {
+		if let Some(CodeForgeInvocation::CreatePullRequest { title, .. }) = pr {
 			assert_eq!(title, "My Release PR");
-			assert_eq!(gh_repo.owner, "acme");
-			assert_eq!(gh_repo.repo, "app");
 		}
 	}
 
@@ -726,8 +721,8 @@ mod tests {
 		assert!(result.is_err(), "Expected Err without github client");
 		let msg = format!("{:#}", result.unwrap_err());
 		assert!(
-			msg.contains("no GitHub token"),
-			"Expected 'no GitHub token' error, got: {msg}"
+			msg.contains("code forge client is unavailable"),
+			"Expected 'code forge client is unavailable' error, got: {msg}"
 		);
 	}
 }

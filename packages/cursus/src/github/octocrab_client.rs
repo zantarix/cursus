@@ -14,24 +14,27 @@ use super::remote::GitHubRepo;
 
 /// GitHub API client backed by octocrab.
 ///
-/// Accepts a pre-configured [`octocrab::Octocrab`] instance at construction.
-/// The library does not handle authentication — consumers provide a fully
-/// configured client (e.g. with a personal access token or GitHub App token).
+/// Accepts a pre-configured [`octocrab::Octocrab`] instance and a resolved
+/// [`GitHubRepo`] at construction (ADR-042). The library does not handle
+/// authentication — consumers provide a fully configured client (e.g. with a
+/// personal access token or GitHub App token).
 pub struct OctocrabGitHubClient {
 	client: octocrab::Octocrab,
+	gh_repo: GitHubRepo,
 }
 
 impl std::fmt::Debug for OctocrabGitHubClient {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("OctocrabGitHubClient")
+			.field("gh_repo", &self.gh_repo)
 			.finish_non_exhaustive()
 	}
 }
 
 impl OctocrabGitHubClient {
-	/// Creates a new client wrapping the given octocrab instance.
-	pub fn new(client: octocrab::Octocrab) -> Self {
-		Self { client }
+	/// Creates a new client wrapping the given octocrab instance and repository identity.
+	pub fn new(client: octocrab::Octocrab, gh_repo: GitHubRepo) -> Self {
+		Self { client, gh_repo }
 	}
 }
 
@@ -39,7 +42,6 @@ impl OctocrabGitHubClient {
 impl CodeForgeClient for OctocrabGitHubClient {
 	async fn create_release(
 		&self,
-		gh_repo: &GitHubRepo,
 		tag_name: &str,
 		name: &str,
 		body: &str,
@@ -47,7 +49,7 @@ impl CodeForgeClient for OctocrabGitHubClient {
 		log::trace!("create_release: tag={tag_name} name={name}");
 		let release = self
 			.client
-			.repos(&gh_repo.owner, &gh_repo.repo)
+			.repos(&self.gh_repo.owner, &self.gh_repo.repo)
 			.releases()
 			.create(tag_name)
 			.name(name)
@@ -62,7 +64,6 @@ impl CodeForgeClient for OctocrabGitHubClient {
 
 	async fn upload_asset(
 		&self,
-		gh_repo: &GitHubRepo,
 		release_id: &str,
 		file_name: &str,
 		file_path: &Path,
@@ -77,7 +78,7 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.with_context(|| format!("Failed to read asset file '{}'", file_path.display()))?;
 
 		self.client
-			.repos(&gh_repo.owner, &gh_repo.repo)
+			.repos(&self.gh_repo.owner, &self.gh_repo.repo)
 			.releases()
 			.upload_asset(id, file_name, data.into())
 			.send()
@@ -88,7 +89,6 @@ impl CodeForgeClient for OctocrabGitHubClient {
 
 	async fn create_pull_request(
 		&self,
-		gh_repo: &GitHubRepo,
 		title: &str,
 		body: &str,
 		head: &str,
@@ -97,7 +97,7 @@ impl CodeForgeClient for OctocrabGitHubClient {
 		log::trace!("create_pull_request: title={title} head={head} base={base}");
 		let pr = self
 			.client
-			.pulls(&gh_repo.owner, &gh_repo.repo)
+			.pulls(&self.gh_repo.owner, &self.gh_repo.repo)
 			.create(title, head, base)
 			.body(body)
 			.send()
@@ -109,16 +109,12 @@ impl CodeForgeClient for OctocrabGitHubClient {
 		Ok(url.to_string())
 	}
 
-	async fn find_open_pull_request(
-		&self,
-		gh_repo: &GitHubRepo,
-		head: &str,
-	) -> anyhow::Result<Option<PullRequest>> {
-		let head_filter = format!("{}:{}", gh_repo.owner, head);
+	async fn find_open_pull_request(&self, head: &str) -> anyhow::Result<Option<PullRequest>> {
+		let head_filter = format!("{}:{}", self.gh_repo.owner, head);
 		log::trace!("find_open_pull_request: head={head_filter}");
 		let page = self
 			.client
-			.pulls(&gh_repo.owner, &gh_repo.repo)
+			.pulls(&self.gh_repo.owner, &self.gh_repo.repo)
 			.list()
 			.state(octocrab::params::State::Open)
 			.head(&head_filter)
@@ -136,7 +132,6 @@ impl CodeForgeClient for OctocrabGitHubClient {
 
 	async fn update_pull_request(
 		&self,
-		gh_repo: &GitHubRepo,
 		pull_number: u64,
 		title: &str,
 		body: &str,
@@ -144,7 +139,7 @@ impl CodeForgeClient for OctocrabGitHubClient {
 		log::trace!("update_pull_request: #{pull_number} title={title}");
 		let pr = self
 			.client
-			.pulls(&gh_repo.owner, &gh_repo.repo)
+			.pulls(&self.gh_repo.owner, &self.gh_repo.repo)
 			.update(pull_number)
 			.title(title)
 			.body(body)
@@ -157,13 +152,13 @@ impl CodeForgeClient for OctocrabGitHubClient {
 		Ok(url.to_string())
 	}
 
-	async fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()> {
+	async fn publish_release(&self, release_id: &str) -> anyhow::Result<()> {
 		let id: u64 = release_id
 			.parse()
 			.with_context(|| format!("Invalid GitHub release_id: {release_id:?}"))?;
 		log::trace!("publish_release: release_id={release_id}");
 		self.client
-			.repos(&gh_repo.owner, &gh_repo.repo)
+			.repos(&self.gh_repo.owner, &self.gh_repo.repo)
 			.releases()
 			.update(id)
 			.draft(false)

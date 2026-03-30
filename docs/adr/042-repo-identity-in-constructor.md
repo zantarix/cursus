@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -26,7 +26,7 @@ The key elements of the approach:
 - `OctocrabGitHubClient` will be constructed with both an `octocrab::Octocrab` client and a `GitHubRepo`. Its methods will use the stored repo internally.
 - `GitHubRepo` and its resolution logic (`GitHubRepo::resolve()`) become a construction concern for `OctocrabGitHubClient`, not part of the trait contract. `main.rs` will call `GitHubRepo::resolve()` during startup and pass the result into the client constructor.
 - `Env` will hold `Result<Arc<dyn CodeForgeClient>>`. No wrapper types, no type erasure, no generics on `Env`. `Ok(client)` means the forge client is ready; `Err(e)` means the forge client is unavailable for any reason (no token, no remote, unparseable URL, non-GitHub host, etc.), with the specific reason preserved in the error.
-- The `RecordingCodeForgeClient` test fake will likewise store its repo at construction time. The `GitHubInvocation` enum variants will drop their `gh_repo` fields since the repo is fixed for the lifetime of the client.
+- The `RecordingCodeForgeClient` test fake does not store a repo at all; it simply drops the repo parameter from its method signatures, matching the trait. The `CodeForgeInvocation` enum variants drop their `gh_repo` fields since the repo is no longer part of the trait contract.
 
 `main.rs` will attempt to resolve the repo identity and construct the forge client eagerly at startup. `Env` will hold `Result<Arc<dyn CodeForgeClient>>` rather than `Option<Arc<dyn CodeForgeClient>>`. The two states are: `Ok(client)` means the forge client is ready, and `Err(e)` means the forge client is unavailable (no token, no remote, unparseable URL, non-GitHub host, etc.). The specific error reason is preserved so that commands which need the forge can surface a meaningful diagnostic. Commands that require the forge unwrap the `Result` and propagate the error with context; commands that do not need the forge (e.g. `change`, `init`, `verify`) ignore the field entirely.
 

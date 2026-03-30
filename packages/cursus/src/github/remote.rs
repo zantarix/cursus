@@ -100,10 +100,7 @@ impl GitHubRepo {
 	///
 	/// Returns an error if both config fields are partially set (one set, one not),
 	/// or if neither config nor remote detection can determine the repository.
-	pub(crate) async fn resolve(
-		github_config: &GitHubConfig,
-		git: &dyn Git,
-	) -> anyhow::Result<Self> {
+	pub async fn resolve(github_config: &GitHubConfig, git: &dyn Git) -> anyhow::Result<Self> {
 		match (github_config.owner(), github_config.repo()) {
 			(Some(owner), Some(repo)) => {
 				return GitHubRepo::new(owner, repo);

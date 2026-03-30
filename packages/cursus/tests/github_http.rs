@@ -19,7 +19,7 @@ fn mock_client(server: &MockServer) -> OctocrabGitHubClient {
 		.unwrap()
 		.build()
 		.unwrap();
-	OctocrabGitHubClient::new(client)
+	OctocrabGitHubClient::new(client, repo())
 }
 
 fn repo() -> GitHubRepo {
@@ -66,7 +66,7 @@ async fn create_release_returns_id() {
 
 	let client = mock_client(&server);
 	let id = client
-		.create_release(&repo(), "v1.0.0", "Release 1.0.0", "Body")
+		.create_release("v1.0.0", "Release 1.0.0", "Body")
 		.await
 		.unwrap();
 	assert_eq!(id, "42");
@@ -83,9 +83,7 @@ async fn create_release_propagates_api_error() {
 	});
 
 	let client = mock_client(&server);
-	let result = client
-		.create_release(&repo(), "v1.0.0", "Release", "Body")
-		.await;
+	let result = client.create_release("v1.0.0", "Release", "Body").await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -130,9 +128,7 @@ async fn upload_asset_succeeds_with_valid_file() {
 	std::fs::write(tmp.path(), b"data").unwrap();
 
 	let client = mock_client(&server);
-	let result = client
-		.upload_asset(&repo(), "42", "file.tar.gz", tmp.path())
-		.await;
+	let result = client.upload_asset("42", "file.tar.gz", tmp.path()).await;
 	assert!(result.is_ok(), "upload_asset failed: {result:?}");
 }
 
@@ -141,7 +137,7 @@ async fn upload_asset_rejects_non_numeric_release_id() {
 	let server = MockServer::start();
 	let client = mock_client(&server);
 	let result = client
-		.upload_asset(&repo(), "abc", "file.tar.gz", Path::new("/tmp/file"))
+		.upload_asset("abc", "file.tar.gz", Path::new("/tmp/file"))
 		.await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
@@ -157,7 +153,6 @@ async fn upload_asset_errors_on_missing_file() {
 	let client = mock_client(&server);
 	let result = client
 		.upload_asset(
-			&repo(),
 			"42",
 			"missing.tar.gz",
 			Path::new("/nonexistent/path/missing.tar.gz"),
@@ -185,7 +180,7 @@ async fn create_pull_request_returns_url() {
 
 	let client = mock_client(&server);
 	let url = client
-		.create_pull_request(&repo(), "Title", "Body", "feature", "main")
+		.create_pull_request("Title", "Body", "feature", "main")
 		.await
 		.unwrap();
 	assert!(url.contains("pull/7"), "Expected PR URL, got: {url}");
@@ -203,7 +198,7 @@ async fn create_pull_request_propagates_api_error() {
 
 	let client = mock_client(&server);
 	let result = client
-		.create_pull_request(&repo(), "Title", "Body", "feature", "main")
+		.create_pull_request("Title", "Body", "feature", "main")
 		.await;
 	assert!(result.is_err());
 }
@@ -221,10 +216,7 @@ async fn find_open_pull_request_returns_pr_when_found() {
 	});
 
 	let client = mock_client(&server);
-	let pr = client
-		.find_open_pull_request(&repo(), "feature")
-		.await
-		.unwrap();
+	let pr = client.find_open_pull_request("feature").await.unwrap();
 	assert!(pr.is_some());
 	assert_eq!(pr.unwrap().number, 7);
 }
@@ -240,10 +232,7 @@ async fn find_open_pull_request_returns_none_when_empty() {
 	});
 
 	let client = mock_client(&server);
-	let pr = client
-		.find_open_pull_request(&repo(), "feature")
-		.await
-		.unwrap();
+	let pr = client.find_open_pull_request("feature").await.unwrap();
 	assert!(pr.is_none());
 }
 
@@ -261,7 +250,7 @@ async fn update_pull_request_returns_url() {
 
 	let client = mock_client(&server);
 	let url = client
-		.update_pull_request(&repo(), 7, "Updated", "New body")
+		.update_pull_request(7, "Updated", "New body")
 		.await
 		.unwrap();
 	assert!(url.contains("pull/7"), "Expected PR URL, got: {url}");
@@ -278,9 +267,7 @@ async fn update_pull_request_propagates_api_error() {
 	});
 
 	let client = mock_client(&server);
-	let result = client
-		.update_pull_request(&repo(), 7, "Title", "Body")
-		.await;
+	let result = client.update_pull_request(7, "Title", "Body").await;
 	assert!(result.is_err());
 }
 
@@ -297,7 +284,7 @@ async fn publish_release_succeeds() {
 	});
 
 	let client = mock_client(&server);
-	let result = client.publish_release(&repo(), "42").await;
+	let result = client.publish_release("42").await;
 	assert!(result.is_ok(), "publish_release failed: {result:?}");
 }
 
@@ -305,7 +292,7 @@ async fn publish_release_succeeds() {
 async fn publish_release_rejects_non_numeric_release_id() {
 	let server = MockServer::start();
 	let client = mock_client(&server);
-	let result = client.publish_release(&repo(), "abc").await;
+	let result = client.publish_release("abc").await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(
@@ -325,7 +312,7 @@ async fn publish_release_propagates_api_error() {
 	});
 
 	let client = mock_client(&server);
-	let result = client.publish_release(&repo(), "42").await;
+	let result = client.publish_release("42").await;
 	assert!(result.is_err());
 	let msg = format!("{:#}", result.unwrap_err());
 	assert!(

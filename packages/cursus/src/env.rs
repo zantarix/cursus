@@ -31,8 +31,8 @@ pub struct Env {
 	/// [`GitWorkdir`][crate::git::GitWorkdir] receives the wrapped
 	/// [`CommandRunner`].
 	git: Arc<dyn Git>,
-	/// The GitHub client for API operations, if a token was provided.
-	code_forge_client: Option<Arc<dyn CodeForgeClient>>,
+	/// The code forge client for API operations, or a reason why it is unavailable.
+	code_forge_client: Result<Arc<dyn CodeForgeClient>, String>,
 	/// Whether an OIDC-capable CI environment is detected.
 	///
 	/// `true` when `ACTIONS_ID_TOKEN_REQUEST_URL` (GitHub Actions) or
@@ -65,7 +65,7 @@ impl Env {
 			filesystem,
 			git,
 			editor: None,
-			code_forge_client: None,
+			code_forge_client: Err("No code forge client configured".into()),
 			oidc_environment: false,
 			node_auth_token_present: false,
 			cargo_registry_token_present: false,
@@ -99,7 +99,7 @@ impl Env {
 
 	/// Sets the code forge client for API operations.
 	pub fn with_code_forge_client(mut self, client: Arc<dyn CodeForgeClient>) -> Self {
-		self.code_forge_client = Some(client);
+		self.code_forge_client = Ok(client);
 		self
 	}
 
@@ -111,10 +111,13 @@ impl Env {
 		self
 	}
 
-	/// Sets the code forge client from an `Option`, overwriting any previously set value.
+	/// Sets the code forge client from a `Result`, overwriting any previously set value.
 	///
-	/// Passing `None` clears a previously set client.
-	pub fn with_code_forge_client_opt(mut self, client: Option<Arc<dyn CodeForgeClient>>) -> Self {
+	/// Passing `Err(reason)` records why the client is unavailable.
+	pub fn with_code_forge_client_result(
+		mut self,
+		client: Result<Arc<dyn CodeForgeClient>, String>,
+	) -> Self {
 		self.code_forge_client = client;
 		self
 	}
@@ -182,9 +185,12 @@ impl Env {
 		&*self.git
 	}
 
-	/// Returns the code forge client, if one was configured.
-	pub(crate) fn code_forge_client(&self) -> Option<&dyn CodeForgeClient> {
-		self.code_forge_client.as_deref()
+	/// Returns the code forge client, or a reason why it is unavailable.
+	pub(crate) fn code_forge_client(&self) -> Result<&dyn CodeForgeClient, &str> {
+		self.code_forge_client
+			.as_ref()
+			.map(|c| &**c as &dyn CodeForgeClient)
+			.map_err(|e| e.as_str())
 	}
 
 	/// Returns `true` when an OIDC-capable CI environment is detected.
@@ -355,7 +361,7 @@ mod tests {
 	fn new_has_no_editor_or_code_forge_client() {
 		let (_, env, _dir) = recording_env(0);
 		assert!(env.editor().is_none());
-		assert!(env.code_forge_client().is_none());
+		assert!(env.code_forge_client().is_err());
 	}
 
 	#[test]
@@ -441,7 +447,7 @@ mod tests {
 		let (_, env, _dir) = recording_env(0);
 		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
 		let env = env.with_code_forge_client(Arc::clone(&client));
-		assert!(env.code_forge_client().is_some());
+		assert!(env.code_forge_client().is_ok());
 	}
 
 	#[test]
@@ -459,21 +465,21 @@ mod tests {
 	}
 
 	#[test]
-	fn with_code_forge_client_opt_some_sets_client() {
+	fn with_code_forge_client_result_ok_sets_client() {
 		let (_, env, _dir) = recording_env(0);
 		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
-		let env = env.with_code_forge_client_opt(Some(client));
-		assert!(env.code_forge_client().is_some());
+		let env = env.with_code_forge_client_result(Ok(client));
+		assert!(env.code_forge_client().is_ok());
 	}
 
 	#[test]
-	fn with_code_forge_client_opt_none_clears_client() {
+	fn with_code_forge_client_result_err_clears_client() {
 		let (_, env, _dir) = recording_env(0);
 		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
 		let env = env
 			.with_code_forge_client(client)
-			.with_code_forge_client_opt(None);
-		assert!(env.code_forge_client().is_none());
+			.with_code_forge_client_result(Err("no token".into()));
+		assert!(env.code_forge_client().is_err());
 	}
 
 	#[tokio::test]

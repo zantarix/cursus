@@ -4,25 +4,24 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
-use super::remote::GitHubRepo;
-
-/// A resolved GitHub pull request.
+/// A resolved pull request.
 #[derive(Debug, Clone)]
 pub struct PullRequest {
 	/// Pull request number.
 	pub number: u64,
-	/// Full URL of the pull request on GitHub.
+	/// Full URL of the pull request.
 	pub html_url: String,
 }
 
 /// Abstract interface for code forge API operations.
 ///
-/// All methods are async. The production implementation uses
-/// octocrab. The `test_support` module provides a recording fake
-/// for unit tests.
+/// Each implementation stores its repository identity at construction time
+/// (ADR-042), so methods do not accept a repo parameter. All methods are
+/// async. The production implementation uses octocrab. The `test_support`
+/// module provides a recording fake for unit tests.
 #[async_trait]
 pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
-	/// Creates a GitHub Release for the given tag, returning the release ID.
+	/// Creates a release for the given tag, returning the release ID.
 	///
 	/// The release is created as a draft. Call [`publish_release`](Self::publish_release)
 	/// after uploading all artifacts to make it public.
@@ -32,20 +31,18 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the API call fails or authentication is missing.
 	async fn create_release(
 		&self,
-		gh_repo: &GitHubRepo,
 		tag_name: &str,
 		name: &str,
 		body: &str,
 	) -> anyhow::Result<String>;
 
-	/// Uploads a file as an asset to an existing GitHub Release.
+	/// Uploads a file as an asset to an existing release.
 	///
 	/// # Errors
 	///
 	/// Returns an error if the upload fails.
 	async fn upload_asset(
 		&self,
-		gh_repo: &GitHubRepo,
 		release_id: &str,
 		file_name: &str,
 		file_path: &Path,
@@ -55,7 +52,6 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	///
 	/// # Arguments
 	///
-	/// * `gh_repo` - GitHub repository (owner and name).
 	/// * `title` - Pull request title.
 	/// * `body` - Pull request description (markdown).
 	/// * `head` - Source branch (the branch to merge from).
@@ -66,7 +62,6 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the API call fails.
 	async fn create_pull_request(
 		&self,
-		gh_repo: &GitHubRepo,
 		title: &str,
 		body: &str,
 		head: &str,
@@ -80,11 +75,7 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails.
-	async fn find_open_pull_request(
-		&self,
-		gh_repo: &GitHubRepo,
-		head: &str,
-	) -> anyhow::Result<Option<PullRequest>>;
+	async fn find_open_pull_request(&self, head: &str) -> anyhow::Result<Option<PullRequest>>;
 
 	/// Updates the title and body of an existing pull request, returning the PR URL.
 	///
@@ -93,7 +84,6 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	/// Returns an error if the API call fails.
 	async fn update_pull_request(
 		&self,
-		gh_repo: &GitHubRepo,
 		pull_number: u64,
 		title: &str,
 		body: &str,
@@ -104,7 +94,7 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	/// # Errors
 	///
 	/// Returns an error if the API call fails or `release_id` is not numeric.
-	async fn publish_release(&self, gh_repo: &GitHubRepo, release_id: &str) -> anyhow::Result<()>;
+	async fn publish_release(&self, release_id: &str) -> anyhow::Result<()>;
 }
 
 /// Test support types for GitHub client operations.
@@ -122,15 +112,12 @@ pub mod test_support {
 	use async_trait::async_trait;
 
 	use super::{CodeForgeClient, PullRequest};
-	use crate::github::remote::GitHubRepo;
 
-	/// A recorded GitHub API invocation.
+	/// A recorded code forge API invocation.
 	#[derive(Debug, Clone)]
-	pub enum GitHubInvocation {
+	pub enum CodeForgeInvocation {
 		/// A `create_release` call.
 		CreateRelease {
-			/// GitHub repository (owner and name).
-			gh_repo: GitHubRepo,
 			/// Git tag name for the release.
 			tag_name: String,
 			/// Release title.
@@ -140,8 +127,6 @@ pub mod test_support {
 		},
 		/// An `upload_asset` call.
 		UploadAsset {
-			/// GitHub repository (owner and name).
-			gh_repo: GitHubRepo,
 			/// ID of the release to attach the asset to.
 			release_id: String,
 			/// Asset file name as it will appear in the release.
@@ -151,8 +136,6 @@ pub mod test_support {
 		},
 		/// A `create_pull_request` call.
 		CreatePullRequest {
-			/// GitHub repository (owner and name).
-			gh_repo: GitHubRepo,
 			/// Pull request title.
 			title: String,
 			/// Pull request body (markdown).
@@ -164,15 +147,11 @@ pub mod test_support {
 		},
 		/// A `find_open_pull_request` call.
 		FindOpenPullRequest {
-			/// GitHub repository (owner and name).
-			gh_repo: GitHubRepo,
 			/// Head branch to search for.
 			head: String,
 		},
 		/// An `update_pull_request` call.
 		UpdatePullRequest {
-			/// GitHub repository (owner and name).
-			gh_repo: GitHubRepo,
 			/// Pull request number.
 			pull_number: u64,
 			/// New pull request title.
@@ -182,8 +161,6 @@ pub mod test_support {
 		},
 		/// A `publish_release` call.
 		PublishRelease {
-			/// GitHub repository (owner and name).
-			gh_repo: GitHubRepo,
 			/// ID of the draft release to publish.
 			release_id: String,
 		},
@@ -192,7 +169,7 @@ pub mod test_support {
 	/// A [`CodeForgeClient`] that records all invocations and returns configured responses.
 	#[derive(Debug)]
 	pub struct RecordingCodeForgeClient {
-		invocations: Mutex<Vec<GitHubInvocation>>,
+		invocations: Mutex<Vec<CodeForgeInvocation>>,
 		release_id: String,
 		fail_create: bool,
 		fail_upload: bool,
@@ -270,7 +247,7 @@ pub mod test_support {
 		}
 
 		/// Returns all invocations recorded so far.
-		pub fn invocations(&self) -> Vec<GitHubInvocation> {
+		pub fn invocations(&self) -> Vec<CodeForgeInvocation> {
 			self.invocations.lock().expect("mutex poisoned").clone()
 		}
 	}
@@ -285,14 +262,12 @@ pub mod test_support {
 	impl CodeForgeClient for RecordingCodeForgeClient {
 		async fn create_release(
 			&self,
-			gh_repo: &GitHubRepo,
 			tag_name: &str,
 			name: &str,
 			body: &str,
 		) -> anyhow::Result<String> {
 			self.invocations.lock().expect("mutex poisoned").push(
-				GitHubInvocation::CreateRelease {
-					gh_repo: gh_repo.clone(),
+				CodeForgeInvocation::CreateRelease {
 					tag_name: tag_name.to_string(),
 					name: name.to_string(),
 					body: body.to_string(),
@@ -306,20 +281,17 @@ pub mod test_support {
 
 		async fn upload_asset(
 			&self,
-			gh_repo: &GitHubRepo,
 			release_id: &str,
 			file_name: &str,
 			file_path: &Path,
 		) -> anyhow::Result<()> {
-			self.invocations
-				.lock()
-				.expect("mutex poisoned")
-				.push(GitHubInvocation::UploadAsset {
-					gh_repo: gh_repo.clone(),
+			self.invocations.lock().expect("mutex poisoned").push(
+				CodeForgeInvocation::UploadAsset {
 					release_id: release_id.to_string(),
 					file_name: file_name.to_string(),
 					file_path: file_path.to_path_buf(),
-				});
+				},
+			);
 			if self.fail_upload {
 				bail!("simulated upload_asset failure");
 			}
@@ -328,15 +300,13 @@ pub mod test_support {
 
 		async fn create_pull_request(
 			&self,
-			gh_repo: &GitHubRepo,
 			title: &str,
 			body: &str,
 			head: &str,
 			base: &str,
 		) -> anyhow::Result<String> {
 			self.invocations.lock().expect("mutex poisoned").push(
-				GitHubInvocation::CreatePullRequest {
-					gh_repo: gh_repo.clone(),
+				CodeForgeInvocation::CreatePullRequest {
 					title: title.to_string(),
 					body: body.to_string(),
 					head: head.to_string(),
@@ -346,19 +316,12 @@ pub mod test_support {
 			if self.fail_create_pr {
 				bail!("simulated create_pull_request failure");
 			}
-			let owner = &gh_repo.owner;
-			let repo = &gh_repo.repo;
-			Ok(format!("https://github.com/{owner}/{repo}/pull/1"))
+			Ok("https://example.com/pull/1".to_string())
 		}
 
-		async fn find_open_pull_request(
-			&self,
-			gh_repo: &GitHubRepo,
-			head: &str,
-		) -> anyhow::Result<Option<PullRequest>> {
+		async fn find_open_pull_request(&self, head: &str) -> anyhow::Result<Option<PullRequest>> {
 			self.invocations.lock().expect("mutex poisoned").push(
-				GitHubInvocation::FindOpenPullRequest {
-					gh_repo: gh_repo.clone(),
+				CodeForgeInvocation::FindOpenPullRequest {
 					head: head.to_string(),
 				},
 			);
@@ -370,14 +333,12 @@ pub mod test_support {
 
 		async fn update_pull_request(
 			&self,
-			gh_repo: &GitHubRepo,
 			pull_number: u64,
 			title: &str,
 			body: &str,
 		) -> anyhow::Result<String> {
 			self.invocations.lock().expect("mutex poisoned").push(
-				GitHubInvocation::UpdatePullRequest {
-					gh_repo: gh_repo.clone(),
+				CodeForgeInvocation::UpdatePullRequest {
 					pull_number,
 					title: title.to_string(),
 					body: body.to_string(),
@@ -386,21 +347,12 @@ pub mod test_support {
 			if self.fail_update_pr {
 				bail!("simulated update_pull_request failure");
 			}
-			let owner = &gh_repo.owner;
-			let repo = &gh_repo.repo;
-			Ok(format!(
-				"https://github.com/{owner}/{repo}/pull/{pull_number}"
-			))
+			Ok(format!("https://example.com/pull/{pull_number}"))
 		}
 
-		async fn publish_release(
-			&self,
-			gh_repo: &GitHubRepo,
-			release_id: &str,
-		) -> anyhow::Result<()> {
+		async fn publish_release(&self, release_id: &str) -> anyhow::Result<()> {
 			self.invocations.lock().expect("mutex poisoned").push(
-				GitHubInvocation::PublishRelease {
-					gh_repo: gh_repo.clone(),
+				CodeForgeInvocation::PublishRelease {
 					release_id: release_id.to_string(),
 				},
 			);
@@ -421,12 +373,7 @@ pub mod test_support {
 		async fn recording_client_records_create_release() {
 			let client = RecordingCodeForgeClient::new().with_release_id("r-42");
 			let id = client
-				.create_release(
-					&GitHubRepo::new("owner", "repo").unwrap(),
-					"v1.0.0",
-					"Release 1.0.0",
-					"body text",
-				)
+				.create_release("v1.0.0", "Release 1.0.0", "body text")
 				.await
 				.unwrap();
 			assert_eq!(id, "r-42");
@@ -434,7 +381,7 @@ pub mod test_support {
 			assert_eq!(invocations.len(), 1);
 			assert!(matches!(
 				&invocations[0],
-				GitHubInvocation::CreateRelease { tag_name, .. } if tag_name == "v1.0.0"
+				CodeForgeInvocation::CreateRelease { tag_name, .. } if tag_name == "v1.0.0"
 			));
 		}
 
@@ -443,33 +390,21 @@ pub mod test_support {
 			let client = RecordingCodeForgeClient::new();
 			let path = PathBuf::from("/tmp/app.tar.gz");
 			client
-				.upload_asset(
-					&GitHubRepo::new("owner", "repo").unwrap(),
-					"r-1",
-					"app.tar.gz",
-					&path,
-				)
+				.upload_asset("r-1", "app.tar.gz", &path)
 				.await
 				.unwrap();
 			let invocations = client.invocations();
 			assert_eq!(invocations.len(), 1);
 			assert!(matches!(
 				&invocations[0],
-				GitHubInvocation::UploadAsset { file_name, .. } if file_name == "app.tar.gz"
+				CodeForgeInvocation::UploadAsset { file_name, .. } if file_name == "app.tar.gz"
 			));
 		}
 
 		#[tokio::test]
 		async fn recording_client_create_failure_returns_error() {
 			let client = RecordingCodeForgeClient::new().with_create_failure();
-			let result = client
-				.create_release(
-					&GitHubRepo::new("owner", "repo").unwrap(),
-					"v1.0.0",
-					"Release",
-					"body",
-				)
-				.await;
+			let result = client.create_release("v1.0.0", "Release", "body").await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);
@@ -479,12 +414,7 @@ pub mod test_support {
 		async fn recording_client_upload_failure_returns_error() {
 			let client = RecordingCodeForgeClient::new().with_upload_failure();
 			let result = client
-				.upload_asset(
-					&GitHubRepo::new("owner", "repo").unwrap(),
-					"r-1",
-					"file.tar.gz",
-					Path::new("/tmp/file.tar.gz"),
-				)
+				.upload_asset("r-1", "file.tar.gz", Path::new("/tmp/file.tar.gz"))
 				.await;
 			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
@@ -495,7 +425,6 @@ pub mod test_support {
 			let client = RecordingCodeForgeClient::new();
 			let url = client
 				.create_pull_request(
-					&GitHubRepo::new("acme", "app").unwrap(),
 					"Release updates",
 					"Release:\n\n- my-pkg@1.0.0",
 					"cursus-release/main",
@@ -503,15 +432,12 @@ pub mod test_support {
 				)
 				.await
 				.unwrap();
-			assert!(
-				url.contains("acme/app"),
-				"URL should contain owner/repo: {url}"
-			);
+			assert!(url.contains("pull/1"), "URL should contain pull/1: {url}");
 			let invocations = client.invocations();
 			assert_eq!(invocations.len(), 1);
 			assert!(matches!(
 				&invocations[0],
-				GitHubInvocation::CreatePullRequest { title, head, base, .. }
+				CodeForgeInvocation::CreatePullRequest { title, head, base, .. }
 					if title == "Release updates" && head == "cursus-release/main" && base == "main"
 			));
 		}
@@ -520,13 +446,7 @@ pub mod test_support {
 		async fn recording_client_create_pr_failure_returns_error() {
 			let client = RecordingCodeForgeClient::new().with_create_pr_failure();
 			let result = client
-				.create_pull_request(
-					&GitHubRepo::new("acme", "app").unwrap(),
-					"Release",
-					"body",
-					"release-branch",
-					"main",
-				)
+				.create_pull_request("Release", "body", "release-branch", "main")
 				.await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
@@ -537,10 +457,7 @@ pub mod test_support {
 		async fn recording_client_find_open_pr_returns_none_when_not_configured() {
 			let client = RecordingCodeForgeClient::new();
 			let result = client
-				.find_open_pull_request(
-					&GitHubRepo::new("acme", "app").unwrap(),
-					"cursus-release/main",
-				)
+				.find_open_pull_request("cursus-release/main")
 				.await
 				.unwrap();
 			assert!(result.is_none());
@@ -548,7 +465,7 @@ pub mod test_support {
 			assert_eq!(invocations.len(), 1);
 			assert!(matches!(
 				&invocations[0],
-				GitHubInvocation::FindOpenPullRequest { head, .. }
+				CodeForgeInvocation::FindOpenPullRequest { head, .. }
 					if head == "cursus-release/main"
 			));
 		}
@@ -561,10 +478,7 @@ pub mod test_support {
 			};
 			let client = RecordingCodeForgeClient::new().with_existing_pr(pr);
 			let result = client
-				.find_open_pull_request(
-					&GitHubRepo::new("acme", "app").unwrap(),
-					"cursus-release/main",
-				)
+				.find_open_pull_request("cursus-release/main")
 				.await
 				.unwrap();
 			assert!(result.is_some());
@@ -576,9 +490,7 @@ pub mod test_support {
 		#[tokio::test]
 		async fn recording_client_find_pr_failure_returns_error() {
 			let client = RecordingCodeForgeClient::new().with_find_pr_failure();
-			let result = client
-				.find_open_pull_request(&GitHubRepo::new("acme", "app").unwrap(), "release-branch")
-				.await;
+			let result = client.find_open_pull_request("release-branch").await;
 			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
@@ -587,12 +499,7 @@ pub mod test_support {
 		async fn recording_client_update_pull_request_records_invocation() {
 			let client = RecordingCodeForgeClient::new();
 			let url = client
-				.update_pull_request(
-					&GitHubRepo::new("acme", "app").unwrap(),
-					42,
-					"Updated Title",
-					"Updated body",
-				)
+				.update_pull_request(42, "Updated Title", "Updated body")
 				.await
 				.unwrap();
 			assert!(url.contains("pull/42"), "URL should contain pull/42: {url}");
@@ -600,7 +507,7 @@ pub mod test_support {
 			assert_eq!(invocations.len(), 1);
 			assert!(matches!(
 				&invocations[0],
-				GitHubInvocation::UpdatePullRequest { pull_number, title, .. }
+				CodeForgeInvocation::UpdatePullRequest { pull_number, title, .. }
 					if *pull_number == 42 && title == "Updated Title"
 			));
 		}
@@ -608,9 +515,7 @@ pub mod test_support {
 		#[tokio::test]
 		async fn recording_client_update_pr_failure_returns_error() {
 			let client = RecordingCodeForgeClient::new().with_update_pr_failure();
-			let result = client
-				.update_pull_request(&GitHubRepo::new("acme", "app").unwrap(), 1, "Title", "body")
-				.await;
+			let result = client.update_pull_request(1, "Title", "body").await;
 			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
@@ -618,24 +523,19 @@ pub mod test_support {
 		#[tokio::test]
 		async fn recording_client_records_publish_release() {
 			let client = RecordingCodeForgeClient::new();
-			client
-				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
-				.await
-				.unwrap();
+			client.publish_release("release-1").await.unwrap();
 			let invocations = client.invocations();
 			assert_eq!(invocations.len(), 1);
 			assert!(matches!(
 				&invocations[0],
-				GitHubInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
+				CodeForgeInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
 			));
 		}
 
 		#[tokio::test]
 		async fn recording_client_publish_release_failure_returns_error() {
 			let client = RecordingCodeForgeClient::new().with_publish_release_failure();
-			let result = client
-				.publish_release(&GitHubRepo::new("owner", "repo").unwrap(), "release-1")
-				.await;
+			let result = client.publish_release("release-1").await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
 			assert_eq!(client.invocations().len(), 1);

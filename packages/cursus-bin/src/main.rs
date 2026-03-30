@@ -153,6 +153,32 @@ async fn main() -> ExitCode {
 	}
 }
 
+/// Attempts to construct the code forge client from environment and config.
+///
+/// Returns `Ok(client)` when a token is present and the repo identity can be
+/// resolved, or `Err(reason)` describing why the client is unavailable.
+async fn resolve_forge_client(
+	env: &cursus::Env,
+	config: &Option<cursus::model::config::Config>,
+) -> Result<Arc<dyn cursus::github::client::CodeForgeClient>, String> {
+	let token = env_first(&["GH_TOKEN", "GITHUB_TOKEN"])
+		.ok_or_else(|| "No GitHub token found (GH_TOKEN / GITHUB_TOKEN)".to_string())?;
+	let octocrab = octocrab::Octocrab::builder()
+		.personal_token(token)
+		.build()
+		.map_err(|e| format!("Failed to build GitHub client: {e}"))?;
+	let cfg = config
+		.as_ref()
+		.ok_or_else(|| "No configuration file found".to_string())?;
+	let repo = cursus::github::remote::GitHubRepo::resolve(&cfg.github, env.git())
+		.await
+		.map_err(|e| format!("{e:#}"))?;
+	Ok(
+		Arc::new(cursus::github::OctocrabGitHubClient::new(octocrab, repo))
+			as Arc<dyn cursus::github::client::CodeForgeClient>,
+	)
+}
+
 /// Runs the application after CLI parsing and logging setup.
 ///
 /// Separated from [`main`] so that all fallible operations can use `?`
@@ -183,16 +209,6 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 	));
 
 	let editor = env_first(&["VISUAL", "EDITOR"]);
-	let forge_client = env_first(&["GH_TOKEN", "GITHUB_TOKEN"])
-		.map(|token| {
-			let client = octocrab::Octocrab::builder()
-				.personal_token(token)
-				.build()
-				.context("Failed to build GitHub client")?;
-			Ok::<_, anyhow::Error>(Arc::new(cursus::github::OctocrabGitHubClient::new(client))
-				as Arc<dyn cursus::github::client::CodeForgeClient>)
-		})
-		.transpose()?;
 	let oidc_environment = env_first(&["ACTIONS_ID_TOKEN_REQUEST_URL", "CI_JOB_JWT_V2"]).is_some();
 	let node_auth_token_present = env_first(&["NODE_AUTH_TOKEN"]).is_some();
 	let cargo_registry_token_present = env_first(&["CARGO_REGISTRY_TOKEN"]).is_some();
@@ -200,13 +216,14 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 
 	let env = cursus::Env::new(runner, filesystem, git)
 		.with_editor_opt(editor)
-		.with_code_forge_client_opt(forge_client)
 		.with_oidc_environment(oidc_environment)
 		.with_node_auth_token_present(node_auth_token_present)
 		.with_cargo_registry_token_present(cargo_registry_token_present)
 		.with_locale(locale);
 
 	let config = cursus::model::config::load(env.fs(), env.git().path()).await?;
+	let forge_client = resolve_forge_client(&env, &config).await;
+	let env = env.with_code_forge_client_result(forge_client);
 
 	cursus::run(cli, env, config).await
 }
