@@ -30,7 +30,9 @@ deny = []
 
 [advisories]
 # Ignore specific advisories (add IDs here if needed)
-ignore = []
+ignore = [
+	"RUSTSEC-2023-0071",
+]
 
 [sources]
 # Allow only crates.io
