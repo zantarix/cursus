@@ -75,7 +75,8 @@ Key differences from old style:
 - ADR-039: Accepted (split dependency versioning -- library caret, binary pinned)
 - ADR-040: Proposed (strip git trailers from conventional commit body during parsing)
 - ADR-041: Accepted (rename GitHubClient trait to CodeForgeClient)
-- Next ADR number: 042
+- ADR-042: Proposed (repo identity in CodeForgeClient constructor)
+- Next ADR number: 043
 
 ## Project ADR Rules (from CLAUDE.md)
 
