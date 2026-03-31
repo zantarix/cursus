@@ -1,7 +1,9 @@
 ---
-files:
-- "**/*.rs"
+paths:
+  - "**/*.rs"
 ---
+
+# Extra clippy exceptions
 
 Further to the baseline Zantarix clippy exceptions, the following is allowed in this project:
 
