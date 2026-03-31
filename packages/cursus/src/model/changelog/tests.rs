@@ -473,16 +473,45 @@ async fn update_changelog_fails_when_cannot_read_existing() {
 	assert!(result.is_err());
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn update_changelog_fails_when_cannot_write() {
-	use std::os::unix::fs::PermissionsExt;
-	let dir = tempfile::tempdir().unwrap();
-	// Make directory read-only
-	let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
-	perms.set_mode(0o444);
-	std::fs::set_permissions(dir.path(), perms).unwrap();
+	use crate::path::AbsolutePath;
 
+	#[derive(Debug)]
+	struct FailingWriteFilesystem;
+
+	#[async_trait::async_trait]
+	impl crate::filesystem::Filesystem for FailingWriteFilesystem {
+		async fn read_to_string(&self, _: &AbsolutePath) -> anyhow::Result<String> {
+			anyhow::bail!("not implemented")
+		}
+		async fn read(&self, _: &AbsolutePath) -> anyhow::Result<Vec<u8>> {
+			anyhow::bail!("not implemented")
+		}
+		async fn write(&self, _: &AbsolutePath, _: &[u8]) -> anyhow::Result<()> {
+			anyhow::bail!("simulated write failure")
+		}
+		async fn create_dir_all(&self, _: &AbsolutePath) -> anyhow::Result<()> {
+			anyhow::bail!("not implemented")
+		}
+		async fn remove_file(&self, _: &AbsolutePath) -> anyhow::Result<()> {
+			anyhow::bail!("not implemented")
+		}
+		async fn exists(&self, _: &AbsolutePath) -> anyhow::Result<bool> {
+			Ok(false)
+		}
+		async fn is_dir(&self, _: &AbsolutePath) -> anyhow::Result<bool> {
+			anyhow::bail!("not implemented")
+		}
+		async fn canonicalize(&self, _: &AbsolutePath) -> anyhow::Result<std::path::PathBuf> {
+			anyhow::bail!("not implemented")
+		}
+		async fn glob(&self, _: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
+			anyhow::bail!("not implemented")
+		}
+	}
+
+	let dir = tempfile::tempdir().unwrap();
 	let changes = vec![(ChangeType::Patch, Some("Fix".to_string()), None)];
 	let changelog = Changelog::new(
 		"1.0.0".parse().unwrap(),
@@ -490,16 +519,9 @@ async fn update_changelog_fails_when_cannot_write() {
 		changes,
 		AbsolutePath::new(dir.path()).unwrap(),
 	);
-	let result = changelog
-		.update(false, &crate::filesystem::LocalFilesystem)
-		.await;
+	let result = changelog.update(false, &FailingWriteFilesystem).await;
 
-	// Restore permissions before assertions for cleanup
-	let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
-	perms.set_mode(0o755);
-	std::fs::set_permissions(dir.path(), perms).unwrap();
-
-	// Should fail because directory is read-only
+	// Should fail because the filesystem returns an error on write.
 	assert!(result.is_err());
 }
 
