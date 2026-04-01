@@ -44,8 +44,9 @@ jobs:
         with:
           use-flakehub: false
 
-      - name: Check code coverage
-        run: cargo make coverage
+      # Coverage disabled due to upstream LLVM bug: https://github.com/llvm/llvm-project/pull/189270
+      - name: Run tests
+        run: cargo test --workspace
 
   lint-js:
     name: Lint JS
