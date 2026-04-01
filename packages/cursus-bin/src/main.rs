@@ -165,6 +165,9 @@ async fn resolve_forge_client(
 		.ok_or_else(|| "No GitHub token found (GH_TOKEN / GITHUB_TOKEN)".to_string())?;
 	let octocrab = octocrab::Octocrab::builder()
 		.personal_token(token)
+		.set_connect_timeout(Some(std::time::Duration::from_secs(10)))
+		.set_read_timeout(Some(std::time::Duration::from_secs(30)))
+		.set_write_timeout(Some(std::time::Duration::from_secs(30)))
 		.build()
 		.map_err(|e| format!("Failed to build GitHub client: {e}"))?;
 	let cfg = config
