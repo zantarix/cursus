@@ -7,6 +7,9 @@
 	"nix": {
 		"enabled": true
 	},
+	"git-submodules": {
+		"enabled": true
+	},
 	"packageRules": [
 		{
 			"description": "Library production dependencies use caret ranges",
