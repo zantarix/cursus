@@ -105,11 +105,11 @@
 				};
 
 				devShells.test-pnpm = pkgs.mkShell {
-					buildInputs = with pkgs; [ git nodejs nodePackages.pnpm ];
+					buildInputs = with pkgs; [ git nodejs pnpm ];
 				};
 
 				devShells.test-yarn-classic = pkgs.mkShell {
-					buildInputs = with pkgs; [ git nodejs nodePackages.yarn ];
+					buildInputs = with pkgs; [ git nodejs yarn ];
 				};
 
 				# yarn-berry provides the `yarn` binary directly — no wrapper needed.
