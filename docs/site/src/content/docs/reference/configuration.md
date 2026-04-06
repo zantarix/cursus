@@ -84,7 +84,7 @@ GitHub integration for releases, pull requests, and asset uploads.
 | `owner` | string | auto-detected | GitHub repository owner |
 | `repo` | string | auto-detected | GitHub repository name |
 | `build_command` | string | `""` | Shell command to build release artifacts |
-| `artifacts` | table | `{}` | Map of display names to file paths for GitHub Release uploads |
+| `artifacts` | table of tables | `{}` | Per-package artifact maps: `[github.artifacts.<package-name>]` sections mapping display names to file paths |
 | `pull_request_title` | string | `"Release updates"` | Title for release pull requests (branch strategy only) |
 
 `owner` and `repo` are auto-detected from your Git remote URL if not specified.
@@ -95,7 +95,7 @@ enabled = true
 build_command = "cargo make release"
 pull_request_title = "chore: release updates"
 
-[github.artifacts]
+[github.artifacts.cursus]
 "cursus-linux-x86_64" = "target/x86_64-unknown-linux-musl/release/cursus"
 "cursus-macos-aarch64" = "target/aarch64-apple-darwin/release/cursus"
 ```
@@ -174,7 +174,7 @@ enabled = true
 build_command = "cargo make release"
 pull_request_title = "chore: release updates"
 
-[github.artifacts]
+[github.artifacts.cursus]
 "linux-x86_64" = "target/x86_64-unknown-linux-musl/release/cursus"
 "macos-aarch64" = "target/aarch64-apple-darwin/release/cursus"
 

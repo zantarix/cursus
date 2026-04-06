@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-04-06)
 
 ## Context
 
@@ -85,7 +85,7 @@ Single-package repositories must still use the package name as the key. There is
 
 ### Negative
 
-- This is a breaking change to `.cursus/config.toml`; existing configurations using the flat `[github.artifacts]` format will fail to deserialize with a clear error (due to `deny_unknown_fields` on `GitHubConfig`)
+- This is a breaking change to `.cursus/config.toml`; existing configurations using the flat `[github.artifacts]` format will fail to deserialize with a clear TOML type-mismatch error (`invalid type: string "...", expected a map`), since the `artifacts` field name is unchanged but its expected type changed from `BTreeMap<String, String>` to `BTreeMap<String, BTreeMap<String, String>>`
 - Single-package repositories gain a small amount of configuration verbosity (one extra nesting level)
 - Packages that genuinely need identical artifacts must duplicate the entries, though this is uncommon in practice
 

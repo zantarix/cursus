@@ -546,7 +546,7 @@ async fn github_config_unicode_artifact_name_loads() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
-		"[cargo]\nenabled = true\n[github]\nenabled = true\nowner = \"acme\"\nrepo = \"app\"\n[github.artifacts]\n\"bin\u{00E1}rio-linux\" = \"target/release/app\"\n",
+		"[cargo]\nenabled = true\n[github]\nenabled = true\nowner = \"acme\"\nrepo = \"app\"\n[github.artifacts.my-app]\n\"bin\u{00E1}rio-linux\" = \"target/release/app\"\n",
 	);
 	std::fs::write(
 		dir.path().join("Cargo.toml"),

@@ -31,11 +31,12 @@ pub struct GitHubConfig {
 	/// Run in the git root directory. Defaults to empty (no build step).
 	#[serde(skip_serializing_if = "String::is_empty")]
 	pub build_command: String,
-	/// Map of artifact display names to file paths (relative to git root).
+	/// Per-package artifact maps: package name → (display name → file path relative to git root).
 	///
-	/// Each entry is uploaded as a release asset. Defaults to empty (no assets).
+	/// Each package's entries are uploaded as assets on its GitHub Release. Packages without an
+	/// entry receive no artifacts. Defaults to empty (no assets for any package).
 	#[serde(skip_serializing_if = "BTreeMap::is_empty")]
-	pub artifacts: BTreeMap<String, String>,
+	pub artifacts: BTreeMap<String, BTreeMap<String, String>>,
 	/// Title to use for automatically created pull requests in the `branch` git strategy.
 	///
 	/// Defaults to `"Release updates"` when not set.
@@ -125,7 +126,7 @@ enabled = true
 owner = "acme"
 repo = "my-app"
 build_command = "cargo build --release"
-[artifacts]
+[artifacts.my-app]
 "linux-amd64" = "target/release/app"
 "#;
 		let config: GitHubConfig = toml::from_str(toml_str).unwrap();
@@ -134,7 +135,11 @@ build_command = "cargo build --release"
 		assert_eq!(config.repo(), Some("my-app"));
 		assert_eq!(config.build_command, "cargo build --release");
 		assert_eq!(
-			config.artifacts.get("linux-amd64").map(|s| s.as_str()),
+			config
+				.artifacts
+				.get("my-app")
+				.and_then(|m| m.get("linux-amd64"))
+				.map(|s| s.as_str()),
 			Some("target/release/app")
 		);
 	}
@@ -146,9 +151,30 @@ build_command = "cargo build --release"
 	}
 
 	#[test]
+	fn github_config_rejects_old_flat_artifacts_format() {
+		// Pre-ADR-044 configs had `[artifacts]` with string values; verify they produce a clear error.
+		let toml_str = r#"
+[artifacts]
+"linux-amd64" = "target/release/app"
+"#;
+		let result: Result<GitHubConfig, _> = toml::from_str(toml_str);
+		assert!(
+			result.is_err(),
+			"Old flat artifact format should fail to parse"
+		);
+		let err_msg = result.unwrap_err().to_string();
+		assert!(
+			err_msg.contains("invalid type"),
+			"Expected a type error for old format, got: {err_msg}"
+		);
+	}
+
+	#[test]
 	fn github_config_roundtrip() {
+		let mut pkg_artifacts = BTreeMap::new();
+		pkg_artifacts.insert("linux".to_string(), "target/app".to_string());
 		let mut artifacts = BTreeMap::new();
-		artifacts.insert("linux".to_string(), "target/app".to_string());
+		artifacts.insert("my-pkg".to_string(), pkg_artifacts);
 		let config = GitHubConfig {
 			enabled: true,
 			build_command: "make release".to_string(),

@@ -37,7 +37,7 @@ enabled = true
 build_command = "cargo make release-cross"
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 
-[github.artifacts]
+[github.artifacts.cursus]
 cursus-linux-x86_64          = "target/x86_64-unknown-linux-musl/release/cursus"
 cursus-linux-aarch64         = "target/aarch64-unknown-linux-musl/release/cursus"
 cursus-linux-riscv64gc       = "target/riscv64gc-unknown-linux-musl/release/cursus"

@@ -165,7 +165,7 @@ fn write_github_advanced_comments(out: &mut String) -> fmt::Result {
 	)?;
 	writeln!(
 		out,
-		"# [github.artifacts]                # {}",
+		"# [github.artifacts.<package-name>] # {}",
 		crate::t!("github-artifacts-comment")
 	)
 }

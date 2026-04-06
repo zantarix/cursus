@@ -22,8 +22,10 @@ pub(super) fn log_dry_run_github_releases(
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
 		info!("Would create GitHub Release for {tag}");
-		for display_name in config.github.artifacts.keys() {
-			info!("  Would attach: {display_name}");
+		if let Some(artifacts) = config.github.artifacts.get(&pkg.name) {
+			for display_name in artifacts.keys() {
+				info!("  Would attach: {display_name}");
+			}
 		}
 		info!("  Would publish release after artifact upload");
 	}
@@ -121,6 +123,7 @@ pub(super) async fn orchestrate_github_releases(
 	}
 	let mut github_failed = false;
 	let mut created_count = 0;
+	let empty_artifacts = std::collections::BTreeMap::new();
 	for pkg in published_packages {
 		let tag = config
 			.git
@@ -129,11 +132,16 @@ pub(super) async fn orchestrate_github_releases(
 		let body = read_changelog_body(pkg, fs).await;
 		match code_forge_client.create_release(&tag, &tag, &body).await {
 			Ok(release_id) => {
+				let pkg_artifacts = config
+					.github
+					.artifacts
+					.get(&pkg.name)
+					.unwrap_or(&empty_artifacts);
 				if publish_draft_release(
 					code_forge_client,
 					&tag,
 					&release_id,
-					&config.github.artifacts,
+					pkg_artifacts,
 					git.path(),
 					fs,
 				)
@@ -356,19 +364,21 @@ mod tests {
 		std::fs::write(&linux_path, b"linux binary").unwrap();
 		std::fs::write(&macos_path, b"macos binary").unwrap();
 
-		let mut artifacts_with_paths = BTreeMap::new();
-		artifacts_with_paths.insert(
+		let mut pkg_artifacts = BTreeMap::new();
+		pkg_artifacts.insert(
 			"linux".to_string(),
 			linux_path.to_string_lossy().into_owned(),
 		);
-		artifacts_with_paths.insert(
+		pkg_artifacts.insert(
 			"macos".to_string(),
 			macos_path.to_string_lossy().into_owned(),
 		);
+		let mut artifacts = BTreeMap::new();
+		artifacts.insert("my-app".to_string(), pkg_artifacts);
 
 		let github_cfg = {
 			let mut c = GitHubConfig::enabled_config();
-			c.artifacts = artifacts_with_paths;
+			c.artifacts = artifacts;
 			c.with_owner("acme".to_string())
 				.with_repo("app".to_string())
 		};
@@ -420,16 +430,19 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn github_release_artifacts_attached_to_every_release() {
+	async fn github_release_artifacts_scoped_to_package() {
+		// Artifact configured only for pkg-a; pkg-b has no entry and should get no uploads.
 		let dir = tempfile::tempdir().unwrap();
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"binary content").unwrap();
 
-		let mut artifacts = BTreeMap::new();
-		artifacts.insert(
+		let mut pkg_a_artifacts = BTreeMap::new();
+		pkg_a_artifacts.insert(
 			"app".to_string(),
 			artifact_path.to_string_lossy().into_owned(),
 		);
+		let mut artifacts = BTreeMap::new();
+		artifacts.insert("pkg-a".to_string(), pkg_a_artifacts);
 
 		let github_cfg = {
 			let mut c = GitHubConfig::enabled_config();
@@ -478,8 +491,8 @@ mod tests {
 			.iter()
 			.filter(|i| matches!(i, CodeForgeInvocation::UploadAsset { .. }))
 			.count();
-		// Each of 2 packages should have 1 artifact each
-		assert_eq!(upload_count, 2);
+		// Only pkg-a has a configured artifact; pkg-b gets no uploads
+		assert_eq!(upload_count, 1);
 	}
 
 	#[tokio::test]
@@ -529,11 +542,13 @@ mod tests {
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"binary content").unwrap();
 
-		let mut artifacts = BTreeMap::new();
-		artifacts.insert(
+		let mut pkg_artifacts = BTreeMap::new();
+		pkg_artifacts.insert(
 			"app".to_string(),
 			artifact_path.to_string_lossy().into_owned(),
 		);
+		let mut artifacts = BTreeMap::new();
+		artifacts.insert("my-app".to_string(), pkg_artifacts);
 
 		let github_cfg = {
 			let mut c = GitHubConfig::enabled_config();
@@ -780,8 +795,10 @@ mod tests {
 		init_test_logger();
 		let _ = take_logs();
 
+		let mut pkg_artifacts = BTreeMap::new();
+		pkg_artifacts.insert("linux-amd64".to_string(), "target/app".to_string());
 		let mut artifacts = BTreeMap::new();
-		artifacts.insert("linux-amd64".to_string(), "target/app".to_string());
+		artifacts.insert("my-app".to_string(), pkg_artifacts);
 		let config = Config::new().with_github(make_github_config("", artifacts));
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),

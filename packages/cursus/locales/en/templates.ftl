@@ -30,4 +30,4 @@ github-owner-auto-detect-comment = GitHub owner (auto-detected from remote if om
 github-repo-auto-detect-comment = GitHub repo (auto-detected from remote if omitted)
 github-build-command-comment = Shell command to build release artifacts
 github-pr-title-comment = Custom PR title (default: "Release updates")
-github-artifacts-comment = Map of display name -> file path for release assets
+github-artifacts-comment = Per-package: display name -> file path for release assets

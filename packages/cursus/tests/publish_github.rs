@@ -256,7 +256,7 @@ async fn publish_dry_run_with_artifacts_shows_would_attach() {
 	let dir = temp_git_repo();
 	write_config(
 		dir.path(),
-		"[cargo]\nenabled = true\n[github]\nenabled = true\nowner = \"acme\"\nrepo = \"app\"\n[github.artifacts]\n\"linux-amd64\" = \"target/release/my-app\"\n",
+		"[cargo]\nenabled = true\n[github]\nenabled = true\nowner = \"acme\"\nrepo = \"app\"\n[github.artifacts.my-app]\n\"linux-amd64\" = \"target/release/my-app\"\n",
 	);
 	std::fs::write(
 		dir.path().join("Cargo.toml"),

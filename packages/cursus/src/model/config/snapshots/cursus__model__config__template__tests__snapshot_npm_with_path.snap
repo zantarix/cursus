@@ -41,4 +41,4 @@ path = "frontend/"
 # repo = ""                         # GitHub repo (auto-detected from remote if omitted)
 # build_command = ""                # Shell command to build release artifacts
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
-# [github.artifacts]                # Map of display name -> file path for release assets
+# [github.artifacts.<package-name>] # Per-package: display name -> file path for release assets

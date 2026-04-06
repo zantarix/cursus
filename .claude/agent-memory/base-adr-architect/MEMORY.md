@@ -77,7 +77,7 @@ Key differences from old style:
 - ADR-041: Accepted (rename GitHubClient trait to CodeForgeClient)
 - ADR-042: Accepted (repo identity in CodeForgeClient constructor)
 - ADR-043: Proposed (publish private packages to GitHub Releases)
-- ADR-044: Proposed (per-package GitHub release artifacts)
+- ADR-044: Accepted (per-package GitHub release artifacts)
 - Next ADR number: 045
 
 ## Project ADR Rules (from CLAUDE.md)
