@@ -15,7 +15,7 @@ Cursus is a Rust CLI application built with [clap](https://docs.rs/clap) for arg
 | `src/package_manager/` | Adapter trait for Cargo and npm workspace enumeration, versioning, and publishing |
 | `src/git/` | Git lifecycle management (commit, tag, push, branch) |
 | `src/github/` | GitHub API integration (releases, PRs, asset uploads) |
-| `src/command.rs` | `CommandRunner` trait for shell command execution with dry-run support |
+| `src/command/` | `CommandRunner` trait for shell command execution with dry-run support |
 | `src/env.rs` | Dependency injection and runner composition |
 | `src/conventional_commit.rs` | Conventional Commit parser |
 | `src/path.rs` | `AbsolutePath` newtype for validated absolute paths |

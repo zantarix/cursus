@@ -49,8 +49,22 @@ See the [configuration reference](/cursus/reference/configuration/#github) for d
 ## Authentication
 
 - **Cargo** — uses your existing `cargo login` credentials or the `CARGO_REGISTRY_TOKEN` environment variable
-- **npm** — uses your existing `npm login` credentials or the `NPM_TOKEN` environment variable
+- **npm** — uses your existing `npm login` credentials or the `NODE_AUTH_TOKEN` environment variable
 - **GitHub** — uses the `GH_TOKEN` or `GITHUB_TOKEN` environment variable (checked in that order)
+
+### npm OIDC trusted publishing
+
+On GitHub Actions (with `id-token: write` permission) and GitLab CI (with OIDC configured), Cursus detects the OIDC environment automatically. npm exchanges the CI identity token for a short-lived publish credential — no `NODE_AUTH_TOKEN` secret is required.
+
+Cursus will warn before publishing in the following situations:
+
+- **`NODE_AUTH_TOKEN` is also set** — the classic token takes precedence over OIDC token exchange. The publish may not use trusted publishing. This is intentional if you are publishing to a registry that does not support OIDC, but is often an accidental leftover secret.
+- **Neither OIDC nor `NODE_AUTH_TOKEN` is present** — no recognised npm authentication is configured; the publish is likely to fail.
+- **OIDC is active, `access = "public"`, but `publishConfig.provenance` is not `true` in `package.json`** — npm attaches provenance attestations automatically via trusted publishing, but declaring `publishConfig.provenance = true` in your `package.json` makes the intent explicit and ensures provenance is attached even in non-OIDC publish scenarios.
+
+:::caution[First publish of a new package]
+npm requires a package to exist on the registry before a trusted publisher can be configured for it. The very first publish of a brand-new package must use a `NODE_AUTH_TOKEN`.
+:::
 
 ## Private packages
 

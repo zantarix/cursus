@@ -12,6 +12,7 @@ Top-level settings.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `disable_dependency_cycle_warnings` | bool | `false` | Suppress warnings about dependency cycles during prepare |
+| `ignore` | list of strings | `[]` | Glob patterns matching package names to exclude from all Cursus operations. Matching packages are dropped before version bumps, publish, and changelog generation. Cursus warns if a pattern matches nothing. |
 
 ## `[cargo]`
 
@@ -158,6 +159,7 @@ packages = ["my-plugin-*"]
 ```toml
 [global]
 disable_dependency_cycle_warnings = false
+ignore = ["internal-*"]
 
 [cargo]
 enabled = true
@@ -189,3 +191,14 @@ enabled = true
 [[linked-versions.groups]]
 packages = ["my-*"]
 ```
+
+## Environment variables
+
+Cursus reads the following environment variables in addition to the `config.toml` settings:
+
+| Variable | Description |
+|----------|-------------|
+| `CURSUS_LOCALE` | Override the locale used for user-visible messages. Accepts a BCP 47 language tag (e.g. `en`, `fr`, `zh-TW`). If unset, the system locale is detected automatically with `en` as the fallback. |
+| `CARGO_REGISTRY_TOKEN` | Token for publishing to crates.io (Cargo adapter). Equivalent to `cargo login`. |
+| `NODE_AUTH_TOKEN` | Token for publishing to the npm registry (npm adapter). Equivalent to `npm login` for token-based auth. |
+| `GH_TOKEN` / `GITHUB_TOKEN` | Token for GitHub API operations (releases, PRs, asset uploads). Checked in this order. |

@@ -53,13 +53,23 @@ Cursus supports npm, pnpm, and Yarn workspaces. The correct lock file command is
 - Updates the lock file automatically
 - Publishes to the npm registry via `npm publish`
 
-**Registry:** npm (authenticated via `npm login` or `NPM_TOKEN`)
+**Registry:** npm (authenticated via `npm login`, `NODE_AUTH_TOKEN`, or OIDC trusted publishing on GitHub Actions / GitLab CI)
 
 ```toml
 [npm]
 enabled = true
 access = "public"
 ```
+
+### Authentication
+
+Cursus delegates npm authentication entirely to the environment:
+
+- **`NODE_AUTH_TOKEN`** — set this environment variable to a classic npm access token for local publishes or CI environments that do not support OIDC.
+- **OIDC trusted publishing** — on GitHub Actions (with `id-token: write` permission) and GitLab CI (with OIDC configured), npm exchanges the CI identity token for a short-lived publish credential automatically. No long-lived secret is needed. Cursus detects the OIDC environment and emits warnings for common misconfigurations (token interference, missing authentication, missing `publishConfig.provenance`). See the [publishing guide](/cursus/guides/publishing/#npm-oidc-trusted-publishing) for details.
+- **`npm login`** — interactive login credentials stored in `.npmrc` also work for local use.
+
+Note: if you are using yarn or pnpm, publishing still goes through `npm publish` and the same authentication mechanisms apply.
 
 ### Access levels
 
