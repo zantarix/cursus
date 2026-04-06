@@ -26,7 +26,7 @@ cargo make release-windows-aarch64 # ARM64 Windows (GNULLVM)
 
 ## Development Environment
 
-This project uses Nix flakes and direnv for development. The flake only supports three systems: x86_64-linux, aarch64-linux, and aarch64-darwin. You should be running inside a dev shell already. If something appears missing then prompt the user to restart you.
+The flake only supports three systems: x86_64-linux, aarch64-linux, and aarch64-darwin.
 
 The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, zig, and cargo-zigbuild for cross-compilation to all targets.
 
