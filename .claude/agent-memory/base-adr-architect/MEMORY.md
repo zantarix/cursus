@@ -76,7 +76,7 @@ Key differences from old style:
 - ADR-040: Accepted (strip git trailers from conventional commit body during parsing)
 - ADR-041: Accepted (rename GitHubClient trait to CodeForgeClient)
 - ADR-042: Accepted (repo identity in CodeForgeClient constructor)
-- ADR-043: Proposed (publish private packages to GitHub Releases)
+- ADR-043: Accepted (publish private packages to GitHub Releases)
 - ADR-044: Accepted (per-package GitHub release artifacts)
 - Next ADR number: 045
 

@@ -283,7 +283,14 @@ pub(crate) async fn cmd_publish(
 		no_git: args.no_git,
 		is_multi_package: projects.len() > 1,
 	};
-	let publish = publish_projects(&sorted_projects, &graph, dry_run, env.fs()).await?;
+	let publish = publish_projects(
+		&sorted_projects,
+		&graph,
+		dry_run,
+		env.fs(),
+		config.git.publish_private_packages(),
+	)
+	.await?;
 	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags).await?;
 	log_publish_summary(&publish, &flags, &outcome);
 
@@ -301,6 +308,7 @@ struct PublishState {
 	skipped_count: usize,
 	dep_skipped_count: usize,
 	unprepared_count: usize,
+	private_tagged_count: usize,
 	failed: bool,
 	blocked: std::collections::HashSet<String>,
 }
@@ -312,9 +320,26 @@ impl PublishState {
 			skipped_count: 0,
 			dep_skipped_count: 0,
 			unprepared_count: 0,
+			private_tagged_count: 0,
 			failed: false,
 			blocked: std::collections::HashSet::new(),
 		}
+	}
+
+	/// Adds a private package to the published list for tag-only publishing (ADR-043).
+	///
+	/// The package is added to `published` so that `run_git_release_operations` creates
+	/// its tag and GitHub Release. No registry publish is performed.
+	///
+	/// Dry-run tag logging is handled by `maybe_create_tags`, which uses the configured
+	/// tag format and iterates all `published` packages uniformly.
+	fn record_private_tagged(&mut self, project: &package_manager::Project) {
+		self.published.push(PublishedPackage {
+			name: project.name().to_string(),
+			version: project.version().clone(),
+			project_path: project.path().clone(),
+		});
+		self.private_tagged_count += 1;
 	}
 
 	/// Records the outcome of publishing a single project.
@@ -362,8 +387,10 @@ impl PublishState {
 ///
 /// Projects should be pre-sorted in dependency order (leaves first).
 /// Private packages (marked with `private: true` in npm or `publish = false` in Cargo)
-/// are silently skipped. Public packages without a `CHANGELOG.md` (never prepared) are
-/// warned about and skipped without blocking their dependents.
+/// are silently skipped unless listed in `publish_private_packages`, in which case they
+/// receive git tags and GitHub Releases but are not published to any registry.
+/// Public packages without a `CHANGELOG.md` (never prepared) are warned about and skipped
+/// without blocking their dependents.
 ///
 /// When a package fails to publish, all of its transitive dependents are skipped
 /// (with a warning) to avoid confusing errors from publishing against a registry
@@ -374,11 +401,15 @@ impl PublishState {
 /// * `projects` - Projects to publish, pre-sorted in dependency order.
 /// * `graph` - The dependency graph used to determine which packages to skip on failure.
 /// * `dry_run` - If true, only print what would be published without actually publishing.
+/// * `fs` - Filesystem abstraction used to check for `CHANGELOG.md`.
+/// * `publish_private_packages` - Names of private packages that should receive git tags
+///   and GitHub Releases (but not registry publish). Per ADR-043.
 async fn publish_projects(
 	projects: &[package_manager::Project],
 	graph: &DependencyGraph,
 	dry_run: bool,
 	fs: &dyn crate::filesystem::Filesystem,
+	publish_private_packages: &[String],
 ) -> anyhow::Result<PublishState> {
 	let mut state = PublishState::new();
 
@@ -391,8 +422,18 @@ async fn publish_projects(
 			state.dep_skipped_count += 1;
 			continue;
 		}
-		// Silently skip private packages (per ADR-007).
+		// Private packages: silently skip unless opted into tag-only publishing (ADR-043).
 		if !project.is_publishable() {
+			let is_listed = publish_private_packages.iter().any(|p| p == project.name());
+			if is_listed && !fs.exists(&project.path().child("CHANGELOG.md")).await? {
+				warn!(
+					"Skipping {}: no CHANGELOG.md found (run 'cursus prepare' first, with an appropriate changeset)",
+					project.name()
+				);
+				state.unprepared_count += 1;
+			} else if is_listed {
+				state.record_private_tagged(project);
+			}
 			continue;
 		}
 		// Skip public packages that have never been prepared (no CHANGELOG.md).
@@ -412,23 +453,35 @@ async fn publish_projects(
 }
 
 /// Logs the GitHub Releases portion of the publish summary.
+///
+/// `registry_published` excludes private-tagged packages; `private_tagged_count` is
+/// reported separately. GitHub Releases are created for all packages in `published`
+/// (registry + private), so `failed_count` is derived from their combined total.
 fn log_github_releases_summary(
-	published_count: usize,
+	registry_published: usize,
+	private_tagged_count: usize,
 	skipped_count: usize,
 	dep_skipped_note: &str,
 	unprepared_note: &str,
 	github_created: usize,
 	github_failed: bool,
 ) {
+	let private_note = if private_tagged_count > 0 {
+		format!(", {private_tagged_count} private (tag only)")
+	} else {
+		String::new()
+	};
+	// GitHub Releases are attempted for both registry-published and private-tagged packages.
+	let total_releasable = registry_published + private_tagged_count;
 	match (github_created, github_failed) {
 		(created, false) => info!(
-			"Summary: {published_count} published, {skipped_count} skipped, \
+			"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
 			 {created} GitHub Releases created{dep_skipped_note}{unprepared_note}",
 		),
 		(created, true) => {
-			let failed_count = published_count.saturating_sub(created);
+			let failed_count = total_releasable.saturating_sub(created);
 			info!(
-				"Summary: {published_count} published, {skipped_count} skipped, \
+				"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
 				 {created} GitHub Release{} created, {failed_count} GitHub Release{} failed\
 				 {dep_skipped_note}{unprepared_note}",
 				if created == 1 { "" } else { "s" },
@@ -450,6 +503,12 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 	} else {
 		String::new()
 	};
+	let private_note = if state.private_tagged_count > 0 {
+		format!(", {} private (tag only)", state.private_tagged_count)
+	} else {
+		String::new()
+	};
+	let registry_published = state.published.len() - state.private_tagged_count;
 	if flags.dry_run {
 		let tag_note = if flags.git_enabled && !state.published.is_empty() {
 			format!(", {} would be tagged", state.published.len())
@@ -457,8 +516,7 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 			String::new()
 		};
 		info!(
-			"Summary: {} would be published, {} would be skipped{tag_note}{unprepared_note}",
-			state.published.len(),
+			"Summary: {registry_published} would be published{private_note}, {} would be skipped{tag_note}{unprepared_note}",
 			state.skipped_count
 		);
 		warn!(
@@ -467,7 +525,8 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 		);
 	} else if flags.github_enabled && !flags.no_git {
 		log_github_releases_summary(
-			state.published.len(),
+			registry_published,
+			state.private_tagged_count,
 			state.skipped_count,
 			&dep_skipped_note,
 			&unprepared_note,
@@ -476,8 +535,7 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 		);
 	} else {
 		info!(
-			"Summary: {} published, {} skipped{dep_skipped_note}{unprepared_note}",
-			state.published.len(),
+			"Summary: {registry_published} published{private_note}, {} skipped{dep_skipped_note}{unprepared_note}",
 			state.skipped_count
 		);
 	}
@@ -814,7 +872,7 @@ mod tests {
 	async fn log_github_releases_summary_no_failure_logs_created_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(3, 0, "", "", 2, false);
+		log_github_releases_summary(3, 0, 0, "", "", 2, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter()
@@ -827,7 +885,7 @@ mod tests {
 	async fn log_github_releases_summary_with_failure_logs_failed_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(3, 0, "", "", 2, true);
+		log_github_releases_summary(3, 0, 0, "", "", 2, true);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter()
@@ -860,6 +918,135 @@ mod tests {
 		state.record_outcome(&project, &graph, false).await;
 		assert_eq!(state.skipped_count, 1, "Expected skipped_count == 1");
 		assert_eq!(state.published.len(), 0, "Expected no published packages");
+	}
+
+	// ── private_tagged_count tests ────────────────────────────────────────────
+
+	#[tokio::test]
+	async fn publish_state_private_tagged_count_starts_at_zero() {
+		let state = PublishState::new();
+		assert_eq!(state.private_tagged_count, 0);
+	}
+
+	#[tokio::test]
+	async fn log_github_releases_summary_private_note_appears_when_nonzero() {
+		// Guards `> 0` → `> 1` on `private_tagged_count` condition.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		log_github_releases_summary(2, 1, 0, "", "", 3, false);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter().any(|(_, m)| m.contains("private (tag only)")),
+			"Expected private note in log: {logs:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn log_github_releases_summary_no_private_note_when_zero() {
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		log_github_releases_summary(2, 0, 0, "", "", 2, false);
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			!logs.iter().any(|(_, m)| m.contains("private (tag only)")),
+			"Private note should not appear when count is zero: {logs:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn log_summary_line_dry_run_shows_private_note() {
+		// Guards `> 0` → `> 1` on `private_tagged_count` condition in log_summary_line.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		state.published.push(make_published_package());
+		state.private_tagged_count = 1;
+		let flags = PublishFlags {
+			dry_run: true,
+			git_enabled: false,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter().any(|(_, m)| m.contains("private (tag only)")),
+			"Expected private note in dry-run summary: {logs:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn log_summary_line_dry_run_registry_published_excludes_private() {
+		// registry_published = published.len() - private_tagged_count
+		// Guards `- private_tagged_count` being dropped (mutant: subtract 0 instead).
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		// 1 registry publish + 1 private-tagged = 2 total in published
+		state.published.push(make_published_package());
+		state.published.push(make_published_package());
+		state.private_tagged_count = 1;
+		let flags = PublishFlags {
+			dry_run: true,
+			git_enabled: false,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter().any(|(_, m)| m.contains("1 would be published")),
+			"Expected '1 would be published' (not 2) in summary: {logs:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn log_summary_line_non_dry_run_shows_private_note() {
+		// Guards `> 0` → `> 1` on `private_tagged_count` in non-dry-run path.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let mut state = PublishState::new();
+		state.published.push(make_published_package());
+		state.private_tagged_count = 1;
+		let flags = PublishFlags {
+			dry_run: false,
+			git_enabled: false,
+			github_enabled: false,
+			no_git: false,
+			is_multi_package: false,
+		};
+		log_summary_line(&state, &flags, &make_empty_outcome());
+		let logs = crate::test_logging::take_logs();
+		assert!(
+			logs.iter().any(|(_, m)| m.contains("private (tag only)")),
+			"Expected private note in non-dry-run summary: {logs:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn record_private_tagged_adds_to_published_and_increments_count() {
+		// Guards the `record_private_tagged` method: package must be pushed to `published`
+		// and `private_tagged_count` incremented, regardless of dry_run mode.
+		use std::sync::Arc;
+		let runner = Arc::new(
+			crate::command::test_support::RecordingCommandRunner::new(0)
+				.with_stdout(b"1.0.0".to_vec()),
+		);
+		let project = crate::package_manager::Project::new_test_with_runner(
+			"my-action",
+			"/nonexistent",
+			Arc::clone(&runner),
+		);
+		let mut state = PublishState::new();
+		state.record_private_tagged(&project);
+		assert_eq!(state.published.len(), 1, "Expected 1 package in published");
+		assert_eq!(
+			state.private_tagged_count, 1,
+			"Expected private_tagged_count == 1"
+		);
+		assert_eq!(state.published[0].name, "my-action");
 	}
 
 	#[tokio::test]

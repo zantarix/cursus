@@ -120,6 +120,11 @@ fn write_git_section(out: &mut String, enabled: bool, strategy: Option<Strategy>
 		"{prefix}# prepare_commit_message = \"ci(release): version packages\"  # {}",
 		crate::t!("git-prepare-commit-message-comment")
 	)?;
+	writeln!(
+		out,
+		"{prefix}# publish_private_packages = []                             # {}",
+		crate::t!("git-publish-private-packages-comment")
+	)?;
 	writeln!(out)
 }
 

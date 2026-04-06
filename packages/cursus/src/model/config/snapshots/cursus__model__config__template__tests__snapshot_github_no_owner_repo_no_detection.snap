@@ -1,5 +1,5 @@
 ---
-source: src/model/config/template.rs
+source: packages/cursus/src/model/config/template.rs
 expression: render(&result)
 ---
 # [global]
@@ -34,6 +34,7 @@ strategy = "push"
 # release_branch_prefix = "cursus-release/"                 # Prefix for release branches (branch strategy)
 # extra_files = []                                          # Additional files to stage before committing
 # prepare_commit_message = "ci(release): version packages"  # Commit message for the prepare step
+# publish_private_packages = []                             # Private packages that receive git tags and GitHub Releases (no registry publish)
 
 [github]
 enabled = true

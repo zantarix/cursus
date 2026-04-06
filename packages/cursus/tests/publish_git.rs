@@ -7,7 +7,7 @@ use common::{
 	temp_real_git_repo_with_config,
 };
 
-use cursus::model::config::PackageManager;
+use cursus::model::config::{GitConfig, PackageManager};
 use cursus::test_logging::{init_test_logger, take_logs};
 
 /// Helper: write a config TOML directly to `.cursus/config.toml`.
@@ -276,5 +276,218 @@ async fn publish_git_disabled_with_changelog_dry_run_no_tag_note_in_summary() {
 	assert!(
 		!logs.iter().any(|(_, m)| m.contains("would be tagged")),
 		"Summary should NOT include 'would be tagged' when git is disabled, got: {logs:?}"
+	);
+}
+
+// ── publish_private_packages (ADR-043) ────────────────────────────────────────
+
+/// A private npm package listed in `publish_private_packages` shows "Would create tag"
+/// in dry-run (using the configured tag format) and does NOT show "Would publish ... to"
+/// (no registry publish).
+#[tokio::test]
+async fn publish_private_package_in_list_dry_run_logs_would_create_tag() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_config(
+		PackageManager::Npm,
+		GitConfig::enabled_config().with_publish_private_packages(vec!["my-action".to_string()]),
+	)
+	.await;
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "my-action", "version": "1.2.0", "private": true}"#,
+	)
+	.unwrap();
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	// Tag is logged by maybe_create_tags using the configured format.
+	// Single-package with TagFormat::Auto → "v{version}".
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("Would create tag") && m.contains("v1.2.0")),
+		"Expected 'Would create tag v1.2.0' in logs: {logs:?}"
+	);
+	// Summary distinguishes private packages from registry-published ones.
+	assert!(
+		logs.iter().any(|(_, m)| m.contains("private (tag only)")),
+		"Expected 'private (tag only)' in summary: {logs:?}"
+	);
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("Would publish my-action")),
+		"Private package should NOT show 'Would publish' to a registry: {logs:?}"
+	);
+}
+
+/// A private package NOT listed in `publish_private_packages` is silently skipped —
+/// no per-package mention in logs (preserves ADR-007 behavior).
+#[tokio::test]
+async fn publish_private_package_not_in_list_silently_skipped() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir =
+		temp_real_git_repo_with_config(PackageManager::Npm, GitConfig::enabled_config()).await;
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "my-action", "version": "1.2.0", "private": true}"#,
+	)
+	.unwrap();
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		!logs
+			.iter()
+			.any(|(_, m)| m.contains("my-action") && !m.contains("Summary")),
+		"Private package not in list should produce no per-package log lines: {logs:?}"
+	);
+}
+
+/// A private package in the list but missing `CHANGELOG.md` is warned about and
+/// skipped — it was never prepared, so there are no release notes to publish.
+#[tokio::test]
+async fn publish_private_package_in_list_no_changelog_skipped() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_config(
+		PackageManager::Npm,
+		GitConfig::enabled_config().with_publish_private_packages(vec!["my-action".to_string()]),
+	)
+	.await;
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "my-action", "version": "1.2.0", "private": true}"#,
+	)
+	.unwrap();
+	// No CHANGELOG.md — package was never prepared.
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	assert!(
+		logs.iter()
+			.any(|(level, m)| *level == log::Level::Warn && m.contains("no CHANGELOG.md found")),
+		"Expected CHANGELOG.md warning for unprepared private package: {logs:?}"
+	);
+	assert!(
+		!logs.iter().any(|(_, m)| m.contains("Would create tag")),
+		"Should NOT log 'Would create tag' for a package without CHANGELOG.md: {logs:?}"
+	);
+}
+
+/// A public package named in `publish_private_packages` follows the normal registry
+/// publish path — the list only affects packages that are actually private.
+#[tokio::test]
+async fn publish_public_package_in_private_list_follows_normal_path() {
+	init_test_logger();
+	let _ = take_logs();
+	let dir = temp_real_git_repo_with_config(
+		PackageManager::Npm,
+		GitConfig::enabled_config().with_publish_private_packages(vec!["my-pkg".to_string()]),
+	)
+	.await;
+	// Public package (no "private": true)
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "my-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+	std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	// Public package should show normal "Would publish ... to" message
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("Would publish") && m.contains("my-pkg")),
+		"Public package in list should still show 'Would publish' (registry path): {logs:?}"
+	);
+	assert!(
+		!logs.iter().any(|(_, m)| m.contains("private (tag only)")),
+		"Public package should NOT show private (tag only) in summary: {logs:?}"
+	);
+}
+
+/// The summary line correctly shows private-tagged packages separately from
+/// registry-published packages.
+#[tokio::test]
+async fn publish_private_package_in_list_dry_run_summary_shows_private_note() {
+	init_test_logger();
+	let _ = take_logs();
+	// Workspace: one public, one private-listed.
+	// Use temp_real_git_repo_with_config for the git setup, then write npm workspace manually.
+	let dir = temp_real_git_repo_with_config(
+		PackageManager::Npm,
+		GitConfig::enabled_config().with_publish_private_packages(vec!["my-action".to_string()]),
+	)
+	.await;
+	std::fs::write(
+		dir.path().join("package.json"),
+		r#"{"name": "root", "version": "1.0.0", "private": true, "workspaces": ["packages/*"]}"#,
+	)
+	.unwrap();
+	std::fs::create_dir_all(dir.path().join("packages/my-pkg")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/my-pkg/package.json"),
+		r#"{"name": "my-pkg", "version": "1.0.0"}"#,
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/my-pkg/CHANGELOG.md"),
+		"# Changelog\n",
+	)
+	.unwrap();
+	std::fs::create_dir_all(dir.path().join("packages/my-action")).unwrap();
+	std::fs::write(
+		dir.path().join("packages/my-action/package.json"),
+		r#"{"name": "my-action", "version": "1.0.0", "private": true}"#,
+	)
+	.unwrap();
+	std::fs::write(
+		dir.path().join("packages/my-action/CHANGELOG.md"),
+		"# Changelog\n",
+	)
+	.unwrap();
+
+	let result = run_cursus(
+		["cursus", "publish", "--no-interactive", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	assert!(result.is_ok(), "Expected Ok, got: {result:?}");
+
+	let logs = take_logs();
+	// Summary: "1 would be published, 1 private (tag only), 0 would be skipped"
+	assert!(
+		logs.iter()
+			.any(|(_, m)| m.contains("1 would be published") && m.contains("1 private (tag only)")),
+		"Expected summary with both registry and private counts: {logs:?}"
 	);
 }

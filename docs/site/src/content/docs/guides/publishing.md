@@ -52,6 +52,25 @@ See the [configuration reference](/cursus/reference/configuration/#github) for d
 - **npm** — uses your existing `npm login` credentials or the `NPM_TOKEN` environment variable
 - **GitHub** — uses the `GH_TOKEN` or `GITHUB_TOKEN` environment variable (checked in that order)
 
+## Private packages
+
+By default, packages marked as private by their manifest (`"private": true` in npm, `publish = false` in Cargo) are silently skipped during `cursus publish`. This is the right behavior for internal packages that should never reach a registry.
+
+Some packages, however, are private from a registry perspective but still need release artifacts — GitHub Actions, CLIs distributed as GitHub Release attachments, or any git-tag-distributed software. For these, use `publish_private_packages` in the `[git]` section:
+
+```toml
+[git]
+enabled = true
+publish_private_packages = ["my-github-action", "my-cli"]
+```
+
+Listed packages receive the non-registry parts of the publish workflow:
+
+1. **Git tag** — same tag format as registry-published packages
+2. **GitHub Release** — when `[github].enabled = true`, a release is created with changelog notes and any configured artifacts
+
+They do not have any registry publish command invoked. Packages that are listed but not actually marked private follow the normal registry publish path.
+
 ## Dry run
 
 Preview what publish would do:

@@ -17,6 +17,7 @@ git-tag-format-comment = Tag format: "auto", "prefixed", or "simple"
 git-release-branch-prefix-comment = Prefix for release branches (branch strategy)
 git-extra-files-comment = Additional files to stage before committing
 git-prepare-commit-message-comment = Commit message for the prepare step
+git-publish-private-packages-comment = Private packages that receive git tags and GitHub Releases (no registry publish)
 
 # [prepare] section comments
 prepare-dependency-bump-comment = Bump level for dependents: "auto" (default), "match", "patch", "minor", or "major"

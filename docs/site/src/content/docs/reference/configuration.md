@@ -58,6 +58,7 @@ Git lifecycle management.
 | `tag_format` | string | `"auto"` | Tag naming: `"auto"`, `"prefixed"`, or `"simple"` |
 | `extra_files` | list | `[]` | Additional file paths to stage before committing |
 | `prepare_commit_message` | string | `"ci(release): version packages"` | Commit message used for the prepare step |
+| `publish_private_packages` | list | `[]` | Private package names that receive git tags and GitHub Releases without registry publish |
 
 **Tag formats:**
 
@@ -72,6 +73,7 @@ Git lifecycle management.
 strategy = "branch"
 tag_format = "prefixed"
 extra_files = ["docs/VERSION"]
+publish_private_packages = ["my-github-action"]
 ```
 
 ## `[github]`

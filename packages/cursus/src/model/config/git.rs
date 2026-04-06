@@ -102,6 +102,17 @@ pub struct GitConfig {
 	/// Defaults to `"ci(release): version packages"` when not set.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	prepare_commit_message: Option<String>,
+	/// Private package names that should receive git tags and GitHub Releases during
+	/// `cursus publish`, without registry publication.
+	///
+	/// When a package is listed here and is marked private by its upstream manifest
+	/// (`"private": true` in npm, `publish = false` in Cargo), Cursus creates a git
+	/// tag and optional GitHub Release for it — but does not attempt to publish it to
+	/// any registry.
+	///
+	/// Defaults to an empty list (all private packages are silently skipped, per ADR-007).
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	publish_private_packages: Vec<String>,
 }
 
 impl GitConfig {
@@ -198,6 +209,18 @@ impl GitConfig {
 	/// Sets the prepare commit message (builder pattern).
 	pub fn with_prepare_commit_message(mut self, message: String) -> Self {
 		self.prepare_commit_message = Some(message);
+		self
+	}
+
+	/// Returns the list of private package names that should receive git tags and GitHub
+	/// Releases during `cursus publish`.
+	pub fn publish_private_packages(&self) -> &[String] {
+		&self.publish_private_packages
+	}
+
+	/// Sets the publish_private_packages list (builder pattern).
+	pub fn with_publish_private_packages(mut self, packages: Vec<String>) -> Self {
+		self.publish_private_packages = packages;
 		self
 	}
 }
@@ -309,10 +332,55 @@ mod tests {
 			.with_release_branch_prefix("release/".to_string())
 			.with_tag_format(TagFormat::Prefixed)
 			.with_extra_files(vec!["custom.lock".to_string()])
-			.with_prepare_commit_message("chore: bump versions".to_string());
+			.with_prepare_commit_message("chore: bump versions".to_string())
+			.with_publish_private_packages(vec!["my-action".to_string()]);
 		let toml_str = toml::to_string(&config).unwrap();
 		let deserialized: GitConfig = toml::from_str(&toml_str).unwrap();
 		assert_eq!(config, deserialized);
+	}
+
+	#[test]
+	fn git_config_publish_private_packages_defaults_to_empty() {
+		let config = GitConfig::default();
+		assert!(config.publish_private_packages().is_empty());
+	}
+
+	#[test]
+	fn git_config_deserializes_publish_private_packages() {
+		let config: GitConfig =
+			toml::from_str("publish_private_packages = [\"my-action\", \"other-action\"]").unwrap();
+		assert_eq!(
+			config.publish_private_packages(),
+			&["my-action", "other-action"]
+		);
+	}
+
+	#[test]
+	fn git_config_publish_private_packages_omitted_when_empty() {
+		let config = GitConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("publish_private_packages"),
+			"Empty list should not be serialized, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn git_config_publish_private_packages_serialized_when_set() {
+		let config =
+			GitConfig::default().with_publish_private_packages(vec!["my-action".to_string()]);
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			toml_str.contains("publish_private_packages"),
+			"Non-empty list should be serialized, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn git_config_with_publish_private_packages_returns_modified_self() {
+		let pkgs = vec!["my-action".to_string()];
+		let config = GitConfig::default().with_publish_private_packages(pkgs.clone());
+		assert_eq!(config.publish_private_packages(), pkgs.as_slice());
 	}
 
 	#[test]
