@@ -1,5 +1,13 @@
 # Architecture Decision Records
 
+This directory contains the Architecture Decision Records (ADRs) for the zantarix-api project.
+
+ADRs are short documents that capture significant architectural decisions made during the development of this project. Each record describes the context behind a decision, the decision itself, the alternatives that were considered, and the consequences — both positive and negative. They serve as a historical log for current and future contributors to understand why the system is shaped the way it is.
+
+Once an ADR is accepted and committed, it is treated as immutable. If a decision is later reversed or revised, a new ADR is created and the original's status is updated to reflect the change.
+
+## Index
+
 | ADR | Title | Status | Summary |
 |-----|-------|--------|---------|
 | [ADR-000](000-founding-constraints.md) | Founding Constraints and Initial Choices | Accepted | Retrospective capture of day-zero constraints: static binary distribution as a hard requirement, Rust chosen to enable that goal, CLI as the user-facing interface, dual CLI/library artifact, JavaScript and Cargo as founding package managers, Nix flakes for development, and Claude Code for AI-assisted development. |
