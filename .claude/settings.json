@@ -24,5 +24,11 @@
       },
       "autoUpdate": true
     }
+  },
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/secrets/**)"
+    ]
   }
 }
