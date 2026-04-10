@@ -1,5 +1,6 @@
 # Direnv
 .direnv/
+.env
 
 # Nix build output
 /result
