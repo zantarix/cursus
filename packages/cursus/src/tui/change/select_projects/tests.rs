@@ -205,9 +205,9 @@ fn projects_c_toggles_changed_group_on() {
 	});
 	let (selected, _, _, _, changed_count) =
 		unwrap_select_projects(handle_key(screen, KeyCode::Char('c'), &[]));
-	assert_eq!(selected[0], true);
-	assert_eq!(selected[1], true);
-	assert_eq!(selected[2], true);
+	assert!(selected[0]);
+	assert!(selected[1]);
+	assert!(selected[2]);
 	assert_eq!(changed_count, 2);
 }
 
@@ -445,7 +445,7 @@ fn mouse_click_on_changed_project_toggles_it() {
 		super::super::KeyResult::Continue(Screen::SelectProjects(
 			super::super::SelectProjectsState { selected, .. },
 		)) => {
-			assert_eq!(selected[0], false);
+			assert!(!selected[0]);
 		}
 		_ => panic!("Expected Continue(SelectProjects)"),
 	}
@@ -461,7 +461,7 @@ fn mouse_click_on_unchanged_project_toggles_it() {
 		super::super::KeyResult::Continue(Screen::SelectProjects(
 			super::super::SelectProjectsState { selected, .. },
 		)) => {
-			assert_eq!(selected[1], true);
+			assert!(selected[1]);
 		}
 		_ => panic!("Expected Continue(SelectProjects)"),
 	}
@@ -577,7 +577,7 @@ fn mouse_click_on_level_of_unselected_project_toggles_instead() {
 				..
 			},
 		)) => {
-			assert_eq!(sel[0], true); // toggled on
+			assert!(sel[0]); // toggled on
 			assert_eq!(lvl[0], ChangeType::Patch); // level unchanged
 		}
 		_ => panic!("Expected Continue(SelectProjects)"),

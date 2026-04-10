@@ -87,7 +87,7 @@ async fn change_succeeds_with_major() {
 	let changeset_files: Vec<_> = std::fs::read_dir(dir.path().join(".cursus"))
 		.expect("Expected .cursus/ directory to exist")
 		.filter_map(|e| e.ok())
-		.filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+		.filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
 		.collect();
 	assert!(
 		!changeset_files.is_empty(),
@@ -124,7 +124,7 @@ async fn change_succeeds_with_minor() {
 	let changeset_files: Vec<_> = std::fs::read_dir(dir.path().join(".cursus"))
 		.expect("Expected .cursus/ directory to exist")
 		.filter_map(|e| e.ok())
-		.filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+		.filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
 		.collect();
 	assert!(
 		!changeset_files.is_empty(),

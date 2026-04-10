@@ -17,8 +17,10 @@ async fn run_change_with_ignore(
 	let dir = temp_git_repo_with_cargo_workspace(members).await;
 
 	// Overwrite the config with the ignore list.
-	let mut global = GlobalConfig::default();
-	global.ignore = ignore_patterns;
+	let global = GlobalConfig {
+		ignore: ignore_patterns,
+		..Default::default()
+	};
 	let env = common::test_env(dir.path());
 	let config = Config::new()
 		.with_global(global)

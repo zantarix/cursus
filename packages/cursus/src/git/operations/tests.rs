@@ -68,7 +68,7 @@ async fn git_add_passes_correct_args() {
 	let dir_abs = abs(&dir);
 	let (git, runner) = make_git(runner, dir_abs);
 	let file = dir.path().join("file.txt");
-	git.add(&[file.clone()]).await.unwrap();
+	git.add(std::slice::from_ref(&file)).await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "git");

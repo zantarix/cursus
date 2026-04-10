@@ -625,7 +625,7 @@ fn strongconnect_handles_node_not_on_stack_in_second_visit() {
 	// exercising the cross-edge skip path.
 	DependencyGraph::strongconnect(&adjacency, "a", &mut state);
 
-	assert!(state.sccs.len() >= 1);
+	assert!(!state.sccs.is_empty());
 }
 
 #[test]

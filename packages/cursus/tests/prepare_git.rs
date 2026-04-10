@@ -762,26 +762,48 @@ async fn prepare_branch_strategy_rerun_is_idempotent() {
 	);
 }
 
-#[tokio::test]
-async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
-	// Full end-to-end test: prepare with branch strategy + GitHub enabled.
-	// First run creates a PR; second run finds the existing PR and updates it.
-	// Uses httpmock to intercept the GitHub REST API calls made via octocrab.
+const PR_JSON: &str = r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}"#;
+const PR_LIST_JSON: &str = r#"[{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}]"#;
+
+fn make_github_test_env(api_url: &str, dir: &std::path::Path) -> cursus::Env {
 	use std::sync::Arc;
 
 	use cursus::command::RealCommandRunner;
 	use cursus::github::OctocrabGitHubClient;
 	use cursus::github::client::CodeForgeClient;
 	use cursus::github::remote::GitHubRepo;
-	use cursus::model::config::CargoConfig;
-	use cursus::model::config::{Config, GitHubConfig};
 	use cursus::path::AbsolutePath;
-	use httpmock::prelude::*;
 
-	let server = MockServer::start();
-	let api_url = server.base_url();
+	let client = Arc::new(OctocrabGitHubClient::new(
+		octocrab::Octocrab::builder()
+			.personal_token("test-token".to_string())
+			.base_uri(api_url)
+			.unwrap()
+			.build()
+			.unwrap(),
+		GitHubRepo::new("acme", "app").unwrap(),
+	)) as Arc<dyn CodeForgeClient>;
+	let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
+	let path = AbsolutePath::new(dir).unwrap();
+	let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
+	cursus::Env::new(runner, Arc::new(LocalFilesystem), git).with_code_forge_client(client)
+}
 
-	// Create a repo with branch strategy + GitHub config (owner = "acme", repo = "app")
+async fn run_prepare(
+	api_url: &str,
+	dir: &std::path::Path,
+) -> anyhow::Result<std::process::ExitCode> {
+	let env = make_github_test_env(api_url, dir);
+	let config = cursus::model::config::load(env.fs(), env.git().path())
+		.await
+		.unwrap();
+	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
+	cursus::run(cli, env, config).await
+}
+
+async fn setup_github_pr_test_repo() -> (tempfile::TempDir, tempfile::TempDir) {
+	use cursus::model::config::{CargoConfig, Config, GitHubConfig};
+
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
 	let cfg_env = common::test_env(dir.path());
 	Config::new()
@@ -795,7 +817,6 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 		.save(cfg_env.fs(), cfg_env.git().path())
 		.await
 		.unwrap();
-
 	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
 	write_changeset(
 		dir.path(),
@@ -803,32 +824,24 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
 	);
 	git_commit_all(dir.path(), "chore: add changeset");
-
-	let _remote = add_local_remote(dir.path());
+	let remote = add_local_remote(dir.path());
 	git_push_to_remote(dir.path());
+	(dir, remote)
+}
+
+#[tokio::test]
+async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
+	// Full end-to-end test: prepare with branch strategy + GitHub enabled.
+	// First run creates a PR; second run finds the existing PR and updates it.
+	use httpmock::prelude::*;
+
+	let server = MockServer::start();
+	let api_url = server.base_url();
+	let (dir, _remote) = setup_github_pr_test_repo().await;
 
 	let initial_branch = git_current_branch(dir.path());
 	let release_branch = format!("cursus-release/{initial_branch}");
 	let head_param = format!("acme:{release_branch}");
-
-	// Build a fresh Env with an OctocrabGitHubClient pointing at the mock server.
-	// A new client is created for each run because Env is consumed by cursus::run.
-	let make_env = || {
-		let octocrab_client = octocrab::Octocrab::builder()
-			.personal_token("test-token".to_string())
-			.base_uri(&api_url)
-			.unwrap()
-			.build()
-			.unwrap();
-		let client = Arc::new(OctocrabGitHubClient::new(
-			octocrab_client,
-			GitHubRepo::new("acme", "app").unwrap(),
-		)) as Arc<dyn CodeForgeClient>;
-		let runner = Arc::new(RealCommandRunner) as Arc<dyn cursus::command::CommandRunner>;
-		let path = AbsolutePath::new(dir.path()).unwrap();
-		let git = Arc::new(cursus::git::GitWorkdir::new(Arc::clone(&runner), path));
-		cursus::Env::new(runner, Arc::new(LocalFilesystem), git).with_code_forge_client(client)
-	};
 
 	// ── First run: no existing PR → find returns empty → create PR ───────────
 	let mut mock_find_empty = server.mock(|when, then| {
@@ -844,20 +857,13 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 		when.method(POST).path("/repos/acme/app/pulls");
 		then.status(201)
 			.header("Content-Type", "application/json")
-			.body(r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}"#);
+			.body(PR_JSON);
 	});
-
-	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
-	let env1 = make_env();
-	let config1 = cursus::model::config::load(env1.fs(), env1.git().path())
+	run_prepare(&api_url, dir.path())
 		.await
-		.unwrap();
-	let result = cursus::run(cli, env1, config1).await;
-	assert!(result.is_ok(), "first prepare failed: {result:?}");
+		.expect("first prepare failed");
 	mock_find_empty.assert_calls(1);
 	mock_create.assert_calls(1);
-
-	// Remove first-run mocks before registering second-run mocks so they don't overlap.
 	mock_find_empty.delete();
 	mock_create.delete();
 
@@ -869,27 +875,28 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.query_param("state", "open");
 		then.status(200)
 			.header("Content-Type", "application/json")
-			.body(r#"[{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}]"#);
+			.body(PR_LIST_JSON);
 	});
 	let mock_update = server.mock(|when, then| {
 		when.method(PATCH).path("/repos/acme/app/pulls/7");
 		then.status(200)
 			.header("Content-Type", "application/json")
-			.body(r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}"#);
+			.body(PR_JSON);
 	});
-
-	let cli: cursus::cli::Cli = clap::Parser::parse_from(["cursus", "--no-interactive", "prepare"]);
-	let env2 = make_env();
-	let config2 = cursus::model::config::load(env2.fs(), env2.git().path())
+	run_prepare(&api_url, dir.path())
 		.await
-		.unwrap();
-	let result = cursus::run(cli, env2, config2).await;
-	assert!(result.is_ok(), "second prepare (update) failed: {result:?}");
+		.expect("second prepare (update) failed");
 	mock_find_existing.assert_calls(1);
 	mock_update.assert_calls(1);
 }
 
 // ── Commit reference integration tests ────────────────────────────────────────
+
+fn extract_bracket_content(line: &str, start: usize) -> Option<&str> {
+	line[start + 1..]
+		.find(']')
+		.map(|end| &line[start + 1..start + 1 + end])
+}
 
 #[tokio::test]
 async fn prepare_with_git_adds_commit_references() {
@@ -913,17 +920,13 @@ async fn prepare_with_git_adds_commit_references() {
 	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
 	// Should contain a 7-character hex SHA reference like [abc1234] on a bullet line
 	let has_sha_ref = changelog.lines().any(|line| {
-		line.starts_with("- ") && line.contains('[') && line.contains(']') && {
-			// Extract content between [ and ] and verify it's a 7-char hex string
-			line.find('[')
-				.and_then(|start| {
-					line[start + 1..]
-						.find(']')
-						.map(|end| &line[start + 1..start + 1 + end])
-				})
+		// Extract content between [ and ] and verify it's a 7-char hex string
+		line.starts_with("- ")
+			&& line
+				.find('[')
+				.and_then(|start| extract_bracket_content(line, start))
 				.map(|hash| hash.len() == 7 && hash.chars().all(|c| c.is_ascii_hexdigit()))
 				.unwrap_or(false)
-		}
 	});
 	assert!(
 		has_sha_ref,

@@ -317,23 +317,22 @@ impl DispatchingCommandRunner {
 	}
 
 	fn find_match(&self, program: &str, args: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
-		for rule in &self.rules {
-			if rule.program != program {
-				continue;
-			}
-			if let Some(prefix) = &rule.args {
-				let matches = prefix.len() <= args.len()
-					&& prefix
-						.iter()
-						.zip(args.iter())
-						.all(|(a, b)| a.as_str() == *b);
-				if !matches {
-					continue;
-				}
-			}
-			return (rule.exit_code, rule.stdout.clone(), rule.stderr.clone());
-		}
-		(self.default_exit_code, Vec::new(), Vec::new())
+		self.rules
+			.iter()
+			.find(|rule| {
+				rule.program == program
+					&& rule.args.as_ref().is_none_or(|prefix| {
+						prefix.len() <= args.len()
+							&& prefix
+								.iter()
+								.zip(args.iter())
+								.all(|(a, b)| a.as_str() == *b)
+					})
+			})
+			.map_or_else(
+				|| (self.default_exit_code, Vec::new(), Vec::new()),
+				|rule| (rule.exit_code, rule.stdout.clone(), rule.stderr.clone()),
+			)
 	}
 
 	fn make_output_for(&self, program: &str, args: &[&str]) -> Output {

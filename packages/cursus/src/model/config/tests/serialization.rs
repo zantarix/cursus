@@ -146,8 +146,10 @@ enabled = true
 async fn config_roundtrip_with_global() {
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.disable_dependency_cycle_warnings = true;
+	let global = GlobalConfig {
+		disable_dependency_cycle_warnings: true,
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_npm(NpmConfig::enabled());

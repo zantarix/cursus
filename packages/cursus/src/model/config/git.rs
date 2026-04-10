@@ -435,8 +435,10 @@ mod tests {
 
 	#[test]
 	fn git_config_resolve_defaults_does_not_override_explicit_enabled_false() {
-		let mut config = GitConfig::default();
-		config.enabled = Some(false);
+		let mut config = GitConfig {
+			enabled: Some(false),
+			..Default::default()
+		};
 		config.resolve_defaults(true);
 		assert!(!config.enabled());
 	}

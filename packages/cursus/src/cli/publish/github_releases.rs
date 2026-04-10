@@ -201,11 +201,13 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::*;
-	use crate::cli::publish::tests_common::{make_github_config, workdir};
+	use crate::cli::publish::tests_common::{
+		artifact_map, git_from_dir, make_github_config, recording_runner, workdir,
+	};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
-	use crate::model::config::{Config, GitHubConfig};
+	use crate::model::config::Config;
 	use crate::path::AbsolutePath;
 
 	// --- Tests for orchestrate_github_releases ---
@@ -357,46 +359,22 @@ mod tests {
 
 	#[tokio::test]
 	async fn github_release_upload_failure_continues_other_artifacts() {
-		// Create the artifact files
 		let dir = tempfile::tempdir().unwrap();
 		let linux_path = dir.path().join("linux.tar.gz");
 		let macos_path = dir.path().join("macos.tar.gz");
 		std::fs::write(&linux_path, b"linux binary").unwrap();
 		std::fs::write(&macos_path, b"macos binary").unwrap();
 
-		let mut pkg_artifacts = BTreeMap::new();
-		pkg_artifacts.insert(
-			"linux".to_string(),
-			linux_path.to_string_lossy().into_owned(),
-		);
-		pkg_artifacts.insert(
-			"macos".to_string(),
-			macos_path.to_string_lossy().into_owned(),
-		);
-		let mut artifacts = BTreeMap::new();
-		artifacts.insert("my-app".to_string(), pkg_artifacts);
-
-		let github_cfg = {
-			let mut c = GitHubConfig::enabled_config();
-			c.artifacts = artifacts;
-			c.with_owner("acme".to_string())
-				.with_repo("app".to_string())
-		};
-
-		let config = Config::new().with_github(github_cfg);
+		let artifacts = artifact_map("my-app", &[("linux", &linux_path), ("macos", &macos_path)]);
+		let config = Config::new().with_github(make_github_config("", artifacts));
 		let client = RecordingCodeForgeClient::new().with_upload_failure();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
-
+		let runner = recording_runner(0);
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let git = git_from_dir(&runner, dir.path());
 
 		let (created, failed) = orchestrate_github_releases(
 			&git,
@@ -436,24 +414,12 @@ mod tests {
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"binary content").unwrap();
 
-		let mut pkg_a_artifacts = BTreeMap::new();
-		pkg_a_artifacts.insert(
-			"app".to_string(),
-			artifact_path.to_string_lossy().into_owned(),
-		);
-		let mut artifacts = BTreeMap::new();
-		artifacts.insert("pkg-a".to_string(), pkg_a_artifacts);
-
-		let github_cfg = {
-			let mut c = GitHubConfig::enabled_config();
-			c.artifacts = artifacts;
-			c.with_owner("acme".to_string())
-				.with_repo("app".to_string())
-		};
-		let config = Config::new().with_github(github_cfg);
+		let config = Config::new().with_github(make_github_config(
+			"",
+			artifact_map("pkg-a", &[("app", &artifact_path)]),
+		));
 		let client = RecordingCodeForgeClient::new();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
-
+		let runner = recording_runner(0);
 		let packages = vec![
 			PublishedPackage {
 				name: "pkg-a".to_string(),
@@ -466,11 +432,7 @@ mod tests {
 				project_path: AbsolutePath::new("/nonexistent").unwrap(),
 			},
 		];
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let git = git_from_dir(&runner, dir.path());
 
 		let (created, failed) = orchestrate_github_releases(
 			&git,
@@ -542,34 +504,18 @@ mod tests {
 		let artifact_path = dir.path().join("app.tar.gz");
 		std::fs::write(&artifact_path, b"binary content").unwrap();
 
-		let mut pkg_artifacts = BTreeMap::new();
-		pkg_artifacts.insert(
-			"app".to_string(),
-			artifact_path.to_string_lossy().into_owned(),
-		);
-		let mut artifacts = BTreeMap::new();
-		artifacts.insert("my-app".to_string(), pkg_artifacts);
-
-		let github_cfg = {
-			let mut c = GitHubConfig::enabled_config();
-			c.artifacts = artifacts;
-			c.with_owner("acme".to_string())
-				.with_repo("app".to_string())
-		};
-		let config = Config::new().with_github(github_cfg);
+		let config = Config::new().with_github(make_github_config(
+			"",
+			artifact_map("my-app", &[("app", &artifact_path)]),
+		));
 		let client = RecordingCodeForgeClient::new();
-		let runner = Arc::new(RecordingCommandRunner::new(0));
-
+		let runner = recording_runner(0);
 		let packages = vec![PublishedPackage {
 			name: "my-app".to_string(),
 			version: "1.0.0".parse().unwrap(),
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
-		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
-		let git = crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			dir_abs.clone(),
-		);
+		let git = git_from_dir(&runner, dir.path());
 
 		let (created, failed) = orchestrate_github_releases(
 			&git,

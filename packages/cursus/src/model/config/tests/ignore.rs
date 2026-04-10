@@ -28,8 +28,10 @@ enabled = true
 async fn config_roundtrip_with_global_ignore() {
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.ignore = vec!["example-*".to_string(), "internal-tool".to_string()];
+	let global = GlobalConfig {
+		ignore: vec!["example-*".to_string(), "internal-tool".to_string()],
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
@@ -46,8 +48,10 @@ async fn load_projects_filters_ignored_packages() {
 	// Set up a workspace with two packages; ignore one by exact name.
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.ignore = vec!["internal-tool".to_string()];
+	let global = GlobalConfig {
+		ignore: vec!["internal-tool".to_string()],
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
@@ -81,8 +85,10 @@ async fn load_projects_filters_by_glob_pattern() {
 	// Wildcard pattern: ignore all packages matching "example-*".
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.ignore = vec!["example-*".to_string()];
+	let global = GlobalConfig {
+		ignore: vec!["example-*".to_string()],
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
@@ -118,8 +124,10 @@ async fn load_projects_filters_by_glob_pattern() {
 async fn load_projects_ignore_invalid_glob_fails() {
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.ignore = vec!["[invalid".to_string()];
+	let global = GlobalConfig {
+		ignore: vec!["[invalid".to_string()],
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
@@ -145,8 +153,10 @@ async fn load_projects_ignore_no_match_warns() {
 	// A pattern that matches nothing should succeed (just log a warning).
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.ignore = vec!["nonexistent-package".to_string()];
+	let global = GlobalConfig {
+		ignore: vec!["nonexistent-package".to_string()],
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
@@ -171,8 +181,10 @@ async fn load_projects_ignoring_all_packages_fails_with_informative_error() {
 	// should mention the ignore patterns rather than the package manager config.
 	let dir = temp_dir();
 	let env = make_env_with_git(dir.path());
-	let mut global = GlobalConfig::default();
-	global.ignore = vec!["app".to_string()];
+	let global = GlobalConfig {
+		ignore: vec!["app".to_string()],
+		..Default::default()
+	};
 	let config = Config::new()
 		.with_global(global)
 		.with_cargo(CargoConfig::enabled());
