@@ -3,7 +3,7 @@
 	"extends": [
 		"github>mscharley/renovate-config"
 	],
-	"gitIgnoredAuthors": ["zantarix-bot <269442275+zantarix-bot[bot]@users.noreply.github.com>"],
+	"gitIgnoredAuthors": ["zantarix-bot[bot] <269442275+zantarix-bot[bot]@users.noreply.github.com>"],
 	"nix": {
 		"enabled": true
 	},
