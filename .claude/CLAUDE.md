@@ -9,7 +9,7 @@ cargo build                    # Build the project
 cargo run                      # Run the application
 cargo test                     # Run tests
 cargo test <test_name>         # Run a specific test
-cargo make coverage            # Check test coverage (90% for lines/regions/functions, 80% for branches)
+cargo make coverage            # Check test coverage
 cargo clippy                   # Lint the code
 cargo fmt                      # Format the code
 
@@ -41,19 +41,7 @@ All module paths below are relative to `packages/cursus/src/`.
 
 ## Testing
 
-Integration tests live in `packages/cursus/tests/` (library) and `packages/cursus-bin/tests/` (subprocess/clap tests). They should always use the `--no-interactive` flag to ensure the TUI never runs. Library tests call `cursus::run()` as the entrypoint; subprocess tests use `run_cursus_subprocess` which spawns the actual binary.
-
-**Non-interactive CLI flags for tests:**
-
-- `change`: `--change-type/-t` (major/minor/patch), `--message/-m`, `--project/-p` (repeatable, defaults to all)
-- `prepare`: `--package/-p` (repeatable, filters which packages to prepare)
-- `--dry-run` is a global flag on `GlobalArgs` and can be passed to any subcommand
-
-**Shared test utilities:** `packages/cursus/tests/common/mod.rs` provides helpers. Two categories of git helpers exist: `temp_git_repo*` (fake `.git` folder, fast, for tests not needing real git operations) and `temp_real_git_repo*` (proper repo with commits, required when `rev-list`, `diff-tree`, or push/fetch operations run). Use `run_cursus_subprocess` (from `packages/cursus-bin/tests/common/`) instead of `run_cursus` when testing clap-generated output (help, version, invalid flags).
-
-**Git root discovery:** `run()` walks up the directory tree to find the `.git` directory. Integration tests must set up a git repo in their temp directory.
-
-**`test-support` feature:** The `cursus` crate exposes a `test-support` Cargo feature that gates test helpers compiled into the library (e.g. mock impls). Enable it in tests that need it.
+Integration tests live in `packages/cursus/tests/` (library) and `packages/cursus-bin/tests/` (subprocess/clap tests). Always pass `--no-interactive` to prevent the TUI from running. The `cursus` crate exposes a `test-support` feature flag for mock implementations.
 
 ## Architecture
 
