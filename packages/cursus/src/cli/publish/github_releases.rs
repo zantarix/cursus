@@ -42,9 +42,8 @@ pub(super) async fn run_github_build_command(
 	if config.github.build_command.is_empty() {
 		return Ok(false);
 	}
-	info!("Running build command: {}", config.github.build_command);
-	let output = env
-		.run_shell_mut(&config.github.build_command, git.path())
+	let status = env
+		.run_streaming(&config.github.build_command, git.path())
 		.await
 		.with_context(|| {
 			format!(
@@ -52,8 +51,8 @@ pub(super) async fn run_github_build_command(
 				config.github.build_command
 			)
 		})?;
-	if !output.status.success() {
-		error!("Build command failed with status {}", output.status);
+	if !status.success() {
+		error!("Build command failed with status {status}");
 		return Ok(true);
 	}
 	Ok(false)

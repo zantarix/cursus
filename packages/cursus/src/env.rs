@@ -278,13 +278,6 @@ impl Env {
 		self.runner.run(program, args, cwd).await
 	}
 
-	/// Runs a shell command via the platform shell in the specified directory.
-	///
-	/// Delegates to the underlying [`CommandRunner`]. Read-only.
-	pub async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.runner.run_shell(command, cwd).await
-	}
-
 	/// Runs a mutating program with the given arguments in the specified directory.
 	///
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
@@ -295,13 +288,6 @@ impl Env {
 		cwd: &Path,
 	) -> anyhow::Result<Output> {
 		self.runner.run_mut(program, args, cwd).await
-	}
-
-	/// Runs a mutating shell command via the platform shell in the specified directory.
-	///
-	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
-	pub async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.runner.run_shell_mut(command, cwd).await
 	}
 
 	/// Runs a program with inherited stdin/stdout/stderr for interactive use.
@@ -326,6 +312,13 @@ impl Env {
 	) -> anyhow::Result<ExitStatus> {
 		self.runner.run_shell_interactive(command, cwd).await
 	}
+
+	/// Runs a shell command via the platform shell, streaming output live to the terminal.
+	///
+	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
+	pub async fn run_streaming(&self, command: &str, cwd: &Path) -> anyhow::Result<ExitStatus> {
+		self.runner.run_streaming(command, cwd).await
+	}
 }
 
 #[cfg(test)]
@@ -334,7 +327,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::command::{CommandRunner, shell_flag, shell_program};
+	use crate::command::{CommandRunner, shell_program};
 	use crate::filesystem::LocalFilesystem;
 	use crate::github::client::CodeForgeClient;
 	use crate::github::client::test_support::RecordingCodeForgeClient;
@@ -492,15 +485,6 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn run_shell_delegates_to_runner() {
-		let (runner, env, _dir) = recording_env(0);
-		env.run_shell("echo hello", Path::new(".")).await.unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, shell_program());
-		assert_eq!(invocations[0].args, [shell_flag(), "echo hello"]);
-	}
-
-	#[tokio::test]
 	async fn run_mut_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
 		env.run_mut("git", &["commit", "-m", "msg"], Path::new("."))
@@ -512,14 +496,15 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn run_shell_mut_delegates_to_runner() {
+	async fn run_streaming_delegates_to_runner() {
 		let (runner, env, _dir) = recording_env(0);
-		env.run_shell_mut("npm install", Path::new("."))
+		env.run_streaming("npm install", Path::new("."))
 			.await
 			.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations[0].program, shell_program());
 		assert!(invocations[0].is_shell);
+		assert!(invocations[0].is_streaming);
 	}
 
 	#[tokio::test]

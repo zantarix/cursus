@@ -14,10 +14,12 @@ pub struct Invocation {
 	pub args: Vec<String>,
 	/// The working directory.
 	pub cwd: PathBuf,
-	/// Whether this was a shell invocation (`run_shell` / `run_shell_mut` / `run_shell_interactive`).
+	/// Whether this was a shell invocation (`run_shell_interactive` / `run_streaming`).
 	pub is_shell: bool,
 	/// Whether this was an interactive invocation (`run_interactive` / `run_shell_interactive`).
 	pub is_interactive: bool,
+	/// Whether this was a streaming invocation (`run_streaming`).
+	pub is_streaming: bool,
 }
 
 /// A command runner that records all invocations and returns a configured output.
@@ -25,7 +27,7 @@ pub struct Invocation {
 /// All commands return the same exit code, stdout, and stderr configured at
 /// construction. Use the builder methods to set non-default values.
 ///
-/// Both `run` and `run_mut` (and their shell variants) are recorded identically —
+/// Both `run` and `run_mut` (and interactive / streaming variants) are recorded identically —
 /// the runner does not distinguish between read-only and mutating calls.
 #[derive(Debug)]
 pub struct RecordingCommandRunner {
@@ -89,6 +91,7 @@ impl RecordingCommandRunner {
 		cwd: &Path,
 		is_shell: bool,
 		is_interactive: bool,
+		is_streaming: bool,
 	) {
 		self.invocations
 			.lock()
@@ -99,6 +102,7 @@ impl RecordingCommandRunner {
 				cwd: cwd.to_path_buf(),
 				is_shell,
 				is_interactive,
+				is_streaming,
 			});
 	}
 }
@@ -112,16 +116,6 @@ impl CommandRunner for RecordingCommandRunner {
 			cwd,
 			false,
 			false,
-		);
-		Ok(self.make_output())
-	}
-
-	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.record(
-			shell_program(),
-			vec![shell_flag().to_string(), command.to_string()],
-			cwd,
-			true,
 			false,
 		);
 		Ok(self.make_output())
@@ -130,11 +124,6 @@ impl CommandRunner for RecordingCommandRunner {
 	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		// Records the invocation (recording runner does not suppress mutations).
 		self.run(program, args, cwd).await
-	}
-
-	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		// Records the invocation (recording runner does not suppress mutations).
-		self.run_shell(command, cwd).await
 	}
 
 	async fn run_interactive(
@@ -149,6 +138,7 @@ impl CommandRunner for RecordingCommandRunner {
 			cwd,
 			false,
 			true,
+			false,
 		);
 		Ok(self.make_output().status)
 	}
@@ -163,6 +153,23 @@ impl CommandRunner for RecordingCommandRunner {
 			vec![shell_flag().to_string(), command.to_string()],
 			cwd,
 			true,
+			true,
+			false,
+		);
+		Ok(self.make_output().status)
+	}
+
+	async fn run_streaming(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		self.record(
+			shell_program(),
+			vec![shell_flag().to_string(), command.to_string()],
+			cwd,
+			true,
+			false,
 			true,
 		);
 		Ok(self.make_output().status)
@@ -197,11 +204,11 @@ pub struct DispatchRule {
 ///
 /// # Shell commands
 ///
-/// `run_shell` / `run_shell_mut` record the invocation with the platform shell program
-/// (see [`shell_program`]) and args `[<shell_flag>, <command>]`. Dispatch rules must
-/// therefore match against the platform shell when targeting shell commands. For most
+/// `run_shell_interactive` and `run_streaming` record the invocation with the platform shell
+/// program (see [`shell_program`]) and args `[<shell_flag>, <command>]`. Dispatch rules must
+/// therefore match against the platform shell when targeting these commands. For most
 /// test scenarios the commands of interest are invoked via `run` / `run_mut`; add an
-/// explicit shell rule only when you need to control `run_shell` output.
+/// explicit shell rule only when you need to control shell command output.
 #[derive(Debug)]
 pub struct DispatchingCommandRunner {
 	rules: Vec<DispatchRule>,
@@ -361,6 +368,7 @@ impl DispatchingCommandRunner {
 		cwd: &Path,
 		is_shell: bool,
 		is_interactive: bool,
+		is_streaming: bool,
 	) {
 		self.invocations
 			.lock()
@@ -371,6 +379,7 @@ impl DispatchingCommandRunner {
 				cwd: cwd.to_path_buf(),
 				is_shell,
 				is_interactive,
+				is_streaming,
 			});
 	}
 }
@@ -384,27 +393,13 @@ impl CommandRunner for DispatchingCommandRunner {
 			cwd,
 			false,
 			false,
+			false,
 		);
 		Ok(self.make_output_for(program, args))
 	}
 
-	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.record(
-			shell_program(),
-			vec![shell_flag().to_string(), command.to_string()],
-			cwd,
-			true,
-			false,
-		);
-		Ok(self.make_output_for(shell_program(), &[shell_flag(), command]))
-	}
-
 	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		self.run(program, args, cwd).await
-	}
-
-	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.run_shell(command, cwd).await
 	}
 
 	async fn run_interactive(
@@ -419,6 +414,7 @@ impl CommandRunner for DispatchingCommandRunner {
 			cwd,
 			false,
 			true,
+			false,
 		);
 		Ok(self.make_output_for(program, args).status)
 	}
@@ -433,6 +429,25 @@ impl CommandRunner for DispatchingCommandRunner {
 			vec![shell_flag().to_string(), command.to_string()],
 			cwd,
 			true,
+			true,
+			false,
+		);
+		Ok(self
+			.make_output_for(shell_program(), &[shell_flag(), command])
+			.status)
+	}
+
+	async fn run_streaming(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		self.record(
+			shell_program(),
+			vec![shell_flag().to_string(), command.to_string()],
+			cwd,
+			true,
+			false,
 			true,
 		);
 		Ok(self
@@ -549,13 +564,15 @@ mod dispatching_tests {
 	}
 
 	#[tokio::test]
-	async fn dispatching_runner_records_shell_invocations() {
+	async fn dispatching_runner_records_streaming_invocations() {
 		let runner = DispatchingCommandRunner::new(0);
 		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell("npm install", cwd).await.unwrap();
+		let _ = runner.run_streaming("npm install", cwd).await.unwrap();
 		let invocations = runner.invocations();
 		assert_eq!(invocations.len(), 1);
 		assert!(invocations[0].is_shell);
+		assert!(invocations[0].is_streaming);
+		assert!(!invocations[0].is_interactive);
 		assert_eq!(invocations[0].program, shell_program());
 	}
 

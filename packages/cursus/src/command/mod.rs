@@ -29,8 +29,8 @@ pub(crate) fn shell_flag() -> &'static str {
 /// All commands run with the specified working directory (`cwd`), removing
 /// the need for `-C` flags before execution.
 ///
-/// Methods are split into read-only (`run`, `run_shell`) and mutating
-/// (`run_mut`, `run_shell_mut`, `run_interactive`, `run_shell_interactive`) variants. The
+/// Methods are split into read-only (`run`) and mutating
+/// (`run_mut`, `run_interactive`, `run_shell_interactive`, `run_streaming`) variants. The
 /// [`DryRunCommandRunner`] decorator intercepts mutating variants and
 /// suppresses them, while read-only variants always execute.
 #[async_trait]
@@ -40,24 +40,11 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 	/// Read-only — always executes, even in dry-run mode.
 	async fn run(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
 
-	/// Runs a shell command via the platform shell in the specified directory.
-	///
-	/// Read-only — always executes, even in dry-run mode. Used for user-configurable
-	/// commands that may use shell features such as pipes, redirects, or variable
-	/// expansion (e.g. custom `lock_command`s that only read state).
-	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
-
 	/// Runs a program with the given arguments and records it as a mutating operation.
 	///
 	/// Mutating — skipped by [`DryRunCommandRunner`]. Use this for commands that
 	/// modify state (e.g. `git add`, `git commit`, `cargo publish`).
 	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output>;
-
-	/// Runs a shell command via the platform shell and records it as a mutating operation.
-	///
-	/// Mutating — skipped by [`DryRunCommandRunner`]. Use this for shell commands that
-	/// write files or modify state (e.g. custom lock file update commands).
-	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output>;
 
 	/// Runs a program with inherited stdin/stdout/stderr for interactive use (e.g. editors).
 	///
@@ -73,11 +60,27 @@ pub trait CommandRunner: Send + Sync + std::fmt::Debug {
 
 	/// Runs a shell command via the platform shell with inherited stdin/stdout/stderr.
 	///
-	/// Mutating — skipped by [`DryRunCommandRunner`]. Combines the shell interpretation
-	/// of [`run_shell`] with the inherited terminal of [`run_interactive`]. Use this for
-	/// user-supplied commands that must be shell-interpreted (e.g. `EDITOR="code --wait"`)
-	/// and need to interact with the terminal directly.
+	/// Mutating — skipped by [`DryRunCommandRunner`]. Use this for user-supplied commands
+	/// that must be shell-interpreted (e.g. `EDITOR="code --wait"`) and need to interact
+	/// with the terminal directly, including reading from stdin.
 	async fn run_shell_interactive(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus>;
+
+	/// Runs a shell command via the platform shell, streaming output live to the terminal.
+	///
+	/// Mutating — skipped by [`DryRunCommandRunner`]. The child process's `stdout` and
+	/// `stderr` are inherited from the parent so all output appears immediately on the
+	/// user's terminal. `stdin` is set to null so the command cannot block waiting for
+	/// user input. Returns the exit status of the child process.
+	///
+	/// Use this for user-configurable shell commands (e.g. `github.build_command`,
+	/// `npm.lock_command`) where live progress feedback matters more than captured output.
+	/// [`RealCommandRunner`] emits `log::info!("Running: {command}")` before spawning;
+	/// callers must not add their own pre-log.
+	async fn run_streaming(
 		&self,
 		command: &str,
 		cwd: &Path,
@@ -134,11 +137,6 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 		self.inner.run(program, args, cwd).await
 	}
 
-	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		log::debug!("run_shell: {command:?} (cwd: {})", cwd.display());
-		self.inner.run_shell(command, cwd).await
-	}
-
 	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		log::debug!(
 			"run_mut: {program} {} (cwd: {})",
@@ -146,11 +144,6 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 			cwd.display()
 		);
 		self.inner.run_mut(program, args, cwd).await
-	}
-
-	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		log::debug!("run_shell_mut: {command:?} (cwd: {})", cwd.display());
-		self.inner.run_shell_mut(command, cwd).await
 	}
 
 	async fn run_interactive(
@@ -178,6 +171,15 @@ impl<R: CommandRunner> CommandRunner for VerboseCommandRunner<R> {
 		);
 		self.inner.run_shell_interactive(command, cwd).await
 	}
+
+	async fn run_streaming(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		log::debug!("run_streaming: {command:?} (cwd: {})", cwd.display());
+		self.inner.run_streaming(command, cwd).await
+	}
 }
 
 /// A command runner that executes real system processes.
@@ -198,21 +200,8 @@ impl CommandRunner for RealCommandRunner {
 			.with_context(|| format!("Failed to run '{program}'"))
 	}
 
-	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		tokio::process::Command::new(shell_program())
-			.args([shell_flag(), command])
-			.current_dir(cwd)
-			.output()
-			.await
-			.with_context(|| format!("Failed to run shell command: '{command}'"))
-	}
-
 	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		self.run(program, args, cwd).await
-	}
-
-	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.run_shell(command, cwd).await
 	}
 
 	async fn run_interactive(
@@ -252,14 +241,32 @@ impl CommandRunner for RealCommandRunner {
 		.await
 		.context("spawn_blocking panicked")?
 	}
+
+	async fn run_streaming(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		use std::process::Stdio;
+		log::info!("Running: {command}");
+		tokio::process::Command::new(shell_program())
+			.args([shell_flag(), command])
+			.current_dir(cwd)
+			.stdin(Stdio::null())
+			.stdout(Stdio::inherit())
+			.stderr(Stdio::inherit())
+			.status()
+			.await
+			.with_context(|| format!("Failed to run streaming command: '{command}'"))
+	}
 }
 
 /// A command runner decorator that suppresses all mutating operations in dry-run mode.
 ///
-/// Wraps any [`CommandRunner`] and intercepts `run_mut`, `run_shell_mut`,
-/// `run_interactive`, and `run_shell_interactive` calls, logging them at `info` level
+/// Wraps any [`CommandRunner`] and intercepts `run_mut`, `run_interactive`,
+/// `run_shell_interactive`, and `run_streaming` calls, logging them at `info` level
 /// and returning a synthetic success result without running the actual command.
-/// Read-only operations (`run`, `run_shell`) are always forwarded to the inner runner.
+/// Read-only operations (`run`) are always forwarded to the inner runner.
 ///
 /// Compose this at the outermost layer when dry-run mode is active.
 #[derive(Debug)]
@@ -280,21 +287,12 @@ impl CommandRunner for DryRunCommandRunner {
 		self.inner.run(program, args, cwd).await
 	}
 
-	async fn run_shell(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		self.inner.run_shell(command, cwd).await
-	}
-
 	async fn run_mut(&self, program: &str, args: &[&str], cwd: &Path) -> anyhow::Result<Output> {
 		log::info!(
 			"[dry-run] would run: {program} {} (cwd: {})",
 			args.join(" "),
 			cwd.display()
 		);
-		Ok(make_success_output())
-	}
-
-	async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-		log::info!("[dry-run] would run: {command:?} (cwd: {})", cwd.display());
 		Ok(make_success_output())
 	}
 
@@ -323,6 +321,18 @@ impl CommandRunner for DryRunCommandRunner {
 		);
 		Ok(make_success_exit_status())
 	}
+
+	async fn run_streaming(
+		&self,
+		command: &str,
+		cwd: &Path,
+	) -> anyhow::Result<std::process::ExitStatus> {
+		log::info!(
+			"[dry-run] would run (streaming): {command:?} (cwd: {})",
+			cwd.display()
+		);
+		Ok(make_success_exit_status())
+	}
 }
 
 #[cfg(test)]
@@ -344,18 +354,6 @@ mod verbose_tests {
 		assert_eq!(invocations.len(), 1);
 		assert_eq!(invocations[0].program, "git");
 		assert_eq!(invocations[0].args, vec!["status"]);
-	}
-
-	#[tokio::test]
-	async fn verbose_runner_delegates_run_shell_to_inner() {
-		init_test_logger();
-		let inner = RecordingCommandRunner::new(0);
-		let runner = VerboseCommandRunner::new(inner);
-		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell("echo hello", cwd).await;
-		let invocations = runner.inner.invocations();
-		assert_eq!(invocations.len(), 1);
-		assert!(invocations[0].is_shell);
 	}
 
 	#[tokio::test]
@@ -385,18 +383,6 @@ mod verbose_tests {
 	}
 
 	#[tokio::test]
-	async fn verbose_runner_delegates_run_shell_mut_to_inner() {
-		init_test_logger();
-		let inner = RecordingCommandRunner::new(0);
-		let runner = VerboseCommandRunner::new(inner);
-		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell_mut("npm install", cwd).await;
-		let invocations = runner.inner.invocations();
-		assert_eq!(invocations.len(), 1);
-		assert!(invocations[0].is_shell);
-	}
-
-	#[tokio::test]
 	async fn verbose_runner_logs_run_with_program_and_args() {
 		init_test_logger();
 		let _ = take_logs(); // clear any accumulated messages
@@ -412,23 +398,6 @@ mod verbose_tests {
 			.expect("expected a log message about cargo");
 		assert!(msg.contains("build"), "log should contain args: {msg}");
 		assert!(msg.contains("/some/dir"), "log should contain cwd: {msg}");
-	}
-
-	#[tokio::test]
-	async fn verbose_runner_logs_run_shell_with_command_and_cwd() {
-		init_test_logger();
-		let _ = take_logs();
-		let inner = RecordingCommandRunner::new(0);
-		let runner = VerboseCommandRunner::new(inner);
-		let cwd = Path::new("/workspace");
-		let _ = runner.run_shell("npm install", cwd).await;
-		let logs = take_logs();
-		let msg = logs
-			.iter()
-			.find(|(_, m)| m.contains("npm install"))
-			.map(|(_, m)| m.as_str())
-			.expect("expected a log message about npm install");
-		assert!(msg.contains("/workspace"), "log should contain cwd: {msg}");
 	}
 
 	#[tokio::test]
@@ -506,14 +475,29 @@ mod verbose_tests {
 	}
 
 	#[tokio::test]
-	async fn verbose_runner_logs_run_shell_mut_with_command_and_cwd() {
+	async fn verbose_runner_delegates_run_streaming_to_inner() {
+		init_test_logger();
+		let inner = RecordingCommandRunner::new(0);
+		let runner = VerboseCommandRunner::new(inner);
+		let cwd = Path::new("/tmp");
+		let _ = runner
+			.run_streaming("pnpm install --lockfile-only", cwd)
+			.await;
+		let invocations = runner.inner.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(invocations[0].is_shell);
+		assert!(invocations[0].is_streaming);
+	}
+
+	#[tokio::test]
+	async fn verbose_runner_logs_run_streaming_with_command_and_cwd() {
 		init_test_logger();
 		let _ = take_logs();
 		let inner = RecordingCommandRunner::new(0);
 		let runner = VerboseCommandRunner::new(inner);
 		let cwd = Path::new("/workspace");
 		let _ = runner
-			.run_shell_mut("pnpm install --lockfile-only", cwd)
+			.run_streaming("pnpm install --lockfile-only", cwd)
 			.await;
 		let logs = take_logs();
 		let msg = logs
@@ -550,17 +534,6 @@ mod dry_run_tests {
 	}
 
 	#[tokio::test]
-	async fn dry_run_runner_forwards_run_shell_to_inner() {
-		let inner = Arc::new(RecordingCommandRunner::new(0));
-		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
-		let cwd = Path::new("/tmp");
-		let _ = runner.run_shell("echo hello", cwd).await;
-		let invocations = inner.invocations();
-		assert_eq!(invocations.len(), 1);
-		assert!(invocations[0].is_shell);
-	}
-
-	#[tokio::test]
 	async fn dry_run_runner_suppresses_run_mut() {
 		let inner = Arc::new(RecordingCommandRunner::new(0));
 		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
@@ -569,17 +542,6 @@ mod dry_run_tests {
 		assert!(result.is_ok());
 		assert!(result.unwrap().status.success());
 		// Inner runner must NOT have been called
-		assert!(inner.invocations().is_empty());
-	}
-
-	#[tokio::test]
-	async fn dry_run_runner_suppresses_run_shell_mut() {
-		let inner = Arc::new(RecordingCommandRunner::new(0));
-		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
-		let cwd = Path::new("/tmp");
-		let result = runner.run_shell_mut("npm install", cwd).await;
-		assert!(result.is_ok());
-		assert!(result.unwrap().status.success());
 		assert!(inner.invocations().is_empty());
 	}
 
@@ -604,29 +566,11 @@ mod dry_run_tests {
 			.run_mut("git", &["push", "origin", "HEAD"], cwd)
 			.await;
 		let logs = take_logs();
-		let msg = logs
+		let (level, msg) = logs
 			.iter()
 			.find(|(_, m)| m.contains("push"))
-			.map(|(_, m)| m.as_str())
 			.expect("expected a log message about push");
-		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
-	}
-
-	#[tokio::test]
-	async fn dry_run_runner_logs_run_shell_mut_at_info() {
-		init_test_logger();
-		let _ = take_logs();
-		let runner = make_dry_run_runner();
-		let cwd = Path::new("/workspace");
-		let _ = runner
-			.run_shell_mut("npm install --package-lock-only", cwd)
-			.await;
-		let logs = take_logs();
-		let msg = logs
-			.iter()
-			.find(|(_, m)| m.contains("npm install"))
-			.map(|(_, m)| m.as_str())
-			.expect("expected a log message about npm install");
+		assert_eq!(*level, log::Level::Info, "should log at info level");
 		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
 	}
 
@@ -680,6 +624,41 @@ mod dry_run_tests {
 			"log should mention interactive: {msg}"
 		);
 	}
+
+	#[tokio::test]
+	async fn dry_run_runner_suppresses_run_streaming() {
+		let inner = Arc::new(RecordingCommandRunner::new(0));
+		let runner = DryRunCommandRunner::new(Arc::clone(&inner) as Arc<dyn CommandRunner>);
+		let cwd = Path::new("/tmp");
+		let result = runner
+			.run_streaming("npm install --lockfile-only", cwd)
+			.await;
+		assert!(result.is_ok());
+		assert!(result.unwrap().success());
+		assert!(inner.invocations().is_empty());
+	}
+
+	#[tokio::test]
+	async fn dry_run_runner_logs_run_streaming_at_info() {
+		init_test_logger();
+		let _ = take_logs();
+		let runner = make_dry_run_runner();
+		let cwd = Path::new("/workspace");
+		let _ = runner
+			.run_streaming("npm install --package-lock-only", cwd)
+			.await;
+		let logs = take_logs();
+		let (level, msg) = logs
+			.iter()
+			.find(|(_, m)| m.contains("npm install"))
+			.expect("expected a log message about npm install");
+		assert_eq!(*level, log::Level::Info, "should log at info level");
+		assert!(msg.contains("dry-run"), "log should mention dry-run: {msg}");
+		assert!(
+			msg.contains("streaming"),
+			"log should mention streaming: {msg}"
+		);
+	}
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -720,5 +699,39 @@ mod real_command_tests {
 			result.unwrap().success(),
 			"'echo ok' must exit with status 0"
 		);
+	}
+
+	#[tokio::test]
+	async fn real_runner_run_streaming_returns_success() {
+		// Exercises RealCommandRunner::run_streaming so the .status() call is
+		// covered — mutations that replace it with something else would break this.
+		// "echo ok" works on both /bin/sh and cmd.exe.
+		let runner = RealCommandRunner;
+		let cwd = std::env::temp_dir();
+		let result = runner.run_streaming("echo ok", &cwd).await;
+		assert!(result.is_ok(), "run_streaming should succeed: {result:?}");
+		assert!(
+			result.unwrap().success(),
+			"'echo ok' must exit with status 0"
+		);
+	}
+
+	#[tokio::test]
+	async fn real_runner_run_streaming_logs_running_at_info() {
+		// The centralised pre-log is load-bearing: callers delete their own
+		// pre-logs on the strength of this guarantee (ADR-046 line 38).
+		// A mutant that removes log::info! would silently break that contract.
+		crate::test_logging::init_test_logger();
+		let _ = crate::test_logging::take_logs();
+		let runner = RealCommandRunner;
+		let cwd = std::env::temp_dir();
+		let _ = runner.run_streaming("echo ok", &cwd).await;
+		let logs = crate::test_logging::take_logs();
+		let (level, msg) = logs
+			.iter()
+			.find(|(_, m)| m.contains("Running:"))
+			.expect("expected a 'Running:' log message before streaming command");
+		assert_eq!(*level, log::Level::Info, "pre-log must be at info level");
+		assert!(msg.contains("echo ok"), "pre-log must include the command");
 	}
 }

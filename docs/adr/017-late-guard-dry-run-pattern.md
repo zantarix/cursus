@@ -91,3 +91,5 @@ Build a list of pending operations during execution and either execute or print 
 ## Errata
 
 `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+
+- **2026-04-19**: [ADR-046](046-streaming-command-execution.md) removed `run_shell` (read-only) and `run_shell_mut` (mutating) from the `CommandRunner` trait. The new `run_streaming` method replaces `run_shell_mut` at the two user-configurable call sites and is suppressed by `DryRunCommandRunner` following the same late-guard pattern. The read-only set is now just `run`; the suppressed mutating set is `run_mut`, `run_interactive`, `run_shell_interactive`, and `run_streaming`.

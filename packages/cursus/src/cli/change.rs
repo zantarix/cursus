@@ -408,15 +408,6 @@ mod tests {
 			})
 		}
 
-		async fn run_shell(&self, _command: &str, cwd: &Path) -> anyhow::Result<Output> {
-			self.run(
-				crate::command::shell_program(),
-				&[crate::command::shell_flag(), ""],
-				cwd,
-			)
-			.await
-		}
-
 		async fn run_mut(
 			&self,
 			program: &str,
@@ -424,10 +415,6 @@ mod tests {
 			cwd: &Path,
 		) -> anyhow::Result<Output> {
 			self.run(program, args, cwd).await
-		}
-
-		async fn run_shell_mut(&self, command: &str, cwd: &Path) -> anyhow::Result<Output> {
-			self.run_shell(command, cwd).await
 		}
 
 		async fn run_interactive(
@@ -449,6 +436,23 @@ mod tests {
 		}
 
 		async fn run_shell_interactive(
+			&self,
+			_command: &str,
+			_cwd: &Path,
+		) -> anyhow::Result<std::process::ExitStatus> {
+			#[cfg(unix)]
+			{
+				use std::os::unix::process::ExitStatusExt;
+				return Ok(std::process::ExitStatus::from_raw(0));
+			}
+			#[cfg(windows)]
+			{
+				use std::os::windows::process::ExitStatusExt;
+				return Ok(std::process::ExitStatus::from_raw(0));
+			}
+		}
+
+		async fn run_streaming(
 			&self,
 			_command: &str,
 			_cwd: &Path,

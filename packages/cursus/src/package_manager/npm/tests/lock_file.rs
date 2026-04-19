@@ -262,6 +262,10 @@ async fn update_lock_file_custom_command_uses_shell_execution() {
 		invocations[0].is_shell,
 		"Custom lock_command should use shell execution"
 	);
+	assert!(
+		invocations[0].is_streaming,
+		"Custom lock_command should stream output"
+	);
 	assert_eq!(invocations[0].args[1], "custom-lock-cmd --flag");
 }
 

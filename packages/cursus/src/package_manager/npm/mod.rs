@@ -415,8 +415,8 @@ async fn run_custom_lock_command(
 	if lock_command.trim().is_empty() {
 		anyhow::bail!("lock_command is empty");
 	}
-	let output = env
-		.run_shell_mut(lock_command, workspace_root)
+	let status = env
+		.run_streaming(lock_command, workspace_root)
 		.await
 		.with_context(|| {
 			format!(
@@ -425,13 +425,11 @@ async fn run_custom_lock_command(
 				workspace_root.display()
 			)
 		})?;
-	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+	if !status.success() {
 		anyhow::bail!(
-			"Lock command '{}' failed in {}: {}",
+			"Lock command '{}' failed in {} with status {status}",
 			lock_command,
 			workspace_root.display(),
-			stderr
 		);
 	}
 	Ok(())
