@@ -52,6 +52,41 @@ See the [configuration reference](/cursus/reference/configuration/#github) for d
 - **npm** — uses your existing `npm login` credentials or the `NODE_AUTH_TOKEN` environment variable
 - **GitHub** — uses the `GH_TOKEN` or `GITHUB_TOKEN` environment variable (checked in that order)
 
+### crates.io trusted publishing
+
+crates.io supports OIDC-based trusted publishing on GitHub Actions and GitLab CI. Unlike npm (which exchanges the OIDC token internally), `cargo publish` does not perform the exchange itself — you must add a dedicated step to your workflow that exchanges the CI-issued OIDC token for a short-lived `CARGO_REGISTRY_TOKEN`.
+
+A minimal GitHub Actions publish workflow looks like this:
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rust-lang/crates-io-auth-action@v1
+      - run: cursus publish --no-interactive
+```
+
+The `rust-lang/crates-io-auth-action` step exchanges the workflow's OIDC identity for a short-lived token and exports it as `CARGO_REGISTRY_TOKEN` — the same environment variable `cargo publish` (and Cursus) already use for classic token auth. No long-lived secret is required.
+
+Cursus will warn before publishing in the following situations:
+
+- **`CARGO_REGISTRY_TOKEN` is not set, no OIDC environment detected** — no Cargo authentication is configured; the publish is likely to fail. Set `CARGO_REGISTRY_TOKEN` or run `cargo login` locally.
+- **`CARGO_REGISTRY_TOKEN` is not set, OIDC environment detected** — an OIDC-capable CI environment is present but no token has been exchanged. Add a token exchange step (such as `rust-lang/crates-io-auth-action`) before `cursus publish`.
+
+When `CARGO_REGISTRY_TOKEN` is present — whether it came from a long-lived secret or from an exchange action — Cursus publishes without warning. There is no conflict between OIDC and a token: the exchange action's job is to produce that token.
+
+:::note[Setting up trusted publishing on crates.io]
+Before your first trusted-publishing run you must configure a trusted publisher on crates.io for your crate (your GitHub repository, workflow filename, and optionally a deployment environment). See the [crates.io trusted publishing documentation](https://crates.io/docs/trusted-publishing) for step-by-step setup instructions.
+:::
+
+:::caution[First publish of a new crate]
+crates.io requires a crate to already be published before a trusted publisher can be configured for it. The very first publish of a brand-new crate must use a `CARGO_REGISTRY_TOKEN`.
+:::
+
 ### npm OIDC trusted publishing
 
 On GitHub Actions (with `id-token: write` permission) and GitLab CI (with OIDC configured), Cursus detects the OIDC environment automatically. npm exchanges the CI identity token for a short-lived publish credential — no `NODE_AUTH_TOKEN` secret is required.
@@ -61,6 +96,10 @@ Cursus will warn before publishing in the following situations:
 - **`NODE_AUTH_TOKEN` is also set** — the classic token takes precedence over OIDC token exchange. The publish may not use trusted publishing. This is intentional if you are publishing to a registry that does not support OIDC, but is often an accidental leftover secret.
 - **Neither OIDC nor `NODE_AUTH_TOKEN` is present** — no recognised npm authentication is configured; the publish is likely to fail.
 - **OIDC is active, `access = "public"`, but `publishConfig.provenance` is not `true` in `package.json`** — npm attaches provenance attestations automatically via trusted publishing, but declaring `publishConfig.provenance = true` in your `package.json` makes the intent explicit and ensures provenance is attached even in non-OIDC publish scenarios.
+
+:::note[Setting up trusted publishing on npmjs.com]
+Before your first trusted-publishing run you must configure a trusted publisher on npmjs.com for your package (your GitHub repository, workflow filename, and optionally an environment). See the [npm trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/) for step-by-step setup instructions.
+:::
 
 :::caution[First publish of a new package]
 npm requires a package to exist on the registry before a trusted publisher can be configured for it. The very first publish of a brand-new package must use a `NODE_AUTH_TOKEN`.

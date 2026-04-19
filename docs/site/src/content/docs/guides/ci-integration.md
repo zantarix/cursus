@@ -52,15 +52,22 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create tags and GitHub Releases
+      id-token: write   # trusted publishing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      # Exchange the GitHub Actions OIDC token for a short-lived CARGO_REGISTRY_TOKEN.
+      # Only consumed when cursus ci dispatches to publish; harmless on prepare runs.
+      - uses: rust-lang/crates-io-auth-action@v1
       - run: cursus ci --no-interactive
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 ```
+
+For projects not using trusted publishing, you can omit the `id-token: write` permission and the exchange step, and set login tokens such as `CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}` in the `env` block instead. See the [publishing guide](/cursus/guides/publishing/#authentication) for details on trusted publishing setup.
 
 For PR changeset verification:
 
@@ -73,7 +80,7 @@ jobs:
   verify-changeset:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - run: cursus verify --no-interactive
@@ -94,6 +101,6 @@ jobs:
     if: contains(github.event.pull_request.labels.*.name, 'dependencies')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: cursus change --no-interactive --auto
 ```
