@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 - 2026-04-19
+
+### Features
+
+- Output from the configured build command and npm lock command is now streamed live to the terminal as the command runs, rather than buffered until completion. Long-running builds no longer appear to hang with no output. [ac67ec6]
+
 ## 0.1.1 - 2026-04-19
 
 ### Bug Fixes
