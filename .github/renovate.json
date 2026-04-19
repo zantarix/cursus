@@ -4,7 +4,7 @@
 		"github>mscharley/renovate-config"
 	],
 	"gitIgnoredAuthors": [
-		"zantarix-bot[bot] <269442275+zantarix-bot[bot]@users.noreply.github.com>"
+		"269442275+zantarix-bot[bot]@users.noreply.github.com"
 	],
 	"nix": {
 		"enabled": true
