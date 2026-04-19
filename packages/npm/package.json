@@ -1,6 +1,9 @@
 {
 	"name": "@zantarix/cursus",
 	"version": "0.1.1",
+	"publishConfig": {
+		"provenance": true
+	},
 	"engines": {
 		"node": ">=22.0.0"
 	},
