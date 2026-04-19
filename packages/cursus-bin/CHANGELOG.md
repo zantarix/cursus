@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-04-19
+
+### Bug Fixes
+
+- Fix a packaging issue with the OSX artifacts [e6b796a]
+
 ## 0.2.0 - 2026-04-19
 
 ### Features
