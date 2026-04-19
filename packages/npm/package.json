@@ -6,7 +6,9 @@
 	},
 	"description": "Release management with style",
 	"homepage": "https://github.com/zantarix/cursus#readme",
-	"bin": "bin/cursus",
+	"bin": {
+		"cursus": "bin/cursus"
+	},
 	"type": "module",
 	"scripts": {
 		"build": "tsc",

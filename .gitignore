@@ -15,9 +15,6 @@
 
 # npm compiled output, dependencies, and postinstall-downloaded binaries
 node_modules/
-/packages/npm/bin/download-binary.js
-/packages/npm/bin/cursus
-/packages/npm/bin/cursus.exe
 
 # Just Claude things
 /.claude/worktrees
