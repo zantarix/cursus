@@ -34,7 +34,7 @@ strategy = "branch"
 enabled = true
 # owner = "zantarix"
 # repo = "cursus"
-build_command = "cargo make release-cross"
+build_command = "cp README.md packages/npm && cargo make release-cross"
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 
 [github.artifacts.cursus]
