@@ -38,7 +38,7 @@ cursus = { path = ".", features = ["test-support"], default-features = false }
 httpmock = "=0.8.3"
 insta = "=1.47.2"
 tempfile = "=3.27.0"
-tokio = { version = "=1.51.1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "=1.52.1", features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true
