@@ -51,4 +51,5 @@ jobs:
           # Override the default GITHUB_TOKEN so cursus uses the App token
           # for all GitHub API calls (PRs, releases).
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: ./target/release/cursus ci --no-interactive
