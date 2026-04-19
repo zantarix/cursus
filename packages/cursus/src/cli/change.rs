@@ -239,6 +239,7 @@ async fn cmd_change_auto(
 		}
 	} else {
 		let path = changeset.write(git, env.fs()).await?;
+		info!("Created changeset: {}", path.display());
 		if config.git.enabled() && !args.no_git {
 			git.add(&[path]).await?;
 		}
@@ -328,6 +329,7 @@ pub(crate) async fn cmd_change(
 		println!("{}", changeset.format()?);
 	} else {
 		let path = changeset.write(git, env.fs()).await?;
+		info!("Created changeset: {}", path.display());
 		if result.message.is_none() {
 			env.run_editor_on(&path, git.path()).await?;
 		}
