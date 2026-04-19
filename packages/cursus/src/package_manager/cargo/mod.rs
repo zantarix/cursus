@@ -559,11 +559,21 @@ impl PackageManagerAdapter for CargoAdapter {
 
 	async fn publish(&self, project: &ProjectInfo) -> anyhow::Result<PublishOutcome> {
 		if !self.env.cargo_registry_token_present() {
-			warn!(
-				"{}: CARGO_REGISTRY_TOKEN is not set; publish may fail if no other \
-				 authentication is configured",
-				project.name
-			);
+			if self.env.oidc_environment() {
+				warn!(
+					"{}: CARGO_REGISTRY_TOKEN is not set; publish is likely to fail. An \
+					 OIDC-capable CI environment was detected - to use crates.io trusted \
+					 publishing, add a token exchange step (such as \
+					 rust-lang/crates-io-auth-action) before `cursus publish`.",
+					project.name
+				);
+			} else {
+				warn!(
+					"{}: CARGO_REGISTRY_TOKEN is not set; publish is likely to fail. Set \
+					 CARGO_REGISTRY_TOKEN or run `cargo login` to configure authentication.",
+					project.name
+				);
+			}
 		}
 
 		let manifest_path = project.path.join("Cargo.toml");

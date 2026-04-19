@@ -21,6 +21,23 @@ fn recording_adapter_with_env(dir: &std::path::Path, env: crate::Env) -> CargoAd
 	)
 }
 
+fn env_with_auth_flags(
+	runner: &Arc<RecordingCommandRunner>,
+	token: bool,
+	oidc: bool,
+) -> crate::Env {
+	crate::Env::new(
+		Arc::clone(runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+		Arc::new(crate::git::GitWorkdir::new(
+			Arc::clone(runner) as Arc<dyn CommandRunner>,
+			crate::path::AbsolutePath::new("/tmp").unwrap(),
+		)),
+	)
+	.with_cargo_registry_token_present(token)
+	.with_oidc_environment(oidc)
+}
+
 #[tokio::test]
 async fn publish_success_returns_published() {
 	let dir = temp_dir();
@@ -105,16 +122,8 @@ async fn publish_without_cargo_token_still_executes_publish() {
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(
-		Arc::clone(&runner) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-		Arc::new(crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			crate::path::AbsolutePath::new("/tmp").unwrap(),
-		)),
-	)
-	.with_cargo_registry_token_present(false);
-	let adapter = recording_adapter_with_env(dir.path(), env);
+	let adapter =
+		recording_adapter_with_env(dir.path(), env_with_auth_flags(&runner, false, false));
 	let result = adapter.publish(&info).await.unwrap();
 	assert_eq!(result, PublishOutcome::Published);
 	// Command must still be dispatched despite missing token
@@ -123,21 +132,38 @@ async fn publish_without_cargo_token_still_executes_publish() {
 }
 
 #[tokio::test]
-async fn publish_without_cargo_token_emits_warning() {
+async fn publish_without_cargo_token_no_oidc_emits_credential_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(
-		Arc::clone(&runner) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-		Arc::new(crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			crate::path::AbsolutePath::new("/tmp").unwrap(),
-		)),
-	)
-	.with_cargo_registry_token_present(false);
-	let adapter = recording_adapter_with_env(dir.path(), env);
+	let adapter =
+		recording_adapter_with_env(dir.path(), env_with_auth_flags(&runner, false, false));
+	adapter.publish(&info).await.unwrap();
+	let logs = crate::test_logging::take_logs();
+	let warn_msgs: Vec<_> = logs
+		.iter()
+		.filter(|(lvl, _)| *lvl == log::Level::Warn)
+		.collect();
+	assert!(
+		warn_msgs.iter().any(|(_, msg)| msg.contains("cargo login")),
+		"Expected credential warning with cargo login hint, got: {warn_msgs:?}"
+	);
+	assert!(
+		!warn_msgs
+			.iter()
+			.any(|(_, msg)| msg.contains("crates-io-auth-action")),
+		"Should NOT emit trusted publishing hint in non-OIDC environment, got: {warn_msgs:?}"
+	);
+}
+
+#[tokio::test]
+async fn publish_without_cargo_token_with_oidc_emits_trusted_publishing_hint() {
+	crate::test_logging::init_test_logger();
+	let dir = temp_dir();
+	let info = setup_publish_project(dir.path());
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let adapter = recording_adapter_with_env(dir.path(), env_with_auth_flags(&runner, false, true));
 	adapter.publish(&info).await.unwrap();
 	let logs = crate::test_logging::take_logs();
 	let warn_msgs: Vec<_> = logs
@@ -147,34 +173,42 @@ async fn publish_without_cargo_token_emits_warning() {
 	assert!(
 		warn_msgs
 			.iter()
-			.any(|(_, msg)| msg.contains("CARGO_REGISTRY_TOKEN is not set")),
-		"Expected token-absent warning, got: {warn_msgs:?}"
+			.any(|(_, msg)| msg.contains("crates-io-auth-action")),
+		"Expected trusted publishing hint with exchange action, got: {warn_msgs:?}"
+	);
+	assert!(
+		!warn_msgs.iter().any(|(_, msg)| msg.contains("cargo login")),
+		"Should NOT emit cargo login hint in OIDC environment, got: {warn_msgs:?}"
 	);
 }
 
 #[tokio::test]
-async fn publish_with_cargo_token_no_warning() {
+async fn publish_with_cargo_token_no_oidc_no_warning() {
 	crate::test_logging::init_test_logger();
 	let dir = temp_dir();
 	let info = setup_publish_project(dir.path());
 	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let env = crate::Env::new(
-		Arc::clone(&runner) as Arc<dyn CommandRunner>,
-		Arc::new(LocalFilesystem),
-		Arc::new(crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			crate::path::AbsolutePath::new("/tmp").unwrap(),
-		)),
-	)
-	.with_cargo_registry_token_present(true);
-	let adapter = recording_adapter_with_env(dir.path(), env);
+	let adapter = recording_adapter_with_env(dir.path(), env_with_auth_flags(&runner, true, false));
 	adapter.publish(&info).await.unwrap();
 	let logs = crate::test_logging::take_logs();
 	assert!(
-		!logs
-			.iter()
-			.any(|(_, msg)| msg.contains("CARGO_REGISTRY_TOKEN")),
-		"Should NOT emit token warning when token is present"
+		!logs.iter().any(|(lvl, _)| *lvl == log::Level::Warn),
+		"Should NOT emit any warning for token+no-OIDC (traditional flow)"
+	);
+}
+
+#[tokio::test]
+async fn publish_with_cargo_token_with_oidc_no_warning() {
+	crate::test_logging::init_test_logger();
+	let dir = temp_dir();
+	let info = setup_publish_project(dir.path());
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let adapter = recording_adapter_with_env(dir.path(), env_with_auth_flags(&runner, true, true));
+	adapter.publish(&info).await.unwrap();
+	let logs = crate::test_logging::take_logs();
+	assert!(
+		!logs.iter().any(|(lvl, _)| *lvl == log::Level::Warn),
+		"Should NOT emit any warning for token+OIDC (trusted publishing happy path)"
 	);
 }
 

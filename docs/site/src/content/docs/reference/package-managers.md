@@ -27,7 +27,7 @@ Cursus supports Cargo workspaces and standalone Cargo packages.
 - Updates `Cargo.lock` via `cargo generate-lockfile`
 - Publishes to crates.io via `cargo publish`
 
-**Registry:** crates.io (authenticated via `cargo login` or `CARGO_REGISTRY_TOKEN`)
+**Registry:** crates.io (authenticated via `cargo login`, `CARGO_REGISTRY_TOKEN`, or crates.io OIDC trusted publishing)
 
 ```toml
 [cargo]
@@ -41,6 +41,14 @@ If your Cargo workspace is in a subdirectory:
 enabled = true
 path = "rust/"
 ```
+
+### Authentication
+
+Cursus delegates Cargo authentication entirely to the environment:
+
+- **`CARGO_REGISTRY_TOKEN`** — set this environment variable to a crates.io API token for local publishes or CI environments that do not use trusted publishing.
+- **crates.io trusted publishing** — on GitHub Actions and GitLab CI, an exchange action (e.g. `rust-lang/crates-io-auth-action`) obtains a short-lived token and exports it as `CARGO_REGISTRY_TOKEN` before `cargo publish` runs. No long-lived secret is needed. Cursus detects the OIDC environment and emits warnings if no token is present. See the [publishing guide](/cursus/guides/publishing/#crates-io-trusted-publishing) for details.
+- **`cargo login`** — interactive login credentials stored in `~/.cargo/credentials.toml` also work for local use.
 
 ## npm
 
