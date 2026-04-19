@@ -79,7 +79,6 @@ pub(super) async fn bump_versions_and_generate_changelogs(
 			.get(pkg_name)
 			.cloned()
 			.unwrap_or_else(|| bump_version(current_version, *change_type));
-		modified_files.push(project.manifest_path().await);
 		modified_files.push(project.path().join("CHANGELOG.md"));
 		let changes = changes_per_package
 			.get(pkg_name)
@@ -94,7 +93,7 @@ pub(super) async fn bump_versions_and_generate_changelogs(
 		)
 		.with_dependency_entries(pkg_dep_entries);
 		let changelog_entry = changelog.format_sections();
-		project.write_version(&new_version, dry_run).await?;
+		modified_files.extend(project.write_version(&new_version, dry_run).await?);
 		changelog.update(dry_run, fs).await?;
 		info!("{pkg_name}: {current_version} -> {new_version} ({change_type})");
 		release_infos.push(ReleaseInfo {
@@ -413,5 +412,97 @@ mod tests {
 			content, original,
 			"Changeset should be untouched in dry-run"
 		);
+	}
+
+	/// Sets up a Cargo workspace where both members inherit `version.workspace = true`
+	/// with global linked-versions enabled (required by `validate_workspace_version_linking`).
+	async fn setup_workspace_version_workspace_true() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+		let setup_env = make_test_env(dir.path());
+		crate::model::config::Config::new()
+			.with_cargo(crate::model::config::CargoConfig::enabled())
+			.with_linked_versions(crate::model::config::LinkedVersionsConfig {
+				enabled: Some(true),
+				groups: Vec::new(),
+			})
+			.save(setup_env.fs(), setup_env.git().path())
+			.await
+			.unwrap();
+		// Workspace root Cargo.toml — defines [workspace.package].version
+		std::fs::write(
+			dir.path().join("Cargo.toml"),
+			"[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n\n[workspace.package]\nversion = \"0.1.0\"\n",
+		)
+		.unwrap();
+		for pkg in ["pkg-a", "pkg-b"] {
+			std::fs::create_dir_all(dir.path().join(pkg).join("src")).unwrap();
+			std::fs::write(
+				dir.path().join(pkg).join("Cargo.toml"),
+				format!(
+					"[package]\nname = \"{pkg}\"\nversion.workspace = true\nedition = \"2024\"\n"
+				),
+			)
+			.unwrap();
+			std::fs::write(dir.path().join(pkg).join("src").join("lib.rs"), "").unwrap();
+		}
+		dir
+	}
+
+	/// Regression test: when Cargo workspace members use `version.workspace = true`,
+	/// `bump_versions_and_generate_changelogs` must include the workspace root
+	/// `Cargo.toml` (not the member manifests) in its returned modified-files list.
+	///
+	/// Before the fix, the member path was pushed unconditionally and `write_version`
+	/// wrote silently to the workspace root without reporting it — causing the root
+	/// `Cargo.toml` to be omitted from the release commit.
+	#[tokio::test]
+	async fn bump_versions_includes_workspace_root_when_version_workspace_true() {
+		let dir = setup_workspace_version_workspace_true().await;
+		let projects = load_projects_for_dir(&dir).await;
+
+		// Both packages bump by patch
+		let aggregated: std::collections::BTreeMap<String, crate::model::changeset::ChangeType> = [
+			(
+				"pkg-a".to_string(),
+				crate::model::changeset::ChangeType::Patch,
+			),
+			(
+				"pkg-b".to_string(),
+				crate::model::changeset::ChangeType::Patch,
+			),
+		]
+		.into_iter()
+		.collect();
+
+		let (_, modified_files) = super::bump_versions_and_generate_changelogs(
+			&aggregated,
+			&std::collections::BTreeMap::new(),
+			&projects,
+			&std::collections::BTreeMap::new(),
+			&std::collections::BTreeMap::new(),
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.await
+		.unwrap();
+
+		let root_cargo = dir.path().join("Cargo.toml");
+		assert!(
+			modified_files.contains(&root_cargo),
+			"Workspace root Cargo.toml must be in modified_files so it is staged for git.\n\
+			 Got: {modified_files:?}"
+		);
+
+		// Member manifests must NOT appear — they only declare `version.workspace = true`
+		// and were not written to.
+		for pkg in ["pkg-a", "pkg-b"] {
+			let member_cargo = dir.path().join(pkg).join("Cargo.toml");
+			assert!(
+				!modified_files.contains(&member_cargo),
+				"Member Cargo.toml ({pkg}) must not be in modified_files — it was not modified.\n\
+				 Got: {modified_files:?}"
+			);
+		}
 	}
 }

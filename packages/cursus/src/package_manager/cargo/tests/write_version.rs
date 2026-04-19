@@ -57,7 +57,7 @@ edition = "2024"
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 	let info = project_info(dir.path(), "my-crate", "");
 	let new_version: semver::Version = "2.0.0".parse().unwrap();
-	adapter
+	let paths = adapter
 		.write_version(&info, &new_version, false)
 		.await
 		.unwrap();
@@ -66,6 +66,9 @@ edition = "2024"
 	assert!(contents.contains("version = \"2.0.0\""));
 	// Preserve other fields
 	assert!(contents.contains("edition = \"2024\""));
+	// The member's Cargo.toml is the only modified file
+	assert_eq!(paths.len(), 1);
+	assert_eq!(paths[0], dir.path().join("Cargo.toml"));
 }
 
 #[tokio::test]
@@ -83,7 +86,7 @@ edition = "2024"
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);
 	let info = project_info(dir.path(), "my-crate", "");
 	let new_version: semver::Version = "2.0.0".parse().unwrap();
-	adapter
+	let paths = adapter
 		.write_version(&info, &new_version, true)
 		.await
 		.unwrap();
@@ -97,6 +100,9 @@ edition = "2024"
 		!contents.contains("version = \"2.0.0\""),
 		"dry-run should not write new version, got: {contents}"
 	);
+	// Path is still reported even in dry-run mode
+	assert_eq!(paths.len(), 1);
+	assert_eq!(paths[0], dir.path().join("Cargo.toml"));
 }
 
 #[tokio::test]
@@ -151,7 +157,7 @@ version.workspace = true
 	let info = project_info(dir.path(), "member", "crates/member");
 
 	let new_v: semver::Version = "2.0.0".parse().unwrap();
-	adapter.write_version(&info, &new_v, false).await.unwrap();
+	let paths = adapter.write_version(&info, &new_v, false).await.unwrap();
 
 	// Member should still have version.workspace = true
 	let member_toml = std::fs::read_to_string(member.join("Cargo.toml")).unwrap();
@@ -171,6 +177,15 @@ version.workspace = true
 	let projects = enumerate(dir.path()).await.unwrap();
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].version.to_string(), "2.0.0");
+
+	// The workspace root Cargo.toml (not the member) is the modified file
+	assert_eq!(paths.len(), 1, "Expected exactly one modified path");
+	assert_eq!(
+		paths[0],
+		dir.path().join("Cargo.toml"),
+		"Expected workspace root Cargo.toml, got: {:?}",
+		paths[0]
+	);
 }
 
 #[tokio::test]
@@ -202,7 +217,7 @@ version.workspace = true
 	let info = project_info(dir.path(), "member", "crates/member");
 
 	let new_v: semver::Version = "2.0.0".parse().unwrap();
-	adapter.write_version(&info, &new_v, true).await.unwrap();
+	let paths = adapter.write_version(&info, &new_v, true).await.unwrap();
 
 	// Workspace root should still have the original version
 	let root_toml = std::fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -213,5 +228,13 @@ version.workspace = true
 	assert!(
 		!root_toml.contains("\"2.0.0\""),
 		"Dry-run should not write new version, got:\n{root_toml}"
+	);
+	// Path is still reported even in dry-run mode
+	assert_eq!(paths.len(), 1, "Expected exactly one modified path");
+	assert_eq!(
+		paths[0],
+		dir.path().join("Cargo.toml"),
+		"Expected workspace root Cargo.toml, got: {:?}",
+		paths[0]
 	);
 }

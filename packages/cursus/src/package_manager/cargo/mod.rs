@@ -44,11 +44,14 @@ impl CargoAdapter {
 	}
 
 	/// Updates `[workspace.package].version` in the workspace root Cargo.toml.
+	///
+	/// Returns the path of the workspace root `Cargo.toml` that was (or would be)
+	/// modified, so callers can stage it for git.
 	async fn write_workspace_package_version(
 		&self,
 		version: &Version,
 		dry_run: bool,
-	) -> anyhow::Result<()> {
+	) -> anyhow::Result<Vec<PathBuf>> {
 		let pm_root = self.resolve_root().await?;
 		let root_path = pm_root.child("Cargo.toml");
 		log::debug!(
@@ -77,7 +80,7 @@ impl CargoAdapter {
 				.await
 				.with_context(|| format!("Failed to write {}", root_path.display()))?;
 		}
-		Ok(())
+		Ok(vec![root_path.into_path_buf()])
 	}
 }
 
@@ -437,7 +440,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		project: &ProjectInfo,
 		version: &Version,
 		dry_run: bool,
-	) -> anyhow::Result<()> {
+	) -> anyhow::Result<Vec<PathBuf>> {
 		let manifest_path = project.path.child("Cargo.toml");
 		let contents = self
 			.env
@@ -474,7 +477,7 @@ impl PackageManagerAdapter for CargoAdapter {
 				.await
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		}
-		Ok(())
+		Ok(vec![manifest_path.into_path_buf()])
 	}
 
 	async fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {

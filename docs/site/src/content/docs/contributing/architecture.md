@@ -27,7 +27,8 @@ Cursus is a Rust CLI application built with [clap](https://docs.rs/clap) for arg
 The `PackageManagerAdapter` trait provides a uniform interface across package managers:
 
 - `enumerate_projects()` — discover packages and their current versions
-- `write_version()` — update a package's version in its manifest
+- `write_version()` — update a package's version in its manifest; returns `Vec<PathBuf>` of the files actually modified (which may be the workspace-root manifest rather than the package's own, e.g. for Cargo crates using `version.workspace = true`); callers must stage those paths for git
+- `update_dependency_version()` — update an intra-workspace dependency's pinned version; also returns `Vec<PathBuf>` of modified files for git staging
 - `update_lock_file()` — regenerate the lock file after version changes
 - `publish()` — publish a package to its registry
 - `registry_name()` — display name for the registry

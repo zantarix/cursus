@@ -138,9 +138,18 @@ impl Project {
 
 	/// Writes a new version to this project's manifest file.
 	///
-	/// When `dry_run` is `true`, detects changes but does not write to disk.
+	/// Returns the list of file paths that were (or would be) modified by the write.
+	/// Callers should extend their `modified_files` list with the returned paths so
+	/// those files are staged for git.
+	///
+	/// When `dry_run` is `true`, no files are written to disk, but the returned
+	/// list still describes which paths would be modified.
 	/// Delegates to the underlying package manager adapter.
-	pub async fn write_version(&self, version: &Version, dry_run: bool) -> anyhow::Result<()> {
+	pub async fn write_version(
+		&self,
+		version: &Version,
+		dry_run: bool,
+	) -> anyhow::Result<Vec<PathBuf>> {
 		self.adapter
 			.write_version(&self.info, version, dry_run)
 			.await
@@ -310,7 +319,15 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 
 	/// Writes a new version to a project's manifest file, preserving formatting.
 	///
+	/// Returns the list of file paths that were (or would be) modified. For most
+	/// adapters this is just the project's own manifest (e.g. `package.json` or
+	/// `Cargo.toml`), but for Cargo projects that inherit `version.workspace = true`
+	/// it is the workspace-root `Cargo.toml` instead. Callers must extend their
+	/// `modified_files` list with the returned paths so those files are staged for
+	/// git — this mirrors the contract of [`PackageManagerAdapter::update_dependency_version`].
+	///
 	/// When `dry_run` is `true`, the method validates but does not write to disk.
+	/// Still returns the paths of files that would be modified.
 	///
 	/// # Arguments
 	///
@@ -320,13 +337,13 @@ pub trait PackageManagerAdapter: Send + Sync + std::fmt::Debug {
 	///
 	/// # Errors
 	///
-	/// Returns an error if the manifest file cannot be read or written.
+	/// Returns an error if the manifest file cannot be read or (when `dry_run` is false) written.
 	async fn write_version(
 		&self,
 		project: &ProjectInfo,
 		version: &Version,
 		dry_run: bool,
-	) -> anyhow::Result<()>;
+	) -> anyhow::Result<Vec<PathBuf>>;
 
 	/// Updates the lock file after version changes.
 	///

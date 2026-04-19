@@ -489,7 +489,7 @@ impl PackageManagerAdapter for NpmAdapter {
 		project: &ProjectInfo,
 		version: &Version,
 		dry_run: bool,
-	) -> anyhow::Result<()> {
+	) -> anyhow::Result<Vec<PathBuf>> {
 		let manifest_path = project.path.child("package.json");
 		let contents = self
 			.env
@@ -519,7 +519,7 @@ impl PackageManagerAdapter for NpmAdapter {
 				.await
 				.with_context(|| format!("Failed to write {}", manifest_path.display()))?;
 		}
-		Ok(())
+		Ok(vec![manifest_path.into_path_buf()])
 	}
 
 	async fn enumerate_projects(&self) -> anyhow::Result<Vec<ProjectInfo>> {

@@ -32,7 +32,7 @@ async fn write_version_updates_package_json() {
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 	let info = project_info(dir.path(), "my-app", "");
 	let new_version: semver::Version = "2.0.0".parse().unwrap();
-	adapter
+	let paths = adapter
 		.write_version(&info, &new_version, false)
 		.await
 		.unwrap();
@@ -43,6 +43,8 @@ async fn write_version_updates_package_json() {
 		"Should contain new version, got: {contents}"
 	);
 	assert!(contents.ends_with('\n'), "Should end with newline");
+	assert_eq!(paths.len(), 1);
+	assert_eq!(paths[0], dir.path().join("package.json"));
 }
 
 #[tokio::test]
@@ -52,7 +54,7 @@ async fn write_version_dry_run_does_not_write_file() {
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);
 	let info = project_info(dir.path(), "my-app", "");
 	let new_version: semver::Version = "2.0.0".parse().unwrap();
-	adapter
+	let paths = adapter
 		.write_version(&info, &new_version, true)
 		.await
 		.unwrap();
@@ -66,6 +68,9 @@ async fn write_version_dry_run_does_not_write_file() {
 		!contents.contains("\"2.0.0\""),
 		"dry-run should not write new version, got: {contents}"
 	);
+	// Path is still reported even in dry-run mode
+	assert_eq!(paths.len(), 1);
+	assert_eq!(paths[0], dir.path().join("package.json"));
 }
 
 #[tokio::test]
