@@ -1,5 +1,0 @@
-+++
-cursus = "minor"
-+++
-
-Initial release
