@@ -1,11 +1,10 @@
 name: Docs
 
 on:
-  # Uncomment when the repo goes public:
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - "docs/site/**"
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/**"
   workflow_dispatch:
 
 permissions:
