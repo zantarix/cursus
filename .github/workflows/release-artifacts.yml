@@ -30,7 +30,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Necessary in order to fix a naming issue
+          cp target/x86_64-apple-darwin/release/cursus ./cursus-osx-x86_64
+          cp target/aarch64-apple-darwin/release/cursus ./cursus-osx-aarch64
           gh release upload "${{ github.event.release.tag_name }}" \
-            "target/x86_64-apple-darwin/release/cursus#cursus-osx-x86_64" \
-            "target/aarch64-apple-darwin/release/cursus#cursus-osx-aarch64"
+            "./cursus-osx-x86_64#cursus-osx-x86_64" \
+            "./cursus-osx-aarch64#cursus-osx-aarch64"
 
