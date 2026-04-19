@@ -3,30 +3,45 @@
 	"extends": [
 		"github>mscharley/renovate-config"
 	],
-	"gitIgnoredAuthors": ["zantarix-bot[bot] <269442275+zantarix-bot[bot]@users.noreply.github.com>"],
+	"gitIgnoredAuthors": [
+		"zantarix-bot[bot] <269442275+zantarix-bot[bot]@users.noreply.github.com>"
+	],
 	"nix": {
 		"enabled": true
 	},
 	"git-submodules": {
-		"enabled": true
+		"enabled": true,
+		"automerge": true
 	},
 	"packageRules": [
 		{
 			"description": "Library production dependencies use caret ranges",
-			"matchFileNames": ["packages/cursus/Cargo.toml"],
-			"matchDepTypes": ["dependencies"],
+			"matchFileNames": [
+				"packages/cursus/Cargo.toml"
+			],
+			"matchDepTypes": [
+				"dependencies"
+			],
 			"rangeStrategy": "replace"
 		},
 		{
 			"description": "Binary dependencies stay pinned",
-			"matchFileNames": ["packages/cursus-bin/Cargo.toml"],
-			"matchDepTypes": ["dependencies"],
+			"matchFileNames": [
+				"packages/cursus-bin/Cargo.toml"
+			],
+			"matchDepTypes": [
+				"dependencies"
+			],
 			"rangeStrategy": "pin"
 		},
 		{
 			"description": "Dev dependencies stay pinned everywhere",
-			"matchDepTypes": ["devDependencies"],
-			"matchManagers": ["cargo"],
+			"matchDepTypes": [
+				"devDependencies"
+			],
+			"matchManagers": [
+				"cargo"
+			],
 			"rangeStrategy": "pin"
 		},
 		{
@@ -42,8 +57,12 @@
 		},
 		{
 			"groupName": "docs site dependencies",
-			"matchFileNames": ["docs/site/package.json"],
-			"matchPackageNames": ["*"]
+			"matchFileNames": [
+				"docs/site/package.json"
+			],
+			"matchPackageNames": [
+				"*"
+			]
 		}
 	]
 }
