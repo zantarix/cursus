@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+description = "Library crate for the cursus release management CLI"
+documentation = "https://zantarix.github.io/cursus/"
+homepage = "https://zantarix.github.io/cursus/"
+repository = "https://github.com/zantarix/cursus"
+readme = "../../README.md"
+
 [dependencies]
 anyhow = "1.0.102"
 async-trait = "0.1.89"
