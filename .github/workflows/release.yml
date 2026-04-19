@@ -40,6 +40,10 @@ jobs:
           git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
           git config user.email "${{ vars.ZANTARIX_APP_USER_ID }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
 
+      - name: Install NPM dependencies
+        run: npm install
+        working-directory: "./packages/npm"
+
       - name: Build cursus
         run: cargo build --release
 
