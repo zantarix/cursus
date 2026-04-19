@@ -32,6 +32,7 @@ const PLATFORMS: Partial<Record<string, Partial<Record<string, string>>>> = {
 const platform = process.platform;
 const arch = process.arch;
 const artifact = PLATFORMS[platform]?.[arch];
+const tag = `cursus@${version}`;
 
 if (artifact == null) {
 	const supported = Object.entries(PLATFORMS)
@@ -40,7 +41,7 @@ if (artifact == null) {
 	process.stderr.write(
 		`Error: Unsupported platform ${platform}/${arch}.\n`
 		+ `Supported platforms: ${supported}\n`
-		+ `Please download manually from: https://github.com/zantarix/cursus/releases/tag/v${version}\n`,
+		+ `Please download manually from: https://github.com/zantarix/cursus/releases/tag/${encodeURIComponent(tag)}\n`,
 	);
 	process.exit(1);
 }
@@ -48,7 +49,7 @@ if (artifact == null) {
 const isWindows = platform === 'win32';
 const binaryName = isWindows ? 'cursus.exe' : 'cursus';
 const binaryPath = join(__dirname, binaryName);
-const downloadUrl = `https://github.com/zantarix/cursus/releases/download/v${version}/${artifact}`;
+const downloadUrl = `https://github.com/zantarix/cursus/releases/download/${encodeURIComponent(tag)}/${artifact}`;
 
 const TIMEOUT_MS = 60_000;
 const UNIX_EXECUTABLE_MODE = 0o755;
@@ -106,7 +107,7 @@ try {
 	const message = err instanceof Error ? err.message : String(err);
 	process.stderr.write(
 		`Error: Failed to download cursus binary: ${message}\n`
-		+ `Please try again or download manually from: https://github.com/zantarix/cursus/releases/tag/v${version}\n`,
+		+ `Please try again or download manually from: https://github.com/zantarix/cursus/releases/tag/${encodeURIComponent(tag)}\n`,
 	);
 	process.exit(1);
 }
