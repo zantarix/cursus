@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-04-19
+
+### Bug Fixes
+
+- Logs the filename of the created changeset after running `cursus change`. [9ce35b8]
+- Fixes npm package binary download failing due to incorrect release tag format. [ad7ef84]
+
 ## 0.1.0 - 2026-04-19
 
 ### Bug Fixes
