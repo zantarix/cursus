@@ -48,7 +48,10 @@ async fn resolve_root(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
-	/// Disable warnings about circular dependencies in monorepos.
+	/// Disable warnings about circular dependencies between two or more packages during publish.
+	///
+	/// Self-loops (a package listing itself as a dependency, e.g. via `dev-dependencies`) are
+	/// never warned about regardless of this setting.
 	pub disable_dependency_cycle_warnings: bool,
 	/// Glob patterns matching package names to exclude from enumeration.
 	///

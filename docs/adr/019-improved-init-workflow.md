@@ -235,3 +235,7 @@ Adding `--package-manager`, `--git`, `--github`, `--git-strategy`, and related f
 ### Pure serde serialisation for config output
 
 Using `toml::to_string_pretty` to generate the config file, relying on serde's `skip_serializing_if` to omit unconfigured fields. This was rejected because it cannot produce commented-out documentation for unused options. The template approach is more work to maintain but produces a significantly more useful config file for users who want to customise beyond the defaults.
+
+## Errata
+
+- **2026-04-19:** The inline comment on the generated `[global].disable_dependency_cycle_warnings` config line has been reworded. The example config blocks above show the original text `Suppress circular dependency warnings`; the Fluent template `global-disable-dep-cycle-comment` now reads `Suppress warnings about circular dependencies between packages (two or more packages in a cycle)`. The wording was updated because `cycle_groups()` was changed to exclude single-package self-loops, so the warning is only emitted for multi-package cycles and the comment should reflect that scope. No other aspect of this ADR is affected.

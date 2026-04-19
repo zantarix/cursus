@@ -3,7 +3,7 @@ source: packages/cursus/src/model/config/template.rs
 expression: render(&result)
 ---
 # [global]
-# disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
+# disable_dependency_cycle_warnings = false  # Suppress warnings about circular dependencies between packages (two or more packages in a cycle)
 # ignore = ["example-*"]                     # Glob patterns for packages to exclude from enumeration
 
 # [cargo]

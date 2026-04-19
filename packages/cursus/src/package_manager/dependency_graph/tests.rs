@@ -108,10 +108,25 @@ fn dependency_graph_self_loop() {
 	let sorted = graph.sort_leaves_first();
 	assert_eq!(sorted, vec!["a"]);
 
-	// cycle_groups should detect the self-loop
+	// self-loops do not affect release ordering, so cycle_groups should be empty
+	let cycles = graph.cycle_groups();
+	assert!(cycles.is_empty());
+}
+
+#[test]
+fn dependency_graph_self_loop_alongside_multi_node_cycle() {
+	// a -> a (self-loop), b <-> c (real cycle)
+	let mut adjacency = std::collections::HashMap::new();
+	adjacency.insert("a".to_string(), vec!["a".to_string()]);
+	adjacency.insert("b".to_string(), vec!["c".to_string()]);
+	adjacency.insert("c".to_string(), vec!["b".to_string()]);
+
+	let graph = DependencyGraph::from_adjacency(adjacency);
+
+	// Only the multi-package cycle is reported; the self-loop is not
 	let cycles = graph.cycle_groups();
 	assert_eq!(cycles.len(), 1);
-	assert_eq!(cycles[0], vec!["a"]);
+	assert_eq!(cycles[0], vec!["b", "c"]);
 }
 
 #[test]

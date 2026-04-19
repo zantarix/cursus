@@ -1,7 +1,7 @@
 # Config template comment strings
 
 # [global] section comments
-global-disable-dep-cycle-comment = Suppress circular dependency warnings
+global-disable-dep-cycle-comment = Suppress warnings about circular dependencies between packages (two or more packages in a cycle)
 global-ignore-comment = Glob patterns for packages to exclude from enumeration
 
 # [cargo] section comments

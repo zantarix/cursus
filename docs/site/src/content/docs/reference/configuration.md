@@ -11,7 +11,7 @@ Top-level settings.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `disable_dependency_cycle_warnings` | bool | `false` | Suppress warnings about dependency cycles during prepare |
+| `disable_dependency_cycle_warnings` | bool | `false` | Suppress warnings about circular dependencies between two or more packages during publish. Self-loops (a package listing itself as a dependency) are never warned about. |
 | `ignore` | list of strings | `[]` | Glob patterns matching package names to exclude from all Cursus operations. Matching packages are dropped before version bumps, publish, and changelog generation. Cursus warns if a pattern matches nothing. |
 
 ## `[cargo]`

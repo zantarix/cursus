@@ -187,8 +187,10 @@ impl DependencyGraph {
 
 	/// Returns groups of packages with circular dependencies.
 	///
-	/// Each group contains one or more package names that form a cycle.
-	/// Single-node groups are only included if they have a self-loop.
+	/// Each group contains two or more package names that form a cycle.
+	/// Single-node self-loops are not included: a package that lists itself as a
+	/// dependency (e.g. via `dev-dependencies`) does not affect release ordering
+	/// because only one package is involved.
 	/// Groups are sorted alphabetically for deterministic output.
 	///
 	/// # Returns
@@ -197,17 +199,7 @@ impl DependencyGraph {
 	pub fn cycle_groups(&self) -> Vec<Vec<String>> {
 		self.sccs
 			.iter()
-			.filter(|scc| {
-				if scc.len() > 1 {
-					true
-				} else {
-					// scc.len() == 1 guaranteed by Tarjan's algorithm; check for self-loop
-					let node = &scc[0];
-					self.adjacency
-						.get(node)
-						.is_some_and(|deps| deps.contains(node))
-				}
-			})
+			.filter(|scc| scc.len() > 1)
 			.cloned()
 			.collect()
 	}
