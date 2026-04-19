@@ -48,6 +48,7 @@ jobs:
         run: cargo build --release
 
       - name: Exchange OIDC token for crates.io registry token
+        id: crates-auth
         uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
 
       - name: Run cursus ci
@@ -55,5 +56,5 @@ jobs:
           # Override the default GITHUB_TOKEN so cursus uses the App token
           # for all GitHub API calls (PRs, releases).
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: ./target/release/cursus ci --no-interactive
