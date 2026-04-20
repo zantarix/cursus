@@ -20,10 +20,19 @@ confidence-threshold = 0.8
 
 [bans]
 # Warn on multiple versions of the same crate
-multiple-versions = "warn"
+multiple-versions = "deny"
 
-# Skip common crates that often have multiple versions in the ecosystem
-skip = ["getrandom", "windows-sys"]
+# Skip crates that often have multiple versions but don't cause issues
+skip = [
+	"cpufeatures",
+	"getrandom",
+	"hashbrown",
+	"rand",
+	"rand_core",
+	"r-efi",
+	"windows-sys",
+	"wit-bindgen",
+]
 
 # Deny specific crates (empty by default)
 deny = []
