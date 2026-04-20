@@ -1,18 +1,8 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": [
-		"github>mscharley/renovate-config"
+		"github>zantarix/renovate-config"
 	],
-	"gitIgnoredAuthors": [
-		"269442275+zantarix-bot[bot]@users.noreply.github.com"
-	],
-	"nix": {
-		"enabled": true
-	},
-	"git-submodules": {
-		"enabled": true,
-		"automerge": true
-	},
 	"packageRules": [
 		{
 			"description": "Library production dependencies use caret ranges",
