@@ -112,3 +112,14 @@ Extend this change to also make `build_command` per-package. Rejected because bu
 ### Maintain backward compatibility with migration
 
 Accept both the flat and nested formats during a transition period, with a deprecation warning for the flat format. Rejected because Cursus is pre-1.0 with no stability guarantee, the user base is small, and migration is a one-line config edit. The complexity of dual-format parsing is not justified.
+
+## Errata
+
+### 2026-04-26: Configuration example references removed Windows targets and a removed make task
+
+The example configuration in the Decision section refers to `build_command = "cargo make release-cross"` and a Windows artifact path of `target/x86_64-pc-windows-gnullvm/release/cursus.exe`. Both references are now outdated:
+
+- The `release-cross` `cargo make` task no longer exists; the Windows job in CI invokes `cargo make release-windows-x86_64` / `release-windows-aarch64` natively on a `windows-latest` runner, while the Linux musl artifacts continue to be produced via `cargo-zigbuild` from a Linux runner.
+- The `*-pc-windows-gnullvm` targets have been removed. Windows artifact paths are now `target/x86_64-pc-windows-msvc/release/cursus.exe` and `target/aarch64-pc-windows-msvc/release/cursus.exe`.
+
+The structural decision of this ADR -- per-package `[github.artifacts.<package-name>]` sections, the `BTreeMap<String, BTreeMap<String, String>>` field type, the no-merge/no-inheritance rule, and the global-`build_command` decision -- is unchanged. Only the illustrative example values are stale. See [ADR-048](048-native-windows-build-runner.md) for the full rationale behind the Windows toolchain change.

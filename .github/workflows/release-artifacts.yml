@@ -37,3 +37,35 @@ jobs:
             "./cursus-osx-x86_64#cursus-osx-x86_64" \
             "./cursus-osx-aarch64#cursus-osx-aarch64"
 
+  windows:
+    name: Build Windows artifacts
+    if: startsWith(github.event.release.tag_name, 'cursus@')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RUSTFLAGS: "-C target-feature=+crt-static"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+
+      - name: Build Windows artifacts
+        run: cargo make release-windows
+
+      - name: Upload artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          # Necessary in order to fix a naming issue
+          cp target/x86_64-pc-windows-msvc/release/cursus.exe ./cursus-windows-x86_64.exe
+          cp target/aarch64-pc-windows-msvc/release/cursus.exe ./cursus-windows-aarch64.exe
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "./cursus-windows-x86_64.exe#cursus-windows-x86_64.exe" \
+            "./cursus-windows-aarch64.exe#cursus-windows-aarch64.exe"
