@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-04-26)
 
 ## Context
 
@@ -67,6 +67,10 @@ The `x86_64-pc-windows-gnullvm` and `aarch64-pc-windows-gnullvm` targets are rem
 - any CI workflow references.
 
 The `release-windows-x86_64` and `release-windows-aarch64` Makefile tasks are updated to invoke `cargo build --release` against the MSVC targets with `+crt-static`, so they remain runnable on a Windows development machine. They are documented as Windows-only tasks; running them from the Nix dev shell on Linux or macOS is not supported and not attempted.
+
+### Removal of the zig-based `synchronization.lib` workaround
+
+The `cursus-bin` build script previously contained a `generate_windows_synchronization_lib()` step that invoked `zig dlltool` to synthesise an import library for `synchronization.lib`, working around the fact that zig 0.15.2 did not bundle that library when targeting GNULLVM. With the move to native MSVC builds, zig is no longer present on the Windows runner and the Windows SDK provides `synchronization.lib` natively (with `windows-sys` carrying the appropriate link attributes). The `generate_windows_synchronization_lib()` function and its associated build-script logic are removed entirely; `build.rs` no longer has any Windows-specific code paths.
 
 ### CI workflow changes
 

@@ -97,3 +97,9 @@ A TypeScript CLI would have been natural for the npm ecosystem but requires a No
 ### Docker-based development environment
 
 A Docker-based dev environment was considered but rejected. It adds overhead for interactive development, complicates access to host tools (editors, git credentials), and does not natively support macOS cross-compilation. Nix flakes provide the same reproducibility with less friction.
+
+## Errata
+
+### 2026-04-26: Windows static-link mechanism changed from GNULLVM to MSVC
+
+The Rust language section above ("native static linking on macOS, and GNULLVM on Windows") and the cross-compilation note in the Positive Consequences ("Cross-compilation to seven targets ... is handled uniformly through cargo-zigbuild") no longer describe how Windows artifacts are produced. Windows binaries are now built natively on a `windows-latest` GitHub-hosted runner using `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc` with `RUSTFLAGS="-C target-feature=+crt-static"` for the static-CRT guarantee; `cargo-zigbuild` is no longer used for Windows. Linux musl cross-compilation via `cargo-zigbuild` is unaffected. The static-binary distribution constraint itself is unchanged. See [ADR-048](048-native-windows-build-runner.md) for the full rationale.

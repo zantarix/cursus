@@ -95,3 +95,11 @@ Add metadata to `Cargo.toml` so that `cargo binstall cursus` can download pre-bu
 ### Shell installer script (curl | sh)
 
 Provide a shell script that users pipe to their shell to download and install the correct binary. This was rejected as a primary channel because it requires trusting a remote script, does not integrate with any package manager for updates or removal, and provides no version management. It may be useful as a convenience method documented in the README, but it is not a distribution *channel* in the same sense as a registry.
+
+## Errata
+
+### 2026-04-26: Windows static-link mechanism corrected
+
+The Context section describes Windows binaries as being "produced via cargo-zigbuild and ... fully statically linked (musl on Linux, GNULLVM on Windows)." This is no longer accurate for Windows. Windows artifacts are now built natively on a `windows-latest` GitHub-hosted runner using the MSVC toolchain (`x86_64-pc-windows-msvc` host-native, `aarch64-pc-windows-msvc` cross-compiled from x86_64 via MSVC's bundled aarch64 cross-toolset) with `RUSTFLAGS="-C target-feature=+crt-static"` to statically link the MSVC C runtime. The resulting `.exe` has no runtime dependency on any Microsoft redistributable.
+
+The static-binary promise, the seven-target matrix, the artifact naming convention, the postinstall download flow, and the version-synchronization rules of this ADR are unaffected; only the Windows toolchain description in the Context section is corrected. Linux musl builds still go through `cargo-zigbuild`. See [ADR-048](048-native-windows-build-runner.md) for the full rationale.
