@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 - 2026-04-25
+
+### Bug Fixes
+
+- update rust crate octocrab to v0.49.8 [c458adb] via #95
+
 ## 0.2.1 - 2026-04-19
 
 ### Bug Fixes
