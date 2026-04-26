@@ -13,22 +13,22 @@ cargo make coverage            # Check test coverage
 cargo clippy                   # Lint the code
 cargo fmt                      # Format the code
 
-# Generate static binaries (all via cargo-zigbuild)
+# Generate static binaries
 cargo make release                 # Build all release targets
-cargo make release-linux-x86_64    # x86_64 Linux (musl static)
-cargo make release-linux-aarch64   # ARM64 Linux (musl static)
-cargo make release-linux-riscv64   # RISC-V Linux (musl static)
-cargo make release-macos-x86_64    # x86_64 macOS
-cargo make release-macos-aarch64   # ARM64 macOS
-cargo make release-windows-x86_64  # x86_64 Windows (GNULLVM)
-cargo make release-windows-aarch64 # ARM64 Windows (GNULLVM)
+cargo make release-linux-x86_64    # x86_64 Linux (musl static, via cargo-zigbuild)
+cargo make release-linux-aarch64   # ARM64 Linux (musl static, via cargo-zigbuild)
+cargo make release-linux-riscv64   # RISC-V Linux (musl static, via cargo-zigbuild)
+cargo make release-macos-x86_64    # x86_64 macOS (via cargo-zigbuild)
+cargo make release-macos-aarch64   # ARM64 macOS (via cargo-zigbuild)
+cargo make release-windows-x86_64  # x86_64 Windows (MSVC + crt-static, Windows host only)
+cargo make release-windows-aarch64 # ARM64 Windows (MSVC + crt-static, Windows host only)
 ```
 
 ## Development Environment
 
 The flake only supports three systems: x86_64-linux, aarch64-linux, and aarch64-darwin.
 
-The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, zig, and cargo-zigbuild for cross-compilation to all targets.
+The dev shell provides: rustc (nightly), cargo, rustfmt, clippy, rust-analyzer, cargo-make, cargo-llvm-cov, zig, and cargo-zigbuild for cross-compilation to Linux and macOS targets. Windows targets require a native Windows host with MSVC and are not buildable from the dev shell.
 
 ## Workspace Structure
 

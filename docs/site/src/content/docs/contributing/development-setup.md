@@ -24,7 +24,7 @@ Cursus uses [Nix flakes](https://nixos.wiki/wiki/Flakes) and [direnv](https://di
 
 The Nix flake supports: `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`.
 
-The dev shell provides: `rustc` (nightly), `cargo`, `rustfmt`, `clippy`, `rust-analyzer`, `cargo-make`, `cargo-llvm-cov`, `zig`, and `cargo-zigbuild`.
+The dev shell provides: `rustc` (nightly), `cargo`, `rustfmt`, `clippy`, `rust-analyzer`, `cargo-make`, `cargo-llvm-cov`, `zig`, and `cargo-zigbuild` for cross-compilation to Linux and macOS targets. Windows targets require a native Windows host with MSVC and are not buildable from the dev shell.
 
 ## Build commands
 

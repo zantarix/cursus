@@ -23,12 +23,6 @@ jobs:
             artifact: linux-riscv64
             binary: cursus
             # No GitHub-hosted RISC-V runner exists; artifact is built but not smoke-tested
-          - target: x86_64-pc-windows-gnullvm
-            artifact: windows-x86_64
-            binary: cursus.exe
-          - target: aarch64-pc-windows-gnullvm
-            artifact: windows-aarch64
-            binary: cursus.exe
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -78,9 +72,42 @@ jobs:
           name: ${{ matrix.artifact }}
           path: target/${{ matrix.target }}/release/${{ matrix.binary }}
 
+  release-windows:
+    name: Release (${{ matrix.artifact }})
+    runs-on: windows-latest
+    env:
+      RUSTFLAGS: "-C target-feature=+crt-static"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+            binary: cursus.exe
+          - target: aarch64-pc-windows-msvc
+            artifact: windows-aarch64
+            binary: cursus.exe
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
+          targets: ${{ matrix.target }}
+
+      - name: Build ${{ matrix.artifact }}
+        run: cargo build --release -p cursus-bin --target ${{ matrix.target }}
+
+      - name: Upload ${{ matrix.artifact }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+
   smoke-test:
     name: Smoke test (${{ matrix.artifact }})
-    needs: [release, release-macos]
+    needs: [release, release-macos, release-windows]
     strategy:
       fail-fast: false
       matrix:
@@ -114,6 +141,49 @@ jobs:
       - name: Make executable
         if: runner.os != 'Windows'
         run: chmod +x ./bin/${{ matrix.binary }}
+
+      - name: Set up MSVC dev environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Assert static linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="./bin/${{ matrix.binary }}"
+          case "${{ runner.os }}" in
+            Linux)
+              file "$BIN"
+              if ! file "$BIN" | grep -q "statically linked"; then
+                echo "FAIL: binary is not statically linked"
+                exit 1
+              fi
+              echo "OK: musl binary is statically linked"
+              ;;
+            macOS)
+              file "$BIN"
+              otool -L "$BIN"
+              bad=$(set +o pipefail; otool -L "$BIN" | tail -n +2 | awk '{print $1}' \
+                    | grep -vE '^(/usr/lib/|/System/Library/)' || true)
+              if [ -n "$bad" ]; then
+                echo "FAIL: non-system dynamic dependencies found:"
+                echo "$bad"
+                exit 1
+              fi
+              echo "OK: only system dylibs linked"
+              ;;
+            Windows)
+              dumpbin //DEPENDENTS "$BIN"
+              bad=$(set +o pipefail; dumpbin //DEPENDENTS "$BIN" 2>&1 \
+                    | grep -iE '(msvcp|vcruntime|msvcr|api-ms-win-crt)' || true)
+              if [ -n "$bad" ]; then
+                echo "FAIL: CRT DLL dependencies found — +crt-static did not apply:"
+                echo "$bad"
+                exit 1
+              fi
+              echo "OK: no CRT DLL dependencies"
+              ;;
+          esac
 
       - name: Run smoke test
         run: ./bin/${{ matrix.binary }} --version

@@ -38,19 +38,23 @@ args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "aarch64-apple-
 [tasks.release-macos]
 dependencies = ["release-macos-x86_64", "release-macos-aarch64"]
 
+# Windows tasks require a Windows host with MSVC installed; not runnable from the Nix dev shell.
 [tasks.release-windows-x86_64]
 command = "cargo"
-args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "x86_64-pc-windows-gnullvm"]
+args = ["build", "--release", "-p", "cursus-bin", "--target", "x86_64-pc-windows-msvc"]
+
+[tasks.release-windows-x86_64.env]
+RUSTFLAGS = "-C target-feature=+crt-static"
 
 [tasks.release-windows-aarch64]
 command = "cargo"
-args = ["zigbuild", "--release", "-p", "cursus-bin", "--target", "aarch64-pc-windows-gnullvm"]
+args = ["build", "--release", "-p", "cursus-bin", "--target", "aarch64-pc-windows-msvc"]
+
+[tasks.release-windows-aarch64.env]
+RUSTFLAGS = "-C target-feature=+crt-static"
 
 [tasks.release-windows]
 dependencies = ["release-windows-x86_64", "release-windows-aarch64"]
-
-[tasks.release-cross]
-dependencies = ["release-linux", "release-windows"]
 
 [tasks.release]
 dependencies = ["release-linux", "release-macos", "release-windows"]

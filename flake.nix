@@ -35,8 +35,6 @@
             "riscv64gc-unknown-linux-musl"
             "x86_64-apple-darwin"
             "aarch64-apple-darwin"
-            "x86_64-pc-windows-gnullvm"
-            "aarch64-pc-windows-gnullvm"
           ];
         };
         # Minimal nightly toolchain for CI: just rustc + cargo for the host target.
