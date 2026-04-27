@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-04-27
+
+### Bug Fixes
+
+- Fixes attestation verification failing on Linux during `npm install @zantarix/cursus`. [698d77a]
+
 ## 0.3.0 - 2026-04-27
 
 ### Features
