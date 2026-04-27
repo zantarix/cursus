@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-04-27
+
+### Features
+
+- version sync to 0.4.0 (linked versions)
+
 ## 0.3.2 - 2026-04-27
 
 ### Bug Fixes

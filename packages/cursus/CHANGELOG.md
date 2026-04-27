@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 - 2026-04-27
+
+### Features
+
+- Fixes `cursus change` incorrectly attributing file changes inside an ignored sub-project to its releasable parent. Adds `match_files_to_projects_in_scope`, `Config::load_all_projects`, and `Config::load_projects_partitioned` to the public API. [3ca0e57]
+
+### Bug Fixes
+
+- Fixes `cursus change --no-interactive` to select only git-changed projects by default, falling back to all projects when none are detected. Explicit `--project` flags are unaffected. [e1620a2]
+- Fixes `cursus change --change-type <type>` (without `--project`) incorrectly selecting all projects when git-changed projects are available. It now selects only changed projects, consistent with the interactive TUI pre-selection. [e1620a2]
+
 ## 0.3.2 - 2026-04-27
 
 ### Bug Fixes
