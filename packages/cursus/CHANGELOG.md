@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 - 2026-04-27
+
+### Bug Fixes
+
+- Adds `Project::is_releasable_under(&Config)`, `Project::is_prepared_for_release(&dyn Filesystem)`, and `package_manager::matching::match_files_to_projects` as public API. [3082f8a]
+
 ## 0.3.1 - 2026-04-27
 
 ### Bug Fixes
