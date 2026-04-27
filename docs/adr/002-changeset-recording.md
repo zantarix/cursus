@@ -63,3 +63,15 @@ Changesets are explicitly opt-in. Changes that don't warrant a changelog entry â
 - The file format supports per-package change types, providing forward compatibility even though the current TUI applies a single type to all selected packages.
 - The `.cursus/` directory serves double duty for both configuration and changeset storage. This keeps the repository footprint minimal (one directory) but means glob patterns for changesets must exclude `config.toml`.
 - Interactive and non-interactive modes share the same underlying logic, with the TUI being a presentation layer on top. This ensures CI scripts produce identical changeset files to local development.
+
+## Errata
+
+### 2026-04-27: Default project selection in non-interactive mode
+
+The Decision section above states that in non-interactive mode, omitting `-p <project-name>` defaults to selecting all projects. This default behavior has been changed to align with the TUI's pre-selection logic.
+
+- When `cursus change --no-interactive` is invoked without any `--project` flags, the command now selects only git-changed projects, using the same three-source diff logic as the TUI pre-selection (committed changes since `origin/HEAD`, staged changes, and unstaged changes).
+- If no git-changed projects are detected, the command falls back to selecting all projects (preserving the original default for repositories with no detectable changes).
+- Explicit `--project` flags continue to take exact precedence and are unaffected by this change.
+
+No new ADR was written for this change. It is a bug fix and behavior alignment between the interactive and non-interactive modes (consistent with the original Decision intent that "interactive and non-interactive modes share the same underlying logic"), rather than a new architectural decision.

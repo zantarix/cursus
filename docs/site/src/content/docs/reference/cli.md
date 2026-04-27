@@ -39,7 +39,7 @@ cursus change [OPTIONS]
 |------|-------|-------------|
 | `--change-type <TYPE>` | `-t` | Change type: `major`, `minor`, or `patch` |
 | `--message <TEXT>` | `-m` | Description of the change |
-| `--project <NAME>` | `-p` | Package(s) to apply to. Repeatable. Defaults to all |
+| `--project <NAME>` | `-p` | Package(s) to apply to. Repeatable. Defaults to git-changed projects, or all if none detected |
 | `--auto` | | Derive changeset from the most recent Conventional Commit |
 | `--no-git` | | Skip commit and push (requires `--auto`) |
 

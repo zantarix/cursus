@@ -199,15 +199,21 @@ fn build_initial_screen(
 
 /// Runs the interactive TUI for selecting projects and a change type.
 ///
-/// Displays a terminal UI that allows the user to select which projects
-/// to include and the type of semantic version change. Projects are split
-/// into "Changed" (pre-selected) and "Unchanged" (unselected) groups based
-/// on the provided `changed` classification.
+/// When `options.change_type` is `Some`, no terminal is opened. Projects are
+/// selected immediately: if `options.projects` is supplied those explicit
+/// indices take precedence; otherwise the "changed" group (first
+/// `changed_count` entries of the reordered list) is used, falling back to
+/// all projects when `changed_count == 0`.
+///
+/// When `options.change_type` is `None`, a terminal UI is displayed. Projects
+/// are split into "Changed" (pre-selected) and "Unchanged" (unselected) groups
+/// based on the provided `changed` classification.
 ///
 /// # Returns
 ///
-/// Returns `Ok(Some(ChangeResult))` if the user completes selection,
-/// or `Ok(None)` if the user cancels.
+/// Returns `Ok(Some(ChangeResult))` if selection completes (either via the
+/// early-return path or user confirmation in the TUI), or `Ok(None)` if the
+/// user cancels.
 ///
 /// # Errors
 ///
@@ -236,6 +242,8 @@ pub fn run(
 	if let Some(change_type) = options.change_type {
 		let indices = if have_projects {
 			project_indices
+		} else if ro.changed_count > 0 {
+			(0..ro.changed_count).collect()
 		} else {
 			(0..ro.projects.len()).collect()
 		};
@@ -477,6 +485,52 @@ mod tests {
 			matches!(screen, Screen::SinglePackage { .. }),
 			"Expected SinglePackage for one project"
 		);
+	}
+
+	// --- change_type short-circuit tests ---
+
+	/// When --change-type is supplied without --project, only changed projects
+	/// should be included in the result (not all projects).
+	#[test]
+	fn run_change_type_shortcircuit_selects_only_changed() {
+		let projects = dummy_projects(3);
+		let changed = vec![true, false, false];
+		let options = ChangeOptions {
+			change_type: Some(ChangeType::Patch),
+			projects: None,
+		};
+		let result = run(&projects, &options, &changed).unwrap().unwrap();
+		assert_eq!(result.projects.len(), 1);
+		assert_eq!(result.projects[0].0.name(), "project-0");
+	}
+
+	/// When --change-type is supplied and no projects are changed, fall back
+	/// to all projects (preserves prior behaviour for clean working trees).
+	#[test]
+	fn run_change_type_shortcircuit_falls_back_to_all_when_none_changed() {
+		let projects = dummy_projects(2);
+		let changed = vec![false, false];
+		let options = ChangeOptions {
+			change_type: Some(ChangeType::Minor),
+			projects: None,
+		};
+		let result = run(&projects, &options, &changed).unwrap().unwrap();
+		assert_eq!(result.projects.len(), 2);
+	}
+
+	/// Explicit --project flags override changed detection even in the short-circuit.
+	#[test]
+	fn run_change_type_shortcircuit_explicit_projects_override_changed() {
+		let projects = dummy_projects(3);
+		// Only project-1 is "changed", but we explicitly request project-2 (index 2).
+		let changed = vec![false, true, false];
+		let options = ChangeOptions {
+			change_type: Some(ChangeType::Patch),
+			projects: Some(vec![2]),
+		};
+		let result = run(&projects, &options, &changed).unwrap().unwrap();
+		assert_eq!(result.projects.len(), 1);
+		assert_eq!(result.projects[0].0.name(), "project-2");
 	}
 
 	/// Catches the `<`→`<=` mutation at line 188: projects[0] (index 0 < changed_count=1)

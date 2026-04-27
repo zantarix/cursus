@@ -22,7 +22,7 @@ pub struct ChangeArgs {
 	#[arg(short = 't', long, conflicts_with = "auto")]
 	pub change_type: Option<ChangeType>,
 
-	/// Project name(s) to include (repeatable; defaults to all in non-interactive mode)
+	/// Project name(s) to include (repeatable; defaults to git-changed projects, or all if none detected)
 	#[arg(short = 'p', long = "project")]
 	pub projects: Vec<String>,
 
@@ -188,12 +188,30 @@ async fn cmd_change_auto(
 	Ok(ExitCode::SUCCESS)
 }
 
-/// Runs the `change` subcommand.
+/// Builds the non-interactive [`change::ChangeResult`].
+///
+/// Selection rules (when `project_indices` is `None`, i.e. no `--project` flags):
+/// - Projects flagged as changed in `changed` are selected.
+/// - Falls back to all projects when no project is flagged as changed (e.g. clean
+///   working tree, or when all git diff sources failed and the fallback all-true
+///   vector was replaced by an all-false one).
+///
+/// When `project_indices` is `Some`, those explicit indices are used verbatim and
+/// `changed` is ignored.
+///
+/// # Invariant
+/// `changed` must be parallel to `projects` (same length).
 fn resolve_non_interactive(
 	args: &ChangeArgs,
 	projects: &[crate::package_manager::Project],
 	project_indices: &Option<Vec<usize>>,
+	changed: &[bool],
 ) -> anyhow::Result<change::ChangeResult> {
+	debug_assert_eq!(
+		projects.len(),
+		changed.len(),
+		"changed must be parallel to projects"
+	);
 	let Some(ct) = args.change_type else {
 		bail!("--change-type is required in non-interactive mode");
 	};
@@ -202,7 +220,18 @@ fn resolve_non_interactive(
 	}
 	let selected: Vec<crate::package_manager::Project> = match project_indices {
 		Some(indices) => indices.iter().map(|&i| projects[i].clone()).collect(),
-		None => projects.to_vec(),
+		None => {
+			let changed_projects: Vec<_> = projects
+				.iter()
+				.zip(changed.iter())
+				.filter_map(|(p, &c)| c.then_some(p.clone()))
+				.collect();
+			if changed_projects.is_empty() {
+				projects.to_vec()
+			} else {
+				changed_projects
+			}
+		}
 	};
 	Ok(change::ChangeResult {
 		projects: selected.into_iter().map(|p| (p, ct)).collect(),
@@ -210,6 +239,7 @@ fn resolve_non_interactive(
 	})
 }
 
+/// Runs the `change` subcommand.
 pub(crate) async fn cmd_change(
 	args: &ChangeArgs,
 	global: &GlobalArgs,
@@ -224,15 +254,15 @@ pub(crate) async fn cmd_change(
 	let projects = config.load_projects(env).await?;
 
 	let project_indices = resolve_project_indices(&projects, &args.projects)?;
+	let changed = classify_changed_projects(git, &projects).await;
 
 	let result = if global.no_interactive {
-		resolve_non_interactive(args, &projects, &project_indices)?
+		resolve_non_interactive(args, &projects, &project_indices, &changed)?
 	} else {
 		let options = change::ChangeOptions {
 			change_type: args.change_type,
 			projects: project_indices.clone(),
 		};
-		let changed = classify_changed_projects(git, &projects).await;
 		let projects_clone = projects.clone();
 		let mut r = match tokio::task::spawn_blocking(move || {
 			change::run(&projects_clone, &options, &changed)
@@ -542,5 +572,77 @@ mod tests {
 		];
 		let result = classify_changed_projects(&git, &projects).await;
 		assert_eq!(result, vec![true, true]);
+	}
+
+	fn make_args(change_type: ChangeType, message: &str) -> ChangeArgs {
+		ChangeArgs {
+			change_type: Some(change_type),
+			message: Some(message.to_string()),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn resolve_non_interactive_uses_changed_when_no_project_flags() {
+		let projects = vec![
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+		];
+		let args = make_args(ChangeType::Patch, "fix thing");
+		let result = resolve_non_interactive(&args, &projects, &None, &[true, false]).unwrap();
+		let names: Vec<_> = result.projects.iter().map(|(p, _)| p.name()).collect();
+		assert_eq!(names, vec!["a"]);
+	}
+
+	#[test]
+	fn resolve_non_interactive_falls_back_to_all_when_no_changes() {
+		let projects = vec![
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+		];
+		let args = make_args(ChangeType::Patch, "fix thing");
+		let result = resolve_non_interactive(&args, &projects, &None, &[false, false]).unwrap();
+		let names: Vec<_> = result.projects.iter().map(|(p, _)| p.name()).collect();
+		assert_eq!(names, vec!["a", "b"]);
+	}
+
+	#[test]
+	fn resolve_non_interactive_all_changed_returns_all() {
+		let projects = vec![
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+		];
+		let args = make_args(ChangeType::Minor, "feat thing");
+		let result = resolve_non_interactive(&args, &projects, &None, &[true, true]).unwrap();
+		let names: Vec<_> = result.projects.iter().map(|(p, _)| p.name()).collect();
+		assert_eq!(names, vec!["a", "b"]);
+	}
+
+	#[test]
+	fn resolve_non_interactive_explicit_projects_override_changed() {
+		let projects = vec![
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+		];
+		let args = make_args(ChangeType::Patch, "fix thing");
+		// Explicit: only project index 0 ("a"); changed says only "b" changed
+		let result =
+			resolve_non_interactive(&args, &projects, &Some(vec![0]), &[false, true]).unwrap();
+		let names: Vec<_> = result.projects.iter().map(|(p, _)| p.name()).collect();
+		assert_eq!(names, vec!["a"]);
+	}
+
+	#[test]
+	fn resolve_non_interactive_explicit_projects_override_when_all_changed() {
+		let projects = vec![
+			Project::new_test("a", "/nonexistent/packages/a"),
+			Project::new_test("b", "/nonexistent/packages/b"),
+		];
+		let args = make_args(ChangeType::Patch, "fix thing");
+		// Explicit: only project index 0 ("a"); both projects are changed — explicit still wins
+		let result =
+			resolve_non_interactive(&args, &projects, &Some(vec![0]), &[true, true]).unwrap();
+		let names: Vec<_> = result.projects.iter().map(|(p, _)| p.name()).collect();
+		assert_eq!(names, vec!["a"]);
 	}
 }
