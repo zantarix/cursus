@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 - 2026-04-27
+
+### Features
+
+- Verifies the Sigstore build-provenance attestation of the downloaded binary during `npm install @zantarix/cursus`, confirming it was produced by the official release workflow before writing it to disk. [c453746]
+
 ## 0.2.3 - 2026-04-27
 
 ### Bug Fixes
