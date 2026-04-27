@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 - 2026-04-27
+
+### Bug Fixes
+
+- Fixes Windows release binaries, which were failing to build due to a linker incompatibility in the cross-compilation toolchain. Windows binaries are now built natively using the MSVC toolchain with a statically linked CRT, producing self-contained executables with no runtime DLL dependencies. [6de8fe6]
+
 ## 0.2.2 - 2026-04-25
 
 ### Bug Fixes
