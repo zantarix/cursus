@@ -70,6 +70,34 @@ pub fn match_files_to_projects(
 	matched
 }
 
+/// Like [`match_files_to_projects`], but uses `attribution_scope` for longest-prefix
+/// matching and returns a `Vec<bool>` parallel to `projects`.
+///
+/// Use this when `projects` is a filtered subset of all workspace projects (e.g.
+/// after applying `[global].ignore`). Files attributed to a project that is present
+/// in `attribution_scope` but absent from `projects` — such as an ignored
+/// sub-project — are **not** propagated to that project's parent.
+///
+/// When `attribution_scope` equals `projects`, this produces the same result as
+/// calling [`match_files_to_projects`] directly.
+pub fn match_files_to_projects_in_scope(
+	projects: &[Project],
+	attribution_scope: &[Project],
+	git_root: &AbsolutePath,
+	changed_files: &HashSet<String>,
+) -> Vec<bool> {
+	let scope_matched = match_files_to_projects(attribution_scope, git_root, changed_files);
+	let matched_paths: HashSet<&AbsolutePath> = attribution_scope
+		.iter()
+		.zip(scope_matched.iter())
+		.filter_map(|(p, &m)| m.then_some(p.path()))
+		.collect();
+	projects
+		.iter()
+		.map(|p| matched_paths.contains(p.path()))
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use std::collections::HashSet;
@@ -275,6 +303,67 @@ mod tests {
 			match_files_to_projects(&projects, &path, &files),
 			vec![true]
 		);
+	}
+
+	// ── match_files_to_projects_in_scope ──────────────────────────────────────
+
+	#[test]
+	fn in_scope_ignored_subproject_prevents_parent_attribution() {
+		// /foo is releasable; /foo/tests is ignored (absent from `projects`).
+		// A file inside /foo/tests must NOT be attributed to /foo.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let releasable = vec![
+			Project::new_test("root", "/repo"),
+			Project::new_test("foo", "/repo/foo"),
+		];
+		let all = vec![
+			Project::new_test("root", "/repo"),
+			Project::new_test("foo", "/repo/foo"),
+			Project::new_test("foo-tests", "/repo/foo/tests"),
+		];
+		let mut files = HashSet::new();
+		files.insert("foo/tests/README.md".to_string());
+		// foo/tests gets the attribution; foo and root are not changed.
+		assert_eq!(
+			match_files_to_projects_in_scope(&releasable, &all, &path, &files),
+			vec![false, false]
+		);
+	}
+
+	#[test]
+	fn in_scope_file_outside_ignored_subproject_still_attributes_parent() {
+		let path = AbsolutePath::new("/repo").unwrap();
+		let releasable = vec![
+			Project::new_test("root", "/repo"),
+			Project::new_test("foo", "/repo/foo"),
+		];
+		let all = vec![
+			Project::new_test("root", "/repo"),
+			Project::new_test("foo", "/repo/foo"),
+			Project::new_test("foo-tests", "/repo/foo/tests"),
+		];
+		let mut files = HashSet::new();
+		files.insert("foo/src/lib.rs".to_string());
+		// foo/src/lib.rs belongs to foo (not to foo-tests), so foo is changed.
+		assert_eq!(
+			match_files_to_projects_in_scope(&releasable, &all, &path, &files),
+			vec![false, true]
+		);
+	}
+
+	#[test]
+	fn in_scope_same_scope_as_projects_matches_identically() {
+		// When attribution_scope == projects, result must match match_files_to_projects.
+		let path = AbsolutePath::new("/repo").unwrap();
+		let projects = vec![
+			Project::new_test("a", "/repo/packages/a"),
+			Project::new_test("b", "/repo/packages/b"),
+		];
+		let mut files = HashSet::new();
+		files.insert("packages/a/src/lib.rs".to_string());
+		let direct = match_files_to_projects(&projects, &path, &files);
+		let scoped = match_files_to_projects_in_scope(&projects, &projects, &path, &files);
+		assert_eq!(direct, scoped);
 	}
 
 	#[test]

@@ -10,7 +10,7 @@ use log::info;
 use crate::git::Git;
 use crate::model::changeset::{ChangeType, Changeset, derive_changeset};
 use crate::model::config::Config;
-use crate::package_manager::matching::match_files_to_projects;
+use crate::package_manager::matching::match_files_to_projects_in_scope;
 use crate::tui::change;
 
 use super::GlobalArgs;
@@ -46,11 +46,16 @@ pub struct ChangeArgs {
 /// - Staged files (`git diff --name-only --cached`)
 /// - Unstaged working-tree files (`git diff --name-only`)
 ///
+/// `all_projects` is used for longest-prefix attribution so that files inside
+/// ignored sub-projects (present in `all_projects` but absent from `projects`)
+/// are not mis-attributed to their releasable parents.
+///
 /// Falls back to `vec![true; projects.len()]` if all three diff sources fail
 /// (e.g. no git repo or a completely uninitialised environment).
 async fn classify_changed_projects(
 	git: &dyn Git,
 	projects: &[crate::package_manager::Project],
+	all_projects: &[crate::package_manager::Project],
 ) -> Vec<bool> {
 	// Collect changed file paths from committed, staged, and unstaged sources.
 	// Each call is independent; failures are treated as empty (no files from that source).
@@ -70,7 +75,7 @@ async fn classify_changed_projects(
 		.flatten()
 		.collect();
 
-	match_files_to_projects(projects, git.path(), &changed_files)
+	match_files_to_projects_in_scope(projects, all_projects, git.path(), &changed_files)
 }
 
 /// Maps `--project` names to indices into the project list.
@@ -138,9 +143,10 @@ async fn cmd_change_auto(
 		return Ok(ExitCode::SUCCESS);
 	};
 
-	let projects = config.load_projects(env).await?;
+	let (all_projects, projects) = config.load_projects_partitioned(env).await?;
 	let changed_files: HashSet<String> = git.diff_tree_names("HEAD").await?.into_iter().collect();
-	let matched_flags = match_files_to_projects(&projects, git.path(), &changed_files);
+	let matched_flags =
+		match_files_to_projects_in_scope(&projects, &all_projects, git.path(), &changed_files);
 	let matched: Vec<_> = projects
 		.iter()
 		.zip(matched_flags.iter())
@@ -251,10 +257,10 @@ pub(crate) async fn cmd_change(
 	}
 
 	let git = env.git();
-	let projects = config.load_projects(env).await?;
+	let (all_projects, projects) = config.load_projects_partitioned(env).await?;
 
 	let project_indices = resolve_project_indices(&projects, &args.projects)?;
-	let changed = classify_changed_projects(git, &projects).await;
+	let changed = classify_changed_projects(git, &projects, &all_projects).await;
 
 	let result = if global.no_interactive {
 		resolve_non_interactive(args, &projects, &project_indices, &changed)?
@@ -458,7 +464,7 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![true, false]);
 	}
 
@@ -470,7 +476,7 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("a-extra", "/nonexistent/packages/a-extra"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![false, true]);
 	}
 
@@ -481,7 +487,7 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![true, true]);
 	}
 
@@ -489,7 +495,7 @@ mod tests {
 	async fn classify_changed_projects_empty_diff_returns_unchanged() {
 		let git = make_git_with_diff_output(b"");
 		let projects = vec![Project::new_test("a", "/nonexistent/packages/a")];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![false]);
 	}
 
@@ -497,7 +503,7 @@ mod tests {
 	async fn classify_changed_projects_root_project_changed_when_any_file_changed() {
 		let git = make_git_with_diff_output(b"src/main.rs\n");
 		let projects = vec![Project::new_test("root", "/nonexistent")];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![true]);
 	}
 
@@ -505,7 +511,7 @@ mod tests {
 	async fn classify_changed_projects_root_project_unchanged_when_empty_diff() {
 		let git = make_git_with_diff_output(b"");
 		let projects = vec![Project::new_test("root", "/nonexistent")];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![false]);
 	}
 
@@ -521,7 +527,7 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![true, false]);
 	}
 
@@ -537,7 +543,7 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![false, true]);
 	}
 
@@ -554,7 +560,7 @@ mod tests {
 			Project::new_test("b", "/nonexistent/packages/b"),
 			Project::new_test("c", "/nonexistent/packages/c"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![true, true, true]);
 	}
 
@@ -570,8 +576,26 @@ mod tests {
 			Project::new_test("a", "/nonexistent/packages/a"),
 			Project::new_test("b", "/nonexistent/packages/b"),
 		];
-		let result = classify_changed_projects(&git, &projects).await;
+		let result = classify_changed_projects(&git, &projects, &projects).await;
 		assert_eq!(result, vec![true, true]);
+	}
+
+	#[tokio::test]
+	async fn classify_changed_projects_ignored_subproject_blocks_parent_attribution() {
+		// foo/tests is ignored (not in `projects`), but is in `all_projects`.
+		// A file inside foo/tests must NOT be attributed to foo.
+		let git = make_git_with_diff_output(b"packages/foo/tests/README.md\n");
+		let projects = vec![
+			Project::new_test("root", "/nonexistent"),
+			Project::new_test("foo", "/nonexistent/packages/foo"),
+		];
+		let all_projects = vec![
+			Project::new_test("root", "/nonexistent"),
+			Project::new_test("foo", "/nonexistent/packages/foo"),
+			Project::new_test("foo-tests", "/nonexistent/packages/foo/tests"),
+		];
+		let result = classify_changed_projects(&git, &projects, &all_projects).await;
+		assert_eq!(result, vec![false, false]);
 	}
 
 	fn make_args(change_type: ChangeType, message: &str) -> ChangeArgs {

@@ -290,18 +290,103 @@ impl Config {
 		Ok(projects)
 	}
 
-	/// Loads all projects using the configuration.
+	/// Loads the releasable project set after applying `[global].ignore` filtering.
 	///
-	/// Builds package manager adapters and enumerates all projects.
+	/// Prefer [`load_projects_partitioned`][Self::load_projects_partitioned] when
+	/// you also need the unfiltered set for file-to-project attribution.
 	///
 	/// # Errors
 	///
 	/// Returns an error if:
 	/// - Projects cannot be enumerated
-	/// - No projects are found
+	/// - No projects remain after filtering
 	pub async fn load_projects(&self, env: &crate::Env) -> anyhow::Result<Vec<Project>> {
+		let (_, filtered) = self.load_projects_partitioned(env).await?;
+		Ok(filtered)
+	}
+
+	/// Enumerates all projects without applying `[global].ignore` filters.
+	///
+	/// Use the result as the `attribution_scope` argument to
+	/// [`match_files_to_projects_in_scope`][crate::package_manager::matching::match_files_to_projects_in_scope]
+	/// so that files inside ignored sub-projects are not mis-attributed to their
+	/// releasable parents.
+	///
+	/// Prefer [`load_projects_partitioned`][Self::load_projects_partitioned] when
+	/// you also need the filtered set, to avoid enumerating projects twice.
+	///
+	/// # Errors
+	///
+	/// Returns an error if projects cannot be enumerated.
+	pub async fn load_all_projects(&self, env: &crate::Env) -> anyhow::Result<Vec<Project>> {
+		let (all, _) = self.load_projects_partitioned(env).await?;
+		Ok(all)
+	}
+
+	/// Enumerates all projects in a single pass, returning both the complete set and
+	/// the `[global].ignore`-filtered (releasable) subset as `(all, releasable)`.
+	///
+	/// Use this instead of calling [`load_all_projects`][Self::load_all_projects] and
+	/// [`load_projects`][Self::load_projects] separately to avoid enumerating the
+	/// workspace twice.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - Projects cannot be enumerated
+	/// - An ignore pattern is invalid glob syntax
+	/// - No projects remain after filtering
+	pub async fn load_projects_partitioned(
+		&self,
+		env: &crate::Env,
+	) -> anyhow::Result<(Vec<Project>, Vec<Project>)> {
 		let adapters = self.create_adapters(env)?;
-		self.load_projects_for_adapters(&adapters).await
+		let all = package_manager::enumerate_projects(adapters).await?;
+
+		validate_workspace_version_linking(&all, &self.data.linked_versions)?;
+
+		let ignore_patterns = self
+			.data
+			.global
+			.ignore
+			.iter()
+			.map(|p| {
+				glob::Pattern::new(p).with_context(|| format!("Invalid ignore glob pattern: {p:?}"))
+			})
+			.collect::<anyhow::Result<Vec<_>>>()?;
+
+		let pattern_matched: Vec<bool> = ignore_patterns
+			.iter()
+			.map(|pat| all.iter().any(|p| pat.matches(p.name())))
+			.collect();
+
+		let filtered: Vec<Project> = all
+			.iter()
+			.filter(|p| !ignore_patterns.iter().any(|pat| pat.matches(p.name())))
+			.cloned()
+			.collect();
+
+		for (matched, raw) in pattern_matched.iter().zip(self.data.global.ignore.iter()) {
+			if !matched {
+				log::warn!("Ignore pattern {raw:?} did not match any project");
+			}
+		}
+
+		if filtered.is_empty() {
+			if all.is_empty() {
+				bail!(
+					"No projects found. Check that your package manager configuration is correct."
+				);
+			} else {
+				bail!(
+					"All {} project(s) were excluded by [global].ignore patterns. \
+					 Check that your ignore patterns are not too broad.",
+					all.len()
+				);
+			}
+		}
+
+		Ok((all, filtered))
 	}
 
 	/// Saves the configuration to `.cursus/config.toml`.
