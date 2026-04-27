@@ -11,6 +11,8 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     defaults:
       run:
         shell: nix develop -c bash -e {0}
@@ -37,12 +39,21 @@ jobs:
             "./cursus-osx-x86_64#cursus-osx-x86_64" \
             "./cursus-osx-aarch64#cursus-osx-aarch64"
 
+      - name: Attest macOS artifacts
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: |
+            ./cursus-osx-x86_64
+            ./cursus-osx-aarch64
+
   windows:
     name: Build Windows artifacts
     if: startsWith(github.event.release.tag_name, 'cursus@')
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       RUSTFLAGS: "-C target-feature=+crt-static"
 
@@ -71,3 +82,10 @@ jobs:
           gh release upload "${{ github.event.release.tag_name }}" \
             "./cursus-windows-x86_64.exe#cursus-windows-x86_64.exe" \
             "./cursus-windows-aarch64.exe#cursus-windows-aarch64.exe"
+
+      - name: Attest Windows artifacts
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: |
+            ./cursus-windows-x86_64.exe
+            ./cursus-windows-aarch64.exe

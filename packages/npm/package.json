@@ -29,8 +29,13 @@
 	},
 	"license": "MPL-2.0",
 	"author": "Matthew Scharley <github@zantarix.com>",
+	"dependencies": {
+		"sigstore": "4.1.0"
+	},
 	"devDependencies": {
 		"@mscharley/eslint-config": "4.2.23",
+		"@sigstore/rekor-types": "4.0.0",
+		"@types/make-fetch-happen": "10.0.4",
 		"@types/node": "24.12.2",
 		"typescript": "5.9.3"
 	}
