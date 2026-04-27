@@ -89,3 +89,46 @@ jobs:
           subject-path: |
             ./cursus-windows-x86_64.exe
             ./cursus-windows-aarch64.exe
+
+  linux:
+    name: Build Linux artifacts
+    if: startsWith(github.event.release.tag_name, 'cursus@')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: nix develop -c bash -e {0}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+        with:
+          use-flakehub: false
+
+      - name: Build Linux artifacts
+        run: cargo make release-linux
+
+      - name: Upload artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp target/x86_64-unknown-linux-musl/release/cursus ./cursus-linux-x86_64
+          cp target/aarch64-unknown-linux-musl/release/cursus ./cursus-linux-aarch64
+          cp target/riscv64gc-unknown-linux-musl/release/cursus ./cursus-linux-riscv64gc
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "./cursus-linux-x86_64#cursus-linux-x86_64" \
+            "./cursus-linux-aarch64#cursus-linux-aarch64" \
+            "./cursus-linux-riscv64gc#cursus-linux-riscv64gc"
+
+      - name: Attest Linux artifacts
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: |
+            ./cursus-linux-x86_64
+            ./cursus-linux-aarch64
+            ./cursus-linux-riscv64gc

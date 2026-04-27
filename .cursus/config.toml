@@ -34,12 +34,5 @@ strategy = "branch"
 enabled = true
 # owner = "zantarix"
 # repo = "cursus"
-build_command = "cp README.md packages/npm && cargo make release-linux"
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
-
-[github.artifacts.cursus]
-cursus-linux-x86_64    = "target/x86_64-unknown-linux-musl/release/cursus"
-cursus-linux-aarch64   = "target/aarch64-unknown-linux-musl/release/cursus"
-cursus-linux-riscv64gc = "target/riscv64gc-unknown-linux-musl/release/cursus"
-# OSX and Windows artifacts are built separately on native runners as they can't be cross-compiled.
-# See .github/workflows/release-artifacts.yml for more.
+# All release artifacts are built and uploaded by .github/workflows/release-artifacts.yml.

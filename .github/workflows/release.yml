@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-      attestations: write
     defaults:
       run:
         shell: nix develop -c bash -e {0}
@@ -45,6 +44,9 @@ jobs:
         run: npm install
         working-directory: "./packages/npm"
 
+      - name: Copy README to npm package
+        run: cp README.md packages/npm/
+
       - name: Build cursus
         run: cargo build --release
 
@@ -60,11 +62,3 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: ./target/release/cursus ci --no-interactive
 
-      - name: Attest Linux artifacts
-        if: "hashFiles('target/x86_64-unknown-linux-musl/release/cursus') != '' && hashFiles('target/aarch64-unknown-linux-musl/release/cursus') != '' && hashFiles('target/riscv64gc-unknown-linux-musl/release/cursus') != ''"
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
-        with:
-          subject-path: |
-            target/x86_64-unknown-linux-musl/release/cursus
-            target/aarch64-unknown-linux-musl/release/cursus
-            target/riscv64gc-unknown-linux-musl/release/cursus

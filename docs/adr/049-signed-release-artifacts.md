@@ -116,3 +116,20 @@ Generate a Minisign or GPG signing key, store its private half in a GitHub Actio
 ### User-side opt-in verification only (`gh attestation verify`)
 
 Produce attestations on the release side but rely on users to verify them by running `gh attestation verify` against the binary they download. This was rejected because the default install path -- `npm install @zantarix/cursus` -- would remain unauthenticated. Users who do not know about the verification command, or who automate installs in CI, would be unprotected. This is structurally inconsistent with the [ADR-022](022-distribution-strategy.md) principle of hard-failing rather than silently degrading: it pushes a security-critical step onto users who do not know they need to take it.
+
+## Errata
+
+### 2026-04-27: Two-workflow attestation split was unworkable; all attestations now produced by `release-artifacts.yml`
+
+The Decision section above describes a two-workflow split for producing attestations: Linux artifacts attested in `release.yml` (triggered by `push: branches: [main]`) and macOS/Windows artifacts attested in `release-artifacts.yml` (triggered by `release: published`). The platform-keyed identity policy in the npm postinstall was designed around that split, requiring `release.yml@refs/tags/cursus@<version>` for Linux and `release-artifacts.yml@refs/tags/cursus@<version>` for macOS and Windows.
+
+This split was unworkable in practice. `release.yml` runs on a branch push, so the GitHub Actions OIDC token issued to that workflow carries `refs/heads/main` as the ref claim -- not `refs/tags/cursus@<version>`. Fulcio embeds the ref from the OIDC token verbatim in the certificate's Subject Alternative Name, so the attestation produced by `release.yml` could never satisfy the postinstall's `refs/tags/cursus@<version>` identity pin. Verification of Linux binaries hard-failed with a certificate identity mismatch.
+
+The corrected design moves the Linux build, artifact upload, and attestation step out of `release.yml` and into `release-artifacts.yml` alongside the macOS and Windows jobs. Because `release-artifacts.yml` is triggered by `release: published`, all three platform jobs now run against the tag ref and produce attestations whose SAN ref component is `refs/tags/cursus@<version>` as the original identity policy required. As a result:
+
+- All seven artifacts are attested in a single workflow (`release-artifacts.yml`).
+- The npm postinstall's identity policy is simplified to a single expected workflow path -- `https://github.com/zantarix/cursus/.github/workflows/release-artifacts.yml@refs/tags/cursus@<version>` -- for every platform. The platform-keyed branching described in step 4 of the verification sequence is removed.
+- `release.yml` no longer attests anything, and its `attestations: write` permission has been removed. The Linux build (`cargo make release-linux`) and asset upload that were previously driven by `cursus publish` via `[github].build_command` are now an explicit Linux job in `release-artifacts.yml`.
+- `.cursus/config.toml` no longer carries a `build_command` or a `[github.artifacts.cursus]` section; the README copy that was embedded in `build_command` is now an explicit step in `release.yml`.
+
+The trust root, Sigstore primitives, hard-fail philosophy, scope, and rejected alternatives are unchanged. Only the workflow that issues the attestations and the per-platform branching in the identity policy are corrected.

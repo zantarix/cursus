@@ -92,17 +92,10 @@ interface InTotoStatement {
 	subject?: Array<{ digest?: Record<string, string> }>;
 }
 
-// Linux artifacts are attested in release.yml; macOS/Windows in release-artifacts.yml.
-// The else-throw branch is intentional: if a new platform is ever added to PLATFORMS
-// without a matching entry here, the postinstall hard-fails rather than silently
-// accepting the wrong identity policy.
+// All artifacts are built and attested in release-artifacts.yml, which triggers on
+// release: published and therefore always carries refs/tags/cursus@<version>.
 function expectedWorkflow(): string {
-	if (platform === 'linux') {
-		return 'release.yml';
-	} else if (platform === 'darwin' || platform === 'win32') {
-		return 'release-artifacts.yml';
-	}
-	throw new Error(`No attestation workflow mapping for platform '${platform}'`);
+	return 'release-artifacts.yml';
 }
 
 async function verifyAttestation(buffer: Buffer): Promise<void> {
