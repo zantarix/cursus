@@ -56,7 +56,9 @@ jobs:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
 
       - name: Build Windows artifacts
-        run: cargo make release-windows
+        run: |
+          cargo build --release -p cursus-bin --target x86_64-pc-windows-msvc
+          cargo build --release -p cursus-bin --target aarch64-pc-windows-msvc
 
       - name: Upload artifacts
         env:
