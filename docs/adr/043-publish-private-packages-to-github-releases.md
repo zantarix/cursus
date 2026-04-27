@@ -109,3 +109,7 @@ A new top-level section like `[publish].private_packages = ["my-action"]` rather
 ### Glob patterns instead of explicit package names
 
 Supporting glob patterns (e.g., `publish_private_packages = ["*-action"]`) to match private packages. This was rejected because the number of private packages needing releases in a typical workspace is small and explicit naming is clearer and less error-prone. Globs risk accidentally matching packages the user did not intend to publish.
+
+## Errata
+
+**2026-04-27**: A subsequent refactor of `publish_projects` consolidated release-readiness gating around the `Project::is_releasable_under` and `Project::is_prepared_for_release` query methods. As a consequence, packages listed in `[git].publish_private_packages` are now subject to the [ADR-031](031-changelog-guard-for-unprepared-packages.md) `CHANGELOG.md` guard before they receive git tags and GitHub Releases -- previously the guard was scoped to registry-publishable packages only. Listed private packages naturally satisfy the guard because `cursus prepare` always creates `CHANGELOG.md`, so the change is observable only in the edge case where the changeset-based flow has been bypassed for such a package (in which case the package is now warned about and skipped instead of receiving an unprepared tag/release). See the Errata in [ADR-031](031-changelog-guard-for-unprepared-packages.md) for details.

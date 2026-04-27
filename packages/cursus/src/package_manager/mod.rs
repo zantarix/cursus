@@ -5,6 +5,7 @@
 //! a unified interface.
 
 mod cargo;
+pub mod matching;
 mod npm;
 
 pub use cargo::CargoAdapter;
@@ -16,6 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use semver::Version;
 
+use crate::filesystem::Filesystem;
+use crate::model::config::Config;
 use crate::path::AbsolutePath;
 
 /// Raw project data returned by package manager adapters.
@@ -176,6 +179,30 @@ impl Project {
 		self.info.publishable
 	}
 
+	/// Returns `true` if `config` allows this project to be released.
+	///
+	/// A project is releasable when its manifest is publishable, or its name
+	/// is listed in `[git].publish_private_packages` (tag-only release path).
+	/// Does **not** check whether release artefacts have been prepared —
+	/// compose with [`Project::is_prepared_for_release`] for that.
+	pub fn is_releasable_under(&self, config: &Config) -> bool {
+		self.is_publishable()
+			|| config
+				.git
+				.publish_private_packages()
+				.iter()
+				.any(|p| p == self.name())
+	}
+
+	/// Returns `true` if a `CHANGELOG.md` exists at this project's root,
+	/// meaning `cursus prepare` has already been run for this project.
+	///
+	/// Compose with [`Project::is_releasable_under`] to determine whether
+	/// the project will be acted on during `cursus publish`.
+	pub async fn is_prepared_for_release(&self, fs: &dyn Filesystem) -> anyhow::Result<bool> {
+		fs.exists(&self.path().child("CHANGELOG.md")).await
+	}
+
 	/// Returns the names of intra-workspace dependencies for this project.
 	///
 	/// The dependency names are cached from when the project was enumerated.
@@ -293,6 +320,14 @@ impl Project {
 				env,
 			)),
 		}
+	}
+
+	/// Creates a non-publishable `Project` for use in unit tests.
+	#[cfg(test)]
+	pub fn new_test_not_publishable(name: &str, path: &str) -> Self {
+		let mut p = Self::new_test(name, path);
+		p.info.publishable = false;
+		p
 	}
 }
 
@@ -735,5 +770,63 @@ mod tests {
 				.to_string()
 				.contains("Unknown package: unknown")
 		);
+	}
+
+	// ── is_releasable_under ───────────────────────────────────────────────────
+
+	#[test]
+	fn is_releasable_under_publishable_project_is_releasable() {
+		let project = Project::new_test("my-lib", "/nonexistent/packages/my-lib");
+		let config = crate::model::config::Config::new();
+		assert!(project.is_releasable_under(&config));
+	}
+
+	#[test]
+	fn is_releasable_under_non_publishable_not_listed_is_not_releasable() {
+		let project =
+			Project::new_test_not_publishable("private-tool", "/nonexistent/packages/private-tool");
+		let config = crate::model::config::Config::new();
+		assert!(!project.is_releasable_under(&config));
+	}
+
+	#[test]
+	fn is_releasable_under_non_publishable_listed_is_releasable() {
+		let project =
+			Project::new_test_not_publishable("private-tool", "/nonexistent/packages/private-tool");
+		let config = crate::model::config::Config::new().with_git(
+			crate::model::config::GitConfig::default()
+				.with_publish_private_packages(vec!["private-tool".to_string()]),
+		);
+		assert!(project.is_releasable_under(&config));
+	}
+
+	#[test]
+	fn is_releasable_under_non_publishable_different_name_listed_is_not_releasable() {
+		let project =
+			Project::new_test_not_publishable("private-tool", "/nonexistent/packages/private-tool");
+		let config = crate::model::config::Config::new().with_git(
+			crate::model::config::GitConfig::default()
+				.with_publish_private_packages(vec!["other-tool".to_string()]),
+		);
+		assert!(!project.is_releasable_under(&config));
+	}
+
+	// ── is_prepared_for_release ───────────────────────────────────────────────
+
+	#[tokio::test]
+	async fn is_prepared_for_release_returns_true_when_changelog_exists() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("CHANGELOG.md"), "# Changelog").unwrap();
+		let project = Project::new_test("my-lib", dir.path().to_str().unwrap());
+		let fs = crate::filesystem::LocalFilesystem;
+		assert!(project.is_prepared_for_release(&fs).await.unwrap());
+	}
+
+	#[tokio::test]
+	async fn is_prepared_for_release_returns_false_when_changelog_absent() {
+		let dir = tempfile::tempdir().unwrap();
+		let project = Project::new_test("my-lib", dir.path().to_str().unwrap());
+		let fs = crate::filesystem::LocalFilesystem;
+		assert!(!project.is_prepared_for_release(&fs).await.unwrap());
 	}
 }

@@ -283,14 +283,7 @@ pub(crate) async fn cmd_publish(
 		no_git: args.no_git,
 		is_multi_package: projects.len() > 1,
 	};
-	let publish = publish_projects(
-		&sorted_projects,
-		&graph,
-		dry_run,
-		env.fs(),
-		config.git.publish_private_packages(),
-	)
-	.await?;
+	let publish = publish_projects(&sorted_projects, &graph, dry_run, env.fs(), &config).await?;
 	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags).await?;
 	log_publish_summary(&publish, &flags, &outcome);
 
@@ -387,9 +380,9 @@ impl PublishState {
 ///
 /// Projects should be pre-sorted in dependency order (leaves first).
 /// Private packages (marked with `private: true` in npm or `publish = false` in Cargo)
-/// are silently skipped unless listed in `publish_private_packages`, in which case they
+/// are silently skipped unless listed in `[git].publish_private_packages`, in which case they
 /// receive git tags and GitHub Releases but are not published to any registry.
-/// Public packages without a `CHANGELOG.md` (never prepared) are warned about and skipped
+/// Releasable packages without a `CHANGELOG.md` (never prepared) are warned about and skipped
 /// without blocking their dependents.
 ///
 /// When a package fails to publish, all of its transitive dependents are skipped
@@ -402,14 +395,14 @@ impl PublishState {
 /// * `graph` - The dependency graph used to determine which packages to skip on failure.
 /// * `dry_run` - If true, only print what would be published without actually publishing.
 /// * `fs` - Filesystem abstraction used to check for `CHANGELOG.md`.
-/// * `publish_private_packages` - Names of private packages that should receive git tags
-///   and GitHub Releases (but not registry publish). Per ADR-043.
+/// * `config` - Repository configuration, used to determine releasable projects via
+///   [`package_manager::Project::is_releasable_under`].
 async fn publish_projects(
 	projects: &[package_manager::Project],
 	graph: &DependencyGraph,
 	dry_run: bool,
 	fs: &dyn crate::filesystem::Filesystem,
-	publish_private_packages: &[String],
+	config: &Config,
 ) -> anyhow::Result<PublishState> {
 	let mut state = PublishState::new();
 
@@ -422,23 +415,13 @@ async fn publish_projects(
 			state.dep_skipped_count += 1;
 			continue;
 		}
-		// Private packages: silently skip unless opted into tag-only publishing (ADR-043).
-		if !project.is_publishable() {
-			let is_listed = publish_private_packages.iter().any(|p| p == project.name());
-			if is_listed && !fs.exists(&project.path().child("CHANGELOG.md")).await? {
-				warn!(
-					"Skipping {}: no CHANGELOG.md found (run 'cursus prepare' first, with an appropriate changeset)",
-					project.name()
-				);
-				state.unprepared_count += 1;
-			} else if is_listed {
-				state.record_private_tagged(project);
-			}
+		// Silently skip projects that are neither publishable nor listed for tag-only release.
+		if !project.is_releasable_under(config) {
 			continue;
 		}
-		// Skip public packages that have never been prepared (no CHANGELOG.md).
+		// Skip projects that have never been prepared (no CHANGELOG.md).
 		// Not added to `blocked` — dependents may be independently publishable.
-		if !fs.exists(&project.path().child("CHANGELOG.md")).await? {
+		if !project.is_prepared_for_release(fs).await? {
 			warn!(
 				"Skipping {}: no CHANGELOG.md found (run 'cursus prepare' first, with an appropriate changeset)",
 				project.name()
@@ -446,7 +429,12 @@ async fn publish_projects(
 			state.unprepared_count += 1;
 			continue;
 		}
-		state.record_outcome(project, graph, dry_run).await;
+		if project.is_publishable() {
+			state.record_outcome(project, graph, dry_run).await;
+		} else {
+			// Non-publishable but releasable: tag-only release (ADR-043).
+			state.record_private_tagged(project);
+		}
 	}
 
 	Ok(state)
