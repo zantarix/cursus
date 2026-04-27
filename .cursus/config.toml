@@ -34,5 +34,6 @@ strategy = "branch"
 enabled = true
 # owner = "zantarix"
 # repo = "cursus"
+build_command = "cp README.md packages/npm"
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 # All release artifacts are built and uploaded by .github/workflows/release-artifacts.yml.

@@ -44,9 +44,6 @@ jobs:
         run: npm install
         working-directory: "./packages/npm"
 
-      - name: Copy README to npm package
-        run: cp README.md packages/npm/
-
       - name: Build cursus
         run: cargo build --release
 
