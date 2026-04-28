@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Deprecated (2026-04-28) — never implemented and not planned for implementation.
 
 ## Context
 
