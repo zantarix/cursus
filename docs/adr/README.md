@@ -60,3 +60,4 @@ Once an ADR is accepted and committed, it is treated as immutable. If a decision
 | [ADR-047](047-configurable-release-target-branch.md) | Configurable Release Target Branch | Deprecated (2026-04-28) |
 | [ADR-048](048-native-windows-build-runner.md) | Build Windows Artifacts Natively with MSVC and Static CRT | Accepted (2026-04-26) |
 | [ADR-049](049-signed-release-artifacts.md) | Sign GitHub Release Artifacts and Verify in npm Postinstall | Accepted (2026-04-27) |
+| [ADR-050](050-verified-release-commits-via-git-data-api.md) | Produce Verified Release Commits via the GitHub Git Data API | Accepted (2026-04-29) |

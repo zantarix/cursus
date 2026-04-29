@@ -152,6 +152,28 @@ impl Git for GitWorkdir {
 		Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
 	}
 
+	/// Returns the full SHA of the current HEAD commit.
+	///
+	/// Runs `git rev-parse HEAD`.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git rev-parse` exits with a non-zero status.
+	async fn head_sha(&self) -> anyhow::Result<String> {
+		let output = self
+			.runner
+			.run("git", &["rev-parse", "HEAD"], &self.path)
+			.await
+			.context("Failed to run git rev-parse HEAD")?;
+
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			bail!("git rev-parse HEAD failed: {stderr}");
+		}
+
+		Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+	}
+
 	/// Returns the name of the current branch, or `None` when HEAD is detached.
 	///
 	/// Runs `git rev-parse --abbrev-ref HEAD`. Returns `None` if the output is `"HEAD"`

@@ -17,7 +17,7 @@ mod prepare;
 mod template;
 
 pub use cargo::CargoConfig;
-pub use git::{GitConfig, Strategy, TagFormat};
+pub use git::{GitConfig, SignedCommitsMode, Strategy, TagFormat};
 pub use github::GitHubConfig;
 pub use linked_versions::{LinkedVersionGroup, LinkedVersionsConfig};
 pub use npm::{NpmAccess, NpmConfig};

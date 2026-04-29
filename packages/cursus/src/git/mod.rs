@@ -65,6 +65,9 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 	/// `extra_args` is appended after `--name-only`.
 	async fn diff_names(&self, extra_args: &[&str]) -> anyhow::Result<Vec<String>>;
 
+	/// Returns the full SHA of the current HEAD commit.
+	async fn head_sha(&self) -> anyhow::Result<String>;
+
 	// ── mutations ────────────────────────────────────────────────────────
 
 	/// Stages the given files for the next git commit.
@@ -96,8 +99,10 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 }
 
 mod operations;
+mod signed_commit;
 
 pub use operations::GitWorkdir;
+pub use signed_commit::SignedCommitGit;
 
 /// Finds the git working directory by walking up from the given path.
 ///

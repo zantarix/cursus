@@ -44,6 +44,30 @@ impl TagFormat {
 	}
 }
 
+/// Controls whether cursus routes commits through the GitHub Git Data API for signing.
+///
+/// When enabled and a GitHub token is available, `cursus prepare` creates commits
+/// via the REST API rather than the local `git` binary. GitHub fills the committer
+/// identity with the App's bot account and signs the commit with the web-flow GPG
+/// key, producing a Verified commit with no long-lived key custody (ADR-050).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SignedCommitsMode {
+	/// Enable API commits when `GITHUB_ACTIONS=true` and a token is available.
+	#[default]
+	Auto,
+	/// Enable API commits whenever a token is available, regardless of CI environment.
+	///
+	/// This mode is experimental and has not been validated outside GitHub Actions.
+	Force,
+	/// Always use the local `git` binary; never route commits through the API.
+	Off,
+}
+
+fn is_default_signed_commits_mode(m: &SignedCommitsMode) -> bool {
+	matches!(m, SignedCommitsMode::Auto)
+}
+
 /// Controls which git strategy is used for release automation.
 ///
 /// `Push` commits and pushes directly to the current branch.
@@ -102,6 +126,11 @@ pub struct GitConfig {
 	/// Defaults to `"ci(release): version packages"` when not set.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	prepare_commit_message: Option<String>,
+	/// Whether to route the prepare commit through the GitHub Git Data API.
+	///
+	/// Defaults to [`SignedCommitsMode::Auto`] (omitted from serialized config).
+	#[serde(default, skip_serializing_if = "is_default_signed_commits_mode")]
+	pub signed_commits: SignedCommitsMode,
 	/// Private package names that should receive git tags and GitHub Releases during
 	/// `cursus publish`, without registry publication.
 	///
@@ -306,6 +335,56 @@ mod tests {
 		assert_eq!(
 			config.extra_files,
 			vec!["custom.lock", "dist/manifest.json"]
+		);
+	}
+
+	#[test]
+	fn signed_commits_mode_defaults_to_auto() {
+		let config = GitConfig::default();
+		assert_eq!(config.signed_commits, SignedCommitsMode::Auto);
+	}
+
+	#[test]
+	fn signed_commits_mode_deserializes_all_variants() {
+		let auto: GitConfig = toml::from_str("signed_commits = \"auto\"").unwrap();
+		assert_eq!(auto.signed_commits, SignedCommitsMode::Auto);
+
+		let force: GitConfig = toml::from_str("signed_commits = \"force\"").unwrap();
+		assert_eq!(force.signed_commits, SignedCommitsMode::Force);
+
+		let off: GitConfig = toml::from_str("signed_commits = \"off\"").unwrap();
+		assert_eq!(off.signed_commits, SignedCommitsMode::Off);
+	}
+
+	#[test]
+	fn signed_commits_mode_rejects_unknown_variant() {
+		let result: Result<GitConfig, _> = toml::from_str("signed_commits = \"always\"");
+		assert!(
+			result.is_err(),
+			"Expected error for unknown signed_commits variant"
+		);
+	}
+
+	#[test]
+	fn signed_commits_mode_auto_omitted_on_serialize() {
+		let config = GitConfig::default();
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			!toml_str.contains("signed_commits"),
+			"Auto (default) should not appear in serialized config, got: {toml_str}"
+		);
+	}
+
+	#[test]
+	fn signed_commits_mode_force_serialized() {
+		let config = GitConfig {
+			signed_commits: SignedCommitsMode::Force,
+			..Default::default()
+		};
+		let toml_str = toml::to_string(&config).unwrap();
+		assert!(
+			toml_str.contains("signed_commits = \"force\""),
+			"Force mode should be serialized, got: {toml_str}"
 		);
 	}
 

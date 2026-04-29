@@ -82,3 +82,5 @@ Store git as `Option<Arc<dyn Git>>` with a `.with_git()` builder method, so comm
 ## Errata
 
 `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+
+- **2026-04-29**: [ADR-050](050-verified-release-commits-via-git-data-api.md) adds a `head_sha()` method to the `Git` trait, returning the full SHA of the current HEAD commit. The method is required for the new `SignedCommitGit` decorator to determine the parent SHA when building a commit object via the GitHub Git Data API. All `Git` implementations must provide it; `GitWorkdir` implements it by delegating to the `git` binary. ADR-050 also introduces `SignedCommitGit` itself as an additional `Git` impl that decorates an inner `Git` to route `commit()`, `push()`, and `force_push_branch()` through the GitHub API while delegating all other methods unchanged.
