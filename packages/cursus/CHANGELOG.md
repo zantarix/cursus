@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-04-29
+
+### Features
+
+- Adds verified release commits when running on GitHub Actions with a GitHub App token. The prepare commit is now routed through the GitHub Git Data API, which causes GitHub to sign it with the web-flow GPG key and display the green Verified badge. Enabled automatically via \`signed_commits = "auto"\` (the default); can be disabled with \`signed_commits = "off"\`. [6f62e1a]
+
 ## 0.4.0 - 2026-04-27
 
 ### Features
