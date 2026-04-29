@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-04-29
+
+### Features
+
+- version sync to 0.5.0 (linked versions)
+
 ## 0.4.0 - 2026-04-27
 
 ### Features
