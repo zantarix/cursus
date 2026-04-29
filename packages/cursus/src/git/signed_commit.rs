@@ -66,6 +66,12 @@ struct UpdateRefRequest<'a> {
 	force: bool,
 }
 
+#[derive(Serialize)]
+struct CreateRefRequest<'a> {
+	r#ref: &'a str,
+	sha: &'a str,
+}
+
 // ── Internal state ────────────────────────────────────────────────────────────
 
 struct PendingCommit {
@@ -146,12 +152,7 @@ impl SignedCommitGit {
 	}
 
 	async fn patch_ref_and_sync(&self, branch: &str, sha: &str, force: bool) -> anyhow::Result<()> {
-		let req = UpdateRefRequest { sha, force };
-		let url = format!(
-			"/repos/{}/{}/git/refs/heads/{branch}",
-			self.owner, self.repo
-		);
-		api_patch(&self.octocrab, url, &req)
+		upsert_branch_ref(&self.octocrab, &self.owner, &self.repo, branch, sha, force)
 			.await
 			.with_context(|| format!("failed to update remote ref for branch '{branch}'"))?;
 
@@ -260,21 +261,52 @@ async fn build_tree_items(
 	Ok(items)
 }
 
-async fn api_patch<P: Serialize + ?Sized>(
+/// Updates or creates a branch ref on the remote.
+///
+/// Tries `PATCH /git/refs/heads/{branch}` first. If GitHub returns 422
+/// "Reference does not exist" (the branch is new), falls back to
+/// `POST /git/refs` to create it. This handles both the initial prepare run
+/// (branch does not exist on remote yet) and subsequent runs (branch already
+/// exists and must be force-updated).
+async fn upsert_branch_ref(
 	client: &Octocrab,
-	url: String,
-	body: &P,
+	owner: &str,
+	repo: &str,
+	branch: &str,
+	sha: &str,
+	force: bool,
 ) -> anyhow::Result<()> {
+	let patch_url = format!("/repos/{owner}/{repo}/git/refs/heads/{branch}");
+	let update_req = UpdateRefRequest { sha, force };
 	let response = client
-		._patch(url, Some(body))
+		._patch(patch_url, Some(&update_req))
 		.await
 		.context("GitHub API PATCH failed")?;
 	let status = response.status();
-	if !status.is_success() {
-		let text = client.body_to_string(response).await.unwrap_or_default();
-		anyhow::bail!("GitHub API returned {status}: {text}");
+	if status.is_success() {
+		return Ok(());
 	}
-	Ok(())
+	let text = client.body_to_string(response).await.unwrap_or_default();
+	// 422 "Reference does not exist" means the branch is new — create it instead.
+	if status.as_u16() == 422 && text.contains("Reference does not exist") {
+		let full_ref = format!("refs/heads/{branch}");
+		let create_req = CreateRefRequest {
+			r#ref: &full_ref,
+			sha,
+		};
+		let post_url = format!("/repos/{owner}/{repo}/git/refs");
+		let response = client
+			._post(post_url, Some(&create_req))
+			.await
+			.context("GitHub API POST failed")?;
+		let status = response.status();
+		if !status.is_success() {
+			let text = client.body_to_string(response).await.unwrap_or_default();
+			anyhow::bail!("GitHub API returned {status}: {text}");
+		}
+		return Ok(());
+	}
+	anyhow::bail!("GitHub API returned {status}: {text}");
 }
 
 // ── Git trait impl ────────────────────────────────────────────────────────────
@@ -867,6 +899,55 @@ mod tests {
 			"expected git reset --hard FETCH_HEAD call"
 		);
 		assert!(dec.state.lock().await.pending.is_none());
+	}
+
+	#[tokio::test]
+	async fn force_push_creates_branch_when_ref_does_not_exist() {
+		// Simulates the first prepare run where the release branch doesn't exist
+		// on the remote yet — PATCH returns 422, so we fall back to POST to create it.
+		let dir = tempfile::tempdir().unwrap();
+		let root = AbsolutePath::new(dir.path()).unwrap();
+		std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+		let server = MockServer::start();
+
+		// PATCH returns 422 "Reference does not exist".
+		let patch_mock = server.mock(|when, then| {
+			when.method(httpmock::Method::PATCH)
+				.path("/repos/owner/repo/git/refs/heads/cursus-release/main");
+			then.status(422)
+				.json_body(json!({ "message": "Reference does not exist" }));
+		});
+		// POST creates the ref.
+		let post_mock = server.mock(|when, then| {
+			when.method(httpmock::Method::POST)
+				.path("/repos/owner/repo/git/refs")
+				.json_body(json!({
+					"ref": "refs/heads/cursus-release/main",
+					"sha": "newsha"
+				}));
+			then.status(201).json_body(json!({}));
+		});
+
+		let dec = make_decorator(
+			git,
+			make_octocrab(&server),
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		);
+		{
+			let mut state = dec.state.lock().await;
+			state.pending = Some(super::PendingCommit {
+				branch: "cursus-release/main".to_string(),
+				sha: "newsha".to_string(),
+			});
+		}
+
+		dec.force_push_branch("cursus-release/main").await.unwrap();
+
+		patch_mock.assert_calls(1);
+		post_mock.assert_calls(1);
 	}
 
 	#[tokio::test]
