@@ -9,7 +9,10 @@ use serde::Deserialize;
 
 use log::warn;
 
-use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
+use super::{
+	PackageManagerAdapter, ProjectInfo, PublishOutcome,
+	name_validation::validate_cargo_package_name,
+};
 use crate::model::config::CargoConfig;
 use crate::path::AbsolutePath;
 
@@ -242,6 +245,8 @@ async fn read_workspace_member(
 	let path = member_path.clone();
 
 	let manifest_path = member_path.child("Cargo.toml");
+	validate_cargo_package_name(&package.name)
+		.with_context(|| format!("Invalid package name in {}", manifest_path.display()))?;
 	let (version, inherits_workspace, publishable, dependency_names) =
 		extract_project_metadata(&cargo, package, workspace_version).with_context(|| {
 			format!(
@@ -414,6 +419,8 @@ fn build_cargo_root_project_info(
 	pm_root: &AbsolutePath,
 	root_manifest_path: &Path,
 ) -> anyhow::Result<ProjectInfo> {
+	validate_cargo_package_name(&package.name)
+		.with_context(|| format!("Invalid package name in {}", root_manifest_path.display()))?;
 	let (version, inherits_workspace, publishable, dependency_names) =
 		extract_project_metadata(root_cargo, package, root_cargo.workspace_version())
 			.with_context(|| {

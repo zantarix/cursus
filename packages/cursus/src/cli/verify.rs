@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use clap::Args;
 use log::{debug, info};
 
+use crate::git::ref_format::validate_revision;
 use crate::model::changeset::filter_changeset_paths;
 
 /// Arguments for the `verify` subcommand.
@@ -34,15 +35,7 @@ pub(crate) async fn cmd_verify(args: &VerifyArgs, env: &crate::Env) -> anyhow::R
 	let git = env.git();
 	debug!("Verifying changesets against base ref: {}", args.base);
 
-	if args.base.is_empty() {
-		anyhow::bail!("Invalid base ref: base ref must not be empty");
-	}
-	if args.base.starts_with('-') {
-		anyhow::bail!(
-			"Invalid base ref '{}': base refs must not start with '-'",
-			args.base
-		);
-	}
+	validate_revision(&args.base)?;
 
 	let range = format!("{}..HEAD", args.base);
 	let names = git

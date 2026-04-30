@@ -8,6 +8,7 @@ use async_trait::async_trait;
 
 use crate::command::CommandRunner;
 use crate::git::Git;
+use crate::git::ref_format::{validate_branch_name, validate_revision, validate_tag_name};
 use crate::path::AbsolutePath;
 
 /// A git working directory paired with a command runner.
@@ -93,6 +94,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git tag` exits with a non-zero status.
 	async fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
+		validate_tag_name(tag_name)?;
 		let output = self
 			.runner
 			.run_mut("git", &["tag", "-a", tag_name, "-m", message], &self.path)
@@ -210,6 +212,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git checkout` exits with a non-zero status.
 	async fn checkout(&self, branch: &str) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		let output = self
 			.runner
 			.run_mut("git", &["checkout", branch], &self.path)
@@ -238,6 +241,7 @@ impl Git for GitWorkdir {
 	/// or any other reason — is treated as the tag not existing and returns
 	/// `Ok(false)`.
 	async fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
+		validate_tag_name(tag)?;
 		let ref_path = format!("refs/tags/{tag}");
 		let output = self
 			.runner
@@ -281,6 +285,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git checkout` exits with a non-zero status.
 	async fn checkout_or_reset_branch(&self, branch: &str) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		let output = self
 			.runner
 			.run_mut("git", &["checkout", "-B", branch], &self.path)
@@ -305,6 +310,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
 	async fn force_push_branch(&self, branch: &str) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		let output = self
 			.runner
 			.run_mut(
@@ -332,6 +338,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git tag -d` exits with a non-zero status.
 	async fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
+		validate_tag_name(tag)?;
 		let output = self
 			.runner
 			.run_mut("git", &["tag", "-d", tag], &self.path)
@@ -355,6 +362,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
 	async fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
+		validate_tag_name(tag)?;
 		let output = self
 			.runner
 			.run_mut("git", &["push", "origin", "tag", tag], &self.path)
@@ -378,9 +386,10 @@ impl Git for GitWorkdir {
 	/// Returns an error if `git rev-list` exits with a non-zero status or the
 	/// output cannot be parsed as an integer.
 	async fn rev_list_count(&self, range: &str) -> anyhow::Result<usize> {
+		validate_revision(range)?;
 		let output = self
 			.runner
-			.run("git", &["rev-list", "--count", range], &self.path)
+			.run("git", &["rev-list", "--count", range, "--"], &self.path)
 			.await
 			.context("Failed to run git rev-list --count")?;
 
@@ -403,9 +412,10 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
 	async fn log_message(&self, rev: &str) -> anyhow::Result<String> {
+		validate_revision(rev)?;
 		let output = self
 			.runner
-			.run("git", &["log", "-1", "--format=%B", rev], &self.path)
+			.run("git", &["log", "-1", "--format=%B", rev, "--"], &self.path)
 			.await
 			.context("Failed to run git log")?;
 
@@ -426,6 +436,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git diff-tree` exits with a non-zero status.
 	async fn diff_tree_names(&self, commit: &str) -> anyhow::Result<Vec<String>> {
+		validate_revision(commit)?;
 		let output = self
 			.runner
 			.run(
@@ -498,9 +509,10 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
 	async fn log_subject(&self, rev: &str) -> anyhow::Result<String> {
+		validate_revision(rev)?;
 		let output = self
 			.runner
-			.run("git", &["log", "-1", "--format=%s", rev], &self.path)
+			.run("git", &["log", "-1", "--format=%s", rev, "--"], &self.path)
 			.await
 			.context("Failed to run git log --format=%s")?;
 
@@ -519,6 +531,12 @@ impl Git for GitWorkdir {
 	/// or `&[]` for unstaged working-tree changes.
 	///
 	/// Returns one relative path per line, filtering empty lines.
+	///
+	/// # Safety contract
+	///
+	/// All callers must pass only trusted or pre-validated values in `extra_args`.
+	/// Values sourced from CLI flags must be validated upstream before reaching
+	/// this method (e.g. `--base` is validated in `cmd_verify`).
 	///
 	/// # Errors
 	///

@@ -6,6 +6,7 @@
 
 mod cargo;
 pub mod matching;
+pub(crate) mod name_validation;
 mod npm;
 
 pub use cargo::CargoAdapter;

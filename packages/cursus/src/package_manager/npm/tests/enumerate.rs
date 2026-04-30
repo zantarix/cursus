@@ -585,3 +585,51 @@ async fn enumerate_parses_publishconfig_without_provenance_as_none() {
 	assert_eq!(projects.len(), 1);
 	assert_eq!(projects[0].publishconfig_provenance, None);
 }
+
+#[tokio::test]
+async fn enumerate_rejects_leading_dash_package_name() {
+	let dir = temp_dir();
+	write_package_json(dir.path(), r#"{"name": "--exec=evil", "version": "1.0.0"}"#);
+	let err = enumerate(dir.path()).await.unwrap_err();
+	let msg = format!("{err:#}");
+	assert!(
+		msg.contains("Invalid package name"),
+		"Expected 'Invalid package name', got: {msg}"
+	);
+	assert!(
+		msg.contains("must not start with '-'"),
+		"Expected validation detail, got: {msg}"
+	);
+}
+
+#[tokio::test]
+async fn enumerate_rejects_package_name_with_control_char() {
+	// JSON \t escape produces a tab (0x09); our validator must reject ASCII control characters.
+	let dir = temp_dir();
+	write_package_json(
+		dir.path(),
+		"{\"name\": \"my\\tpkg\", \"version\": \"1.0.0\"}",
+	);
+	let err = enumerate(dir.path()).await.unwrap_err();
+	assert!(
+		format!("{err:#}").contains("Invalid package name"),
+		"Expected validation error"
+	);
+}
+
+#[tokio::test]
+async fn enumerate_workspace_rejects_member_leading_dash_name() {
+	let dir = temp_dir();
+	write_package_json(
+		dir.path(),
+		r#"{"name": "root", "version": "1.0.0", "workspaces": ["packages/*"]}"#,
+	);
+	let member_dir = dir.path().join("packages/evil");
+	std::fs::create_dir_all(&member_dir).unwrap();
+	write_package_json(&member_dir, r#"{"name": "--evil", "version": "0.1.0"}"#);
+	let err = enumerate(dir.path()).await.unwrap_err();
+	assert!(
+		format!("{err:#}").contains("Invalid package name"),
+		"Expected validation error for workspace member"
+	);
+}

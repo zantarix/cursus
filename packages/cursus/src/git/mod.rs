@@ -99,6 +99,7 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 }
 
 mod operations;
+pub(crate) mod ref_format;
 mod signed_commit;
 
 pub use operations::GitWorkdir;
