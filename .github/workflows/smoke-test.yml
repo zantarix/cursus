@@ -209,8 +209,11 @@ jobs:
           cd cursus-test
           npm init -y
           npm install @zantarix/cursus
+          npm audit signatures
 
       - name: Run npx cursus --version
         shell: bash
         working-directory: cursus-test
-        run: npx cursus --version
+        run: |
+          ./node_modules/.bin/cursus --version
+          npx cursus --version

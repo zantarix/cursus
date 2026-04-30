@@ -15,6 +15,7 @@
 
 # npm compiled output, dependencies, and postinstall-downloaded binaries
 node_modules/
+packages/npm/*.tgz
 
 # Just Claude things
 /.claude/worktrees

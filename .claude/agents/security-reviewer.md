@@ -28,7 +28,7 @@ description: |-
   assistant: <commentary>A security review of recent changes is requested. Launch the security-reviewer agent.</commentary>
   "I'll delegate that to the security-reviewer agent."
   </example>
-tools: Glob, Grep, Read, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(cargo deny:*), Bash(cargo audit:*)
+tools: Glob, Grep, Read, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(cargo deny:*), Bash(cargo audit:*), Bash(gh *)
 model: opus
 color: red
 ---
