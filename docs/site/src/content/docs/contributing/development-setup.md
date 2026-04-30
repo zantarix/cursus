@@ -38,6 +38,17 @@ The dev shell provides: `rustc` (nightly), `cargo`, `rustfmt`, `clippy`, `rust-a
 | `cargo clippy` | Lint the code |
 | `cargo fmt` | Format the code |
 
+## JavaScript/TypeScript
+
+`packages/npm` (the `@zantarix/cursus` npm wrapper) and `docs/site` (this documentation site) are independent npm projects — there is no workspace root. Install their dependencies separately:
+
+```bash
+cd packages/npm && npm install   # npm wrapper (sigstore verifier, download script)
+cd docs/site && npm install      # documentation site (Astro/Starlight)
+```
+
+The Nix dev shell provides Node.js, so no separate Node installation step is needed under Option B.
+
 ## Code style
 
 - **Rust 2024 edition**

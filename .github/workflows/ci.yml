@@ -58,10 +58,11 @@ jobs:
         with:
           node-version: '24.15.0'
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: packages/npm/package-lock.json
 
       - name: Install dependencies
         run: npm ci
+        working-directory: packages/npm
 
       - name: Build
         run: npm run build

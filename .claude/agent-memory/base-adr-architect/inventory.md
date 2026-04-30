@@ -53,3 +53,4 @@
 | 048 | 048-native-windows-build-runner.md | Build Windows Artifacts Natively with MSVC and Static CRT | Accepted (2026-04-26) |
 | 049 | 049-signed-release-artifacts.md | Sign GitHub Release Artifacts and Verify in npm Postinstall | Accepted (2026-04-27) |
 | 050 | 050-verified-release-commits-via-git-data-api.md | Produce Verified Release Commits via the GitHub Git Data API | Accepted (2026-04-29) |
+| 051 | 051-bundle-sigstore-deps-via-workspace-removal.md | Bundle Sigstore Transitive Dependencies into the npm Tarball by Removing the Workspace Declaration | Accepted (2026-05-01) |
