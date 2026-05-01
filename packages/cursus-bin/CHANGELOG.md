@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 - 2026-05-01
+
+### Bug Fixes
+
+- update rust crate octocrab to v0.49.9 [2cc681d] via #113
+
 ## 0.5.0 - 2026-04-29
 
 ### Features

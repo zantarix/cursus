@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 - 2026-05-01
+
+### Bug Fixes
+
+- Fixes token leakage where GitHub access tokens, registry credentials, and other URL-embedded secrets could appear in error messages produced by failed git operations or package publishes. [131dc96] via #112
+- Rejects changeset files larger than 64 KiB and config.toml larger than 256 KiB to prevent out-of-memory conditions when processing maliciously oversized inputs. [131dc96] via #112
+- Fixes security vulnerabilities in the npm postinstall download script: redirect targets are now validated against an allowlist of known GitHub domains, response sizes are bounded to prevent memory exhaustion, and GitHub API rate-limit errors include actionable retry guidance. [131dc96] via #112
+- Rejects package names and git ref names that start with '-' or contain ASCII control characters, preventing argv-smuggling attacks where a malicious workspace member name could be interpreted as a flag by the git binary. [131dc96] via #112
+
 ## 0.5.0 - 2026-04-29
 
 ### Features

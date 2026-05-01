@@ -1,6 +1,6 @@
 {
 	"name": "@zantarix/cursus",
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"publishConfig": {
 		"provenance": true
 	},
