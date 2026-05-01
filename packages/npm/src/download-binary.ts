@@ -55,6 +55,43 @@ const downloadUrl = `https://github.com/zantarix/cursus/releases/download/${enco
 
 const TIMEOUT_MS = 60_000;
 const UNIX_EXECUTABLE_MODE = 0o755;
+const MAX_REDIRECTS = 5;
+const MAX_BINARY_BYTES = 50 * 1024 * 1024;
+const MAX_ATTESTATION_BYTES = 10 * 1024 * 1024;
+
+async function readBounded(response: Response, maxBytes: number): Promise<Buffer> {
+	const reader = response.body?.getReader();
+	if (reader == null) {
+		throw new Error('Response body is not readable');
+	}
+	let total = 0;
+	const chunks: Uint8Array[] = [];
+	try {
+		let finished = false;
+		do {
+			// eslint-disable-next-line no-await-in-loop
+			const { done, value } = await reader.read();
+			if (!done) {
+				total += value.byteLength;
+				if (total > maxBytes) {
+					throw new Error(`Response body exceeds ${maxBytes} byte limit`);
+				}
+				chunks.push(value);
+			} else {
+				finished = true;
+			}
+		} while (!finished);
+	} finally {
+		reader.releaseLock();
+	}
+	return Buffer.concat(chunks);
+}
+
+const ALLOWED_DOWNLOAD_HOSTS = new Set([
+	'github.com',
+	'objects.githubusercontent.com',
+	'release-assets.githubusercontent.com',
+]);
 
 async function downloadBuffer(fileUrl: string): Promise<Buffer> {
 	const controller = new AbortController();
@@ -63,17 +100,38 @@ async function downloadBuffer(fileUrl: string): Promise<Buffer> {
 	}, TIMEOUT_MS);
 
 	try {
-		const response = await fetch(fileUrl, { signal: controller.signal });
+		let currentUrl = fileUrl;
+		for (let i = 0; i <= MAX_REDIRECTS; i++) {
+			// eslint-disable-next-line no-await-in-loop
+			const response = await fetch(currentUrl, {
+				signal: controller.signal,
+				redirect: 'manual',
+			});
 
-		if (!response.url.startsWith('https://')) {
-			throw new Error(`Refusing non-HTTPS redirect to ${response.url}`);
+			if (response.status >= 300 && response.status < 400) {
+				const location = response.headers.get('location');
+				if (location == null) {
+					throw new Error('Redirect response missing Location header');
+				}
+				const next = new URL(location, currentUrl);
+				if (next.protocol !== 'https:') {
+					throw new Error(`Refusing non-HTTPS redirect to ${next.href}`);
+				}
+				if (!ALLOWED_DOWNLOAD_HOSTS.has(next.hostname)) {
+					throw new Error(`Refusing redirect to disallowed host ${next.hostname}`);
+				}
+				currentUrl = next.href;
+				continue;
+			}
+
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status.toString()} fetching ${currentUrl}`);
+			}
+
+			// eslint-disable-next-line no-await-in-loop
+			return await readBounded(response, MAX_BINARY_BYTES);
 		}
-
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status.toString()} fetching ${response.url}`);
-		}
-
-		return Buffer.from(await response.arrayBuffer());
+		throw new Error(`Too many redirects fetching ${fileUrl}`);
 	} finally {
 		clearTimeout(timer);
 	}
@@ -112,9 +170,26 @@ async function verifyAttestation(buffer: Buffer): Promise<void> {
 			signal: controller.signal,
 		});
 		if (!response.ok) {
+			const isRateLimited = response.status === 403
+				&& response.headers.get('x-ratelimit-remaining') === '0';
+			if (isRateLimited) {
+				const retryAfter = response.headers.get('retry-after');
+				let when = '';
+				if (retryAfter != null) {
+					const secs = parseInt(retryAfter, 10);
+					const formatted = !isNaN(secs) && secs >= 60
+						? `${Math.ceil(secs / 60)} minute(s)`
+						: `${retryAfter} second(s)`;
+					when = ` Try again in ${formatted}.`;
+				}
+				throw new Error(
+					`GitHub API rate limit exceeded (unauthenticated: 60 req/hr).${when} `
+					+ 'Alternatively, run from a network with a different egress IP.',
+				);
+			}
 			throw new Error(`HTTP ${response.status.toString()} fetching attestation`);
 		}
-		const data = await response.json() as { attestations?: Array<{ bundle: AttestationBundle }> };
+		const data = JSON.parse((await readBounded(response, MAX_ATTESTATION_BYTES)).toString('utf-8')) as { attestations?: Array<{ bundle: AttestationBundle }> };
 		const attestations = data.attestations ?? [];
 		if (attestations.length === 0) {
 			throw new Error(`No attestation found for digest sha256:${digest}`);
@@ -144,7 +219,7 @@ async function verifyAttestation(buffer: Buffer): Promise<void> {
 		const statement = JSON.parse(
 			Buffer.from(payloadB64, 'base64').toString('utf-8'),
 		) as InTotoStatement;
-		const digestMatch = (statement.subject ?? []).some((s) => s.digest?.sha256 === digest);
+		const digestMatch = (statement.subject ?? []).some((s) => s.digest?.sha256.toLowerCase() === digest);
 		if (!digestMatch) {
 			throw new Error('Attestation subject digest does not match the downloaded binary');
 		}

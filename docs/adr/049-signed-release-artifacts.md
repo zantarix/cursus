@@ -133,3 +133,7 @@ The corrected design moves the Linux build, artifact upload, and attestation ste
 - `.cursus/config.toml` no longer carries a `build_command` or a `[github.artifacts.cursus]` section; the README copy that was embedded in `build_command` is now an explicit step in `release.yml`.
 
 The trust root, Sigstore primitives, hard-fail philosophy, scope, and rejected alternatives are unchanged. Only the workflow that issues the attestations and the per-platform branching in the identity policy are corrected.
+
+### 2026-04-30: Transitive-dep pinning gap closed by [ADR-051](051-bundle-sigstore-deps-via-workspace-removal.md)
+
+The Negative Consequences section above acknowledged that the npm package gains a runtime JavaScript dependency on `sigstore`, but did not address how that dependency's transitive tree is resolved at consumer install time. As shipped, every `npm install @zantarix/cursus` re-resolved sigstore's transitive tree from the npm registry under floating `^`-ranges, leaving the [ADR-049](049-signed-release-artifacts.md) trust chain bypassable via compromise of any one of dozens of transitive sub-deps -- without defeating any Sigstore primitive. [ADR-051](051-bundle-sigstore-deps-via-workspace-removal.md) closes this gap by physically embedding the sigstore tree in the published tarball via `bundleDependencies` and removing the npm workspace declaration that was preventing the bundling from taking effect.

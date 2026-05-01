@@ -6,9 +6,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+
+const MAX_CHANGESET_BYTES: u64 = 64 * 1024;
 
 use crate::conventional_commit;
 use crate::git::Git;
@@ -249,7 +251,8 @@ impl Changeset {
 	///
 	/// # Errors
 	///
-	/// Returns an error if any changeset file cannot be read or parsed.
+	/// Returns an error if any changeset file cannot be read or parsed, or if
+	/// any changeset file exceeds 64 KiB.
 	pub(crate) async fn read_all(
 		env: &crate::Env,
 	) -> anyhow::Result<Vec<(crate::path::AbsolutePath, Self)>> {
@@ -274,6 +277,13 @@ impl Changeset {
 				continue;
 			}
 			let abs_path = crate::path::AbsolutePath::new(&path)?;
+			let size = fs.file_size(&abs_path).await?;
+			if size > MAX_CHANGESET_BYTES {
+				bail!(
+					"Changeset file {} is too large ({size} bytes, limit is {MAX_CHANGESET_BYTES} bytes)",
+					abs_path.display()
+				);
+			}
 			let contents = fs
 				.read_to_string(&abs_path)
 				.await

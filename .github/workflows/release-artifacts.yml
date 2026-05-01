@@ -4,10 +4,30 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
+  check-tag:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      is_cursus_release: ${{ steps.check.outputs.is_cursus_release }}
+    steps:
+      - id: check
+        name: Check tag format
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ "$TAG_NAME" =~ ^cursus@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_cursus_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_cursus_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
   macos:
     name: Build macOS artifacts
-    if: startsWith(github.event.release.tag_name, 'cursus@')
+    needs: check-tag
+    if: needs.check-tag.outputs.is_cursus_release == 'true'
     runs-on: macos-latest
     permissions:
       contents: write
@@ -31,11 +51,12 @@ jobs:
       - name: Upload artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           # Necessary in order to fix a naming issue
           cp target/x86_64-apple-darwin/release/cursus ./cursus-osx-x86_64
           cp target/aarch64-apple-darwin/release/cursus ./cursus-osx-aarch64
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "$TAG_NAME" \
             "./cursus-osx-x86_64#cursus-osx-x86_64" \
             "./cursus-osx-aarch64#cursus-osx-aarch64"
 
@@ -48,7 +69,8 @@ jobs:
 
   windows:
     name: Build Windows artifacts
-    if: startsWith(github.event.release.tag_name, 'cursus@')
+    needs: check-tag
+    if: needs.check-tag.outputs.is_cursus_release == 'true'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -74,12 +96,13 @@ jobs:
       - name: Upload artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
         shell: bash
         run: |
           # Necessary in order to fix a naming issue
           cp target/x86_64-pc-windows-msvc/release/cursus.exe ./cursus-windows-x86_64.exe
           cp target/aarch64-pc-windows-msvc/release/cursus.exe ./cursus-windows-aarch64.exe
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "$TAG_NAME" \
             "./cursus-windows-x86_64.exe#cursus-windows-x86_64.exe" \
             "./cursus-windows-aarch64.exe#cursus-windows-aarch64.exe"
 
@@ -92,7 +115,8 @@ jobs:
 
   linux:
     name: Build Linux artifacts
-    if: startsWith(github.event.release.tag_name, 'cursus@')
+    needs: check-tag
+    if: needs.check-tag.outputs.is_cursus_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -116,11 +140,12 @@ jobs:
       - name: Upload artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           cp target/x86_64-unknown-linux-musl/release/cursus ./cursus-linux-x86_64
           cp target/aarch64-unknown-linux-musl/release/cursus ./cursus-linux-aarch64
           cp target/riscv64gc-unknown-linux-musl/release/cursus ./cursus-linux-riscv64gc
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "$TAG_NAME" \
             "./cursus-linux-x86_64#cursus-linux-x86_64" \
             "./cursus-linux-aarch64#cursus-linux-aarch64" \
             "./cursus-linux-riscv64gc#cursus-linux-riscv64gc"

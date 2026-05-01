@@ -41,6 +41,10 @@ Each TUI wizard follows a consistent pattern:
 - A pure `handle_key()` function handles state transitions (testable without a terminal)
 - Separate `ui()` / `render_*()` functions handle rendering
 
+### Git ref validation
+
+Every `GitWorkdir` method that accepts a caller-supplied branch name, tag name, or revision string passes it through the appropriate validator in the `git::ref_format` submodule (`validate_branch_name`, `validate_tag_name`, `validate_revision`) before invoking the `CommandRunner`. Any new git operation that takes such a string must do the same.
+
 ### Command execution
 
 The `CommandRunner` trait abstracts shell command execution. The `DryRunCommandRunner` decorator wraps any runner and intercepts commands that would mutate state, logging them instead — implementing a late-guard dry-run pattern.

@@ -10,9 +10,12 @@ use log::warn;
 use semver::Version;
 use serde::Deserialize;
 
-use super::{PackageManagerAdapter, ProjectInfo, PublishOutcome};
+use super::{
+	PackageManagerAdapter, ProjectInfo, PublishOutcome, name_validation::validate_npm_package_name,
+};
 use crate::model::config::{NpmAccess, NpmConfig};
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 /// Adapter for npm-based projects.
 ///
@@ -215,6 +218,9 @@ async fn read_workspace_project(
 		let manifest_path = workspace_path.child("package.json");
 		format!("Missing name in {}", manifest_path.display())
 	})?;
+	let manifest_path = workspace_path.child("package.json");
+	validate_npm_package_name(&name)
+		.with_context(|| format!("Invalid package name in {}", manifest_path.display()))?;
 	let path = workspace_path.clone();
 
 	let (version, publishable, dependency_names, publishconfig_provenance) =
@@ -270,6 +276,8 @@ fn build_npm_root_project_info(
 		.name
 		.clone()
 		.with_context(|| format!("Missing name in {}", manifest_path.display()))?;
+	validate_npm_package_name(&name)
+		.with_context(|| format!("Invalid package name in {}", manifest_path.display()))?;
 	let (version, publishable, dependency_names, publishconfig_provenance) =
 		extract_project_metadata(package).with_context(|| {
 			format!(
@@ -319,7 +327,8 @@ async fn run_lock_update(
 			)
 		})?;
 	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+		let raw = String::from_utf8_lossy(&output.stderr);
+		let stderr = redact_credentials(&raw);
 		anyhow::bail!(
 			"{} {} failed in {}: {}",
 			program,
@@ -344,7 +353,8 @@ async fn yarn_major_version(
 		.await
 		.context("Failed to run 'yarn --version'")?;
 	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+		let raw = String::from_utf8_lossy(&output.stderr);
+		let stderr = redact_credentials(&raw);
 		anyhow::bail!("'yarn --version' failed: {stderr}");
 	}
 	let stdout = String::from_utf8_lossy(&output.stdout);
@@ -393,7 +403,8 @@ async fn run_yarn_lock_update(
 			)
 		})?;
 	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+		let raw = String::from_utf8_lossy(&output.stderr);
+		let stderr = redact_credentials(&raw);
 		anyhow::bail!(
 			"yarn {} failed in {}: {}",
 			args.join(" "),
@@ -649,7 +660,11 @@ impl PackageManagerAdapter for NpmAdapter {
 		}
 
 		// Some other error
-		anyhow::bail!("npm publish failed for {}: {}", project.name, stderr);
+		anyhow::bail!(
+			"npm publish failed for {}: {}",
+			project.name,
+			redact_credentials(&stderr)
+		);
 	}
 
 	async fn registry_name(&self) -> &str {

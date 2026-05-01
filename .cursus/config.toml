@@ -1,6 +1,6 @@
 [global]
 # disable_dependency_cycle_warnings = false  # Suppress circular dependency warnings
-ignore = ["@zantarix/cursus-docs", "@zantarix/cursus-workspace"]
+ignore = ["@zantarix/cursus-docs"]
 
 [cargo]
 enabled = true
@@ -8,6 +8,7 @@ enabled = true
 
 [npm]
 enabled = true
+path = "packages/npm"
 # lock_command = "npm install"  # Custom command to update the lock file
 access = "public"               # Access level for scoped packages: "public" or "restricted" (default: "restricted")
 

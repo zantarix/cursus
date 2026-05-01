@@ -13,6 +13,7 @@ pub mod locale;
 pub mod model;
 pub mod package_manager;
 pub mod path;
+pub mod redact;
 pub(crate) mod shell;
 pub mod tui;
 pub mod utils;

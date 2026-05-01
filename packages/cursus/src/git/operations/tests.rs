@@ -461,18 +461,18 @@ async fn git_tag_exists_returns_false_on_nonzero_exit() {
 }
 
 #[tokio::test]
-async fn git_tag_exists_passes_glob_chars_as_literal_ref() {
-	// Tag names containing glob metacharacters must be passed verbatim in the
-	// ref path so git treats them literally, not as a glob pattern.
+async fn git_tag_exists_uses_full_ref_path() {
+	// The tag name must be wrapped in refs/tags/ so git treats it as a
+	// fully-qualified ref rather than a glob pattern or ambiguous short name.
 	let dir = temp_dir();
 	let runner = Arc::new(RecordingCommandRunner::new(0).with_stdout(b"abc123\n".to_vec()));
 	let dir_abs = abs(&dir);
 	let (git, runner) = make_git(runner, dir_abs);
-	git.tag_exists("v1.0.0-rc[1]").await.unwrap();
+	git.tag_exists("v1.0.0-rc.1").await.unwrap();
 	let invocations = runner.invocations();
 	assert_eq!(
 		invocations[0].args,
-		["rev-parse", "--verify", "refs/tags/v1.0.0-rc[1]"]
+		["rev-parse", "--verify", "refs/tags/v1.0.0-rc.1"]
 	);
 }
 
@@ -605,7 +605,7 @@ async fn rev_list_count_passes_correct_args() {
 	assert_eq!(invocations[0].program, "git");
 	assert_eq!(
 		invocations[0].args,
-		["rev-list", "--count", "origin/HEAD..HEAD"]
+		["rev-list", "--count", "origin/HEAD..HEAD", "--"]
 	);
 }
 
@@ -665,7 +665,10 @@ async fn log_message_passes_correct_args() {
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "git");
-	assert_eq!(invocations[0].args, ["log", "-1", "--format=%B", "HEAD"]);
+	assert_eq!(
+		invocations[0].args,
+		["log", "-1", "--format=%B", "HEAD", "--"]
+	);
 }
 
 #[tokio::test]
@@ -852,7 +855,10 @@ async fn log_subject_passes_correct_args() {
 	let invocations = runner.invocations();
 	assert_eq!(invocations.len(), 1);
 	assert_eq!(invocations[0].program, "git");
-	assert_eq!(invocations[0].args, ["log", "-1", "--format=%s", "abc1234"]);
+	assert_eq!(
+		invocations[0].args,
+		["log", "-1", "--format=%s", "abc1234", "--"]
+	);
 }
 
 #[tokio::test]
@@ -878,5 +884,203 @@ async fn log_subject_failure_propagates() {
 	assert!(
 		msg.contains("git log --format=%s failed"),
 		"Expected 'git log --format=%s failed', got: {msg}"
+	);
+}
+
+// ── credential-redaction wiring tests ────────────────────────────────────────
+//
+// These tests verify that credentialed URLs in subprocess stderr are stripped
+// before they reach the anyhow error message. A mutant that removes the
+// `redact_credentials` call would cause the raw token to appear in the error
+// string, failing these assertions.
+
+#[tokio::test]
+async fn git_push_failure_redacts_credentials_from_stderr() {
+	let dir = temp_dir();
+	let runner = recording_with_stderr(
+		1,
+		b"fatal: unable to access 'https://x-access-token:ghs_SECRET@github.com/org/repo.git/': The requested URL returned error: 403",
+	);
+	let dir_abs = abs(&dir);
+	let (git, _) = make_git(runner, dir_abs);
+	let err = git.push().await.unwrap_err().to_string();
+	assert!(
+		!err.contains("ghs_SECRET"),
+		"token must not appear in error: {err}"
+	);
+	assert!(err.contains("[REDACTED]"), "expected [REDACTED] in: {err}");
+}
+
+// ── argv-smuggling rejection tests ────────────────────────────────────────────
+//
+// Each test verifies that a malicious leading-`-` input is rejected before the
+// CommandRunner is ever invoked. The recording runner exits 0, so any test that
+// passes through validation would succeed — failure means validation fired.
+
+#[tokio::test]
+async fn checkout_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.checkout("--upload-pack=evil").await;
+	assert!(result.is_err());
+	assert!(
+		result
+			.unwrap_err()
+			.to_string()
+			.contains("must not start with '-'"),
+		"Expected validation error"
+	);
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn checkout_or_reset_branch_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.checkout_or_reset_branch("--exec=evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn force_push_branch_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.force_push_branch("--receive-pack=evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn tag_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.tag("--tag=evil", "message").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn delete_tag_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.delete_tag("--evil-tag").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn push_tag_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.push_tag("-evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn tag_exists_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.tag_exists("--evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn rev_list_count_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.rev_list_count("--all").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn log_message_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.log_message("--evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn log_subject_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.log_subject("--evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
+	);
+}
+
+#[tokio::test]
+async fn rev_list_count_passes_double_dot_separator() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, _) = make_git(runner, abs(&dir));
+	// "origin/HEAD..HEAD" is a normal range — must pass validation
+	let result = git.rev_list_count("origin/HEAD..HEAD").await;
+	// exits 0 with empty stdout → parse error (not a validation error)
+	assert!(result.is_err());
+	assert!(
+		!result
+			.unwrap_err()
+			.to_string()
+			.contains("must not start with"),
+		"Validation must not fire for a legitimate range"
+	);
+}
+
+#[tokio::test]
+async fn diff_tree_names_rejects_leading_dash() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git.diff_tree_names("--evil").await;
+	assert!(result.is_err());
+	assert!(
+		runner.invocations().is_empty(),
+		"Runner must not be invoked"
 	);
 }

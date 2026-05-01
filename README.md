@@ -52,6 +52,7 @@ pipelines.
 - [Configuration](https://zantarix.github.io/cursus/reference/configuration/)
 - [CI Integration](https://zantarix.github.io/cursus/guides/ci-integration/)
 - [Contributing](https://zantarix.github.io/cursus/contributing/development-setup/)
+- [Security Policy](docs/SECURITY.md)
 
 ## Contributing
 

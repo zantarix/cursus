@@ -80,6 +80,11 @@ export default defineConfig({
               link: "https://github.com/zantarix/cursus/tree/main/docs/adr#readme",
               attrs: { target: "_blank" },
             },
+            {
+              label: "Security Policy",
+              link: "https://github.com/zantarix/cursus/blob/main/docs/SECURITY.md",
+              attrs: { target: "_blank" },
+            },
           ],
         },
       ],

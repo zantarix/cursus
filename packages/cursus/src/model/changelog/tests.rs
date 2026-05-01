@@ -509,6 +509,9 @@ async fn update_changelog_fails_when_cannot_write() {
 		async fn glob(&self, _: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
 			anyhow::bail!("not implemented")
 		}
+		async fn file_size(&self, _: &AbsolutePath) -> anyhow::Result<u64> {
+			anyhow::bail!("not implemented")
+		}
 	}
 
 	let dir = tempfile::tempdir().unwrap();

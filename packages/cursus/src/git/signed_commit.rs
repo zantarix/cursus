@@ -3,6 +3,15 @@
 //! See ADR-050 for the full design rationale.
 
 use std::path::{Path, PathBuf};
+
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+
+// Encodes characters that would corrupt a URL path segment: space, ?, #, %.
+// Control characters are already rejected by validate_branch_name.
+// `/` is intentionally left unencoded — hierarchical refs like
+// `cursus-release/main` map correctly to the GitHub API path.
+// Unicode bytes are encoded by utf8_percent_encode automatically.
+const BRANCH_PATH: &AsciiSet = &CONTROLS.add(b' ').add(b'?').add(b'#').add(b'%');
 use std::sync::Arc;
 
 use anyhow::Context as _;
@@ -14,7 +23,9 @@ use tokio::sync::Mutex;
 use crate::command::CommandRunner;
 use crate::filesystem::Filesystem;
 use crate::git::Git;
+use crate::git::ref_format::validate_branch_name;
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 // ── GitHub API request / response types ──────────────────────────────────────
 
@@ -152,6 +163,7 @@ impl SignedCommitGit {
 	}
 
 	async fn patch_ref_and_sync(&self, branch: &str, sha: &str, force: bool) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		upsert_branch_ref(&self.octocrab, &self.owner, &self.repo, branch, sha, force)
 			.await
 			.with_context(|| format!("failed to update remote ref for branch '{branch}'"))?;
@@ -163,7 +175,8 @@ impl SignedCommitGit {
 			.await
 			.context("git fetch failed after API ref update")?;
 		if !fetch.status.success() {
-			let stderr = String::from_utf8_lossy(&fetch.stderr);
+			let raw = String::from_utf8_lossy(&fetch.stderr);
+			let stderr = redact_credentials(&raw);
 			anyhow::bail!("git fetch origin {branch} failed: {stderr}");
 		}
 
@@ -173,7 +186,8 @@ impl SignedCommitGit {
 			.await
 			.context("git reset failed after API ref update")?;
 		if !reset.status.success() {
-			let stderr = String::from_utf8_lossy(&reset.stderr);
+			let raw = String::from_utf8_lossy(&reset.stderr);
+			let stderr = redact_credentials(&raw);
 			anyhow::bail!("git reset --hard FETCH_HEAD failed: {stderr}");
 		}
 
@@ -198,7 +212,10 @@ async fn api_post<P: Serialize + ?Sized, R: serde::de::DeserializeOwned>(
 		.await
 		.context("failed to read GitHub API response body")?;
 	if !status.is_success() {
-		anyhow::bail!("GitHub API returned {status}: {text}");
+		anyhow::bail!(
+			"GitHub API returned {status}: {}",
+			redact_credentials(&text)
+		);
 	}
 	serde_json::from_str(&text).context("failed to deserialize GitHub API response")
 }
@@ -276,7 +293,8 @@ async fn upsert_branch_ref(
 	sha: &str,
 	force: bool,
 ) -> anyhow::Result<()> {
-	let patch_url = format!("/repos/{owner}/{repo}/git/refs/heads/{branch}");
+	let encoded_branch = utf8_percent_encode(branch, BRANCH_PATH);
+	let patch_url = format!("/repos/{owner}/{repo}/git/refs/heads/{encoded_branch}");
 	let update_req = UpdateRefRequest { sha, force };
 	let response = client
 		._patch(patch_url, Some(&update_req))
@@ -302,11 +320,17 @@ async fn upsert_branch_ref(
 		let status = response.status();
 		if !status.is_success() {
 			let text = client.body_to_string(response).await.unwrap_or_default();
-			anyhow::bail!("GitHub API returned {status}: {text}");
+			anyhow::bail!(
+				"GitHub API returned {status}: {}",
+				redact_credentials(&text)
+			);
 		}
 		return Ok(());
 	}
-	anyhow::bail!("GitHub API returned {status}: {text}");
+	anyhow::bail!(
+		"GitHub API returned {status}: {}",
+		redact_credentials(&text)
+	);
 }
 
 // ── Git trait impl ────────────────────────────────────────────────────────────

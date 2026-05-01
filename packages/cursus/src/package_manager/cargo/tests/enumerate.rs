@@ -636,3 +636,68 @@ version = "1.0.0"
 		"literal version should not be flagged as workspace"
 	);
 }
+
+#[tokio::test]
+async fn enumerate_rejects_leading_dash_package_name() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[package]
+name = "--upload-pack=evil"
+version = "1.0.0"
+"#,
+	);
+	let err = enumerate(dir.path()).await.unwrap_err();
+	let msg = format!("{err:#}");
+	assert!(
+		msg.contains("Invalid package name"),
+		"Expected 'Invalid package name', got: {msg}"
+	);
+	assert!(
+		msg.contains("must not start with '-'"),
+		"Expected validation detail, got: {msg}"
+	);
+}
+
+#[tokio::test]
+async fn enumerate_rejects_package_name_with_control_char() {
+	// TOML allows tab in strings; our validator must reject ASCII control characters.
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		"[package]\nname = \"my\tcrate\"\nversion = \"1.0.0\"\n",
+	);
+	let err = enumerate(dir.path()).await.unwrap_err();
+	assert!(
+		format!("{err:#}").contains("Invalid package name"),
+		"Expected validation error"
+	);
+}
+
+#[tokio::test]
+async fn enumerate_workspace_rejects_member_leading_dash_name() {
+	let dir = temp_dir();
+	write_cargo_toml(
+		dir.path(),
+		r#"
+[workspace]
+members = ["crates/*"]
+"#,
+	);
+	let crate_dir = dir.path().join("crates/evil");
+	std::fs::create_dir_all(&crate_dir).unwrap();
+	write_cargo_toml(
+		&crate_dir,
+		r#"
+[package]
+name = "--evil"
+version = "0.1.0"
+"#,
+	);
+	let err = enumerate(dir.path()).await.unwrap_err();
+	assert!(
+		format!("{err:#}").contains("Invalid package name"),
+		"Expected validation error for workspace member"
+	);
+}

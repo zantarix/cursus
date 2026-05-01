@@ -4,6 +4,7 @@ use anyhow::Context;
 use log::info;
 
 use crate::git::Git;
+use crate::git::ref_format::validate_branch_name;
 use crate::model::config::{Config, Strategy};
 
 use super::{PrepareArgs, PrepareOutput, ReleaseInfo};
@@ -54,16 +55,13 @@ pub(super) fn compute_release_branch(
 	current_branch: Option<&str>,
 ) -> anyhow::Result<String> {
 	if let Some(branch) = args_branch {
-		if branch.is_empty() {
-			anyhow::bail!("Invalid branch name: branch name must not be empty");
-		}
-		if branch.starts_with('-') {
-			anyhow::bail!("Invalid branch name '{branch}': branch names must not start with '-'");
-		}
+		validate_branch_name(branch)?;
 		return Ok(branch.to_string());
 	}
 	let base = current_branch.unwrap_or("detached");
-	Ok(format!("{config_prefix}{base}"))
+	let composed = format!("{config_prefix}{base}");
+	validate_branch_name(&composed)?;
+	Ok(composed)
 }
 
 /// Stages files and creates a commit for the prepare step.
@@ -530,6 +528,34 @@ mod tests {
 				.unwrap_err()
 				.to_string()
 				.contains("must not be empty")
+		);
+	}
+
+	#[tokio::test]
+	async fn compute_release_branch_rejects_composed_leading_dash() {
+		// config_prefix itself is attacker-controlled via .cursus/config.toml;
+		// the composed result must still be rejected when it starts with '-'.
+		let result = compute_release_branch(None, "--", Some("main"));
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("must not start with '-'")
+		);
+	}
+
+	#[tokio::test]
+	async fn compute_release_branch_rejects_composed_control_char() {
+		// A current_branch containing a control character (e.g. BEL) must be
+		// caught before the composed name reaches git.
+		let result = compute_release_branch(None, "cursus-release/", Some("feat\x07ure"));
+		assert!(result.is_err());
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("control character")
 		);
 	}
 

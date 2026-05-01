@@ -8,7 +8,9 @@ use async_trait::async_trait;
 
 use crate::command::CommandRunner;
 use crate::git::Git;
+use crate::git::ref_format::{validate_branch_name, validate_revision, validate_tag_name};
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 /// A git working directory paired with a command runner.
 ///
@@ -60,7 +62,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git add")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git add failed: {stderr}");
 		}
 
@@ -80,7 +83,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git commit")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git commit failed: {stderr}");
 		}
 
@@ -93,6 +97,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git tag` exits with a non-zero status.
 	async fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
+		validate_tag_name(tag_name)?;
 		let output = self
 			.runner
 			.run_mut("git", &["tag", "-a", tag_name, "-m", message], &self.path)
@@ -100,7 +105,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git tag")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git tag failed: {stderr}");
 		}
 
@@ -125,7 +131,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git push")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git push failed: {stderr}");
 		}
 
@@ -145,7 +152,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git status")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git status failed: {stderr}");
 		}
 
@@ -167,7 +175,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git rev-parse HEAD")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git rev-parse HEAD failed: {stderr}");
 		}
 
@@ -190,7 +199,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git rev-parse")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git rev-parse failed: {stderr}");
 		}
 
@@ -210,6 +220,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git checkout` exits with a non-zero status.
 	async fn checkout(&self, branch: &str) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		let output = self
 			.runner
 			.run_mut("git", &["checkout", branch], &self.path)
@@ -217,7 +228,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git checkout failed: {stderr}");
 		}
 
@@ -238,6 +250,7 @@ impl Git for GitWorkdir {
 	/// or any other reason — is treated as the tag not existing and returns
 	/// `Ok(false)`.
 	async fn tag_exists(&self, tag: &str) -> anyhow::Result<bool> {
+		validate_tag_name(tag)?;
 		let ref_path = format!("refs/tags/{tag}");
 		let output = self
 			.runner
@@ -281,6 +294,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git checkout` exits with a non-zero status.
 	async fn checkout_or_reset_branch(&self, branch: &str) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		let output = self
 			.runner
 			.run_mut("git", &["checkout", "-B", branch], &self.path)
@@ -288,7 +302,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git checkout -B failed: {stderr}");
 		}
 
@@ -305,6 +320,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
 	async fn force_push_branch(&self, branch: &str) -> anyhow::Result<()> {
+		validate_branch_name(branch)?;
 		let output = self
 			.runner
 			.run_mut(
@@ -316,7 +332,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git force push branch")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git force push branch failed: {stderr}");
 		}
 
@@ -332,6 +349,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git tag -d` exits with a non-zero status.
 	async fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
+		validate_tag_name(tag)?;
 		let output = self
 			.runner
 			.run_mut("git", &["tag", "-d", tag], &self.path)
@@ -339,7 +357,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git tag -d")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git tag -d failed: {stderr}");
 		}
 
@@ -355,6 +374,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git push` exits with a non-zero status.
 	async fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
+		validate_tag_name(tag)?;
 		let output = self
 			.runner
 			.run_mut("git", &["push", "origin", "tag", tag], &self.path)
@@ -362,7 +382,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git push tag")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git push tag failed: {stderr}");
 		}
 
@@ -378,14 +399,16 @@ impl Git for GitWorkdir {
 	/// Returns an error if `git rev-list` exits with a non-zero status or the
 	/// output cannot be parsed as an integer.
 	async fn rev_list_count(&self, range: &str) -> anyhow::Result<usize> {
+		validate_revision(range)?;
 		let output = self
 			.runner
-			.run("git", &["rev-list", "--count", range], &self.path)
+			.run("git", &["rev-list", "--count", range, "--"], &self.path)
 			.await
 			.context("Failed to run git rev-list --count")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git rev-list --count failed: {stderr}");
 		}
 
@@ -403,14 +426,16 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
 	async fn log_message(&self, rev: &str) -> anyhow::Result<String> {
+		validate_revision(rev)?;
 		let output = self
 			.runner
-			.run("git", &["log", "-1", "--format=%B", rev], &self.path)
+			.run("git", &["log", "-1", "--format=%B", rev, "--"], &self.path)
 			.await
 			.context("Failed to run git log")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git log failed: {stderr}");
 		}
 
@@ -426,6 +451,7 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git diff-tree` exits with a non-zero status.
 	async fn diff_tree_names(&self, commit: &str) -> anyhow::Result<Vec<String>> {
+		validate_revision(commit)?;
 		let output = self
 			.runner
 			.run(
@@ -437,7 +463,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git diff-tree")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git diff-tree failed: {stderr}");
 		}
 
@@ -477,7 +504,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git log --diff-filter=A")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git log --diff-filter=A failed: {stderr}");
 		}
 
@@ -498,14 +526,16 @@ impl Git for GitWorkdir {
 	///
 	/// Returns an error if `git log` exits with a non-zero status.
 	async fn log_subject(&self, rev: &str) -> anyhow::Result<String> {
+		validate_revision(rev)?;
 		let output = self
 			.runner
-			.run("git", &["log", "-1", "--format=%s", rev], &self.path)
+			.run("git", &["log", "-1", "--format=%s", rev, "--"], &self.path)
 			.await
 			.context("Failed to run git log --format=%s")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git log --format=%s failed: {stderr}");
 		}
 
@@ -520,6 +550,12 @@ impl Git for GitWorkdir {
 	///
 	/// Returns one relative path per line, filtering empty lines.
 	///
+	/// # Safety contract
+	///
+	/// All callers must pass only trusted or pre-validated values in `extra_args`.
+	/// Values sourced from CLI flags must be validated upstream before reaching
+	/// this method (e.g. `--base` is validated in `cmd_verify`).
+	///
 	/// # Errors
 	///
 	/// Returns an error if `git diff` exits with a non-zero status.
@@ -533,7 +569,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git diff --name-only")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git diff --name-only failed: {stderr}");
 		}
 

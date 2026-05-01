@@ -203,3 +203,7 @@ Cursus reads the following environment variables in addition to the `config.toml
 | `CARGO_REGISTRY_TOKEN` | Token for publishing to crates.io (Cargo adapter). Equivalent to `cargo login`. |
 | `NODE_AUTH_TOKEN` | Token for publishing to the npm registry (npm adapter). Equivalent to `npm login` for token-based auth. |
 | `GH_TOKEN` / `GITHUB_TOKEN` | Token for GitHub API operations (releases, PRs, asset uploads). Checked in this order. |
+
+## Limits
+
+`config.toml` must not exceed **256 KiB**. This limit exists to prevent excessive memory use when loading configuration. In practice, even large monorepo configurations are well under this limit.

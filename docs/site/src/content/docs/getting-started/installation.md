@@ -17,7 +17,7 @@ Download the binary for your platform, make it executable, and place it on your 
 
 ## npm
 
-If you use Node.js, you can install Cursus via npm. The package downloads the appropriate static binary for your platform during `postinstall`. All downloads are verified using a GitHub attestation to ensure that the downloaded builds are official builds.
+If you use Node.js, you can install Cursus via npm. The package downloads the appropriate static binary for your platform during `postinstall`. All downloads are verified using a GitHub attestation to ensure that the downloaded builds are official builds. See the [security policy](https://github.com/zantarix/cursus/blob/main/docs/SECURITY.md) for details on the verification chain and how to audit it manually.
 
 ```bash
 npm install --save-dev @zantarix/cursus

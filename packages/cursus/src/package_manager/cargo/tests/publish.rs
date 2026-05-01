@@ -233,6 +233,26 @@ async fn publish_with_cargo_token_executes_publish() {
 }
 
 #[tokio::test]
+async fn publish_failure_redacts_credentials_from_stderr() {
+	let dir = temp_dir();
+	let info = setup_publish_project(dir.path());
+	let runner = Arc::new(
+		RecordingCommandRunner::new(1).with_stderr(
+			b"error: failed to get https://user:SECRET_TOKEN@private.registry.example.com/: 403"
+				.to_vec(),
+		),
+	);
+	let adapter =
+		recording_adapter_inspectable(CargoConfig::default(), dir.path(), Arc::clone(&runner));
+	let err = adapter.publish(&info).await.unwrap_err().to_string();
+	assert!(
+		!err.contains("SECRET_TOKEN"),
+		"token must not appear in error: {err}"
+	);
+	assert!(err.contains("[REDACTED]"), "expected [REDACTED] in: {err}");
+}
+
+#[tokio::test]
 async fn registry_name_is_crates_io() {
 	let dir = temp_dir();
 	let adapter = recording_adapter(CargoConfig::default(), dir.path(), 0);

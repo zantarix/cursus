@@ -32,6 +32,9 @@
 	"dependencies": {
 		"sigstore": "4.1.0"
 	},
+	"bundleDependencies": [
+		"sigstore"
+	],
 	"devDependencies": {
 		"@mscharley/eslint-config": "4.2.23",
 		"@sigstore/rekor-types": "4.0.0",

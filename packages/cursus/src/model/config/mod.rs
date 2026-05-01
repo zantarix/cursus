@@ -16,6 +16,8 @@ mod npm;
 mod prepare;
 mod template;
 
+const MAX_CONFIG_BYTES: u64 = 256 * 1024;
+
 pub use cargo::CargoConfig;
 pub use git::{GitConfig, SignedCommitsMode, Strategy, TagFormat};
 pub use github::GitHubConfig;
@@ -435,7 +437,8 @@ pub async fn exists(
 ///
 /// # Errors
 ///
-/// Returns an error if the config file cannot be read or parsed.
+/// Returns an error if the config file cannot be read or parsed, or if the
+/// config file exceeds 256 KiB.
 pub async fn load(
 	fs: &dyn crate::filesystem::Filesystem,
 	git_root: &AbsolutePath,
@@ -445,6 +448,13 @@ pub async fn load(
 	}
 
 	let path = config_path(git_root);
+	let size = fs.file_size(&path).await?;
+	if size > MAX_CONFIG_BYTES {
+		bail!(
+			"Config file {} is too large ({size} bytes, limit is {MAX_CONFIG_BYTES} bytes)",
+			path.display()
+		);
+	}
 	let contents = fs
 		.read_to_string(&path)
 		.await
