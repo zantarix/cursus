@@ -10,6 +10,7 @@ use crate::command::CommandRunner;
 use crate::git::Git;
 use crate::git::ref_format::{validate_branch_name, validate_revision, validate_tag_name};
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 /// A git working directory paired with a command runner.
 ///
@@ -61,7 +62,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git add")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git add failed: {stderr}");
 		}
 
@@ -81,7 +83,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git commit")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git commit failed: {stderr}");
 		}
 
@@ -102,7 +105,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git tag")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git tag failed: {stderr}");
 		}
 
@@ -127,7 +131,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git push")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git push failed: {stderr}");
 		}
 
@@ -147,7 +152,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git status")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git status failed: {stderr}");
 		}
 
@@ -169,7 +175,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git rev-parse HEAD")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git rev-parse HEAD failed: {stderr}");
 		}
 
@@ -192,7 +199,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git rev-parse")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git rev-parse failed: {stderr}");
 		}
 
@@ -220,7 +228,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git checkout failed: {stderr}");
 		}
 
@@ -293,7 +302,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git checkout")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git checkout -B failed: {stderr}");
 		}
 
@@ -322,7 +332,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git force push branch")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git force push branch failed: {stderr}");
 		}
 
@@ -346,7 +357,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git tag -d")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git tag -d failed: {stderr}");
 		}
 
@@ -370,7 +382,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git push tag")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git push tag failed: {stderr}");
 		}
 
@@ -394,7 +407,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git rev-list --count")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git rev-list --count failed: {stderr}");
 		}
 
@@ -420,7 +434,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git log")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git log failed: {stderr}");
 		}
 
@@ -448,7 +463,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git diff-tree")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git diff-tree failed: {stderr}");
 		}
 
@@ -488,7 +504,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git log --diff-filter=A")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git log --diff-filter=A failed: {stderr}");
 		}
 
@@ -517,7 +534,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git log --format=%s")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git log --format=%s failed: {stderr}");
 		}
 
@@ -551,7 +569,8 @@ impl Git for GitWorkdir {
 			.context("Failed to run git diff --name-only")?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			bail!("git diff --name-only failed: {stderr}");
 		}
 

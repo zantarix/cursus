@@ -25,6 +25,7 @@ use crate::filesystem::Filesystem;
 use crate::git::Git;
 use crate::git::ref_format::validate_branch_name;
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 // ── GitHub API request / response types ──────────────────────────────────────
 
@@ -174,7 +175,8 @@ impl SignedCommitGit {
 			.await
 			.context("git fetch failed after API ref update")?;
 		if !fetch.status.success() {
-			let stderr = String::from_utf8_lossy(&fetch.stderr);
+			let raw = String::from_utf8_lossy(&fetch.stderr);
+			let stderr = redact_credentials(&raw);
 			anyhow::bail!("git fetch origin {branch} failed: {stderr}");
 		}
 
@@ -184,7 +186,8 @@ impl SignedCommitGit {
 			.await
 			.context("git reset failed after API ref update")?;
 		if !reset.status.success() {
-			let stderr = String::from_utf8_lossy(&reset.stderr);
+			let raw = String::from_utf8_lossy(&reset.stderr);
+			let stderr = redact_credentials(&raw);
 			anyhow::bail!("git reset --hard FETCH_HEAD failed: {stderr}");
 		}
 
@@ -209,7 +212,10 @@ async fn api_post<P: Serialize + ?Sized, R: serde::de::DeserializeOwned>(
 		.await
 		.context("failed to read GitHub API response body")?;
 	if !status.is_success() {
-		anyhow::bail!("GitHub API returned {status}: {text}");
+		anyhow::bail!(
+			"GitHub API returned {status}: {}",
+			redact_credentials(&text)
+		);
 	}
 	serde_json::from_str(&text).context("failed to deserialize GitHub API response")
 }
@@ -314,11 +320,17 @@ async fn upsert_branch_ref(
 		let status = response.status();
 		if !status.is_success() {
 			let text = client.body_to_string(response).await.unwrap_or_default();
-			anyhow::bail!("GitHub API returned {status}: {text}");
+			anyhow::bail!(
+				"GitHub API returned {status}: {}",
+				redact_credentials(&text)
+			);
 		}
 		return Ok(());
 	}
-	anyhow::bail!("GitHub API returned {status}: {text}");
+	anyhow::bail!(
+		"GitHub API returned {status}: {}",
+		redact_credentials(&text)
+	);
 }
 
 // ── Git trait impl ────────────────────────────────────────────────────────────

@@ -421,6 +421,23 @@ async fn publish_node_auth_only_does_not_emit_no_auth_warning() {
 }
 
 #[tokio::test]
+async fn publish_failure_redacts_credentials_from_stderr() {
+	let dir = temp_dir();
+	let runner = Arc::new(RecordingCommandRunner::new(1).with_stderr(
+		b"npm error code E403\nnpm error 403 Forbidden - PUT https://user:NPM_SECRET@private.registry.example.com/my-app"
+			.to_vec(),
+	));
+	let adapter = recording_adapter(NpmConfig::default(), dir.path(), runner);
+	let info = project_info(dir.path(), "my-app", "");
+	let err = adapter.publish(&info).await.unwrap_err().to_string();
+	assert!(
+		!err.contains("NPM_SECRET"),
+		"token must not appear in error: {err}"
+	);
+	assert!(err.contains("[REDACTED]"), "expected [REDACTED] in: {err}");
+}
+
+#[tokio::test]
 async fn registry_name_is_npm() {
 	let dir = temp_dir();
 	let adapter = recording_adapter_default(NpmConfig::default(), dir.path(), 0);

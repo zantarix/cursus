@@ -62,3 +62,4 @@ Once an ADR is accepted and committed, it is treated as immutable. If a decision
 | [ADR-049](049-signed-release-artifacts.md) | Sign GitHub Release Artifacts and Verify in npm Postinstall | Accepted (2026-04-27) |
 | [ADR-050](050-verified-release-commits-via-git-data-api.md) | Produce Verified Release Commits via the GitHub Git Data API | Accepted (2026-04-29) |
 | [ADR-051](051-bundle-sigstore-deps-via-workspace-removal.md) | Bundle Sigstore Transitive Dependencies into the npm Tarball by Removing the Workspace Declaration | Accepted (2026-05-01) |
+| [ADR-052](052-credential-redaction-in-error-messages.md) | Redact Credentials from Subprocess and API Error Messages | Accepted (2026-05-01) |

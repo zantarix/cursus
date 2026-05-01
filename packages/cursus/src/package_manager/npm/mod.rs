@@ -15,6 +15,7 @@ use super::{
 };
 use crate::model::config::{NpmAccess, NpmConfig};
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 /// Adapter for npm-based projects.
 ///
@@ -326,7 +327,8 @@ async fn run_lock_update(
 			)
 		})?;
 	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+		let raw = String::from_utf8_lossy(&output.stderr);
+		let stderr = redact_credentials(&raw);
 		anyhow::bail!(
 			"{} {} failed in {}: {}",
 			program,
@@ -351,7 +353,8 @@ async fn yarn_major_version(
 		.await
 		.context("Failed to run 'yarn --version'")?;
 	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+		let raw = String::from_utf8_lossy(&output.stderr);
+		let stderr = redact_credentials(&raw);
 		anyhow::bail!("'yarn --version' failed: {stderr}");
 	}
 	let stdout = String::from_utf8_lossy(&output.stdout);
@@ -400,7 +403,8 @@ async fn run_yarn_lock_update(
 			)
 		})?;
 	if !output.status.success() {
-		let stderr = String::from_utf8_lossy(&output.stderr);
+		let raw = String::from_utf8_lossy(&output.stderr);
+		let stderr = redact_credentials(&raw);
 		anyhow::bail!(
 			"yarn {} failed in {}: {}",
 			args.join(" "),
@@ -656,7 +660,11 @@ impl PackageManagerAdapter for NpmAdapter {
 		}
 
 		// Some other error
-		anyhow::bail!("npm publish failed for {}: {}", project.name, stderr);
+		anyhow::bail!(
+			"npm publish failed for {}: {}",
+			project.name,
+			redact_credentials(&stderr)
+		);
 	}
 
 	async fn registry_name(&self) -> &str {

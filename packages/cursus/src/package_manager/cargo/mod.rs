@@ -15,6 +15,7 @@ use super::{
 };
 use crate::model::config::CargoConfig;
 use crate::path::AbsolutePath;
+use crate::redact::redact_credentials;
 
 /// Adapter for Cargo-based Rust projects.
 ///
@@ -553,7 +554,8 @@ impl PackageManagerAdapter for CargoAdapter {
 			})?;
 
 		if !output.status.success() {
-			let stderr = String::from_utf8_lossy(&output.stderr);
+			let raw = String::from_utf8_lossy(&output.stderr);
+			let stderr = redact_credentials(&raw);
 			anyhow::bail!(
 				"cargo update --workspace failed in {}: {}",
 				workspace_root.display(),
@@ -615,7 +617,7 @@ impl PackageManagerAdapter for CargoAdapter {
 		anyhow::bail!(
 			"cargo publish failed for {}: {}",
 			manifest_path.display(),
-			stderr
+			redact_credentials(&stderr)
 		);
 	}
 

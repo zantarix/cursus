@@ -105,3 +105,7 @@ Partially rejected. After migration, `run_shell_mut` has zero production callers
 Let the child process inherit the parent's `stdin` so `run_streaming` could serve both the build-command case and the editor case.
 
 Rejected. The editor case already has `run_shell_interactive`, which is designed for it and will remain unchanged. Inheriting `stdin` in `run_streaming` would open the door to a build command accidentally blocking on a prompt from an underlying tool (for instance, a build script that runs `sudo` or requests a credential). Nulling `stdin` turns that failure mode into a fast, visible error (whatever the tool does when it cannot read from `stdin`) instead of an opaque hang.
+
+## Errata
+
+- **2026-05-01**: [ADR-052](052-credential-redaction-in-error-messages.md) places `run_streaming` explicitly out of scope for credential redaction. Because the child process inherits the parent's stdout and stderr file descriptors, cursus never sees the streamed bytes and has no point at which it could redact them before they reach the terminal or CI log. Operators configuring `github.build_command` or `npm.lock_command` must continue to rely on CI-side secret masking (e.g. `::add-mask::`) for any credentials those commands may print.

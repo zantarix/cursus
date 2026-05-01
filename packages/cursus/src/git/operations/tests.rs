@@ -887,6 +887,30 @@ async fn log_subject_failure_propagates() {
 	);
 }
 
+// ── credential-redaction wiring tests ────────────────────────────────────────
+//
+// These tests verify that credentialed URLs in subprocess stderr are stripped
+// before they reach the anyhow error message. A mutant that removes the
+// `redact_credentials` call would cause the raw token to appear in the error
+// string, failing these assertions.
+
+#[tokio::test]
+async fn git_push_failure_redacts_credentials_from_stderr() {
+	let dir = temp_dir();
+	let runner = recording_with_stderr(
+		1,
+		b"fatal: unable to access 'https://x-access-token:ghs_SECRET@github.com/org/repo.git/': The requested URL returned error: 403",
+	);
+	let dir_abs = abs(&dir);
+	let (git, _) = make_git(runner, dir_abs);
+	let err = git.push().await.unwrap_err().to_string();
+	assert!(
+		!err.contains("ghs_SECRET"),
+		"token must not appear in error: {err}"
+	);
+	assert!(err.contains("[REDACTED]"), "expected [REDACTED] in: {err}");
+}
+
 // ── argv-smuggling rejection tests ────────────────────────────────────────────
 //
 // Each test verifies that a malicious leading-`-` input is rejected before the
