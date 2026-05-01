@@ -61,22 +61,26 @@ const MAX_ATTESTATION_BYTES = 10 * 1024 * 1024;
 
 async function readBounded(response: Response, maxBytes: number): Promise<Buffer> {
 	const reader = response.body?.getReader();
-	if (!reader) {
+	if (reader == null) {
 		throw new Error('Response body is not readable');
 	}
 	let total = 0;
 	const chunks: Uint8Array[] = [];
 	try {
-		while (true) {
+		let finished = false;
+		do {
 			// eslint-disable-next-line no-await-in-loop
 			const { done, value } = await reader.read();
-			if (done) break;
-			total += value.byteLength;
-			if (total > maxBytes) {
-				throw new Error(`Response body exceeds ${maxBytes} byte limit`);
+			if (!done) {
+				total += value.byteLength;
+				if (total > maxBytes) {
+					throw new Error(`Response body exceeds ${maxBytes} byte limit`);
+				}
+				chunks.push(value);
+			} else {
+				finished = true;
 			}
-			chunks.push(value);
-		}
+		} while (!finished);
 	} finally {
 		reader.releaseLock();
 	}
@@ -106,7 +110,7 @@ async function downloadBuffer(fileUrl: string): Promise<Buffer> {
 
 			if (response.status >= 300 && response.status < 400) {
 				const location = response.headers.get('location');
-				if (!location) {
+				if (location == null) {
 					throw new Error('Redirect response missing Location header');
 				}
 				const next = new URL(location, currentUrl);
@@ -124,7 +128,8 @@ async function downloadBuffer(fileUrl: string): Promise<Buffer> {
 				throw new Error(`HTTP ${response.status.toString()} fetching ${currentUrl}`);
 			}
 
-			return readBounded(response, MAX_BINARY_BYTES);
+			// eslint-disable-next-line no-await-in-loop
+			return await readBounded(response, MAX_BINARY_BYTES);
 		}
 		throw new Error(`Too many redirects fetching ${fileUrl}`);
 	} finally {
@@ -214,7 +219,7 @@ async function verifyAttestation(buffer: Buffer): Promise<void> {
 		const statement = JSON.parse(
 			Buffer.from(payloadB64, 'base64').toString('utf-8'),
 		) as InTotoStatement;
-		const digestMatch = (statement.subject ?? []).some((s) => s.digest?.sha256?.toLowerCase() === digest);
+		const digestMatch = (statement.subject ?? []).some((s) => s.digest?.sha256.toLowerCase() === digest);
 		if (!digestMatch) {
 			throw new Error('Attestation subject digest does not match the downloaded binary');
 		}
