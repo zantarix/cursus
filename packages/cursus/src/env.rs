@@ -20,6 +20,11 @@ pub struct Env {
 	/// The configured editor for opening changeset files.
 	///
 	/// Resolved from `VISUAL` then `EDITOR` in the binary entry point.
+	///
+	/// Per POSIX [`environ(7)`](https://man7.org/linux/man-pages/man7/environ.7.html),
+	/// `$VISUAL`/`$EDITOR` are defined as "any string acceptable as a `command_string`
+	/// operand to `sh -c`", meaning they may contain flags and shell syntax
+	/// (e.g. `EDITOR="emacs -nw"`, `EDITOR="vim --nofork"`).
 	editor: Option<String>,
 	/// The command runner used for all external process invocations.
 	runner: Arc<dyn CommandRunner>,
