@@ -122,3 +122,20 @@ async fn load_fails_on_old_run_until_field() {
 		"Expected 'unknown field' error for run_until, got: {chain}"
 	);
 }
+
+#[tokio::test]
+async fn load_rejects_oversized_config() {
+	let dir = temp_dir();
+	let config_dir = dir.path().join(".cursus");
+	std::fs::create_dir_all(&config_dir).unwrap();
+	// Write a file larger than 256 KiB.
+	let oversized = vec![b'x'; 257 * 1024];
+	std::fs::write(config_dir.join("config.toml"), &oversized).unwrap();
+
+	let env = make_env_with_git(dir.path());
+	let err = load(env.fs(), env.git().path()).await.unwrap_err();
+	assert!(
+		err.to_string().contains("too large"),
+		"unexpected error: {err}"
+	);
+}

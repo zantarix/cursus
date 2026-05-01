@@ -48,6 +48,9 @@ pub trait Filesystem: Send + Sync + std::fmt::Debug {
 
 	/// Expands a glob pattern and returns matching paths.
 	async fn glob(&self, pattern: &str) -> anyhow::Result<Vec<PathBuf>>;
+
+	/// Returns the size of a file in bytes.
+	async fn file_size(&self, path: &AbsolutePath) -> anyhow::Result<u64>;
 }
 
 /// A filesystem implementation backed by the local operating system.
@@ -120,6 +123,13 @@ impl Filesystem for LocalFilesystem {
 		})
 		.await
 		.context("spawn_blocking panicked")?
+	}
+
+	async fn file_size(&self, path: &AbsolutePath) -> anyhow::Result<u64> {
+		tokio::fs::metadata(path.as_path())
+			.await
+			.map(|m| m.len())
+			.with_context(|| format!("Failed to stat {}", path.display()))
 	}
 }
 
@@ -291,5 +301,22 @@ mod tests {
 			err.to_string().contains("Invalid glob pattern"),
 			"got: {err}"
 		);
+	}
+
+	#[tokio::test]
+	async fn file_size_returns_correct_size() {
+		let dir = tempfile::tempdir().unwrap();
+		let file = dir.path().join("sized.bin");
+		std::fs::write(&file, b"hello").unwrap();
+		let path = AbsolutePath::new(&file).unwrap();
+		assert_eq!(local_fs().file_size(&path).await.unwrap(), 5);
+	}
+
+	#[tokio::test]
+	async fn file_size_missing_file_returns_error() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = AbsolutePath::new(dir.path().join("missing.bin")).unwrap();
+		let err = local_fs().file_size(&path).await.unwrap_err();
+		assert!(err.to_string().contains("Failed to stat"), "got: {err}");
 	}
 }

@@ -39,3 +39,7 @@ Changeset files are given random names to avoid merge conflicts. You don't need 
 ## Manual creation
 
 While `cursus change` is the recommended way to create changesets, you can also create them manually. Place a file in `.cursus/` following the format above. Any filename works as long as it doesn't conflict with `config.toml`.
+
+## Limits
+
+Changeset files must not exceed **64 KiB**. This limit exists to prevent excessive memory use when processing a large number of changesets. In practice, changeset descriptions are a few sentences, so this limit is unlikely to be reached.

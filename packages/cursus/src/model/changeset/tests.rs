@@ -774,3 +774,28 @@ fn filter_changeset_paths_empty_input() {
 	let result = filter_changeset_paths(&paths);
 	assert!(result.is_empty());
 }
+
+#[tokio::test]
+async fn read_all_rejects_oversized_changeset() {
+	let dir = tempfile::tempdir().unwrap();
+	let (abs, runner) = make_git(&dir);
+	let env = crate::Env::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		Arc::new(LocalFilesystem),
+		std::sync::Arc::new(GitWorkdir::new(
+			Arc::clone(&runner) as Arc<dyn CommandRunner>,
+			abs.clone(),
+		)),
+	);
+	let cursus_dir = dir.path().join(".cursus");
+	std::fs::create_dir_all(&cursus_dir).unwrap();
+	// Write a file larger than 64 KiB.
+	let oversized = vec![b'x'; 65 * 1024];
+	std::fs::write(cursus_dir.join("big.md"), &oversized).unwrap();
+
+	let err = Changeset::read_all(&env).await.unwrap_err();
+	assert!(
+		err.to_string().contains("too large"),
+		"unexpected error: {err}"
+	);
+}
