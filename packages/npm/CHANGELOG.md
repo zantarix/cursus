@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 - 2026-05-02
+
+### Bug Fixes
+
+- Redeploy after a bad publish [78feef7]
+
 ## 0.5.2 - 2026-05-02
 
 ### Bug Fixes
