@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-05-02
+
+### Bug Fixes
+
+- Fixes npm install on Windows where `./node_modules/.bin/cursus` would print "native binary is not installed" after a successful install. Also adds `cargo binstall cursus-bin` support for fast prebuilt-binary installs from the Rust ecosystem, with glibc Linux mapped to the musl artifact automatically. [2eae47f] via #121
+
 ## 0.5.1 - 2026-05-01
 
 ### Bug Fixes
