@@ -10,7 +10,7 @@
 	"description": "Release management with style",
 	"homepage": "https://github.com/zantarix/cursus#readme",
 	"bin": {
-		"cursus": "bin/cursus"
+		"cursus": "bin/cursus.js"
 	},
 	"type": "module",
 	"scripts": {

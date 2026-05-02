@@ -1,9 +1,5 @@
 #!/usr/bin/env node
 
-// Placeholder shim. The postinstall script (bin/download-binary.js) overwrites
-// this file with the native cursus binary on Linux/macOS, or rewrites
-// package.json#bin to point at bin/cursus.exe on Windows. If you are seeing
-// this message, the postinstall step did not complete successfully.
 process.stderr.write(
 	'cursus: native binary is not installed.\n'
 	+ 'The postinstall step did not complete successfully on this machine.\n'

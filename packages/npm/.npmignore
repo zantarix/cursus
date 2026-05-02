@@ -5,7 +5,7 @@ eslint.config.js
 package-lock.json
 
 # Downloaded native binaries (postinstall downloads these at install time)
-bin/cursus
+bin/cursus-bin
 bin/cursus.exe
 
 # Locally packed distributions

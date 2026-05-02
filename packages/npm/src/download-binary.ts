@@ -1,5 +1,5 @@
 import { type Bundle, verify } from 'sigstore';
-import { chmod, readFile, unlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface PackageJson {
 	version: string;
-	bin: string;
 	[key: string]: unknown;
 }
 
@@ -49,7 +48,7 @@ if (artifact == null) {
 }
 
 const isWindows = platform === 'win32';
-const binaryName = isWindows ? 'cursus.exe' : 'cursus';
+const binaryName = isWindows ? 'cursus.exe' : 'cursus-bin';
 const binaryPath = join(__dirname, binaryName);
 const downloadUrl = `https://github.com/zantarix/cursus/releases/download/${encodeURIComponent(tag)}/${artifact}`;
 
@@ -266,16 +265,9 @@ try {
 
 try {
 	await writeFile(binaryPath, bytes);
-
-	if (isWindows) {
-		// Update the bin field so that subsequent npx invocations resolve the .exe correctly.
-		const pkgPath = join(__dirname, '..', 'package.json');
-		const pkgData = JSON.parse(await readFile(pkgPath, 'utf-8')) as PackageJson;
-		pkgData.bin = 'bin/cursus.exe';
-		await writeFile(pkgPath, `${JSON.stringify(pkgData, null, '\t')}\n`);
-	} else {
-		await chmod(binaryPath, UNIX_EXECUTABLE_MODE);
-	}
+	await chmod(binaryPath, UNIX_EXECUTABLE_MODE);
+	await copyFile(join(__dirname, 'cursus.shim.js'), join(__dirname, 'cursus.js'));
+	await chmod(join(__dirname, 'cursus.js'), UNIX_EXECUTABLE_MODE);
 
 	process.stdout.write(`Successfully installed cursus to ${binaryPath}\n`);
 } catch (err) {
