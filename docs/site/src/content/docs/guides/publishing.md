@@ -26,7 +26,15 @@ cursus publish -p my-package
 
 ## Idempotency
 
-Publish is designed to be safely re-runnable. If a package is already published at the target version, Cursus skips it rather than failing. This is important for CI where a job might be retried after a partial failure.
+Publish is designed to be safely re-runnable across all three stages:
+
+- **Registry publish** — if a package is already at the target version on the registry, Cursus skips it rather than failing.
+- **Git tags** — if the tag for a package already exists, Cursus skips creating it.
+- **GitHub Releases** — if a published GitHub Release already exists for a tag, Cursus skips creating it.
+
+This means re-running `cursus publish` after a partial failure automatically completes any missing tags or GitHub Releases for packages that were successfully published in a previous run.
+
+**Draft releases block recovery.** If Cursus finds an existing *draft* GitHub Release for a tag, it will not modify it — it reports an actionable error instead. Finalise or delete the draft (e.g. via the GitHub UI or `gh release delete <tag>`) and re-run `cursus publish`.
 
 ## Skipping Git operations
 

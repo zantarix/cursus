@@ -13,6 +13,15 @@ pub struct PullRequest {
 	pub html_url: String,
 }
 
+/// An existing GitHub Release found by tag lookup.
+#[derive(Debug, Clone)]
+pub struct ExistingRelease {
+	/// Numeric release ID as a string.
+	pub id: String,
+	/// Whether the release is currently a draft (unpublished).
+	pub is_draft: bool,
+}
+
 /// Abstract interface for code forge API operations.
 ///
 /// Each implementation stores its repository identity at construction time
@@ -89,6 +98,15 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 		body: &str,
 	) -> anyhow::Result<String>;
 
+	/// Looks up an existing GitHub Release by its git tag.
+	///
+	/// Returns `Ok(None)` if no release exists for the given tag (HTTP 404).
+	///
+	/// # Errors
+	///
+	/// Returns an error if the API call fails for reasons other than "not found".
+	async fn find_release_by_tag(&self, tag: &str) -> anyhow::Result<Option<ExistingRelease>>;
+
 	/// Transitions a draft release to published.
 	///
 	/// # Errors
@@ -111,7 +129,7 @@ pub mod test_support {
 	use anyhow::bail;
 	use async_trait::async_trait;
 
-	use super::{CodeForgeClient, PullRequest};
+	use super::{CodeForgeClient, ExistingRelease, PullRequest};
 
 	/// A recorded code forge API invocation.
 	#[derive(Debug, Clone)]
@@ -164,6 +182,11 @@ pub mod test_support {
 			/// ID of the draft release to publish.
 			release_id: String,
 		},
+		/// A `find_release_by_tag` call.
+		FindReleaseByTag {
+			/// Git tag to look up.
+			tag: String,
+		},
 	}
 
 	/// A [`CodeForgeClient`] that records all invocations and returns configured responses.
@@ -178,6 +201,8 @@ pub mod test_support {
 		fail_find_pr: bool,
 		fail_update_pr: bool,
 		fail_publish_release: bool,
+		existing_releases: std::collections::HashMap<String, ExistingRelease>,
+		fail_find_release: bool,
 	}
 
 	impl RecordingCodeForgeClient {
@@ -193,6 +218,8 @@ pub mod test_support {
 				fail_find_pr: false,
 				fail_update_pr: false,
 				fail_publish_release: false,
+				existing_releases: std::collections::HashMap::new(),
+				fail_find_release: false,
 			}
 		}
 
@@ -243,6 +270,23 @@ pub mod test_support {
 		/// Causes [`publish_release`](CodeForgeClient::publish_release) to return an error.
 		pub fn with_publish_release_failure(mut self) -> Self {
 			self.fail_publish_release = true;
+			self
+		}
+
+		/// Configures a release returned by
+		/// [`find_release_by_tag`](CodeForgeClient::find_release_by_tag) for the given tag.
+		pub fn with_existing_release(
+			mut self,
+			tag: impl Into<String>,
+			release: ExistingRelease,
+		) -> Self {
+			self.existing_releases.insert(tag.into(), release);
+			self
+		}
+
+		/// Causes [`find_release_by_tag`](CodeForgeClient::find_release_by_tag) to return an error.
+		pub fn with_find_release_failure(mut self) -> Self {
+			self.fail_find_release = true;
 			self
 		}
 
@@ -348,6 +392,18 @@ pub mod test_support {
 				bail!("simulated update_pull_request failure");
 			}
 			Ok(format!("https://example.com/pull/{pull_number}"))
+		}
+
+		async fn find_release_by_tag(&self, tag: &str) -> anyhow::Result<Option<ExistingRelease>> {
+			self.invocations.lock().expect("mutex poisoned").push(
+				CodeForgeInvocation::FindReleaseByTag {
+					tag: tag.to_string(),
+				},
+			);
+			if self.fail_find_release {
+				bail!("simulated find_release_by_tag failure");
+			}
+			Ok(self.existing_releases.get(tag).cloned())
 		}
 
 		async fn publish_release(&self, release_id: &str) -> anyhow::Result<()> {
@@ -538,6 +594,42 @@ pub mod test_support {
 			let result = client.publish_release("release-1").await;
 			assert!(result.is_err());
 			// Invocation is still recorded even on failure
+			assert_eq!(client.invocations().len(), 1);
+		}
+
+		#[tokio::test]
+		async fn recording_client_find_release_by_tag_returns_none_when_not_configured() {
+			let client = RecordingCodeForgeClient::new();
+			let result = client.find_release_by_tag("v1.0.0").await.unwrap();
+			assert!(result.is_none());
+			assert_eq!(client.invocations().len(), 1);
+			assert!(matches!(
+				&client.invocations()[0],
+				CodeForgeInvocation::FindReleaseByTag { tag } if tag == "v1.0.0"
+			));
+		}
+
+		#[tokio::test]
+		async fn recording_client_find_release_by_tag_returns_configured_release() {
+			let client = RecordingCodeForgeClient::new().with_existing_release(
+				"v1.0.0",
+				ExistingRelease {
+					id: "r-42".to_string(),
+					is_draft: false,
+				},
+			);
+			let result = client.find_release_by_tag("v1.0.0").await.unwrap();
+			assert!(result.is_some());
+			let release = result.unwrap();
+			assert_eq!(release.id, "r-42");
+			assert!(!release.is_draft);
+		}
+
+		#[tokio::test]
+		async fn recording_client_find_release_failure_returns_error() {
+			let client = RecordingCodeForgeClient::new().with_find_release_failure();
+			let result = client.find_release_by_tag("v1.0.0").await;
+			assert!(result.is_err());
 			assert_eq!(client.invocations().len(), 1);
 		}
 	}

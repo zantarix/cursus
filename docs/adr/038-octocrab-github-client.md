@@ -87,3 +87,5 @@ Use an HTTP client that does not depend on tokio (e.g. `surf` or a custom trait 
 ## Errata
 
 `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+
+**2026-05-03**: [ADR-055](055-end-to-end-idempotent-publish-recovery.md) extends the `CodeForgeClient` trait with `find_release_by_tag`. The `OctocrabGitHubClient` implementation gains a use of `repos().releases().get_by_tag(tag)`, a routine extension of the existing octocrab usage pattern established by this ADR. No change to the injection model, authentication strategy, or async semantics. See [ADR-055](055-end-to-end-idempotent-publish-recovery.md) for the recovery decision tree.

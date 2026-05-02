@@ -8,8 +8,14 @@ use std::path::Path;
 
 use anyhow::Context;
 use async_trait::async_trait;
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 
-use super::client::{CodeForgeClient, PullRequest};
+use super::client::{CodeForgeClient, ExistingRelease, PullRequest};
+
+// Encodes characters unsafe in a URL path segment used as a single token (e.g., a git tag in
+// the GitHub Releases API path `/releases/tags/{tag}`). Unlike branch refs, `/` must be encoded
+// here because the tag occupies a single path segment — an unencoded `/` would corrupt the route.
+const TAG_PATH: &AsciiSet = &CONTROLS.add(b' ').add(b'?').add(b'#').add(b'%').add(b'/');
 use super::remote::GitHubRepo;
 
 /// GitHub API client backed by octocrab.
@@ -150,6 +156,31 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.html_url
 			.context("GitHub API response missing html_url for updated pull request")?;
 		Ok(url.to_string())
+	}
+
+	async fn find_release_by_tag(&self, tag: &str) -> anyhow::Result<Option<ExistingRelease>> {
+		let encoded_tag = utf8_percent_encode(tag, TAG_PATH).to_string();
+		log::trace!("find_release_by_tag: tag={tag} encoded={encoded_tag}");
+		match self
+			.client
+			.repos(&self.gh_repo.owner, &self.gh_repo.repo)
+			.releases()
+			.get_by_tag(&encoded_tag)
+			.await
+		{
+			Ok(release) => Ok(Some(ExistingRelease {
+				id: release.id.to_string(),
+				is_draft: release.draft,
+			})),
+			Err(octocrab::Error::GitHub { ref source, .. })
+				if source.status_code.as_u16() == 404 =>
+			{
+				Ok(None)
+			}
+			Err(e) => {
+				Err(e).with_context(|| format!("Failed to look up GitHub Release for tag '{tag}'"))
+			}
+		}
 	}
 
 	async fn publish_release(&self, release_id: &str) -> anyhow::Result<()> {

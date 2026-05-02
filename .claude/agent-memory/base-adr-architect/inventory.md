@@ -57,3 +57,4 @@
 | 052 | 052-credential-redaction-in-error-messages.md | Redact Credentials from Subprocess and API Error Messages | Accepted (2026-05-01) |
 | 053 | 053-npm-package-node-spawner.md | Use a Node.js Spawner Script for the npm Package Binary Entry Point | Accepted (2026-05-02) |
 | 054 | 054-cargo-binstall-support.md | Add cargo-binstall Support for Prebuilt Binary Installation | Accepted (2026-05-02) |
+| 055 | 055-end-to-end-idempotent-publish-recovery.md | End-to-End Idempotent Publish Recovery | Accepted (2026-05-03) |

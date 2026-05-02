@@ -103,12 +103,73 @@ pub(super) async fn publish_draft_release(
 	}
 }
 
+enum ReleaseAction {
+	Created,
+	AlreadyPresent,
+	Failed,
+}
+
+/// Processes a single package's GitHub Release.
+async fn process_one_release(
+	code_forge_client: &dyn CodeForgeClient,
+	git: &dyn Git,
+	config: &Config,
+	pkg: &PublishedPackage,
+	tag: &str,
+	fs: &dyn crate::filesystem::Filesystem,
+) -> anyhow::Result<ReleaseAction> {
+	match code_forge_client.find_release_by_tag(tag).await {
+		Err(e) => {
+			error!("Failed to look up GitHub Release for {tag}: {e:#}");
+			return Ok(ReleaseAction::Failed);
+		}
+		Ok(Some(r)) if !r.is_draft => {
+			info!("Skipped GitHub Release for {tag} (already exists)");
+			return Ok(ReleaseAction::AlreadyPresent);
+		}
+		Ok(Some(_)) => {
+			error!(
+				"Found a partial draft GitHub Release for {tag}; cursus will not modify it. \
+				 Finalise or delete the draft manually (e.g. via the GitHub UI or \
+				 `gh release delete '{tag}'`) and re-run cursus publish."
+			);
+			return Ok(ReleaseAction::Failed);
+		}
+		Ok(None) => {}
+	}
+	let body = read_changelog_body(pkg, fs).await;
+	let empty = std::collections::BTreeMap::new();
+	let artifacts = config.github.artifacts.get(&pkg.name).unwrap_or(&empty);
+	match code_forge_client.create_release(tag, tag, &body).await {
+		Ok(release_id) => {
+			let failed = publish_draft_release(
+				code_forge_client,
+				tag,
+				&release_id,
+				artifacts,
+				git.path(),
+				fs,
+			)
+			.await;
+			Ok(if failed {
+				ReleaseAction::Failed
+			} else {
+				ReleaseAction::Created
+			})
+		}
+		Err(e) => {
+			error!("Failed to create GitHub Release for {tag}: {e:#}");
+			Ok(ReleaseAction::Failed)
+		}
+	}
+}
+
 /// Orchestrates GitHub Release creation for all successfully published packages.
 ///
 /// The caller must ensure that the code forge client is available (i.e. `code_forge_client`
 /// is `Ok`) before calling this function (enforced by the early check in `cmd_publish`).
 ///
-/// Returns `(releases_created, any_failed)`.
+/// Returns `(releases_created, releases_already_present, any_failed)`.
 pub(super) async fn orchestrate_github_releases(
 	git: &dyn Git,
 	config: &Config,
@@ -116,48 +177,25 @@ pub(super) async fn orchestrate_github_releases(
 	published_packages: &[PublishedPackage],
 	is_multi_package: bool,
 	fs: &dyn crate::filesystem::Filesystem,
-) -> anyhow::Result<(usize, bool)> {
+) -> anyhow::Result<(usize, usize, bool)> {
 	if published_packages.is_empty() {
-		return Ok((0, false));
+		return Ok((0, 0, false));
 	}
 	let mut github_failed = false;
 	let mut created_count = 0;
-	let empty_artifacts = std::collections::BTreeMap::new();
+	let mut already_present_count = 0;
 	for pkg in published_packages {
 		let tag = config
 			.git
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
-		let body = read_changelog_body(pkg, fs).await;
-		match code_forge_client.create_release(&tag, &tag, &body).await {
-			Ok(release_id) => {
-				let pkg_artifacts = config
-					.github
-					.artifacts
-					.get(&pkg.name)
-					.unwrap_or(&empty_artifacts);
-				if publish_draft_release(
-					code_forge_client,
-					&tag,
-					&release_id,
-					pkg_artifacts,
-					git.path(),
-					fs,
-				)
-				.await
-				{
-					github_failed = true;
-				} else {
-					created_count += 1;
-				}
-			}
-			Err(e) => {
-				error!("Failed to create GitHub Release for {tag}: {e:#}");
-				github_failed = true;
-			}
+		match process_one_release(code_forge_client, git, config, pkg, &tag, fs).await? {
+			ReleaseAction::Created => created_count += 1,
+			ReleaseAction::AlreadyPresent => already_present_count += 1,
+			ReleaseAction::Failed => github_failed = true,
 		}
 	}
-	Ok((created_count, github_failed))
+	Ok((created_count, already_present_count, github_failed))
 }
 
 /// Uploads all configured artifacts to a GitHub release.
@@ -220,7 +258,7 @@ mod tests {
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -251,7 +289,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -265,14 +303,18 @@ mod tests {
 		assert_eq!(created, 1);
 		assert!(!failed);
 		let invocations = client.invocations();
-		assert_eq!(invocations.len(), 2);
+		assert_eq!(invocations.len(), 3);
 		assert!(matches!(
 			&invocations[0],
+			CodeForgeInvocation::FindReleaseByTag { tag } if tag == "v1.2.0"
+		));
+		assert!(matches!(
+			&invocations[1],
 			CodeForgeInvocation::CreateRelease { tag_name, .. }
 				if tag_name == "v1.2.0"
 		));
 		assert!(matches!(
-			&invocations[1],
+			&invocations[2],
 			CodeForgeInvocation::PublishRelease { release_id, .. } if release_id == "release-1"
 		));
 	}
@@ -292,7 +334,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -306,13 +348,17 @@ mod tests {
 		assert_eq!(created, 1);
 		assert!(!failed);
 		let invocations = client.invocations();
-		assert_eq!(invocations.len(), 2);
+		assert_eq!(invocations.len(), 3);
 		assert!(matches!(
 			&invocations[0],
-			CodeForgeInvocation::CreateRelease { tag_name, .. } if tag_name == "my-app@1.2.0"
+			CodeForgeInvocation::FindReleaseByTag { tag } if tag == "my-app@1.2.0"
 		));
 		assert!(matches!(
 			&invocations[1],
+			CodeForgeInvocation::CreateRelease { tag_name, .. } if tag_name == "my-app@1.2.0"
+		));
+		assert!(matches!(
+			&invocations[2],
 			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
@@ -339,7 +385,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -352,8 +398,8 @@ mod tests {
 
 		assert_eq!(created, 0);
 		assert!(failed);
-		// Both packages should have been attempted
-		assert_eq!(client.invocations().len(), 2);
+		// Both packages should have been attempted: FindReleaseByTag + CreateRelease each
+		assert_eq!(client.invocations().len(), 4);
 	}
 
 	#[tokio::test]
@@ -375,7 +421,7 @@ mod tests {
 		}];
 		let git = git_from_dir(&runner, dir.path());
 
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -433,7 +479,7 @@ mod tests {
 		];
 		let git = git_from_dir(&runner, dir.path());
 
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -471,7 +517,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -489,10 +535,14 @@ mod tests {
 		let invocations = client.invocations();
 		assert!(matches!(
 			&invocations[0],
-			CodeForgeInvocation::CreateRelease { .. }
+			CodeForgeInvocation::FindReleaseByTag { .. }
 		));
 		assert!(matches!(
 			&invocations[1],
+			CodeForgeInvocation::CreateRelease { .. }
+		));
+		assert!(matches!(
+			&invocations[2],
 			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
@@ -516,7 +566,7 @@ mod tests {
 		}];
 		let git = git_from_dir(&runner, dir.path());
 
-		let (created, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_github_releases(
 			&git,
 			&config,
 			&client,
@@ -530,19 +580,23 @@ mod tests {
 		assert_eq!(created, 1);
 		assert!(!failed);
 
-		// Sequence: CreateRelease, UploadAsset, PublishRelease
+		// Sequence: FindReleaseByTag, CreateRelease, UploadAsset, PublishRelease
 		let invocations = client.invocations();
-		assert_eq!(invocations.len(), 3);
+		assert_eq!(invocations.len(), 4);
 		assert!(matches!(
 			&invocations[0],
-			CodeForgeInvocation::CreateRelease { .. }
+			CodeForgeInvocation::FindReleaseByTag { .. }
 		));
 		assert!(matches!(
 			&invocations[1],
-			CodeForgeInvocation::UploadAsset { .. }
+			CodeForgeInvocation::CreateRelease { .. }
 		));
 		assert!(matches!(
 			&invocations[2],
+			CodeForgeInvocation::UploadAsset { .. }
+		));
+		assert!(matches!(
+			&invocations[3],
 			CodeForgeInvocation::PublishRelease { .. }
 		));
 	}
@@ -763,6 +817,215 @@ mod tests {
 			logs.iter()
 				.any(|(_, m)| m.contains("Would publish release after artifact upload")),
 			"Expected publish log even with artifacts, got: {logs:?}"
+		);
+	}
+
+	// --- Tests for GitHub Release idempotency ---
+
+	#[tokio::test]
+	async fn orchestrate_github_releases_skips_when_release_already_published() {
+		use crate::github::client::ExistingRelease;
+
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
+		let existing = ExistingRelease {
+			id: "existing-1".to_string(),
+			is_draft: false,
+		};
+		let client = RecordingCodeForgeClient::new().with_existing_release("v1.0.0", existing);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+
+		let packages = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.0.0".parse().unwrap(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
+		}];
+
+		let wd = workdir();
+		let git =
+			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
+		let (created, already_present, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(created, 0);
+		assert_eq!(already_present, 1);
+		assert!(!failed);
+
+		let invocations = client.invocations();
+		assert!(
+			invocations.iter().any(
+				|i| matches!(i, CodeForgeInvocation::FindReleaseByTag { tag } if tag == "v1.0.0")
+			),
+			"Expected FindReleaseByTag invocation"
+		);
+		assert!(
+			!invocations
+				.iter()
+				.any(|i| matches!(i, CodeForgeInvocation::CreateRelease { .. })),
+			"CreateRelease must NOT be called when release already exists"
+		);
+		assert!(
+			!invocations
+				.iter()
+				.any(|i| matches!(i, CodeForgeInvocation::PublishRelease { .. })),
+			"PublishRelease must NOT be called when release already exists"
+		);
+	}
+
+	#[tokio::test]
+	async fn orchestrate_github_releases_aborts_on_existing_draft() {
+		use crate::github::client::ExistingRelease;
+		use crate::test_logging::{init_test_logger, take_logs};
+		init_test_logger();
+		let _ = take_logs();
+
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
+		let client = RecordingCodeForgeClient::new().with_existing_release(
+			"v1.0.0",
+			ExistingRelease {
+				id: "draft-1".to_string(),
+				is_draft: true,
+			},
+		);
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let packages = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "1.0.0".parse().unwrap(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
+		}];
+		let git =
+			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, workdir());
+		let (created, already_present, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(created, 0);
+		assert_eq!(already_present, 0);
+		assert!(failed);
+		// Only FindReleaseByTag must have been called — no mutating API calls.
+		let invocations = client.invocations();
+		assert_eq!(invocations.len(), 1);
+		assert!(matches!(
+			&invocations[0],
+			CodeForgeInvocation::FindReleaseByTag { .. }
+		));
+		let logs = take_logs();
+		assert!(
+			logs.iter()
+				.any(|(_, m)| m.contains("v1.0.0") && m.contains("draft")),
+			"Expected error mentioning the tag and 'draft': {logs:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn orchestrate_github_releases_finds_release_before_creating() {
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
+		let client = RecordingCodeForgeClient::new();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+
+		let packages = vec![PublishedPackage {
+			name: "my-app".to_string(),
+			version: "2.0.0".parse().unwrap(),
+			project_path: AbsolutePath::new("/nonexistent").unwrap(),
+		}];
+
+		let wd = workdir();
+		let git =
+			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
+		let (created, already_present, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			false,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(created, 1);
+		assert_eq!(already_present, 0);
+		assert!(!failed);
+
+		let invocations = client.invocations();
+		assert!(
+			invocations
+				.iter()
+				.any(|i| matches!(i, CodeForgeInvocation::FindReleaseByTag { .. })),
+			"FindReleaseByTag must be called before CreateRelease"
+		);
+		// FindReleaseByTag must come before CreateRelease in the invocation list
+		let find_pos = invocations
+			.iter()
+			.position(|i| matches!(i, CodeForgeInvocation::FindReleaseByTag { .. }))
+			.unwrap();
+		let create_pos = invocations
+			.iter()
+			.position(|i| matches!(i, CodeForgeInvocation::CreateRelease { .. }))
+			.unwrap();
+		assert!(
+			find_pos < create_pos,
+			"FindReleaseByTag must precede CreateRelease"
+		);
+	}
+
+	#[tokio::test]
+	async fn orchestrate_github_releases_find_failure_marks_failed_continues_next_package() {
+		// A find_release_by_tag error on one package must not abort the loop.
+		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
+		let client = RecordingCodeForgeClient::new().with_find_release_failure();
+		let runner = Arc::new(RecordingCommandRunner::new(0));
+		let packages = vec![
+			PublishedPackage {
+				name: "pkg-a".to_string(),
+				version: "1.0.0".parse().unwrap(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
+			},
+			PublishedPackage {
+				name: "pkg-b".to_string(),
+				version: "2.0.0".parse().unwrap(),
+				project_path: AbsolutePath::new("/nonexistent").unwrap(),
+			},
+		];
+		let git =
+			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, workdir());
+		let (created, already_present, failed) = orchestrate_github_releases(
+			&git,
+			&config,
+			&client,
+			&packages,
+			true,
+			&crate::filesystem::LocalFilesystem,
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(created, 0);
+		assert_eq!(already_present, 0);
+		assert!(failed);
+		// Both packages should have had FindReleaseByTag attempted.
+		let find_count = client
+			.invocations()
+			.iter()
+			.filter(|i| matches!(i, CodeForgeInvocation::FindReleaseByTag { .. }))
+			.count();
+		assert_eq!(
+			find_count, 2,
+			"Both packages should be attempted despite first failure"
 		);
 	}
 }

@@ -58,6 +58,8 @@ struct GitReleaseOutcome {
 	tags_skipped: usize,
 	tags_push_failed: usize,
 	github_created: usize,
+	/// Releases skipped because a published release already exists for the tag.
+	releases_already_present: usize,
 	github_failed: bool,
 }
 
@@ -158,21 +160,23 @@ async fn run_git_release_operations(
 		flags.is_multi_package,
 	)
 	.await?;
-	let (github_created, github_failed) = maybe_orchestrate_github_releases(
-		git,
-		config,
-		env,
-		published_packages,
-		flags.dry_run,
-		flags.no_git,
-		flags.is_multi_package,
-	)
-	.await?;
+	let (github_created, releases_already_present, github_failed) =
+		maybe_orchestrate_github_releases(
+			git,
+			config,
+			env,
+			published_packages,
+			flags.dry_run,
+			flags.no_git,
+			flags.is_multi_package,
+		)
+		.await?;
 	Ok(GitReleaseOutcome {
 		tags_created,
 		tags_skipped,
 		tags_push_failed,
 		github_created,
+		releases_already_present,
 		github_failed,
 	})
 }
@@ -206,7 +210,7 @@ async fn maybe_create_tags(
 
 /// Orchestrates GitHub Releases when enabled, or logs dry-run intent.
 ///
-/// Returns `(releases_created, any_failed)`.
+/// Returns `(releases_created, releases_already_present, any_failed)`.
 async fn maybe_orchestrate_github_releases(
 	git: &dyn Git,
 	config: &Config,
@@ -215,13 +219,13 @@ async fn maybe_orchestrate_github_releases(
 	dry_run: bool,
 	no_git: bool,
 	is_multi_package: bool,
-) -> anyhow::Result<(usize, bool)> {
+) -> anyhow::Result<(usize, usize, bool)> {
 	if !config.github.enabled || no_git {
-		return Ok((0, false));
+		return Ok((0, 0, false));
 	}
 	if dry_run {
 		log_dry_run_github_releases(published_packages, config, is_multi_package);
-		return Ok((0, false));
+		return Ok((0, 0, false));
 	}
 	let client = env
 		.code_forge_client()
@@ -338,7 +342,9 @@ impl PublishState {
 	/// Records the outcome of publishing a single project.
 	///
 	/// In dry-run mode, logs what would be published and pushes to `published`.
-	/// In real mode, delegates to `do_publish` and updates counts/blocked set on failure.
+	/// In real mode, both `Published` and `Skipped` (already-on-registry) outcomes push onto
+	/// `published` so that downstream tag and GitHub Release stages can recover from prior partial
+	/// failures (ADR-055). Only `Failed` skips the package from `published`.
 	async fn record_outcome(
 		&mut self,
 		project: &package_manager::Project,
@@ -366,7 +372,17 @@ impl PublishState {
 					version: project.version().clone(),
 					project_path: project.path().clone(),
 				}),
-				PublishResult::Skipped => self.skipped_count += 1,
+				// Package version is already on the registry (published in a prior run).
+				// Still add it to `published` so tag and GitHub Release creation are
+				// retried — both are already idempotent and handle the pre-existing state.
+				PublishResult::Skipped => {
+					self.published.push(PublishedPackage {
+						name: project.name().to_string(),
+						version: project.version().clone(),
+						project_path: project.path().clone(),
+					});
+					self.skipped_count += 1;
+				}
 				PublishResult::Failed => {
 					self.failed = true;
 					add_transitive_dependents(graph, project.name(), &mut self.blocked);
@@ -442,16 +458,17 @@ async fn publish_projects(
 
 /// Logs the GitHub Releases portion of the publish summary.
 ///
-/// `registry_published` excludes private-tagged packages; `private_tagged_count` is
-/// reported separately. GitHub Releases are created for all packages in `published`
-/// (registry + private), so `failed_count` is derived from their combined total.
+/// `registry_published` excludes private-tagged and registry-skipped packages.
+/// `skipped_count` covers packages already on the registry (whose releases are still
+/// attempted). `failed_count` is derived from the combined total minus created and
+/// already-present releases.
 fn log_github_releases_summary(
 	registry_published: usize,
 	private_tagged_count: usize,
 	skipped_count: usize,
-	dep_skipped_note: &str,
-	unprepared_note: &str,
+	suffix_note: &str,
 	github_created: usize,
+	releases_already_present: usize,
 	github_failed: bool,
 ) {
 	let private_note = if private_tagged_count > 0 {
@@ -459,19 +476,26 @@ fn log_github_releases_summary(
 	} else {
 		String::new()
 	};
-	// GitHub Releases are attempted for both registry-published and private-tagged packages.
-	let total_releasable = registry_published + private_tagged_count;
+	let already_note = if releases_already_present > 0 {
+		format!(", {releases_already_present} already present")
+	} else {
+		String::new()
+	};
+	// GitHub Releases are attempted for registry-published, registry-skipped, and
+	// private-tagged packages — the full `state.published` slice.
+	let total_releasable = registry_published + private_tagged_count + skipped_count;
 	match (github_created, github_failed) {
 		(created, false) => info!(
 			"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
-			 {created} GitHub Releases created{dep_skipped_note}{unprepared_note}",
+			 {created} GitHub Release{} created{already_note}{suffix_note}",
+			if created == 1 { "" } else { "s" },
 		),
 		(created, true) => {
-			let failed_count = total_releasable.saturating_sub(created);
+			let failed_count = total_releasable.saturating_sub(created + releases_already_present);
 			info!(
 				"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
-				 {created} GitHub Release{} created, {failed_count} GitHub Release{} failed\
-				 {dep_skipped_note}{unprepared_note}",
+				 {created} GitHub Release{} created{already_note}, {failed_count} GitHub Release{} \
+				 failed{suffix_note}",
 				if created == 1 { "" } else { "s" },
 				if failed_count == 1 { "" } else { "s" },
 			);
@@ -496,7 +520,8 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 	} else {
 		String::new()
 	};
-	let registry_published = state.published.len() - state.private_tagged_count;
+	let registry_published =
+		state.published.len() - state.private_tagged_count - state.skipped_count;
 	if flags.dry_run {
 		let tag_note = if flags.git_enabled && !state.published.is_empty() {
 			format!(", {} would be tagged", state.published.len())
@@ -512,13 +537,14 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 			 differ if some packages are already published or if publish failures occur"
 		);
 	} else if flags.github_enabled && !flags.no_git {
+		let suffix_note = format!("{dep_skipped_note}{unprepared_note}");
 		log_github_releases_summary(
 			registry_published,
 			state.private_tagged_count,
 			state.skipped_count,
-			&dep_skipped_note,
-			&unprepared_note,
+			&suffix_note,
 			outcome.github_created,
+			outcome.releases_already_present,
 			outcome.github_failed,
 		);
 	} else {
@@ -657,6 +683,7 @@ mod tests {
 			tags_skipped: 0,
 			tags_push_failed: 0,
 			github_created: 0,
+			releases_already_present: 0,
 			github_failed: false,
 		}
 	}
@@ -780,6 +807,7 @@ mod tests {
 			tags_skipped: 0,
 			tags_push_failed: 0,
 			github_created: 0,
+			releases_already_present: 0,
 			github_failed: false,
 		};
 		log_publish_summary(&state, &flags, &outcome);
@@ -808,6 +836,7 @@ mod tests {
 			tags_skipped: 0,
 			tags_push_failed: 1,
 			github_created: 0,
+			releases_already_present: 0,
 			github_failed: false,
 		};
 		log_publish_summary(&state, &flags, &outcome);
@@ -836,6 +865,7 @@ mod tests {
 			tags_skipped: 0,
 			tags_push_failed: 2,
 			github_created: 0,
+			releases_already_present: 0,
 			github_failed: false,
 		};
 		log_publish_summary(&state, &flags, &outcome);
@@ -860,11 +890,11 @@ mod tests {
 	async fn log_github_releases_summary_no_failure_logs_created_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(3, 0, 0, "", "", 2, false);
+		log_github_releases_summary(3, 0, 0, "", 2, 0, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter()
-				.any(|(_, m)| m.contains("3 published") && m.contains("2 GitHub Releases created")),
+				.any(|(_, m)| m.contains("3 published") && m.contains("2 GitHub Release")),
 			"Expected GitHub Release summary: {logs:?}"
 		);
 	}
@@ -873,7 +903,7 @@ mod tests {
 	async fn log_github_releases_summary_with_failure_logs_failed_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(3, 0, 0, "", "", 2, true);
+		log_github_releases_summary(3, 0, 0, "", 2, 0, true);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter()
@@ -905,7 +935,11 @@ mod tests {
 		let mut state = PublishState::new();
 		state.record_outcome(&project, &graph, false).await;
 		assert_eq!(state.skipped_count, 1, "Expected skipped_count == 1");
-		assert_eq!(state.published.len(), 0, "Expected no published packages");
+		assert_eq!(
+			state.published.len(),
+			1,
+			"Skipped package must be added to published so tags/releases are retried"
+		);
 	}
 
 	// ── private_tagged_count tests ────────────────────────────────────────────
@@ -921,7 +955,7 @@ mod tests {
 		// Guards `> 0` → `> 1` on `private_tagged_count` condition.
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(2, 1, 0, "", "", 3, false);
+		log_github_releases_summary(2, 1, 0, "", 3, 0, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter().any(|(_, m)| m.contains("private (tag only)")),
@@ -933,7 +967,7 @@ mod tests {
 	async fn log_github_releases_summary_no_private_note_when_zero() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(2, 0, 0, "", "", 2, false);
+		log_github_releases_summary(2, 0, 0, "", 2, 0, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			!logs.iter().any(|(_, m)| m.contains("private (tag only)")),
