@@ -35,6 +35,27 @@ cargo install cursus-bin
 
 This builds from source and installs the binary to `~/.cargo/bin/`.
 
+## cargo-binstall
+
+If you have [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) installed, you can install the prebuilt binary from GitHub Releases without compiling from source:
+
+```bash
+cargo binstall cursus-bin
+```
+
+This downloads the matching static binary for your host triple (including glibc Linux, which is mapped to the equivalent musl artifact) and installs it to `~/.cargo/bin/`. cargo-binstall verifies the download via HTTPS; for stronger identity-pinned provenance verification, run `gh attestation verify --repo zantarix/cursus ~/.cargo/bin/cursus` against the installed binary.
+
+## cargo-run-bin
+
+If you pin tooling versions per-repository using [cargo-run-bin](https://github.com/dustinblackman/cargo-run-bin), you can declare cursus as a project-scoped binary in your own `Cargo.toml`:
+
+```toml
+[package.metadata.bin]
+cursus-bin = { version = "<desired-version>" }
+```
+
+When cargo-binstall is also installed, cargo-run-bin will delegate to it and pick up the prebuilt binary, so the install is a fast download rather than a from-source build.
+
 ## Verify installation
 
 ```bash

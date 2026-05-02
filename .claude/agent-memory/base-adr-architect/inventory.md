@@ -55,5 +55,5 @@
 | 050 | 050-verified-release-commits-via-git-data-api.md | Produce Verified Release Commits via the GitHub Git Data API | Accepted (2026-04-29) |
 | 051 | 051-bundle-sigstore-deps-via-workspace-removal.md | Bundle Sigstore Transitive Dependencies into the npm Tarball by Removing the Workspace Declaration | Accepted (2026-05-01) |
 | 052 | 052-credential-redaction-in-error-messages.md | Redact Credentials from Subprocess and API Error Messages | Accepted (2026-05-01) |
-| 053 | 053-npm-package-node-spawner.md | Use a Node.js Spawner Script for the npm Package Binary Entry Point | Proposed (2026-05-02) |
-| 054 | 054-cargo-binstall-support.md | Add cargo-binstall Support for Prebuilt Binary Installation | Proposed (2026-05-02) |
+| 053 | 053-npm-package-node-spawner.md | Use a Node.js Spawner Script for the npm Package Binary Entry Point | Accepted (2026-05-02) |
+| 054 | 054-cargo-binstall-support.md | Add cargo-binstall Support for Prebuilt Binary Installation | Accepted (2026-05-02) |

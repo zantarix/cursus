@@ -37,3 +37,36 @@ tokio = { version = "=1.52.1", features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true
+
+[package.metadata.binstall]
+pkg-fmt = "bin"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-musl]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-linux-x86_64"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-musl]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-linux-aarch64"
+
+[package.metadata.binstall.overrides.riscv64gc-unknown-linux-musl]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-linux-riscv64gc"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-osx-x86_64"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-osx-aarch64"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-windows-x86_64.exe"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-windows-aarch64.exe"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-linux-x86_64"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-linux-aarch64"
+
+[package.metadata.binstall.overrides.riscv64gc-unknown-linux-gnu]
+pkg-url = "https://github.com/zantarix/cursus/releases/download/cursus@{ version }/cursus-linux-riscv64gc"

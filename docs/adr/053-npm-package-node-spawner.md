@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-05-02)
+Accepted (2026-05-02)
 
 ## Context
 
@@ -39,7 +39,7 @@ The published npm tarball will retain the existing placeholder at `bin/cursus.js
 
 The `package.json.bin` field will point at `bin/cursus.js` (renamed from `bin/cursus` for clarity, since the file is always a JavaScript ESM module — either the placeholder or, after postinstall, the spawner).
 
-Postinstall will be modified as follows. The native binary will be downloaded and verified per the existing flow ([ADR-049](049-signed-release-artifacts.md)) and written to a sibling path next to the bin entry: `bin/cursus.exe` on Windows, `bin/cursus-bin` on Unix. Postinstall will then **copy `bin/cursus.shim.js` over `bin/cursus.js`**, replacing the placeholder with the pre-written spawner. The `package.json.bin` field will continue to point at `bin/cursus.js` and will not be mutated by postinstall.
+Postinstall will be modified as follows. The native binary will be downloaded and verified per the existing flow ([ADR-049](049-signed-release-artifacts.md)) and written to a sibling path next to the bin entry: `bin/cursus.exe` on Windows, `bin/cursus-bin` on Unix. Postinstall will then **copy `bin/cursus.shim.js` over `bin/cursus.js`**, replacing the placeholder with the pre-written spawner, and **chmod the resulting `bin/cursus.js` to mode `0755`**. The chmod step is required because the TypeScript compiler emits files with mode `0644` and `cp` preserves source permissions; on Unix, npm's `node_modules/.bin/cursus` symlink inherits the target's permissions, so without the explicit chmod the symlinked invocation fails with "permission denied". The `package.json.bin` field will continue to point at `bin/cursus.js` and will not be mutated by postinstall.
 
 The spawner script (`bin/cursus.shim.js`) shall:
 
