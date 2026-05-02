@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "cursus"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "cursus-bin"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "clap",
