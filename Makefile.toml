@@ -1,16 +1,15 @@
 [config]
 default_to_workspace = false
 
-# Coverage disabled due to upstream LLVM bug: https://github.com/llvm/llvm-project/pull/189270
 [tasks.coverage]
 clear = true
 command = "cargo"
-args = ["test", "--workspace"]
+args = ["llvm-cov", "--workspace", "--summary-only", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 
 [tasks.coverage-html]
 clear = true
 command = "cargo"
-args = ["test", "--workspace"]
+args = ["llvm-cov", "--workspace", "--html", "--open", "--fail-under-lines", "90", "--fail-under-regions", "90", "--fail-under-functions", "90"]
 
 [tasks.release-linux-x86_64]
 command = "cargo"
