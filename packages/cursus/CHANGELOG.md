@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 - 2026-05-07
+
+### Bug Fixes
+
+- Updates octocrab to 0.50.0, tokio to 1.52.2, and serde-saphyr to 0.0.26. [d9b875c]
+
 ## 0.6.0 - 2026-05-02
 
 ### Features
