@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 - 2026-05-07
+
+### Bug Fixes
+
+- Revert octocrab to 0.49 to revert upstream issues [fc2bbdf]
+
 ## 0.6.1 - 2026-05-07
 
 ### Bug Fixes
