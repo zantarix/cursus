@@ -109,7 +109,10 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.send()
 			.await
 			.with_context(|| format!("Failed to create pull request '{title}'"))?;
-		Ok(pr.html_url.to_string())
+		let url = pr
+			.html_url
+			.context("GitHub API response missing html_url for created pull request")?;
+		Ok(url.to_string())
 	}
 
 	async fn find_open_pull_request(&self, head: &str) -> anyhow::Result<Option<PullRequest>> {
@@ -125,7 +128,7 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.await
 			.with_context(|| format!("Failed to list pull requests for branch '{head}'"))?;
 		Ok(page.items.into_iter().next().map(|pr| {
-			let html_url = pr.html_url.to_string();
+			let html_url = pr.html_url.map_or_else(String::new, |u| u.to_string());
 			PullRequest {
 				number: pr.number,
 				html_url,
@@ -149,7 +152,10 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.send()
 			.await
 			.with_context(|| format!("Failed to update pull request #{pull_number}"))?;
-		Ok(pr.html_url.to_string())
+		let url = pr
+			.html_url
+			.context("GitHub API response missing html_url for updated pull request")?;
+		Ok(url.to_string())
 	}
 
 	async fn find_release_by_tag(&self, tag: &str) -> anyhow::Result<Option<ExistingRelease>> {
