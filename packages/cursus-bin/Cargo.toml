@@ -22,7 +22,7 @@ log = "=0.4.29"
 mutants = "=0.0.4"
 octocrab = "=0.49.9"
 sys-locale = "=0.3.2"
-tokio = { version = "=1.52.2", default-features = false, features = ["rt-multi-thread", "macros"] }
+tokio = { version = "=1.52.3", default-features = false, features = ["rt-multi-thread", "macros"] }
 
 [features]
 default = ["nix-tests"]
@@ -33,7 +33,7 @@ test-support = []
 [dev-dependencies]
 cursus = { path = "../cursus", version = "=0.6.2", features = ["test-support"], default-features = false }
 tempfile = "=3.27.0"
-tokio = { version = "=1.52.2", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "=1.52.3", features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true
