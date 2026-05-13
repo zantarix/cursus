@@ -20,8 +20,9 @@ pub(crate) struct ForgeClientOutcome {
 /// Dispatches to the appropriate forge client constructor based on which
 /// `[github].enabled` / `[gitlab].enabled` flag is set.
 ///
-/// Precedence is GitHub-first when both are enabled — ADR-059 will refine
-/// the "both enabled" rule and remote-URL auto-detection.
+/// The "more than one enabled" case is rejected at `Config::load`, so it
+/// should be unreachable here; the defensive arm returns an error rather
+/// than panicking.
 pub(crate) async fn resolve_forge_client(
 	env: &cursus::Env,
 	config: &Option<cursus::model::config::Config>,
@@ -31,11 +32,11 @@ pub(crate) async fn resolve_forge_client(
 	let github_enabled = cfg.is_some_and(|c| c.github.enabled);
 	let gitlab_enabled = cfg.is_some_and(|c| c.gitlab.enabled);
 	match (github_enabled, gitlab_enabled) {
-		(true, _) => Ok(ForgeClientOutcome {
+		(true, false) => Ok(ForgeClientOutcome {
 			client: github::resolve_github_forge_client(env, config, octocrab).await?,
 			gitlab_uses_job_token_only: false,
 		}),
-		(_, true) => {
+		(false, true) => {
 			let gitlab_outcome = gitlab::resolve_gitlab_forge_client(env, config).await?;
 			Ok(ForgeClientOutcome {
 				client: gitlab_outcome.client,
@@ -46,6 +47,7 @@ pub(crate) async fn resolve_forge_client(
 			"No forge enabled; set [github].enabled or [gitlab].enabled in .cursus/config.toml"
 				.to_string(),
 		),
+		_ => Err("More than one forge is enabled in .cursus/config.toml.".to_string()),
 	}
 }
 

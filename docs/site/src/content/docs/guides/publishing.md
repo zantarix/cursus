@@ -3,7 +3,7 @@ title: Publishing
 description: How Cursus publishes packages to registries
 ---
 
-The `publish` step takes a prepared release and pushes it to package registries, creates Git tags, and optionally creates GitHub Releases.
+The `publish` step takes a prepared release and pushes it to package registries, creates Git tags, and optionally creates releases on the configured forge (GitHub or GitLab).
 
 ## Running publish
 
@@ -22,7 +22,7 @@ cursus publish -p my-package
 1. **Publish to registries** — each package is published to its configured registry (crates.io for Cargo, npm registry for npm packages)
 2. **Create Git tags** — version tags are created for each published package
 3. **Push tags** — tags are pushed to the remote
-4. **GitHub Releases** — if GitHub integration is enabled, a release is created with changelog notes and any configured build artifacts
+4. **Forge releases** — if a forge integration (GitHub or GitLab) is enabled, a release is created on that forge with changelog notes and any configured build artifacts
 
 ## Idempotency
 
@@ -30,15 +30,15 @@ Publish is designed to be safely re-runnable across all three stages:
 
 - **Registry publish** — if a package is already at the target version on the registry, Cursus skips it rather than failing.
 - **Git tags** — if the tag for a package already exists, Cursus skips creating it.
-- **GitHub Releases** — if a published GitHub Release already exists for a tag, Cursus skips creating it.
+- **Forge releases** — if a published release already exists for a tag on the configured forge, Cursus skips creating it.
 
-This means re-running `cursus publish` after a partial failure automatically completes any missing tags or GitHub Releases for packages that were successfully published in a previous run.
+This means re-running `cursus publish` after a partial failure automatically completes any missing tags or forge releases for packages that were successfully published in a previous run.
 
-**Draft releases block recovery.** If Cursus finds an existing *draft* GitHub Release for a tag, it will not modify it — it reports an actionable error instead. Finalise or delete the draft (e.g. via the GitHub UI or `gh release delete <tag>`) and re-run `cursus publish`.
+**Draft releases block recovery (GitHub only).** If Cursus finds an existing *draft* GitHub Release for a tag, it will not modify it — it reports an actionable error instead. Finalise or delete the draft (e.g. via the GitHub UI or `gh release delete <tag>`) and re-run `cursus publish`. GitLab has no draft-release concept; releases are created in their final state, so this case cannot arise there.
 
 ## Skipping Git operations
 
-To publish without creating tags or GitHub Releases:
+To publish without creating tags or forge releases:
 
 ```bash
 cursus publish --no-git
@@ -53,6 +53,16 @@ When `[github]` is enabled in your configuration, publish will:
 3. Upload any files listed in `artifacts`
 
 See the [configuration reference](/cursus/reference/configuration/#github) for details on setting up GitHub integration.
+
+## GitLab Releases
+
+When `[gitlab]` is enabled in your configuration, publish will:
+
+1. Run your `build_command` to produce artifacts
+2. Create a GitLab Release with the changelog as the body
+3. Upload any files listed in `artifacts`
+
+See the [configuration reference](/cursus/reference/configuration/#gitlab) for details on setting up GitLab integration.
 
 ## Authentication
 
@@ -128,7 +138,7 @@ publish_private_packages = ["my-github-action", "my-cli"]
 Listed packages receive the non-registry parts of the publish workflow:
 
 1. **Git tag** — same tag format as registry-published packages
-2. **GitHub Release** — when `[github].enabled = true`, a release is created with changelog notes and any configured artifacts
+2. **Forge release** — when `[github].enabled = true` or `[gitlab].enabled = true`, a release is created with changelog notes and any configured artifacts
 
 They do not have any registry publish command invoked. Packages that are listed but not actually marked private follow the normal registry publish path.
 

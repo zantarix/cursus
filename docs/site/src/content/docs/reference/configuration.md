@@ -53,8 +53,8 @@ Git lifecycle management.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `enabled` | bool | `false` (derived `true` when `[github].enabled`) | Enable git operations (commit, tag, push) |
-| `strategy` | string | `"push"` (`"branch"` when github enabled) | Release strategy: `"push"` or `"branch"` |
+| `enabled` | bool | `false` (derived `true` when any forge is enabled) | Enable git operations (commit, tag, push) |
+| `strategy` | string | `"push"` (`"branch"` when a forge is enabled) | Release strategy: `"push"` or `"branch"` |
 | `release_branch_prefix` | string | `"cursus-release/"` | Prefix for release branch names (branch strategy only) |
 | `tag_format` | string | `"auto"` | Tag naming: `"auto"`, `"prefixed"`, or `"simple"` |
 | `extra_files` | list | `[]` | Additional file paths to stage before committing |
@@ -82,6 +82,8 @@ publish_private_packages = ["my-github-action"]
 
 GitHub integration for releases, pull requests, and asset uploads.
 
+At most one forge section (`[github]` or `[gitlab]`) may have `enabled = true` at any time. Cursus fails to load the configuration if both are enabled simultaneously.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `false` | Enable GitHub integration |
@@ -107,6 +109,8 @@ pull_request_title = "chore: release updates"
 ## `[gitlab]`
 
 GitLab integration for releases, merge requests, and asset uploads.
+
+At most one forge section (`[github]` or `[gitlab]`) may have `enabled = true` at any time. Cursus fails to load the configuration if both are enabled simultaneously.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

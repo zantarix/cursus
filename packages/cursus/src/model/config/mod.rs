@@ -534,6 +534,23 @@ pub async fn load(
 		bail!("Configuration must have at least one package manager enabled");
 	}
 
+	let enabled_forges: Vec<&str> = [
+		("[github].enabled", config.data.github.enabled),
+		("[gitlab].enabled", config.data.gitlab.enabled),
+	]
+	.into_iter()
+	.filter_map(|(name, on)| on.then_some(name))
+	.collect();
+	if enabled_forges.len() > 1 {
+		bail!(
+			"More than one forge is enabled in .cursus/config.toml ({}). \
+			 At most one forge section may have `enabled = true`. \
+			 Set `enabled = true` on no more than one forge section, \
+			 and set the others to `false` (or remove them).",
+			enabled_forges.join(", ")
+		);
+	}
+
 	// Apply cross-config derived defaults (git.enabled, git.strategy).
 	config
 		.data

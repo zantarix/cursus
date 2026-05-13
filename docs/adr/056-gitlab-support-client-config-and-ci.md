@@ -247,3 +247,7 @@ A `gitlab` Cargo feature could gate compilation of the `forge::gitlab` module an
 ### Reuse `octocrab` against a GitLab-compatible shim
 
 A handful of GitLab-compatibility shims for octocrab-shaped clients exist. They were rejected on inspection: none is maintained, all target a subset of the GitHub REST surface that does not include the endpoints Cursus needs (Releases, Merge Requests, Generic Packages), and the impedance mismatch between GitHub's and GitLab's actual API shapes (drafts, two-step asset upload, MR vs PR semantics) is large enough that a shim would hide more bugs than it solves.
+
+## Errata
+
+- **2026-05-13**: The cross-section validation deferred to a future ADR (see the "Both forges enabled" question raised in Decision and Out of Scope) is now closed out by [ADR-059](059-forge-selection-runtime-rules.md), which has been Accepted. The rule is: at most one forge section may have `enabled = true`, enforced at `Config::load`. The "GitHub-first precedence" mentioned for the four forge-resolving helpers (`forge_enabled`, `release_request_title`, `build_command`, `forge_artifacts`) is no longer reachable at runtime because the load-time validation rejects the both-enabled state before any helper is consulted; the helpers still contain the precedence branches as a defensive fallback but the GitHub-first arm cannot be exercised under a valid config.

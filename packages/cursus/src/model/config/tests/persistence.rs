@@ -124,6 +124,85 @@ async fn load_fails_on_old_run_until_field() {
 }
 
 #[tokio::test]
+async fn load_fails_when_both_forges_enabled() {
+	let dir = temp_dir();
+	let config_dir = dir.path().join(".cursus");
+	std::fs::create_dir_all(&config_dir).unwrap();
+	std::fs::write(
+		config_dir.join("config.toml"),
+		"[cargo]\nenabled = true\n[github]\nenabled = true\n[gitlab]\nenabled = true\n",
+	)
+	.unwrap();
+
+	let env = make_env_with_git(dir.path());
+	let err = load(env.fs(), env.git().path()).await.unwrap_err();
+	let msg = err.to_string();
+	assert!(
+		msg.contains("[github].enabled"),
+		"expected message to name [github].enabled, got: {msg}"
+	);
+	assert!(
+		msg.contains("[gitlab].enabled"),
+		"expected message to name [gitlab].enabled, got: {msg}"
+	);
+	assert!(
+		msg.contains("At most one forge section may have `enabled = true`"),
+		"expected rule statement, got: {msg}"
+	);
+	assert!(
+		msg.contains("set the others to `false`"),
+		"expected actionable fix, got: {msg}"
+	);
+}
+
+#[tokio::test]
+async fn load_succeeds_when_only_github_enabled() {
+	let dir = temp_dir();
+	let config_dir = dir.path().join(".cursus");
+	std::fs::create_dir_all(&config_dir).unwrap();
+	std::fs::write(
+		config_dir.join("config.toml"),
+		"[cargo]\nenabled = true\n[github]\nenabled = true\n[gitlab]\nenabled = false\n",
+	)
+	.unwrap();
+
+	let env = make_env_with_git(dir.path());
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
+	assert!(loaded.github.enabled);
+	assert!(!loaded.gitlab.enabled);
+}
+
+#[tokio::test]
+async fn load_succeeds_when_only_gitlab_enabled() {
+	let dir = temp_dir();
+	let config_dir = dir.path().join(".cursus");
+	std::fs::create_dir_all(&config_dir).unwrap();
+	std::fs::write(
+		config_dir.join("config.toml"),
+		"[cargo]\nenabled = true\n[github]\nenabled = false\n[gitlab]\nenabled = true\n",
+	)
+	.unwrap();
+
+	let env = make_env_with_git(dir.path());
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
+	assert!(!loaded.github.enabled);
+	assert!(loaded.gitlab.enabled);
+}
+
+#[tokio::test]
+async fn load_succeeds_when_no_forge_enabled() {
+	let dir = temp_dir();
+	let config_dir = dir.path().join(".cursus");
+	std::fs::create_dir_all(&config_dir).unwrap();
+	std::fs::write(config_dir.join("config.toml"), "[cargo]\nenabled = true\n").unwrap();
+
+	let env = make_env_with_git(dir.path());
+	let loaded = load(env.fs(), env.git().path()).await.unwrap().unwrap();
+	assert!(!loaded.github.enabled);
+	assert!(!loaded.gitlab.enabled);
+}
+
+#[tokio::test]
 async fn load_rejects_oversized_config() {
 	let dir = temp_dir();
 	let config_dir = dir.path().join(".cursus");

@@ -57,7 +57,7 @@ Once a release is prepared, publish to your registries:
 cursus publish
 ```
 
-This publishes each package to its registry (crates.io, npm), creates Git tags, and optionally creates GitHub Releases with build artifacts.
+This publishes each package to its registry (crates.io, npm), creates Git tags, and optionally creates releases on the configured forge (GitHub or GitLab) with build artifacts.
 
 ## Automate with CI
 
