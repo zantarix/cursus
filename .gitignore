@@ -19,3 +19,4 @@ packages/npm/*.tgz
 
 # Just Claude things
 /.claude/worktrees
+/.reviews
