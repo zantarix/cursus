@@ -8,9 +8,10 @@ use std::path::Path;
 
 use anyhow::Context;
 use async_trait::async_trait;
+use log::info;
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 
-use super::client::{CodeForgeClient, ExistingRelease, PullRequest};
+use crate::forge::{CodeForgeClient, ExistingRelease, PullRequest};
 
 // Encodes characters unsafe in a URL path segment used as a single token (e.g., a git tag in
 // the GitHub Releases API path `/releases/tags/{tag}`). Unlike branch refs, `/` must be encoded
@@ -46,6 +47,10 @@ impl OctocrabGitHubClient {
 
 #[async_trait]
 impl CodeForgeClient for OctocrabGitHubClient {
+	fn forge_name(&self) -> &'static str {
+		"GitHub"
+	}
+
 	async fn create_release(
 		&self,
 		tag_name: &str,
@@ -111,8 +116,10 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.with_context(|| format!("Failed to create pull request '{title}'"))?;
 		let url = pr
 			.html_url
-			.context("GitHub API response missing html_url for created pull request")?;
-		Ok(url.to_string())
+			.context("GitHub API response missing html_url for created pull request")?
+			.to_string();
+		info!("Created pull request: {url}");
+		Ok(url)
 	}
 
 	async fn find_open_pull_request(&self, head: &str) -> anyhow::Result<Option<PullRequest>> {
@@ -154,8 +161,10 @@ impl CodeForgeClient for OctocrabGitHubClient {
 			.with_context(|| format!("Failed to update pull request #{pull_number}"))?;
 		let url = pr
 			.html_url
-			.context("GitHub API response missing html_url for updated pull request")?;
-		Ok(url.to_string())
+			.context("GitHub API response missing html_url for updated pull request")?
+			.to_string();
+		info!("Updated pull request: {url}");
+		Ok(url)
 	}
 
 	async fn find_release_by_tag(&self, tag: &str) -> anyhow::Result<Option<ExistingRelease>> {

@@ -104,6 +104,40 @@ pull_request_title = "chore: release updates"
 "cursus-macos-aarch64" = "target/aarch64-apple-darwin/release/cursus"
 ```
 
+## `[gitlab]`
+
+GitLab integration for releases, merge requests, and asset uploads.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Enable GitLab integration |
+| `group` | string | auto-detected | GitLab namespace (user or group). Subgroup paths like `acme/sub` are supported |
+| `project` | string | auto-detected | GitLab project name (the final path segment) |
+| `host` | string | `""` (→ `gitlab.com`) | Base URL of the GitLab instance for self-managed deployments. Non-standard ports are supported (e.g. `https://gitlab.example.com:8443`). Overridden by `CI_API_V4_URL` when running under GitLab CI |
+| `build_command` | string | `""` | Shell command to build release artifacts |
+| `artifacts` | table of tables | `{}` | Per-package artifact maps: `[gitlab.artifacts.<package-name>]` sections mapping display names to file paths |
+| `merge_request_title` | string | `"Release updates"` | Title for release merge requests (branch strategy only) |
+
+`group` and `project` are auto-detected from your Git remote URL if not specified. Both fields must be set together (or both omitted for auto-detection).
+
+```toml
+[gitlab]
+enabled = true
+group = "acme"
+project = "my-app"
+host = "https://gitlab.example.com"
+build_command = "cargo make release"
+merge_request_title = "chore: release updates"
+
+[gitlab.artifacts.cursus]
+"cursus-linux-x86_64" = "target/x86_64-unknown-linux-musl/release/cursus"
+"cursus-macos-aarch64" = "target/aarch64-apple-darwin/release/cursus"
+```
+
+Release artifacts on GitLab are uploaded to the project's [Generic Package Registry](https://docs.gitlab.com/user/packages/generic_packages/) and attached as release asset links. If your instance or project has the Generic Package Registry disabled, asset uploads will fail.
+
+See the [GitLab integration guide](/cursus/guides/ci-integration/gitlab/) for a complete walkthrough.
+
 ## `[prepare]`
 
 Settings that control the prepare step.
@@ -203,6 +237,9 @@ Cursus reads the following environment variables in addition to the `config.toml
 | `CARGO_REGISTRY_TOKEN` | Token for publishing to crates.io (Cargo adapter). Equivalent to `cargo login`. |
 | `NODE_AUTH_TOKEN` | Token for publishing to the npm registry (npm adapter). Equivalent to `npm login` for token-based auth. |
 | `GH_TOKEN` / `GITHUB_TOKEN` | Token for GitHub API operations (releases, PRs, asset uploads). Checked in this order. |
+| `GITLAB_TOKEN` | Project- or group-access token for GitLab API operations. Required for `prepare` (merge-request creation); falls back to `CI_JOB_TOKEN` when only release/publish operations are needed. |
+| `CI_JOB_TOKEN` | GitLab CI predefined job token. Sufficient for `publish` (releases, assets) but **cannot** create merge requests — `prepare` requires `GITLAB_TOKEN`. |
+| `CI_API_V4_URL` | GitLab CI predefined variable; when present, overrides `[gitlab].host` so the client targets the same instance the CI job runs on. |
 
 ## Limits
 

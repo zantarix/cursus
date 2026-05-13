@@ -29,7 +29,7 @@ pub(crate) async fn cmd_init(
 	let git = env.git();
 	let git_workdir = git.path();
 
-	let detected_github = crate::github::remote::GitHubRepo::detect_in(git)
+	let detected_github = crate::forge::github::remote::GitHubRepo::detect_in(git)
 		.await
 		.ok()
 		.flatten();

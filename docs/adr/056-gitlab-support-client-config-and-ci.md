@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-05-12)
+Accepted (2026-05-13)
 
 ## Context
 
@@ -47,6 +47,8 @@ Cursus shall gain a first-class GitLab integration alongside the existing GitHub
 
 The `CodeForgeClient` trait, its parameter names (`head`, `base`, `pull_request`, etc.), and shared types (`ExistingRelease`, etc.) shall not be renamed. The trait abstracts the forge concept; renaming `create_pull_request` to `create_change_request` or similar would force every consumer to learn invented terminology that matches no real forge.
 
+To let orchestration code compose forge-aware log lines without inline `unwrap_or` fallback, the trait gains a single new method, `forge_name(&self) -> &'static str`, that returns the active forge's user-facing label (`"GitHub"`, `"GitLab"`). `Env` exposes a paired accessor, `code_forge_name()`, that auto-captures the active client's name and returns `"forge"` as a neutral fallback when no client is configured. This is the smallest trait-shape change required to keep orchestration log lines vocabulary-correct without re-introducing forge-specific branches into shared code.
+
 In exchange, every user-visible surface shall use the active forge's vocabulary:
 
 - Config keys under `[gitlab]` use `group` (not `owner`), `project` (not `repo`), `merge_request_title` (not `pull_request_title`).
@@ -55,25 +57,30 @@ In exchange, every user-visible surface shall use the active forge's vocabulary:
 
 This split — neutral at every code abstraction, native at every user boundary — is the rule for any future forge addition.
 
-### New `gitlab/` module (sibling of `github/`)
+### New `forge/` module containing `github/` and `gitlab/` siblings
 
-A new `gitlab/` module will sit alongside `github/` at `packages/cursus/src/gitlab/`. It will contain:
+The existing `github/` module shall be relocated under a new `forge/` parent module, and a new `gitlab/` module shall be added alongside it. The final library layout is:
 
-- `mod.rs` — module wiring and public re-exports.
-- `client.rs` — the `ReqwestGitLabClient` implementation of `CodeForgeClient`, constructed with a `GitLabProject { host, group, project }` identity per the constraint set by [ADR-042](042-repo-identity-in-constructor.md). The struct holds an `AsyncGitlab` instance and the project identity for the lifetime of the client.
-- `remote.rs` — git remote URL parser, mirroring `github/remote.rs` in structure but with GitLab-aware behaviour.
+- `forge/mod.rs` — module wiring and public re-exports (`pub use client::CodeForgeClient`, etc.).
+- `forge/client.rs` — the `CodeForgeClient` trait definition and shared types (`ExistingRelease`, `PullRequest`).
+- `forge/github/` — the relocated GitHub implementation (`mod.rs`, `octocrab_client.rs`, `remote.rs`).
+- `forge/gitlab/mod.rs` — module wiring and public re-exports.
+- `forge/gitlab/client.rs` — the `ReqwestGitLabClient` implementation of `CodeForgeClient`, constructed with a `GitLabProject { host, group, project }` identity per the constraint set by [ADR-042](042-repo-identity-in-constructor.md). The struct holds an `AsyncGitlab` instance and the project identity for the lifetime of the client.
+- `forge/gitlab/remote.rs` — git remote URL parser, mirroring `forge/github/remote.rs` in structure but with GitLab-aware behaviour.
 
-The `Env` struct keeps its single `Option<Arc<dyn CodeForgeClient>>` slot; the choice of which concrete client to construct is made at the binary boundary in `cursus-bin/src/main.rs`. [ADR-059](059-forge-selection-runtime-rules.md) will define the precise selection logic. For this ADR, the addition is purely "the GitLab client now exists and can be constructed."
+This is the module reorganisation foreshadowed by [ADR-041](041-rename-github-client-trait-to-code-forge-client.md)'s closing note ("a future ADR may reorganise the module structure when a second forge is added"). The flat `github/` directory was the right shape when only one forge existed; once a second forge needs to share trait, types, and a directory neighbourhood, a `forge::{github, gitlab}` parent is the natural home. Existing references to `crate::github::*` paths shall be updated to `crate::forge::github::*` at the same time.
+
+The `Env` struct keeps its single `Result<Arc<dyn CodeForgeClient>, String>` slot; the choice of which concrete client to construct is made at the binary boundary in `cursus-bin/src/main.rs`. [ADR-059](059-forge-selection-runtime-rules.md) will define the precise selection logic. For this ADR, the addition is purely "the GitLab client now exists and can be constructed."
 
 ### Remote URL parsing must be host-derived, not host-matched
 
-`gitlab/remote.rs` shall parse three forms in line with `github/remote.rs`:
+`forge/gitlab/remote.rs` shall parse three forms in line with `forge/github/remote.rs`:
 
 - HTTPS: `https://gitlab.example.com/group/project.git`
 - SCP-style SSH: `git@gitlab.example.com:group/project.git`
 - `ssh://` SSH: `ssh://git@gitlab.example.com/group/project.git`
 
-Unlike the GitHub parser, GitLab's parser must not hard-code `gitlab.com` as a sentinel. The hostname must be extracted from the URL itself so that self-managed instances (`gitlab.mycompany.internal`, etc.) are supported without configuration heroics. The parsed segments are exposed as `group` and `project`; subgroup paths (`group/subgroup/project`) shall be supported by treating everything up to the final `/` as the group path. The same unsafe-character validation pattern used in `github/remote.rs` shall be applied to each parsed segment before it leaves the parser.
+Unlike the GitHub parser, GitLab's parser must not hard-code `gitlab.com` as a sentinel. The hostname must be extracted from the URL itself so that self-managed instances (`gitlab.mycompany.internal`, etc.) are supported without configuration heroics. Explicit-port hosts (e.g. `gitlab.example.com:8443`) shall be preserved verbatim in the parsed host so that downstream API calls hit the correct endpoint on instances that expose GitLab on a non-default port. The parsed segments are exposed as `group` and `project`; subgroup paths (`group/subgroup/project`) shall be supported by treating everything up to the final `/` as the group path. The same unsafe-character validation pattern used in `forge/github/remote.rs` shall be applied to each parsed segment before it leaves the parser.
 
 ### New `model/config/gitlab.rs` config section
 
@@ -105,15 +112,33 @@ Field types:
 
 The two config sections (`[github]` and `[gitlab]`) coexist in the schema. Whether having both `enabled = true` simultaneously is an error, or whether one takes precedence, is decided in [ADR-059](059-forge-selection-runtime-rules.md) — this ADR makes no validation rule beyond "the section parses correctly."
 
+To keep callers forge-agnostic, `Config` gains four helpers that resolve a single value from whichever forge is active: `forge_enabled()` (any forge enabled), `release_request_title()` (PR / MR title template), `build_command()` (the active forge's build command), and `forge_artifacts()` (per-package artifact maps). When both forges are configured with `enabled = true`, these helpers prefer the GitHub value — this is the precedence rule for the helpers themselves and is independent of the runtime forge-selection rules being defined in [ADR-059](059-forge-selection-runtime-rules.md).
+
+### Orchestrator rename: `github_releases.rs` → `forge_releases.rs`
+
+The `cli/publish/github_releases.rs` orchestrator and its public symbols (e.g. `orchestrate_github_releases` → `orchestrate_forge_releases`) shall be renamed to drop the `github_` prefix. The orchestrator drives any `CodeForgeClient` impl and contains no GitHub-specific logic; the old name was a vestige of the single-forge era. This rename is internal to the binary and library crates and does not change any user-visible surface.
+
 ### Environment detection wired at the binary boundary
 
-Per [ADR-030](030-bin-lib-crate-separation.md), environment detection lives only in `cursus-bin/src/main.rs`. The binary shall:
+Per [ADR-030](030-bin-lib-crate-separation.md), environment detection lives only in the binary crate. As part of this work the binary crate's `main.rs` shall be decomposed into focused submodules so the GitLab-specific resolution path does not balloon a single file:
+
+- `cursus-bin/src/main.rs` — argument parsing, top-level orchestration, exit-code handling.
+- `cursus-bin/src/logging.rs` — `CliLogger` setup and verbosity wiring (previously inline in `main.rs`).
+- `cursus-bin/src/env_helpers.rs` — small helpers for reading and normalising environment variables.
+- `cursus-bin/src/git_setup.rs` — git workdir discovery and the `SignedCommitGit` decorator wrap decision.
+- `cursus-bin/src/forge_resolution/{mod,github,gitlab}.rs` — per-forge token + base-URL + identity resolution and `CodeForgeClient` construction. The `mod.rs` selects between forges, the `github.rs` and `gitlab.rs` submodules each own their own environment-variable contracts.
+
+The GitLab-specific resolution shall:
 
 - Detect a GitLab CI environment by reading `GITLAB_CI` and checking that it equals `"true"`.
 - Read the auth token from `GITLAB_TOKEN` in preference, falling back to `CI_JOB_TOKEN` if `GITLAB_TOKEN` is absent. This precedence is required because `CI_JOB_TOKEN` has narrower scope than a user-provisioned project- or group-access token (see the authentication caveat below).
 - Prefer `CI_API_V4_URL` for the base URL when present; otherwise fall back to the `host` value from the `[gitlab]` config section; otherwise default to `https://gitlab.com`. `CI_API_V4_URL` is provided by GitLab CI on every job and is the most reliable indicator of the correct API base, especially on self-managed instances.
 
 These values flow into the `ReqwestGitLabClient` constructor as part of the `GitLabProject` identity and authenticated client setup. The library itself reads none of these environment variables directly.
+
+### rustls crypto provider unified on `aws-lc-rs`
+
+Octocrab and the Kitware `gitlab` crate both pull in `rustls` transitively. With two HTTP stacks active in the same binary, the previously-implicit choice of `rustls` crypto provider becomes ambiguous: `rustls` refuses to pick a default when more than one provider is compiled in, and panics at first use. To avoid this, the binary shall pin the crypto provider to `aws-lc-rs` (the FIPS-friendly default that already ships with octocrab) and call `aws_lc_rs::default_provider().install_default()` at startup before any HTTP client is constructed. Octocrab's feature flags shall be trimmed so that the `ring` provider is not also compiled in.
 
 ### Release-asset upload is a two-step flow, but the trait signature does not change
 
@@ -134,7 +159,7 @@ The `CodeForgeClient` trait shall keep both `create_release` and `publish_releas
 - `publish_release` is a no-op that returns `Ok(())`. It exists to keep the trait shape uniform.
 - `find_release_by_tag` calls the GET-by-tag endpoint and returns `Ok(None)` on 404 (per the `find_release_by_tag` contract from [ADR-055](055-end-to-end-idempotent-publish-recovery.md)) and `Ok(Some(ExistingRelease { is_draft: false, .. }))` on hit. The `is_draft` field is always `false` for GitLab because the concept does not exist there.
 
-The draft-release recovery branch in `orchestrate_github_releases` will therefore never trigger when GitLab is the active forge — the "no release exists" and "published release exists" paths cover every GitLab case.
+The draft-release recovery branch in `orchestrate_forge_releases` (renamed from `orchestrate_github_releases` per the section above) will therefore never trigger when GitLab is the active forge — the "no release exists" and "published release exists" paths cover every GitLab case.
 
 ### Authentication caveat — `CI_JOB_TOKEN` cannot create merge requests
 
@@ -157,12 +182,14 @@ The `gitlab` crate does not follow semver — its versions track GitLab releases
 
 ### Documentation site
 
-The docs site shall gain a GitLab section parallel to the existing GitHub configuration and CI-integration pages, covering:
+The docs site's CI-integration section shall be restructured into a nested sidebar group with three pages — Overview, GitHub Actions, and GitLab — so each forge's CI guidance can grow independently. The new GitLab page covers:
 
 - `[gitlab]` config schema with examples.
 - Required CI variables (`GITLAB_TOKEN`, fallback to `CI_JOB_TOKEN`, the MR-creation caveat).
 - Self-managed instance setup (the `host` key, `CI_API_V4_URL` interplay).
 - A note that release artifacts on GitLab go through the Generic Package Registry, so projects with that registry disabled at the instance or project level will not be able to attach assets.
+
+The configuration reference page also gains a `[gitlab]` section mirroring the existing `[github]` documentation.
 
 The `cursus init` walkthrough for GitLab projects is **out of scope** for this ADR and lands in [ADR-057](057-cursus-init-gitlab-support.md).
 
@@ -180,6 +207,7 @@ The `cursus init` walkthrough for GitLab projects is **out of scope** for this A
 - The forge-neutrality of `CodeForgeClient` is validated by a second real implementation. Any leakage of GitHub-specific assumptions through the trait (parameter names, error shapes, the implicit existence of drafts) is surfaced and dealt with at the implementation boundary rather than infecting the trait itself.
 - The "neutral abstraction, native vocabulary" rule is established as a precedent for future forge additions. A hypothetical Gitea or Forgejo client follows the same pattern without further ADR-level debate.
 - The two-step GitLab asset-upload flow is hidden behind the same `upload_asset` trait method users already know, so the publish stage's orchestration code is unchanged.
+- The new `forge_enabled` / `release_request_title` / `build_command` / `forge_artifacts` helpers on `Config` let orchestration code stay forge-agnostic without per-call-site branching, and the `forge_name()` trait method removes the previous need for inline `unwrap_or("forge")` fallbacks in log lines.
 
 ### Negative
 
@@ -187,13 +215,16 @@ The `cursus init` walkthrough for GitLab projects is **out of scope** for this A
 - Cursus now ships GitLab API surface that is exercised only when a user activates the `[gitlab]` section. Cargo-feature-gating was considered (see Alternatives) and declined; the dependency weight (a tokio-async HTTP client) is paid by every build.
 - The MR-creation token caveat is a sharp edge. Users running `prepare` from GitLab CI for the first time will hit it. The mitigation is documentation plus a clear error message, but neither replaces the experience of a forge where the default CI token can do everything.
 - Asset uploads consume Generic Package Registry storage on the user's GitLab project. On self-managed instances with quotas, this is a real cost the GitHub flow does not impose. The docs must call this out.
+- Two `rustls` crypto providers are now reachable transitively, so the binary must explicitly `install_default()` on `aws-lc-rs` at startup. Forgetting this would cause a runtime panic on first HTTPS call; it is a one-line invariant but a new one to maintain.
 
 ### Neutral
 
 - The `[gitlab]` config section is purely additive. Existing `[github]`-configured projects are unaffected by parsing changes.
-- The `CodeForgeClient` trait is unchanged. Existing test doubles, the `OctocrabGitHubClient`, and orchestration code continue to compile and pass unchanged.
+- The `CodeForgeClient` trait gains exactly one new method (`forge_name()`); all other methods, parameter names, and shared types are unchanged. Existing test doubles, the `OctocrabGitHubClient`, and orchestration code continue to compile against the trait with a single one-line addition per implementation.
 - `publish_release` becoming a no-op on the GitLab path is a contract-level surprise but a behaviour-level non-event: the GitHub path is unchanged and the GitLab path needs no second call.
 - Token precedence (`GITLAB_TOKEN` → `CI_JOB_TOKEN`) is consistent with GitLab community convention; users coming from other GitLab-aware Rust tools will recognise it.
+- The `cli/publish/github_releases.rs` orchestrator is renamed to `cli/publish/forge_releases.rs` (and `orchestrate_github_releases` to `orchestrate_forge_releases`). The rename is internal; no user-facing surface changes.
+- The `github/` module is relocated to `forge::github`. All in-tree `crate::github::*` references shift to `crate::forge::github::*`; downstream callers (the `cursus-bot` project) update their import paths once.
 
 ## Alternatives Considered
 
@@ -211,7 +242,7 @@ A bespoke client built directly on `reqwest` was considered. It would have zero 
 
 ### Cargo feature-flag the GitLab integration
 
-A `gitlab` Cargo feature could gate compilation of the `gitlab/` module and its dependencies so that users who only use GitHub do not pay the compile-time cost. This was rejected for now because the binary is shipped as prebuilt static artifacts ([ADR-022](022-distribution-strategy.md), [ADR-054](054-cargo-binstall-support.md)) — end users do not compile Cursus locally, so the compile-cost argument applies only to the project's own CI and Renovate runs. The added complexity of conditional compilation across `mod.rs`, the `Env` constructor, the binary's main, and the test-support feature was judged not worth that marginal saving. If binary size becomes a concern (the `gitlab` crate's transitive dependencies are not trivial), this decision can be revisited in a follow-up ADR.
+A `gitlab` Cargo feature could gate compilation of the `forge::gitlab` module and its dependencies so that users who only use GitHub do not pay the compile-time cost. This was rejected for now because the binary is shipped as prebuilt static artifacts ([ADR-022](022-distribution-strategy.md), [ADR-054](054-cargo-binstall-support.md)) — end users do not compile Cursus locally, so the compile-cost argument applies only to the project's own CI and Renovate runs. The added complexity of conditional compilation across `mod.rs`, the `Env` constructor, the binary's main, and the test-support feature was judged not worth that marginal saving. If binary size becomes a concern (the `gitlab` crate's transitive dependencies are not trivial), this decision can be revisited in a follow-up ADR.
 
 ### Reuse `octocrab` against a GitLab-compatible shim
 

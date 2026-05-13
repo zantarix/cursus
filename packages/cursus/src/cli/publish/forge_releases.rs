@@ -3,26 +3,32 @@
 use anyhow::Context;
 use log::{error, info, warn};
 
+use crate::forge::CodeForgeClient;
 use crate::git::Git;
-use crate::github::client::CodeForgeClient;
 use crate::model::changelog::extract_version_body;
 use crate::model::config::Config;
 
 use super::PublishedPackage;
 
-/// Logs what GitHub Releases and artifacts would be created in a dry run.
-pub(super) fn log_dry_run_github_releases(
+/// Logs what releases and artifacts would be created on the active forge in a dry run.
+///
+/// `forge_name` is the active forge's user-facing label (e.g. `"GitHub"`,
+/// `"GitLab"`); the caller obtains it from the configured
+/// [`crate::forge::CodeForgeClient`] or falls back to a configured-forge label
+/// when no client is available.
+pub(super) fn log_dry_run_forge_releases(
 	published_packages: &[PublishedPackage],
 	config: &crate::model::config::Config,
 	is_multi_package: bool,
+	forge_name: &str,
 ) {
 	for pkg in published_packages {
 		let tag = config
 			.git
 			.tag_format
 			.tag(&pkg.name, &pkg.version, is_multi_package);
-		info!("Would create GitHub Release for {tag}");
-		if let Some(artifacts) = config.github.artifacts.get(&pkg.name) {
+		info!("Would create {forge_name} Release for {tag}");
+		if let Some(artifacts) = config.forge_artifacts().get(&pkg.name) {
 			for display_name in artifacts.keys() {
 				info!("  Would attach: {display_name}");
 			}
@@ -31,26 +37,25 @@ pub(super) fn log_dry_run_github_releases(
 	}
 }
 
-/// Runs the configured GitHub pre-release build command, if any.
+/// Runs the active forge's pre-release build command, if any.
+///
+/// Reads `[github].build_command` or `[gitlab].build_command` depending on
+/// which forge is enabled (GitHub-first when both are enabled).
 ///
 /// Returns `true` if the build command failed, `false` if it succeeded or was not configured.
-pub(super) async fn run_github_build_command(
+pub(super) async fn run_forge_build_command(
 	env: &crate::Env,
 	config: &Config,
 	git: &dyn Git,
 ) -> anyhow::Result<bool> {
-	if config.github.build_command.is_empty() {
+	let build_command = config.build_command();
+	if build_command.is_empty() {
 		return Ok(false);
 	}
 	let status = env
-		.run_streaming(&config.github.build_command, git.path())
+		.run_streaming(build_command, git.path())
 		.await
-		.with_context(|| {
-			format!(
-				"Failed to execute build command: {}",
-				config.github.build_command
-			)
-		})?;
+		.with_context(|| format!("Failed to execute build command: {build_command}"))?;
 	if !status.success() {
 		error!("Build command failed with status {status}");
 		return Ok(true);
@@ -91,13 +96,14 @@ pub(super) async fn publish_draft_release(
 		warn!("Artifact uploads failed for {tag}; leaving release as a draft");
 		return true;
 	}
+	let forge = code_forge_client.forge_name();
 	match code_forge_client.publish_release(release_id).await {
 		Ok(()) => {
-			info!("Created GitHub Release for {tag}");
+			info!("Created {forge} Release for {tag}");
 			false
 		}
 		Err(e) => {
-			error!("Failed to publish GitHub Release for {tag}: {e:#}");
+			error!("Failed to publish {forge} Release for {tag}: {e:#}");
 			true
 		}
 	}
@@ -118,19 +124,20 @@ async fn process_one_release(
 	tag: &str,
 	fs: &dyn crate::filesystem::Filesystem,
 ) -> anyhow::Result<ReleaseAction> {
+	let forge = code_forge_client.forge_name();
 	match code_forge_client.find_release_by_tag(tag).await {
 		Err(e) => {
-			error!("Failed to look up GitHub Release for {tag}: {e:#}");
+			error!("Failed to look up {forge} Release for {tag}: {e:#}");
 			return Ok(ReleaseAction::Failed);
 		}
 		Ok(Some(r)) if !r.is_draft => {
-			info!("Skipped GitHub Release for {tag} (already exists)");
+			info!("Skipped {forge} Release for {tag} (already exists)");
 			return Ok(ReleaseAction::AlreadyPresent);
 		}
 		Ok(Some(_)) => {
 			error!(
-				"Found a partial draft GitHub Release for {tag}; cursus will not modify it. \
-				 Finalise or delete the draft manually (e.g. via the GitHub UI or \
+				"Found a partial draft {forge} Release for {tag}; cursus will not modify it. \
+				 Finalise or delete the draft manually (e.g. via the {forge} UI or \
 				 `gh release delete '{tag}'`) and re-run cursus publish."
 			);
 			return Ok(ReleaseAction::Failed);
@@ -139,7 +146,7 @@ async fn process_one_release(
 	}
 	let body = read_changelog_body(pkg, fs).await;
 	let empty = std::collections::BTreeMap::new();
-	let artifacts = config.github.artifacts.get(&pkg.name).unwrap_or(&empty);
+	let artifacts = config.forge_artifacts().get(&pkg.name).unwrap_or(&empty);
 	match code_forge_client.create_release(tag, tag, &body).await {
 		Ok(release_id) => {
 			let failed = publish_draft_release(
@@ -158,7 +165,7 @@ async fn process_one_release(
 			})
 		}
 		Err(e) => {
-			error!("Failed to create GitHub Release for {tag}: {e:#}");
+			error!("Failed to create {forge} Release for {tag}: {e:#}");
 			Ok(ReleaseAction::Failed)
 		}
 	}
@@ -170,7 +177,7 @@ async fn process_one_release(
 /// is `Ok`) before calling this function (enforced by the early check in `cmd_publish`).
 ///
 /// Returns `(releases_created, releases_already_present, any_failed)`.
-pub(super) async fn orchestrate_github_releases(
+pub(super) async fn orchestrate_forge_releases(
 	git: &dyn Git,
 	config: &Config,
 	code_forge_client: &dyn CodeForgeClient,
@@ -181,7 +188,7 @@ pub(super) async fn orchestrate_github_releases(
 	if published_packages.is_empty() {
 		return Ok((0, 0, false));
 	}
-	let mut github_failed = false;
+	let mut forge_failed = false;
 	let mut created_count = 0;
 	let mut already_present_count = 0;
 	for pkg in published_packages {
@@ -192,10 +199,10 @@ pub(super) async fn orchestrate_github_releases(
 		match process_one_release(code_forge_client, git, config, pkg, &tag, fs).await? {
 			ReleaseAction::Created => created_count += 1,
 			ReleaseAction::AlreadyPresent => already_present_count += 1,
-			ReleaseAction::Failed => github_failed = true,
+			ReleaseAction::Failed => forge_failed = true,
 		}
 	}
-	Ok((created_count, already_present_count, github_failed))
+	Ok((created_count, already_present_count, forge_failed))
 }
 
 /// Uploads all configured artifacts to a GitHub release.
@@ -243,11 +250,11 @@ mod tests {
 	};
 	use crate::command::CommandRunner;
 	use crate::command::test_support::RecordingCommandRunner;
-	use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
+	use crate::forge::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 	use crate::model::config::Config;
 	use crate::path::AbsolutePath;
 
-	// --- Tests for orchestrate_github_releases ---
+	// --- Tests for orchestrate_forge_releases ---
 
 	#[tokio::test]
 	async fn github_release_skipped_when_no_published_packages() {
@@ -258,7 +265,7 @@ mod tests {
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -275,7 +282,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn github_releases_created_for_published_packages() {
+	async fn forge_releases_created_for_published_packages() {
 		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -289,7 +296,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -320,7 +327,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn github_releases_uses_prefixed_tag_for_monorepo() {
+	async fn forge_releases_uses_prefixed_tag_for_monorepo() {
 		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -334,7 +341,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -385,7 +392,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -421,7 +428,7 @@ mod tests {
 		}];
 		let git = git_from_dir(&runner, dir.path());
 
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -479,7 +486,7 @@ mod tests {
 		];
 		let git = git_from_dir(&runner, dir.path());
 
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -517,7 +524,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -566,7 +573,7 @@ mod tests {
 		}];
 		let git = git_from_dir(&runner, dir.path());
 
-		let (created, _already_present, failed) = orchestrate_github_releases(
+		let (created, _already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -763,10 +770,10 @@ mod tests {
 		);
 	}
 
-	// --- Tests for log_dry_run_github_releases ---
+	// --- Tests for log_dry_run_forge_releases ---
 
 	#[tokio::test]
-	async fn log_dry_run_github_releases_emits_would_publish_always() {
+	async fn log_dry_run_forge_releases_emits_would_publish_always() {
 		use crate::test_logging::{init_test_logger, take_logs};
 		init_test_logger();
 		let _ = take_logs();
@@ -778,7 +785,7 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
-		log_dry_run_github_releases(&packages, &config, false);
+		log_dry_run_forge_releases(&packages, &config, false, "GitHub");
 
 		let logs = take_logs();
 		assert!(
@@ -789,7 +796,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn log_dry_run_github_releases_emits_would_attach_for_artifacts() {
+	async fn log_dry_run_forge_releases_emits_would_attach_for_artifacts() {
 		use crate::test_logging::{init_test_logger, take_logs};
 		init_test_logger();
 		let _ = take_logs();
@@ -805,7 +812,7 @@ mod tests {
 			project_path: AbsolutePath::new("/nonexistent").unwrap(),
 		}];
 
-		log_dry_run_github_releases(&packages, &config, false);
+		log_dry_run_forge_releases(&packages, &config, false, "GitHub");
 
 		let logs = take_logs();
 		assert!(
@@ -823,8 +830,8 @@ mod tests {
 	// --- Tests for GitHub Release idempotency ---
 
 	#[tokio::test]
-	async fn orchestrate_github_releases_skips_when_release_already_published() {
-		use crate::github::client::ExistingRelease;
+	async fn orchestrate_forge_releases_skips_when_release_already_published() {
+		use crate::forge::ExistingRelease;
 
 		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let existing = ExistingRelease {
@@ -843,7 +850,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, already_present, failed) = orchestrate_github_releases(
+		let (created, already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -880,8 +887,8 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn orchestrate_github_releases_aborts_on_existing_draft() {
-		use crate::github::client::ExistingRelease;
+	async fn orchestrate_forge_releases_aborts_on_existing_draft() {
+		use crate::forge::ExistingRelease;
 		use crate::test_logging::{init_test_logger, take_logs};
 		init_test_logger();
 		let _ = take_logs();
@@ -902,7 +909,7 @@ mod tests {
 		}];
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, workdir());
-		let (created, already_present, failed) = orchestrate_github_releases(
+		let (created, already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -932,7 +939,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn orchestrate_github_releases_finds_release_before_creating() {
+	async fn orchestrate_forge_releases_finds_release_before_creating() {
 		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new();
 		let runner = Arc::new(RecordingCommandRunner::new(0));
@@ -946,7 +953,7 @@ mod tests {
 		let wd = workdir();
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
-		let (created, already_present, failed) = orchestrate_github_releases(
+		let (created, already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,
@@ -984,7 +991,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn orchestrate_github_releases_find_failure_marks_failed_continues_next_package() {
+	async fn orchestrate_forge_releases_find_failure_marks_failed_continues_next_package() {
 		// A find_release_by_tag error on one package must not abort the loop.
 		let config = Config::new().with_github(make_github_config("", BTreeMap::new()));
 		let client = RecordingCodeForgeClient::new().with_find_release_failure();
@@ -1003,7 +1010,7 @@ mod tests {
 		];
 		let git =
 			crate::git::GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, workdir());
-		let (created, already_present, failed) = orchestrate_github_releases(
+		let (created, already_present, failed) = orchestrate_forge_releases(
 			&git,
 			&config,
 			&client,

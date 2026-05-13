@@ -1,7 +1,7 @@
 use anyhow::Context;
 use log::info;
 
-use crate::github::client::CodeForgeClient;
+use crate::forge::CodeForgeClient;
 use crate::model::config::Config;
 
 use super::ReleaseInfo;
@@ -10,7 +10,9 @@ use super::ReleaseInfo;
 ///
 /// If an open pull request already exists for `head`, it is updated with the
 /// new `title` and `body`. Otherwise a new pull request is created from `head`
-/// into `base`. Returns the URL of the created or updated pull request.
+/// into `base`. Returns the URL of the created or updated request. The
+/// concrete client emits its own user-visible success log line using
+/// forge-native vocabulary; this layer does not log success.
 ///
 /// # Errors
 ///
@@ -23,16 +25,8 @@ pub(super) async fn upsert_pull_request(
 	base: &str,
 ) -> anyhow::Result<String> {
 	match client.find_open_pull_request(head).await? {
-		Some(pr) => {
-			let url = client.update_pull_request(pr.number, title, body).await?;
-			info!("Updated pull request: {url}");
-			Ok(url)
-		}
-		None => {
-			let url = client.create_pull_request(title, body, head, base).await?;
-			info!("Created pull request: {url}");
-			Ok(url)
-		}
+		Some(pr) => client.update_pull_request(pr.number, title, body).await,
+		None => client.create_pull_request(title, body, head, base).await,
 	}
 }
 
@@ -57,11 +51,13 @@ pub(super) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> Stri
 	body
 }
 
-/// Creates or updates the GitHub pull request for the release branch.
+/// Creates or updates the forge release request (pull request on GitHub,
+/// merge request on GitLab) for the release branch.
 ///
-/// No-ops in dry-run mode or when no GitHub client is available. The dry-run
-/// short-circuit is intentional per ADR-017: the PR upsert is the side-effecting
-/// operation being guarded, so the check lives here rather than at the call site.
+/// No-ops in dry-run mode or when no forge client is available. The dry-run
+/// short-circuit is intentional per ADR-017: the request upsert is the
+/// side-effecting operation being guarded, so the check lives here rather
+/// than at the call site.
 pub(super) async fn upsert_release_pull_request(
 	config: &Config,
 	env: &crate::Env,
@@ -71,18 +67,26 @@ pub(super) async fn upsert_release_pull_request(
 	dry_run: bool,
 ) -> anyhow::Result<()> {
 	if dry_run {
-		info!("Would attempt to create or update a PR in GitHub.");
+		info!(
+			"Would attempt to create or update a release request on {}.",
+			env.code_forge_name()
+		);
 		return Ok(());
 	}
 	let Ok(client) = env.code_forge_client() else {
 		return Ok(());
 	};
-	let base = original_branch.context("HEAD is detached; cannot determine PR base branch")?;
-	let title = config.github.pull_request_title();
+	let base = original_branch.context("HEAD is detached; cannot determine release base branch")?;
+	let title = config.release_request_title();
 	let pr_body = build_pr_body(release_infos, base);
 	upsert_pull_request(client, title, &pr_body, branch, base)
 		.await
-		.context("Failed to create or update pull request")?;
+		.with_context(|| {
+			format!(
+				"Failed to create or update release request on {}",
+				client.forge_name()
+			)
+		})?;
 	Ok(())
 }
 
@@ -171,7 +175,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_creates_when_no_existing() {
-		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
+		use crate::forge::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 		let client = RecordingCodeForgeClient::new(); // no existing PR
 		let result =
 			upsert_pull_request(&client, "Release PR", "body", "cursus-release/main", "main").await;
@@ -194,8 +198,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_updates_when_existing() {
-		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
+		use crate::forge::PullRequest;
+		use crate::forge::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 		let existing_pr = PullRequest {
 			number: 7,
 			html_url: "https://github.com/acme/app/pull/7".to_string(),
@@ -234,7 +238,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_propagates_find_error() {
-		use crate::github::client::test_support::RecordingCodeForgeClient;
+		use crate::forge::test_support::RecordingCodeForgeClient;
 		let client = RecordingCodeForgeClient::new().with_find_pr_failure();
 		let result =
 			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
@@ -248,8 +252,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_propagates_update_error() {
-		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::RecordingCodeForgeClient;
+		use crate::forge::PullRequest;
+		use crate::forge::test_support::RecordingCodeForgeClient;
 		let existing_pr = PullRequest {
 			number: 1,
 			html_url: "https://github.com/acme/app/pull/1".to_string(),
@@ -269,7 +273,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn upsert_pull_request_propagates_create_error() {
-		use crate::github::client::test_support::RecordingCodeForgeClient;
+		use crate::forge::test_support::RecordingCodeForgeClient;
 		let client = RecordingCodeForgeClient::new().with_create_pr_failure();
 		let result =
 			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;

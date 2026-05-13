@@ -8,7 +8,7 @@ use ratatui_textarea::TextArea;
 use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
-use crate::github::GitHubRepo;
+use crate::forge::github::GitHubRepo;
 use crate::model::config::{PackageManager, Strategy};
 use crate::path::AbsolutePath;
 
@@ -313,7 +313,7 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 pub fn run(
 	env: &Env,
 	dry_run: bool,
-	detected_github: Option<crate::github::remote::GitHubRepo>,
+	detected_github: Option<crate::forge::github::remote::GitHubRepo>,
 ) -> anyhow::Result<Option<InitResult>> {
 	let git = env.git();
 	let (cargo_detected, npm_detected) = detect_package_managers(git.path());

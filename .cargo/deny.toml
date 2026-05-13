@@ -13,6 +13,10 @@ allow = [
 	"ISC",
 	"Unicode-3.0",
 	"Zlib",
+	# CDLA-Permissive-2.0 is a Linux Foundation data license used by `webpki-root-certs`
+	# (Mozilla's CA bundle) reached transitively via the `gitlab` crate → reqwest → rustls.
+	# Applies to certificate data, not code.
+	"CDLA-Permissive-2.0",
 ]
 
 # Warn on confidence level
@@ -32,6 +36,18 @@ skip = [
 	"r-efi",
 	"windows-sys",
 	"wit-bindgen",
+	# Duplicates pulled in transitively by the `gitlab` crate (cron 0.15, derive_builder,
+	# graphql_client, etc.) until upstream catches up. These crates also appear via toml /
+	# clap / proc-macro frameworks in newer versions; neither version is directly used by
+	# cursus.
+	"darling",
+	"darling_core",
+	"darling_macro",
+	"heck",
+	"syn",
+	"thiserror",
+	"thiserror-impl",
+	"winnow",
 ]
 
 # Deny specific crates (empty by default)

@@ -174,19 +174,18 @@ impl GitConfig {
 	///
 	/// This must be called after loading config from disk, not during in-code
 	/// construction (builder methods already express intent directly). It is
-	/// called by [`Config::load`] once both `[git]` and `[github]` sections are
-	/// known.
+	/// called by [`Config::load`] once `[git]` and the forge sections are known.
 	///
-	/// - If `github_enabled` is `true` and `enabled` was not explicitly set,
+	/// - If `forge_enabled` is `true` and `enabled` was not explicitly set,
 	///   enables git lifecycle automation.
-	/// - If `strategy` was not explicitly set, derives it from `github_enabled`:
-	///   [`Strategy::Branch`] when GitHub is enabled, [`Strategy::Push`] otherwise.
-	pub(super) fn resolve_defaults(&mut self, github_enabled: bool) {
-		if github_enabled && self.enabled.is_none() {
+	/// - If `strategy` was not explicitly set, derives it from `forge_enabled`:
+	///   [`Strategy::Branch`] when a forge is enabled, [`Strategy::Push`] otherwise.
+	pub(super) fn resolve_defaults(&mut self, forge_enabled: bool) {
+		if forge_enabled && self.enabled.is_none() {
 			self.enabled = Some(true);
 		}
 		if self.strategy.is_none() {
-			self.strategy = Some(if github_enabled {
+			self.strategy = Some(if forge_enabled {
 				Strategy::Branch
 			} else {
 				Strategy::Push

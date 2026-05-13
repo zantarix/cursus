@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::Filesystem;
+use crate::forge::CodeForgeClient;
 use crate::git::Git;
-use crate::github::client::CodeForgeClient;
 
 /// Environment variables and runtime dependencies used by Cursus.
 ///
@@ -47,6 +47,23 @@ pub struct Env {
 	node_auth_token_present: bool,
 	/// Whether `CARGO_REGISTRY_TOKEN` is set in the environment.
 	cargo_registry_token_present: bool,
+	/// `true` when the active GitLab forge client was built from `CI_JOB_TOKEN`
+	/// with no `GITLAB_TOKEN` PAT available.
+	///
+	/// Used by the `prepare` preflight to surface a clear error before any
+	/// merge-request API call is attempted — `CI_JOB_TOKEN` has read-only
+	/// access to the Merge Requests API on GitLab (see ADR-056). Always
+	/// `false` when the active forge is GitHub or when no forge is configured.
+	gitlab_uses_job_token_only: bool,
+	/// User-facing label for the active forge (e.g. `"GitHub"`, `"GitLab"`).
+	///
+	/// Captured automatically from [`CodeForgeClient::forge_name`] when a
+	/// client is wired up via [`with_code_forge_client`](Self::with_code_forge_client)
+	/// or a successful [`with_code_forge_client_result`](Self::with_code_forge_client_result).
+	/// Defaults to `"the configured forge"` when no client has been set
+	/// (e.g. token missing in dry-run), so dry-run preview messages and
+	/// pre-flight errors still have a sensible noun phrase to interpolate.
+	code_forge_name: &'static str,
 	/// The BCP 47 locale tag to use for all user-visible messages.
 	///
 	/// Resolved from `CURSUS_LOCALE`, then the system locale, then `"en"` by
@@ -74,6 +91,8 @@ impl Env {
 			oidc_environment: false,
 			node_auth_token_present: false,
 			cargo_registry_token_present: false,
+			gitlab_uses_job_token_only: false,
+			code_forge_name: "the configured forge",
 			locale: crate::locale::DEFAULT_LOCALE.to_string(),
 		}
 	}
@@ -96,6 +115,16 @@ impl Env {
 		self
 	}
 
+	/// Sets whether the active GitLab client was constructed from `CI_JOB_TOKEN`
+	/// only (no `GITLAB_TOKEN` PAT).
+	///
+	/// Consumed by the prepare preflight to fail fast before any merge-request
+	/// API call when the token cannot create or update merge requests.
+	pub fn with_gitlab_uses_job_token_only(mut self, value: bool) -> Self {
+		self.gitlab_uses_job_token_only = value;
+		self
+	}
+
 	/// Sets the editor to open changeset files with.
 	pub fn with_editor(mut self, editor: String) -> Self {
 		self.editor = Some(editor);
@@ -103,7 +132,12 @@ impl Env {
 	}
 
 	/// Sets the code forge client for API operations.
+	///
+	/// Also captures the forge's user-facing name (via
+	/// [`CodeForgeClient::forge_name`]) so [`code_forge_name`](Self::code_forge_name)
+	/// stays in sync with the configured client without a second setter call.
 	pub fn with_code_forge_client(mut self, client: Arc<dyn CodeForgeClient>) -> Self {
+		self.code_forge_name = client.forge_name();
 		self.code_forge_client = Ok(client);
 		self
 	}
@@ -118,11 +152,16 @@ impl Env {
 
 	/// Sets the code forge client from a `Result`, overwriting any previously set value.
 	///
-	/// Passing `Err(reason)` records why the client is unavailable.
+	/// Passing `Err(reason)` records why the client is unavailable. On `Ok`,
+	/// also captures [`CodeForgeClient::forge_name`] so
+	/// [`code_forge_name`](Self::code_forge_name) reflects the active forge.
 	pub fn with_code_forge_client_result(
 		mut self,
 		client: Result<Arc<dyn CodeForgeClient>, String>,
 	) -> Self {
+		if let Ok(c) = &client {
+			self.code_forge_name = c.forge_name();
+		}
 		self.code_forge_client = client;
 		self
 	}
@@ -154,6 +193,8 @@ impl Env {
 			oidc_environment: self.oidc_environment,
 			node_auth_token_present: self.node_auth_token_present,
 			cargo_registry_token_present: self.cargo_registry_token_present,
+			gitlab_uses_job_token_only: self.gitlab_uses_job_token_only,
+			code_forge_name: self.code_forge_name,
 			locale: self.locale,
 		}
 	}
@@ -211,6 +252,23 @@ impl Env {
 	/// Returns `true` when `CARGO_REGISTRY_TOKEN` is present in the environment.
 	pub(crate) fn cargo_registry_token_present(&self) -> bool {
 		self.cargo_registry_token_present
+	}
+
+	/// Returns `true` when the active GitLab client was built from `CI_JOB_TOKEN`
+	/// without a `GITLAB_TOKEN` PAT fallback.
+	pub(crate) fn gitlab_uses_job_token_only(&self) -> bool {
+		self.gitlab_uses_job_token_only
+	}
+
+	/// Returns the user-facing label for the active forge.
+	///
+	/// Prefer this over `env.code_forge_client().map(|c| c.forge_name())`
+	/// when the active code path needs a forge name without a specific
+	/// client invocation in scope (dry-run previews, pre-flight error
+	/// messages, etc.). Falls back to `"the configured forge"` when no
+	/// forge has been wired up.
+	pub(crate) fn code_forge_name(&self) -> &'static str {
+		self.code_forge_name
 	}
 
 	/// Returns the BCP 47 locale tag for user-visible messages.
@@ -334,8 +392,8 @@ mod tests {
 	use crate::command::test_support::RecordingCommandRunner;
 	use crate::command::{CommandRunner, shell_program};
 	use crate::filesystem::LocalFilesystem;
-	use crate::github::client::CodeForgeClient;
-	use crate::github::client::test_support::RecordingCodeForgeClient;
+	use crate::forge::CodeForgeClient;
+	use crate::forge::test_support::RecordingCodeForgeClient;
 
 	use super::*;
 
@@ -478,6 +536,40 @@ mod tests {
 			.with_code_forge_client(client)
 			.with_code_forge_client_result(Err("no token".into()));
 		assert!(env.code_forge_client().is_err());
+	}
+
+	#[test]
+	fn code_forge_name_defaults_to_configured_forge() {
+		let (_, env, _dir) = recording_env(0);
+		assert_eq!(env.code_forge_name(), "the configured forge");
+	}
+
+	#[test]
+	fn with_code_forge_client_captures_forge_name() {
+		let (_, env, _dir) = recording_env(0);
+		let client = Arc::new(RecordingCodeForgeClient::new().with_forge_name("GitLab"))
+			as Arc<dyn CodeForgeClient>;
+		let env = env.with_code_forge_client(client);
+		assert_eq!(env.code_forge_name(), "GitLab");
+	}
+
+	#[test]
+	fn with_code_forge_client_result_ok_captures_forge_name() {
+		let (_, env, _dir) = recording_env(0);
+		let client = Arc::new(RecordingCodeForgeClient::new().with_forge_name("GitLab"))
+			as Arc<dyn CodeForgeClient>;
+		let env = env.with_code_forge_client_result(Ok(client));
+		assert_eq!(env.code_forge_name(), "GitLab");
+	}
+
+	#[test]
+	fn with_code_forge_client_result_err_leaves_default_name() {
+		// Initial Err sets no client and keeps the default name; the contract
+		// the orchestration layer relies on is that `code_forge_name` is the
+		// label of the *active* client when one is configured.
+		let (_, env, _dir) = recording_env(0);
+		let env = env.with_code_forge_client_result(Err("no token".into()));
+		assert_eq!(env.code_forge_name(), "the configured forge");
 	}
 
 	#[tokio::test]

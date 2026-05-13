@@ -1,6 +1,6 @@
 //! Publish command implementation.
 
-mod github_releases;
+mod forge_releases;
 mod tags;
 #[cfg(test)]
 mod tests_common;
@@ -16,8 +16,8 @@ use crate::model::config::Config;
 use crate::package_manager::{self, DependencyGraph, PublishOutcome, filter_projects_by_name};
 use crate::path::AbsolutePath;
 
-use github_releases::{
-	log_dry_run_github_releases, orchestrate_github_releases, run_github_build_command,
+use forge_releases::{
+	log_dry_run_forge_releases, orchestrate_forge_releases, run_forge_build_command,
 };
 use tags::create_and_push_tags;
 
@@ -46,7 +46,7 @@ pub(super) struct PublishedPackage {
 struct PublishFlags {
 	dry_run: bool,
 	git_enabled: bool,
-	github_enabled: bool,
+	forge_enabled: bool,
 	no_git: bool,
 	is_multi_package: bool,
 }
@@ -57,10 +57,10 @@ struct GitReleaseOutcome {
 	tags_created: usize,
 	tags_skipped: usize,
 	tags_push_failed: usize,
-	github_created: usize,
+	releases_created: usize,
 	/// Releases skipped because a published release already exists for the tag.
 	releases_already_present: usize,
-	github_failed: bool,
+	forge_failed: bool,
 }
 
 /// Arguments for the publish subcommand.
@@ -160,8 +160,8 @@ async fn run_git_release_operations(
 		flags.is_multi_package,
 	)
 	.await?;
-	let (github_created, releases_already_present, github_failed) =
-		maybe_orchestrate_github_releases(
+	let (releases_created, releases_already_present, forge_failed) =
+		maybe_orchestrate_forge_releases(
 			git,
 			config,
 			env,
@@ -175,9 +175,9 @@ async fn run_git_release_operations(
 		tags_created,
 		tags_skipped,
 		tags_push_failed,
-		github_created,
+		releases_created,
 		releases_already_present,
-		github_failed,
+		forge_failed,
 	})
 }
 
@@ -211,7 +211,7 @@ async fn maybe_create_tags(
 /// Orchestrates GitHub Releases when enabled, or logs dry-run intent.
 ///
 /// Returns `(releases_created, releases_already_present, any_failed)`.
-async fn maybe_orchestrate_github_releases(
+async fn maybe_orchestrate_forge_releases(
 	git: &dyn Git,
 	config: &Config,
 	env: &crate::Env,
@@ -220,17 +220,22 @@ async fn maybe_orchestrate_github_releases(
 	no_git: bool,
 	is_multi_package: bool,
 ) -> anyhow::Result<(usize, usize, bool)> {
-	if !config.github.enabled || no_git {
+	if !config.forge_enabled() || no_git {
 		return Ok((0, 0, false));
 	}
 	if dry_run {
-		log_dry_run_github_releases(published_packages, config, is_multi_package);
+		log_dry_run_forge_releases(
+			published_packages,
+			config,
+			is_multi_package,
+			env.code_forge_name(),
+		);
 		return Ok((0, 0, false));
 	}
 	let client = env
 		.code_forge_client()
-		.map_err(|reason| anyhow::anyhow!("GitHub client not available: {reason}"))?;
-	orchestrate_github_releases(
+		.map_err(|reason| anyhow::anyhow!("Forge client not available: {reason}"))?;
+	orchestrate_forge_releases(
 		git,
 		config,
 		client,
@@ -245,20 +250,20 @@ async fn maybe_orchestrate_github_releases(
 ///
 /// Returns `Ok(true)` if the build command failed (caller should return `ExitCode::FAILURE`),
 /// `Ok(false)` if checks pass or GitHub is not enabled, or `Err` if no token was found.
-async fn run_pre_publish_github_checks(
+async fn run_pre_publish_forge_checks(
 	env: &crate::Env,
 	config: &Config,
 	git: &dyn Git,
 	no_git: bool,
 	dry_run: bool,
 ) -> anyhow::Result<bool> {
-	if !config.github.enabled || no_git {
+	if !config.forge_enabled() || no_git {
 		return Ok(false);
 	}
 	if !dry_run && let Err(reason) = env.code_forge_client() {
-		bail!("GitHub Releases is enabled but the code forge client is unavailable: {reason}");
+		bail!("Forge releases are enabled but the code forge client is unavailable: {reason}");
 	}
-	run_github_build_command(env, config, git).await
+	run_forge_build_command(env, config, git).await
 }
 
 /// Execute the publish command.
@@ -277,13 +282,13 @@ pub(crate) async fn cmd_publish(
 		config.global.disable_dependency_cycle_warnings,
 	)
 	.await?;
-	if run_pre_publish_github_checks(env, &config, git, args.no_git, dry_run).await? {
+	if run_pre_publish_forge_checks(env, &config, git, args.no_git, dry_run).await? {
 		return Ok(ExitCode::FAILURE);
 	}
 	let flags = PublishFlags {
 		dry_run,
 		git_enabled: config.git.enabled() && !args.no_git,
-		github_enabled: config.github.enabled,
+		forge_enabled: config.forge_enabled(),
 		no_git: args.no_git,
 		is_multi_package: projects.len() > 1,
 	};
@@ -291,7 +296,7 @@ pub(crate) async fn cmd_publish(
 	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags).await?;
 	log_publish_summary(&publish, &flags, &outcome);
 
-	let code = if publish.failed || outcome.github_failed || outcome.tags_push_failed > 0 {
+	let code = if publish.failed || outcome.forge_failed || outcome.tags_push_failed > 0 {
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
@@ -462,14 +467,14 @@ async fn publish_projects(
 /// `skipped_count` covers packages already on the registry (whose releases are still
 /// attempted). `failed_count` is derived from the combined total minus created and
 /// already-present releases.
-fn log_github_releases_summary(
+fn log_forge_releases_summary(
 	registry_published: usize,
 	private_tagged_count: usize,
 	skipped_count: usize,
 	suffix_note: &str,
-	github_created: usize,
+	releases_created: usize,
 	releases_already_present: usize,
-	github_failed: bool,
+	forge_failed: bool,
 ) {
 	let private_note = if private_tagged_count > 0 {
 		format!(", {private_tagged_count} private (tag only)")
@@ -484,7 +489,7 @@ fn log_github_releases_summary(
 	// GitHub Releases are attempted for registry-published, registry-skipped, and
 	// private-tagged packages — the full `state.published` slice.
 	let total_releasable = registry_published + private_tagged_count + skipped_count;
-	match (github_created, github_failed) {
+	match (releases_created, forge_failed) {
 		(created, false) => info!(
 			"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
 			 {created} GitHub Release{} created{already_note}{suffix_note}",
@@ -536,16 +541,16 @@ fn log_summary_line(state: &PublishState, flags: &PublishFlags, outcome: &GitRel
 			"Dry-run assumes all packages need publishing and will succeed; actual results may \
 			 differ if some packages are already published or if publish failures occur"
 		);
-	} else if flags.github_enabled && !flags.no_git {
+	} else if flags.forge_enabled && !flags.no_git {
 		let suffix_note = format!("{dep_skipped_note}{unprepared_note}");
-		log_github_releases_summary(
+		log_forge_releases_summary(
 			registry_published,
 			state.private_tagged_count,
 			state.skipped_count,
 			&suffix_note,
-			outcome.github_created,
+			outcome.releases_created,
 			outcome.releases_already_present,
-			outcome.github_failed,
+			outcome.forge_failed,
 		);
 	} else {
 		info!(
@@ -682,9 +687,9 @@ mod tests {
 			tags_created: 0,
 			tags_skipped: 0,
 			tags_push_failed: 0,
-			github_created: 0,
+			releases_created: 0,
 			releases_already_present: 0,
-			github_failed: false,
+			forge_failed: false,
 		}
 	}
 
@@ -707,7 +712,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: false,
 			git_enabled: false,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -731,7 +736,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: false,
 			git_enabled: false,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -754,7 +759,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: true,
 			git_enabled: false, // git disabled
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -776,7 +781,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: true,
 			git_enabled: true, // git enabled
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -798,7 +803,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: false,
 			git_enabled: true,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -806,9 +811,9 @@ mod tests {
 			tags_created: 2,
 			tags_skipped: 0,
 			tags_push_failed: 0,
-			github_created: 0,
+			releases_created: 0,
 			releases_already_present: 0,
-			github_failed: false,
+			forge_failed: false,
 		};
 		log_publish_summary(&state, &flags, &outcome);
 		let logs = crate::test_logging::take_logs();
@@ -827,7 +832,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: false,
 			git_enabled: true,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -835,9 +840,9 @@ mod tests {
 			tags_created: 0,
 			tags_skipped: 0,
 			tags_push_failed: 1,
-			github_created: 0,
+			releases_created: 0,
 			releases_already_present: 0,
-			github_failed: false,
+			forge_failed: false,
 		};
 		log_publish_summary(&state, &flags, &outcome);
 		let logs = crate::test_logging::take_logs();
@@ -856,7 +861,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: true, // dry-run: no tag log lines expected
 			git_enabled: true,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -864,9 +869,9 @@ mod tests {
 			tags_created: 3,
 			tags_skipped: 0,
 			tags_push_failed: 2,
-			github_created: 0,
+			releases_created: 0,
 			releases_already_present: 0,
-			github_failed: false,
+			forge_failed: false,
 		};
 		log_publish_summary(&state, &flags, &outcome);
 		let logs = crate::test_logging::take_logs();
@@ -884,13 +889,13 @@ mod tests {
 		);
 	}
 
-	// ── log_github_releases_summary tests ─────────────────────────────────────
+	// ── log_forge_releases_summary tests ─────────────────────────────────────
 
 	#[tokio::test]
-	async fn log_github_releases_summary_no_failure_logs_created_count() {
+	async fn log_forge_releases_summary_no_failure_logs_created_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(3, 0, 0, "", 2, 0, false);
+		log_forge_releases_summary(3, 0, 0, "", 2, 0, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter()
@@ -900,10 +905,10 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn log_github_releases_summary_with_failure_logs_failed_count() {
+	async fn log_forge_releases_summary_with_failure_logs_failed_count() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(3, 0, 0, "", 2, 0, true);
+		log_forge_releases_summary(3, 0, 0, "", 2, 0, true);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter()
@@ -951,11 +956,11 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn log_github_releases_summary_private_note_appears_when_nonzero() {
+	async fn log_forge_releases_summary_private_note_appears_when_nonzero() {
 		// Guards `> 0` → `> 1` on `private_tagged_count` condition.
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(2, 1, 0, "", 3, 0, false);
+		log_forge_releases_summary(2, 1, 0, "", 3, 0, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			logs.iter().any(|(_, m)| m.contains("private (tag only)")),
@@ -964,10 +969,10 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn log_github_releases_summary_no_private_note_when_zero() {
+	async fn log_forge_releases_summary_no_private_note_when_zero() {
 		crate::test_logging::init_test_logger();
 		let _ = crate::test_logging::take_logs();
-		log_github_releases_summary(2, 0, 0, "", 2, 0, false);
+		log_forge_releases_summary(2, 0, 0, "", 2, 0, false);
 		let logs = crate::test_logging::take_logs();
 		assert!(
 			!logs.iter().any(|(_, m)| m.contains("private (tag only)")),
@@ -986,7 +991,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: true,
 			git_enabled: false,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -1012,7 +1017,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: true,
 			git_enabled: false,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};
@@ -1035,7 +1040,7 @@ mod tests {
 		let flags = PublishFlags {
 			dry_run: false,
 			git_enabled: false,
-			github_enabled: false,
+			forge_enabled: false,
 			no_git: false,
 			is_multi_package: false,
 		};

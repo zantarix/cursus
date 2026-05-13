@@ -13,7 +13,7 @@ pub struct PullRequest {
 	pub html_url: String,
 }
 
-/// An existing GitHub Release found by tag lookup.
+/// An existing release found on the active forge by tag lookup.
 #[derive(Debug, Clone)]
 pub struct ExistingRelease {
 	/// Numeric release ID as a string.
@@ -30,6 +30,14 @@ pub struct ExistingRelease {
 /// module provides a recording fake for unit tests.
 #[async_trait]
 pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
+	/// Returns the human-readable forge name for use in user-visible messages.
+	///
+	/// Implementations return the active forge's native label
+	/// (e.g. `"GitHub"`, `"GitLab"`). The orchestration layer composes log
+	/// strings and error messages using this label so it does not need to
+	/// know which concrete client is active.
+	fn forge_name(&self) -> &'static str;
+
 	/// Creates a release for the given tag, returning the release ID.
 	///
 	/// The release is created as a draft. Call [`publish_release`](Self::publish_release)
@@ -98,7 +106,7 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 		body: &str,
 	) -> anyhow::Result<String>;
 
-	/// Looks up an existing GitHub Release by its git tag.
+	/// Looks up an existing release by its git tag.
 	///
 	/// Returns `Ok(None)` if no release exists for the given tag (HTTP 404).
 	///
@@ -115,7 +123,7 @@ pub trait CodeForgeClient: Send + Sync + std::fmt::Debug {
 	async fn publish_release(&self, release_id: &str) -> anyhow::Result<()>;
 }
 
-/// Test support types for GitHub client operations.
+/// Test support types for code-forge client operations.
 ///
 /// Provides a fake client implementation for use in unit and integration tests.
 /// Available when compiled with `#[cfg(test)]` (unit tests within this crate)
@@ -203,10 +211,15 @@ pub mod test_support {
 		fail_publish_release: bool,
 		existing_releases: std::collections::HashMap<String, ExistingRelease>,
 		fail_find_release: bool,
+		forge_name: &'static str,
 	}
 
 	impl RecordingCodeForgeClient {
 		/// Creates a new recording client that succeeds with `release_id = "release-1"`.
+		///
+		/// Defaults `forge_name` to `"GitHub"`. Use
+		/// [`with_forge_name`](Self::with_forge_name) when a test needs to assert
+		/// on GitLab-specific orchestrator output.
 		pub fn new() -> Self {
 			Self {
 				invocations: Mutex::new(Vec::new()),
@@ -220,7 +233,14 @@ pub mod test_support {
 				fail_publish_release: false,
 				existing_releases: std::collections::HashMap::new(),
 				fail_find_release: false,
+				forge_name: "GitHub",
 			}
+		}
+
+		/// Overrides the [`CodeForgeClient::forge_name`] return value (defaults to `"GitHub"`).
+		pub fn with_forge_name(mut self, name: &'static str) -> Self {
+			self.forge_name = name;
+			self
 		}
 
 		/// Configures the release ID returned by [`create_release`](CodeForgeClient::create_release).
@@ -304,6 +324,10 @@ pub mod test_support {
 
 	#[async_trait]
 	impl CodeForgeClient for RecordingCodeForgeClient {
+		fn forge_name(&self) -> &'static str {
+			self.forge_name
+		}
+
 		async fn create_release(
 			&self,
 			tag_name: &str,

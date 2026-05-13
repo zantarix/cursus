@@ -2,7 +2,7 @@ use crossterm::event::{Event, KeyCode};
 use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
 
-use crate::github::GitHubRepo;
+use crate::forge::github::GitHubRepo;
 use crate::tui::widgets::{self, KeyResult};
 
 use super::{HandleResult, Screen, WizardState, bordered_textarea};
@@ -120,7 +120,7 @@ mod tests {
 	use crossterm::event::KeyCode;
 	use ratatui_textarea::TextArea;
 
-	use crate::github::GitHubRepo;
+	use crate::forge::github::GitHubRepo;
 
 	use super::super::test_helpers::*;
 	use super::super::{Screen, WizardState, handle_key};

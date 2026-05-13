@@ -769,9 +769,9 @@ fn make_github_test_env(api_url: &str, dir: &std::path::Path) -> cursus::Env {
 	use std::sync::Arc;
 
 	use cursus::command::RealCommandRunner;
-	use cursus::github::OctocrabGitHubClient;
-	use cursus::github::client::CodeForgeClient;
-	use cursus::github::remote::GitHubRepo;
+	use cursus::forge::CodeForgeClient;
+	use cursus::forge::github::OctocrabGitHubClient;
+	use cursus::forge::github::remote::GitHubRepo;
 	use cursus::path::AbsolutePath;
 
 	let client = Arc::new(OctocrabGitHubClient::new(

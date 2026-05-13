@@ -140,12 +140,10 @@ pub(super) async fn preflight_checks(
 ) -> anyhow::Result<BranchState> {
 	let needs_forge = git_ctx.enabled
 		&& git_ctx.strategy == Strategy::Branch
-		&& config.github.enabled
+		&& config.forge_enabled()
 		&& !dry_run;
-	if needs_forge && let Err(reason) = env.code_forge_client() {
-		anyhow::bail!(
-			"GitHub integration is enabled but the code forge client is unavailable: {reason}"
-		);
+	if needs_forge {
+		check_forge_preconditions(env)?;
 	}
 	if !git_ctx.enabled {
 		return Ok(BranchState {
@@ -180,6 +178,29 @@ pub(super) async fn preflight_checks(
 	}
 }
 
+/// Checks that the configured forge client is available and that its auth
+/// token has the scope needed to create or update a release request.
+///
+/// GitLab's `CI_JOB_TOKEN` cannot create or update merge requests
+/// (ADR-056); we surface that error here before the release branch is
+/// pushed rather than letting the upstream 403 fire mid-flight.
+fn check_forge_preconditions(env: &crate::Env) -> anyhow::Result<()> {
+	env.code_forge_client().map_err(|reason| {
+		anyhow::anyhow!(
+			"Forge integration is enabled but the code forge client is unavailable: {reason}"
+		)
+	})?;
+	if env.gitlab_uses_job_token_only() && env.code_forge_name() == "GitLab" {
+		anyhow::bail!(
+			"GitLab merge-request operations require GITLAB_TOKEN with `api` scope; \
+			 CI_JOB_TOKEN cannot create or update merge requests. \
+			 Provision a project- or group-access token and expose it as \
+			 GITLAB_TOKEN in CI."
+		);
+	}
+	Ok(())
+}
+
 /// Pushes the release branch and optionally creates/updates a pull request.
 async fn push_branch_and_pr(
 	git: &dyn Git,
@@ -200,7 +221,7 @@ async fn push_branch_and_pr(
 			 `git checkout <your-branch>` to return."
 		)
 	})?;
-	let pr_result = if config.github.enabled {
+	let pr_result = if config.forge_enabled() {
 		super::github::upsert_release_pull_request(
 			config,
 			env,
@@ -641,8 +662,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn cmd_prepare_branch_strategy_with_github_creates_pr() {
-		use crate::github::client::CodeForgeClient;
-		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
+		use crate::forge::CodeForgeClient;
+		use crate::forge::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
 		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
@@ -686,8 +707,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn cmd_prepare_branch_strategy_pr_failure_is_fatal() {
-		use crate::github::client::CodeForgeClient;
-		use crate::github::client::test_support::RecordingCodeForgeClient;
+		use crate::forge::CodeForgeClient;
+		use crate::forge::test_support::RecordingCodeForgeClient;
 		let dir = setup_branch_strategy_with_github().await;
 		let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
 			"git",
@@ -749,6 +770,78 @@ mod tests {
 		assert!(
 			msg.contains("code forge client is unavailable"),
 			"Expected 'code forge client is unavailable' error, got: {msg}"
+		);
+	}
+
+	// ── check_forge_preconditions ─────────────────────────────────────────────
+
+	fn minimal_env_with(
+		client: Arc<dyn crate::forge::CodeForgeClient>,
+		gitlab_uses_job_token_only: bool,
+	) -> crate::Env {
+		let dir = tempfile::tempdir().unwrap();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		std::mem::forget(dir);
+		let runner: Arc<dyn CommandRunner> = Arc::new(RecordingCommandRunner::new(0));
+		let git = Arc::new(crate::git::GitWorkdir::new(Arc::clone(&runner), dir_abs));
+		crate::Env::new(runner, Arc::new(LocalFilesystem), git)
+			.with_code_forge_client(client)
+			.with_gitlab_uses_job_token_only(gitlab_uses_job_token_only)
+	}
+
+	#[test]
+	fn check_forge_preconditions_succeeds_for_github_pat() {
+		use crate::forge::test_support::RecordingCodeForgeClient;
+		let client =
+			Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn crate::forge::CodeForgeClient>;
+		let env = minimal_env_with(client, false);
+		check_forge_preconditions(&env).expect("GitHub PAT path should succeed");
+	}
+
+	#[test]
+	fn check_forge_preconditions_succeeds_for_gitlab_with_pat() {
+		use crate::forge::test_support::RecordingCodeForgeClient;
+		let client = Arc::new(RecordingCodeForgeClient::new().with_forge_name("GitLab"))
+			as Arc<dyn crate::forge::CodeForgeClient>;
+		let env = minimal_env_with(client, false);
+		check_forge_preconditions(&env)
+			.expect("GitLab with PAT (job_token_only=false) should succeed");
+	}
+
+	#[test]
+	fn check_forge_preconditions_bails_for_gitlab_with_job_token_only() {
+		use crate::forge::test_support::RecordingCodeForgeClient;
+		let client = Arc::new(RecordingCodeForgeClient::new().with_forge_name("GitLab"))
+			as Arc<dyn crate::forge::CodeForgeClient>;
+		let env = minimal_env_with(client, true);
+		let result = check_forge_preconditions(&env);
+		assert!(result.is_err(), "GitLab + job-token-only must bail");
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("GITLAB_TOKEN"),
+			"Expected error message to name GITLAB_TOKEN, got: {msg}"
+		);
+		assert!(
+			msg.contains("CI_JOB_TOKEN"),
+			"Expected error message to name CI_JOB_TOKEN, got: {msg}"
+		);
+	}
+
+	#[test]
+	fn check_forge_preconditions_bails_when_client_unavailable() {
+		let dir = tempfile::tempdir().unwrap();
+		let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+		std::mem::forget(dir);
+		let runner: Arc<dyn CommandRunner> = Arc::new(RecordingCommandRunner::new(0));
+		let git = Arc::new(crate::git::GitWorkdir::new(Arc::clone(&runner), dir_abs));
+		let env = crate::Env::new(runner, Arc::new(LocalFilesystem), git);
+		// Default Env has no forge client configured (Err("No code forge client configured")).
+		let result = check_forge_preconditions(&env);
+		assert!(result.is_err());
+		let msg = format!("{:#}", result.unwrap_err());
+		assert!(
+			msg.contains("code forge client is unavailable"),
+			"Expected unavailable-client error, got: {msg}"
 		);
 	}
 }

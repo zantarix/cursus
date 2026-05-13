@@ -7,9 +7,9 @@ use std::path::Path;
 
 use httpmock::prelude::*;
 
-use cursus::github::OctocrabGitHubClient;
-use cursus::github::client::CodeForgeClient;
-use cursus::github::remote::GitHubRepo;
+use cursus::forge::CodeForgeClient;
+use cursus::forge::github::OctocrabGitHubClient;
+use cursus::forge::github::remote::GitHubRepo;
 
 /// Builds an `OctocrabGitHubClient` pointing at the given mock server.
 fn mock_client(server: &MockServer) -> OctocrabGitHubClient {

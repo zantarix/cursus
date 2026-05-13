@@ -116,4 +116,4 @@ Instead of pre-checking, `orchestrate_github_releases` could catch the HTTP 422 
 
 ## Errata
 
-(none yet)
+- **2026-05-13**: [ADR-056](056-gitlab-support-client-config-and-ci.md) adds a second `CodeForgeClient` implementation, `ReqwestGitLabClient`, which implements `find_release_by_tag` against the GitLab Releases GET-by-tag endpoint. It returns `Ok(None)` on 404 (matching the contract this ADR defines) and `Ok(Some(ExistingRelease { is_draft: false, .. }))` on hit — `is_draft` is always `false` on GitLab because the concept does not exist there. The draft-release recovery branch of `orchestrate_forge_releases` (renamed from `orchestrate_github_releases` by ADR-056) is therefore unreachable under the GitLab forge; the "no release exists" and "published release exists" paths cover every GitLab case. The recovery decision tree this ADR defines is unchanged; the GitLab forge simply exercises a strict subset of it.
