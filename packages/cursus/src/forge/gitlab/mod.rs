@@ -13,3 +13,6 @@ pub mod remote;
 
 pub use client::{GitLabTokenKind, ReqwestGitLabClient};
 pub use remote::GitLabProject;
+
+#[cfg(test)]
+mod tests;

@@ -20,3 +20,6 @@ pub use client::{CodeForgeClient, ExistingRelease, PullRequest};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use client::test_support;
+
+#[cfg(test)]
+mod tests;

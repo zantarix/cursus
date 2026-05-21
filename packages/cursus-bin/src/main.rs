@@ -12,6 +12,9 @@ mod forge_resolution;
 mod git_setup;
 mod logging;
 
+#[cfg(test)]
+mod tests;
+
 use env_helpers::{detect_locale, env_first};
 use forge_resolution::{build_octocrab, resolve_forge_client_for_env};
 use git_setup::build_git;

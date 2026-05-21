@@ -9,3 +9,6 @@ pub mod remote;
 
 pub use octocrab_client::OctocrabGitHubClient;
 pub use remote::GitHubRepo;
+
+#[cfg(test)]
+mod tests;

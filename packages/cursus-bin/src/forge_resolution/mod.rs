@@ -7,6 +7,9 @@
 mod github;
 mod gitlab;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 pub(crate) use github::build_octocrab;

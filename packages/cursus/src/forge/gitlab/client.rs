@@ -307,7 +307,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 }
 
 /// Detects whether a `gitlab::api::ApiError` corresponds to an HTTP 404 response.
-fn is_not_found<E>(err: &ApiError<E>) -> bool
+pub(crate) fn is_not_found<E>(err: &ApiError<E>) -> bool
 where
 	E: std::error::Error + Send + Sync + 'static,
 {
@@ -322,7 +322,7 @@ where
 /// Replaces characters disallowed by GitLab's package_version regex
 /// (`\A(\.?[\w\+-]+\.?)+\z`) with `-`. Allowed characters: word characters,
 /// `+`, `-`, and `.`.
-fn sanitize_package_version(s: &str) -> String {
+pub(crate) fn sanitize_package_version(s: &str) -> String {
 	s.chars()
 		.map(|c| {
 			if c.is_ascii_alphanumeric() || c == '_' || c == '+' || c == '-' || c == '.' {
@@ -336,7 +336,7 @@ fn sanitize_package_version(s: &str) -> String {
 
 /// Replaces characters disallowed by GitLab's generic package file_name rule
 /// (alphanumerics plus `.`, `-`, `_`) with `-`.
-fn sanitize_file_name(s: &str) -> String {
+pub(crate) fn sanitize_file_name(s: &str) -> String {
 	s.chars()
 		.map(|c| {
 			if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' {
@@ -351,7 +351,7 @@ fn sanitize_file_name(s: &str) -> String {
 /// Percent-encodes a value for safe interpolation into a single URL path segment.
 ///
 /// The `/` separator inside `group/project` paths is preserved by encoding to `%2F`.
-fn percent_encode_path(s: &str) -> String {
+pub(crate) fn percent_encode_path(s: &str) -> String {
 	percent_encoding::utf8_percent_encode(s, PATH_SET).to_string()
 }
 
@@ -366,69 +366,3 @@ const PATH_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
 	.add(b'{')
 	.add(b'}')
 	.add(b'/');
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn sanitize_package_version_replaces_at() {
-		assert_eq!(sanitize_package_version("pkg@1.0.0"), "pkg-1.0.0");
-	}
-
-	#[test]
-	fn sanitize_package_version_keeps_allowed_chars() {
-		assert_eq!(
-			sanitize_package_version("v1.0.0-rc.1+build"),
-			"v1.0.0-rc.1+build"
-		);
-	}
-
-	#[test]
-	fn sanitize_file_name_replaces_disallowed() {
-		assert_eq!(sanitize_file_name("name with spaces"), "name-with-spaces");
-	}
-
-	#[test]
-	fn sanitize_file_name_keeps_allowed_chars() {
-		assert_eq!(
-			sanitize_file_name("cursus-x86_64-linux.tar.gz"),
-			"cursus-x86_64-linux.tar.gz"
-		);
-	}
-
-	#[test]
-	fn project_path_uses_group_and_project_with_slash() {
-		let project = GitLabProject::new("gitlab.example.com", "acme/sub", "app").unwrap();
-		assert_eq!(
-			format!("{}/{}", project.group, project.project),
-			"acme/sub/app"
-		);
-	}
-
-	#[test]
-	fn package_file_url_encodes_slashes_in_project_path() {
-		let project = GitLabProject::new("gitlab.example.com", "acme/sub", "app").unwrap();
-		let path = format!("{}/{}", project.group, project.project);
-		let encoded = percent_encode_path(&path);
-		assert_eq!(encoded, "acme%2Fsub%2Fapp");
-	}
-
-	#[test]
-	fn is_not_found_matches_404() {
-		let err: ApiError<std::io::Error> = ApiError::GitlabWithStatus {
-			status: 404u16.try_into().unwrap(),
-			msg: "Not Found".to_string(),
-		};
-		assert!(is_not_found(&err));
-	}
-
-	#[test]
-	fn is_not_found_rejects_other_statuses() {
-		let err: ApiError<std::io::Error> = ApiError::GitlabWithStatus {
-			status: 500u16.try_into().unwrap(),
-			msg: "boom".to_string(),
-		};
-		assert!(!is_not_found(&err));
-	}
-}

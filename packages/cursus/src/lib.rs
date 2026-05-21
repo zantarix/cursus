@@ -21,6 +21,9 @@ pub mod utils;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_logging;
 
+#[cfg(test)]
+mod tests;
+
 use std::process::ExitCode;
 
 pub use env::Env;
