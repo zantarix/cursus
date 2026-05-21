@@ -71,6 +71,10 @@ The `.cursus/` directory at the git root serves as the home for both configurati
 
 ## Errata
 
-The original consequences section stated that `deny_unknown_fields` makes adding new configuration options a breaking change. This is incorrect. Adding new fields is non-breaking: existing config files simply won't contain the new field, and `serde(default)` provides sensible defaults. The constraint only prevents *users* from having fields in their config that Cursus doesn't recognise, catching typos and stale configuration. *Removing* a previously supported field would be breaking, since existing configs referencing it would fail to parse.
+### 2026-02-21: `deny_unknown_fields` does not make new options breaking
 
-**2026-03-11:** [ADR-019](019-improved-init-workflow.md) expands the init workflow to cover git automation, GitHub integration, multi-package-manager selection, and manifest path prompting. The package manager screen changes from a single-select to a multi-select. The `--package-manager` non-interactive flag is removed; init becomes interactive-only. The generated config includes commented-out documentation for all available options.
+The Consequences section's claim that `deny_unknown_fields` makes adding new configuration options a breaking change is incorrect. Adding new fields is non-breaking because existing config files simply won't contain the new field and `serde(default)` provides sensible defaults; the constraint only prevents *users* from having unrecognised fields, which catches typos and stale configuration. *Removing* a previously supported field would be breaking, since existing configs referencing it would fail to parse.
+
+### 2026-03-11: Init becomes interactive-only with multi-select package managers
+
+The Decision section's description of init as accepting a `--package-manager` non-interactive flag with a single-select package-manager screen is incorrect. [ADR-019](019-improved-init-workflow.md) removes the `--package-manager` flag (init is interactive-only), changes the package-manager screen to multi-select, and expands the wizard to cover git automation, GitHub integration, and manifest path prompting; the generated config now includes commented-out documentation for all available options.

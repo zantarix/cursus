@@ -250,4 +250,6 @@ A handful of GitLab-compatibility shims for octocrab-shaped clients exist. They 
 
 ## Errata
 
-- **2026-05-13**: The cross-section validation deferred to a future ADR (see the "Both forges enabled" question raised in Decision and Out of Scope) is now closed out by [ADR-059](059-forge-selection-runtime-rules.md), which has been Accepted. The rule is: at most one forge section may have `enabled = true`, enforced at `Config::load`. The "GitHub-first precedence" mentioned for the four forge-resolving helpers (`forge_enabled`, `release_request_title`, `build_command`, `forge_artifacts`) is no longer reachable at runtime because the load-time validation rejects the both-enabled state before any helper is consulted; the helpers still contain the precedence branches as a defensive fallback but the GitHub-first arm cannot be exercised under a valid config.
+### 2026-05-13: Both-enabled state is now rejected at load time
+
+The Decision and Out of Scope sections defer the cross-section "both forges enabled" question, and the GitHub-first precedence described for the four forge-resolving helpers (`forge_enabled`, `release_request_title`, `build_command`, `forge_artifacts`) is presented as a runtime-reachable behaviour. Both framings are now incorrect: [ADR-059](059-forge-selection-runtime-rules.md) closes the deferred question by requiring that at most one forge section have `enabled = true`, enforced at `Config::load`. The helpers still contain the precedence branches as a defensive fallback, but the GitHub-first arm cannot be exercised under a valid config.

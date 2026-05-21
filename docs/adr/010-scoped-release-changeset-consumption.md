@@ -71,4 +71,6 @@ Maintain a `.cursus/released.toml` recording which package entries have been con
 
 ## Errata
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. References to `release` as a subcommand name in this ADR now refer to `cursus prepare`. The scoped changeset consumption behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+### 2026-03-09: `cursus release` renamed to `cursus prepare`
+
+References to `release` as a subcommand name in this ADR are incorrect: [ADR-016](016-rename-release-to-prepare.md) renames the subcommand to `cursus prepare`. The scoped changeset consumption behaviour is unchanged; only the user-facing name differs.

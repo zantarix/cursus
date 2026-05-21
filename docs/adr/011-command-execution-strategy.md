@@ -161,5 +161,10 @@ This was deferred rather than rejected. Many tools in the ecosystem support this
 
 ## Errata
 
-- **2026-03-18**: [ADR-033](033-windows-shell-execution.md) extends this decision to support Windows. The `/bin/sh -c` convention described above applies to Unix only; on Windows, `cmd.exe /C` is used instead. The supported platform list (originally Linux and macOS) now includes Windows as a cross-compilation target. See [ADR-033](033-windows-shell-execution.md) for the full decision and rationale.
-- **2026-04-19**: [ADR-046](046-streaming-command-execution.md) changed how user-configurable shell commands execute. `run_shell_mut` (which captured stdout/stderr into `Output`) was removed from `CommandRunner` and replaced by `run_streaming`. `run_streaming` inherits the parent's stdout and stderr so output appears live on the terminal; stdin is set to null. As a result, the two user-configurable command fields (`github.build_command` and `npm.lock_command`) no longer capture stderr on failure -- the stderr has already been streamed to the terminal. Error messages on failure include the exit status only. The dry-run log format for these commands is `[dry-run] would run (streaming): "<command>" (cwd: <path>)` rather than a generic "would run" line.
+### 2026-03-18: `/bin/sh -c` convention is Unix-only
+
+The "`/bin/sh -c`" shell convention described in this ADR is no longer the whole story: it applies on Unix only. [ADR-033](033-windows-shell-execution.md) extends the strategy to Windows, where `cmd.exe /C` is used instead, and adds Windows to the previously Linux-and-macOS supported-platform list.
+
+### 2026-04-19: `run_shell_mut` removed in favour of `run_streaming`
+
+The `run_shell_mut` mutating-shell call described here no longer exists on `CommandRunner`. [ADR-046](046-streaming-command-execution.md) removes it and introduces `run_streaming`, which inherits the parent's stdout and stderr so output appears live on the terminal (stdin is null). As a consequence, `github.build_command` and `npm.lock_command` no longer capture stderr on failure — error messages include only the exit status — and the dry-run log format for these commands becomes `[dry-run] would run (streaming): "<command>" (cwd: <path>)`.

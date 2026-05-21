@@ -90,8 +90,18 @@ Build a list of pending operations during execution and either execute or print 
 
 ## Errata
 
-`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
 
-- **2026-04-19**: [ADR-046](046-streaming-command-execution.md) removed `run_shell` (read-only) and `run_shell_mut` (mutating) from the `CommandRunner` trait. The new `run_streaming` method replaces `run_shell_mut` at the two user-configurable call sites and is suppressed by `DryRunCommandRunner` following the same late-guard pattern. The read-only set is now just `run`; the suppressed mutating set is `run_mut`, `run_interactive`, `run_shell_interactive`, and `run_streaming`.
-- **2026-04-29**: [ADR-050](050-verified-release-commits-via-git-data-api.md) introduces a documented, scoped exception to the late-guard pattern. The new `SignedCommitGit::commit()` decorator routes the prepare-step commit through the GitHub Git Data API via `octocrab` rather than `CommandRunner`, so `DryRunCommandRunner` cannot intercept it. To preserve [ADR-008](008-dry-run-local-only-guarantee.md)'s strictly-local-only guarantee, the decorator captures a `dry_run` flag at construction time and short-circuits before any HTTP request. The exception is local to that one decorator and does not change the late-guard pattern for any other call site.
-- **2026-05-01**: [ADR-052](052-credential-redaction-in-error-messages.md) adds a complementary cross-cutting convention at the same call sites this ADR governs: any subprocess stderr or external API response body embedded into an `anyhow::Error` (whether the originating subprocess was suppressed by `DryRunCommandRunner` or executed for real) must first be passed through `redact_credentials`. Dry-run does not relax the obligation -- read-only commands that still execute under `DryRunCommandRunner` follow the same redaction rule as the production path.
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The late-guard pattern itself is unchanged; only the trait name differs.
+
+### 2026-04-19: `run_shell` and `run_shell_mut` removed from the suppressed set
+
+The Decision section's enumeration of suppressed mutating methods includes `run_shell_mut`, and the read-only set includes `run_shell`. Both are now incorrect: [ADR-046](046-streaming-command-execution.md) removes `run_shell` and `run_shell_mut` from `CommandRunner` and introduces `run_streaming`, which replaces `run_shell_mut` at the two user-configurable call sites and is suppressed by `DryRunCommandRunner` under the same late-guard pattern. The read-only set is now just `run`; the suppressed mutating set is `run_mut`, `run_interactive`, `run_shell_interactive`, and `run_streaming`.
+
+### 2026-04-29: Scoped exception for `SignedCommitGit`
+
+The Decision section presents the late-guard pattern as the sole mechanism by which `--dry-run` suppresses mutations. This is no longer strictly accurate: [ADR-050](050-verified-release-commits-via-git-data-api.md) introduces `SignedCommitGit::commit()`, which routes the prepare-step commit through the GitHub Git Data API via `octocrab` rather than `CommandRunner`, so `DryRunCommandRunner` cannot intercept it. The decorator captures a `dry_run` flag at construction time and short-circuits before any HTTP request, preserving [ADR-008](008-dry-run-local-only-guarantee.md)'s strictly-local-only guarantee; the exception is local to that one decorator and does not change the pattern for any other call site.
+
+### 2026-05-01: Credential redaction applies at the same call sites
+
+The Decision section says nothing about how stderr or API response bodies are handled when embedded in errors raised from late-guarded call sites. [ADR-052](052-credential-redaction-in-error-messages.md) adds a complementary cross-cutting requirement: any subprocess stderr or external API response body embedded into an `anyhow::Error` at these sites must first be passed through `redact_credentials`, whether the originating subprocess was suppressed by `DryRunCommandRunner` or executed for real. Dry-run does not relax the obligation — read-only commands that still execute under `DryRunCommandRunner` follow the same redaction rule as the production path.

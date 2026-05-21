@@ -197,8 +197,14 @@ Continuing to rely on manual git operations, as established by [ADR-003](003-rel
 
 ## Errata
 
-**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) replaces the `run_until` field (with variants `commit | tag | push`) with a `strategy` field (with variants `push | branch`). The `tag` step described in section "2. Tag" is removed from the release workflow entirely -- tags are now created during `cursus publish`, not during `cursus release`. The `commit` variant is also removed; both strategies include committing as an inherent step. The `--no-git` flag, originally defined in this ADR only for `cursus release`, now also applies to `cursus publish`. See [ADR-015](015-ci-managed-release-workflow.md) for the revised git integration model.
+### 2026-03-09: `run_until` replaced by `strategy`; tag step removed
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. References to `cursus release` in this ADR now refer to `cursus prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+The `run_until` field (with variants `commit | tag | push`) described in this ADR no longer exists; [ADR-015](015-ci-managed-release-workflow.md) replaces it with a `strategy` field (with variants `push | branch`). Section "2. Tag" is removed from the release workflow entirely — tags are created during `cursus publish` instead — and the `commit` variant is gone because both strategies include committing as an inherent step. The `--no-git` flag, originally scoped here to `cursus release`, also now applies to `cursus publish`.
 
-**2026-03-18**: The commit message format described in section "1. Commit" (lines 87-95) is no longer accurate. The dynamic `chore(release): <pkg1>@<version1>, <pkg2>@<version2>` format has been replaced with a static configurable string. The default is now `ci(release): version packages`. Users can override this via the `[git].prepare_commit_message` field in `.cursus/config.toml`. The message is used verbatim -- no template interpolation or variable substitution is supported.
+### 2026-03-09: `cursus release` renamed to `cursus prepare`
+
+References to `cursus release` in this ADR are incorrect: [ADR-016](016-rename-release-to-prepare.md) renames the subcommand to `cursus prepare`. The behaviour is unchanged; only the user-facing name differs.
+
+### 2026-03-18: Commit message is now a static configurable string
+
+The dynamic commit message format described in section "1. Commit" (`chore(release): <pkg1>@<version1>, <pkg2>@<version2>`) is no longer used. The default is now the static string `ci(release): version packages`, overridable via `[git].prepare_commit_message` in `.cursus/config.toml`. The message is used verbatim with no template interpolation or variable substitution.

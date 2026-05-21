@@ -89,6 +89,10 @@ Instead of bundling capabilities into `Env`, each function could accept the spec
 
 ## Errata
 
-- **2026-03-22:** The "Full trait abstraction for filesystem access" alternative, rejected above for testing-only benefit, is revisited and adopted in [ADR-036](036-filesystem-trait-abstraction.md) to support non-local backends (remote code forges, in-memory filesystems). The core decision of this ADR (environment injection via `Env`) is preserved and extended with the new `Filesystem` trait on `Env`.
-- `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
-- **2026-05-13:** [ADR-056](056-gitlab-support-client-config-and-ci.md) extends the binary-side environment-detection responsibility to cover GitLab (`GITLAB_CI`, `GITLAB_TOKEN`, `CI_JOB_TOKEN`, `CI_API_V4_URL`) and decomposes `cursus-bin/src/main.rs` into focused submodules (`logging.rs`, `env_helpers.rs`, `git_setup.rs`, `forge_resolution/{mod,github,gitlab}.rs`). The principle of this ADR — environment detection lives only at the binary boundary, the library reads no ambient state — is preserved; the new submodules are an internal organisation of that boundary, not a change to the boundary itself.
+### 2026-03-22: Filesystem-abstraction rejection was revisited
+
+The "Full trait abstraction for filesystem access" alternative, rejected above as testing-only benefit, was revisited and adopted by [ADR-036](036-filesystem-trait-abstraction.md) to support non-local backends (remote code forges, in-memory filesystems). The core decision of this ADR — environment injection via `Env` — is preserved and extended with a new `Filesystem` trait carried on `Env`.
+
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
+
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The bin/lib separation and environment-injection model are unchanged; only the trait name differs.

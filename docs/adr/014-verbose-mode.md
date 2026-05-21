@@ -95,4 +95,6 @@ Adding a `verbose: bool` parameter to every `CommandRunner` method. This was rej
 
 ## Errata
 
-`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
+
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The verbose-mode behaviour described here is unchanged; only the trait name differs.

@@ -86,8 +86,10 @@ Use an HTTP client that does not depend on tokio (e.g. `surf` or a custom trait 
 
 ## Errata
 
-`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
 
-**2026-05-03**: [ADR-055](055-end-to-end-idempotent-publish-recovery.md) extends the `CodeForgeClient` trait with `find_release_by_tag`. The `OctocrabGitHubClient` implementation gains a use of `repos().releases().get_by_tag(tag)`, a routine extension of the existing octocrab usage pattern established by this ADR. No change to the injection model, authentication strategy, or async semantics. See [ADR-055](055-end-to-end-idempotent-publish-recovery.md) for the recovery decision tree.
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The octocrab-based implementation, injection model, and authentication strategy are unchanged; only the trait name differs.
 
-**2026-05-13**: [ADR-056](056-gitlab-support-client-config-and-ci.md) relocates `OctocrabGitHubClient` from `crate::github::OctocrabGitHubClient` to `crate::forge::github::OctocrabGitHubClient` as part of introducing a sibling `forge::gitlab` module. The injection model, octocrab dependency, and authentication strategy are unchanged. The same ADR also pins the `rustls` crypto provider to `aws-lc-rs` and trims octocrab's feature set so only one provider is compiled in; this is a compile-time configuration change at the binary boundary and does not affect the `OctocrabGitHubClient` API surface. ADR-056 additionally adds a single new method, `forge_name() -> &'static str`, to the `CodeForgeClient` trait; the `OctocrabGitHubClient` impl returns `"GitHub"`.
+### 2026-05-13: `OctocrabGitHubClient` module path is now `forge::github`
+
+The Decision section's module path of `crate::github::OctocrabGitHubClient` is incorrect: [ADR-056](056-gitlab-support-client-config-and-ci.md) relocates the impl to `crate::forge::github::OctocrabGitHubClient` as part of introducing a sibling `forge::gitlab` module. The injection model, octocrab dependency, and authentication strategy are unchanged; the same ADR additionally pins the `rustls` crypto provider to `aws-lc-rs` and trims octocrab's feature set so only one provider is compiled in, which is a compile-time configuration change at the binary boundary that does not affect the impl's API surface.

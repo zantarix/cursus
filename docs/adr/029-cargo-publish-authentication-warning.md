@@ -47,7 +47,6 @@ Instead of warning, cursus could refuse to publish when no token is detected. Th
 
 ## Errata
 
-### 2026-04-19 -- superseded warning behaviour; OIDC claim is stale
+### 2026-04-19: OIDC claim and single-warning behaviour are stale
 
-- The Context statement *"Cargo has no OIDC mechanism -- token-based authentication is the only supported method for CI publishing"* is no longer accurate. crates.io reached general availability on OIDC-based trusted publishing in mid-2025.
-- The single unconditional warning described in this ADR (emit when `CARGO_REGISTRY_TOKEN` is absent) is superseded by a two-branch warning set keyed on the combination of token presence and OIDC environment detection, as decided in [ADR-045](045-crates-io-trusted-publishing.md). The `Env` flag and the "never block, never inspect `credentials.toml`" behaviours from this ADR are retained; only the warning copy is refined.
+The Context statement that "Cargo has no OIDC mechanism — token-based authentication is the only supported method for CI publishing" is no longer accurate: crates.io reached general availability on OIDC-based trusted publishing in mid-2025, and [ADR-045](045-crates-io-trusted-publishing.md) supersedes the single unconditional `CARGO_REGISTRY_TOKEN`-absent warning with a two-branch warning set keyed on the combination of token presence and OIDC environment detection. The `Env` flag and the "never block, never inspect `credentials.toml`" behaviours from this ADR are retained; only the warning copy is refined.
