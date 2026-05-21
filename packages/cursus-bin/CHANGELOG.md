@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3 - 2026-05-12
+
+### Bug Fixes
+
+- update rust crate tokio to v1.52.3 [5d22372] via #133
+
 ## 0.6.2 - 2026-05-07
 
 ### Bug Fixes
