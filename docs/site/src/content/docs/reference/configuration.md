@@ -59,7 +59,7 @@ Git lifecycle management.
 | `tag_format` | string | `"auto"` | Tag naming: `"auto"`, `"prefixed"`, or `"simple"` |
 | `extra_files` | list | `[]` | Additional file paths to stage before committing |
 | `prepare_commit_message` | string | `"ci(release): version packages"` | Commit message used for the prepare step |
-| `publish_private_packages` | list | `[]` | Private package names that receive git tags and GitHub Releases without registry publish |
+| `publish_private_packages` | list | `[]` | Private package names that receive git tags and forge releases (GitHub or GitLab) without registry publish |
 | `signed_commits` | string | `"auto"` | Whether to create the prepare commit via the GitHub Git Data API for a Verified badge. `"auto"`: enabled when `GITHUB_ACTIONS=true` and a token is present. `"force"`: enabled whenever a token is present (experimental). `"off"`: always use the local `git` binary. |
 
 **Tag formats:**

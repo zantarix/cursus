@@ -27,6 +27,17 @@ cursus init
 
 Creates `.cursus/config.toml` with your chosen package managers and settings. This command is interactive-only.
 
+The wizard walks through:
+
+1. **Package managers**: select Cargo, npm, or both (auto-detected from the repo root).
+2. **Manifest paths**: enter a subdirectory for each manifest if not at the git root.
+3. **Git automation**: enable, then choose `push` or `branch` strategy.
+4. **Forge**: pick **GitHub**, **GitLab**, or **Neither**.
+5. **Forge configuration**: for the chosen forge, edit auto-detected `owner/repo` (GitHub) or `group/project` (GitLab). The GitLab screen additionally surfaces a self-managed host field for non-gitlab.com instances.
+6. **Editor**: optionally open the generated config in `$EDITOR`.
+
+The generated config emits the chosen forge's section as `enabled = true` and the other forge as a commented-out template, so switching forges later only requires uncommenting and editing.
+
 ## `cursus change`
 
 Record a change to the project. This is the **default subcommand** — running `cursus` with no subcommand is equivalent to `cursus change`.
@@ -90,7 +101,7 @@ cursus prepare --no-interactive --dry-run
 
 ## `cursus publish`
 
-Publish packages to their registries, create Git tags, and optionally create GitHub Releases.
+Publish packages to their registries, create Git tags, and optionally create forge releases (GitHub or GitLab).
 
 ```bash
 cursus publish [OPTIONS]
@@ -99,7 +110,7 @@ cursus publish [OPTIONS]
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--package <NAME>` | `-p` | Package(s) to publish. Repeatable. Defaults to all |
-| `--no-git` | | Skip Git tags, tag pushing, and GitHub Releases |
+| `--no-git` | | Skip Git tags, tag pushing, and forge releases |
 
 ### Examples
 
@@ -125,7 +136,7 @@ cursus ci [OPTIONS]
 |------|-------|-------------|
 | `--package <NAME>` | `-p` | Package(s) to operate on. Repeatable. Defaults to all |
 | `--branch <NAME>` | | Override release branch name |
-| `--no-git` | | Skip git/GitHub operations |
+| `--no-git` | | Skip git and forge (GitHub/GitLab) operations |
 
 **Detection logic:**
 

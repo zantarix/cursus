@@ -2,12 +2,6 @@
 source: packages/cursus/src/model/config/template.rs
 expression: render(&result)
 ---
-[npm]
-enabled = true
-path = "frontend/"
-# lock_command = "npm install"  # Custom command to update the lock file
-# access = "restricted"         # Access level for scoped packages: "public" or "restricted" (default: "restricted")
-
 # [global]
 # disable_dependency_cycle_warnings = false  # Suppress warnings about circular dependencies between packages (two or more packages in a cycle)
 # ignore = ["example-*"]                     # Glob patterns for packages to exclude from enumeration
@@ -15,6 +9,12 @@ path = "frontend/"
 # [cargo]
 # enabled = false
 # path = "subdir/"              # Subdirectory for Cargo.toml (relative to git root)
+
+# [npm]
+# enabled = false
+# path = "subdir/"              # Subdirectory for package.json (relative to git root)
+# lock_command = "npm install"  # Custom command to update the lock file
+# access = "restricted"         # Access level for scoped packages: "public" or "restricted" (default: "restricted")
 
 # [prepare]
 # dependency_bump = "auto"      # Bump level for dependents: "auto" (default), "match", "patch", "minor", or "major"

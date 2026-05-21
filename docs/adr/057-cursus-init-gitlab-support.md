@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-05-12)
+Accepted (2026-05-21)
 
 ## Context
 
@@ -65,6 +65,10 @@ The init config-template writer (the template approach established by [ADR-019](
 
 The symmetric treatment also applies to `[github]`: when the user picks GitLab, the `[github]` section is written in commented-out template form. This preserves [ADR-019](019-improved-init-workflow.md)'s "every option is discoverable as a commented-out line" principle and means a user can switch forges by hand-editing without needing to know the schema by heart.
 
+### Active sections sort to the top
+
+The template writer shall emit user-opted-in sections (Cargo, npm, git, and the chosen forge) first as active TOML in the canonical section order, followed by the always-commented and disabled sections as commented-out templates. This ordering rule applies to the file as a whole; within each group (active and commented), sections appear in the canonical sequence `[global]`, cargo, npm, `[prepare]`, `[linked-versions]`, `[git]`, `[github]`, `[gitlab]`. The rationale is to keep the parts of the config the user actually configured visible at the top of the file as the schema grows — every new optional section added in future ADRs would otherwise push the user's live configuration further down the file and increasingly out of sight. The "every option is discoverable as a commented-out line" principle from [ADR-019](019-improved-init-workflow.md) is preserved; only the relative ordering of active vs. commented blocks changes.
+
 ### Non-interactive init remains a hard error
 
 [ADR-019](019-improved-init-workflow.md) made `cursus init --no-interactive` an explicit error. That behaviour is preserved. The new forge-choice prompt is interactive-only; there is no `--forge` flag. Scripts that need a config containing a `[gitlab]` section can write the TOML file directly, exactly as they do today for `[github]`.
@@ -75,11 +79,13 @@ The phrase "in `--no-interactive` init the forge-choice prompt is skipped (defau
 
 Per [ADR-056](056-gitlab-support-client-config-and-ci.md)'s "neutral abstraction, native vocabulary" rule, every new Fluent key added under [ADR-034](034-compile-time-embedded-localisation.md) for the GitLab init path shall use GitLab vocabulary:
 
-- `tab-gitlab`, `enable-gitlab-question`, `edit-gitlab-question`, `edit-gitlab-invalid-question`, `edit-gitlab-help`, `edit-gitlab-host-question`, and similar keys in `tui.ftl`.
+- `tab-gitlab`, `tab-forge`, `enable-gitlab-question`, `edit-gitlab-question`, `edit-gitlab-invalid-question`, `edit-gitlab-help`, `edit-gitlab-host-question`, and similar keys in `tui.ftl`.
 - Template comments for the `[gitlab]` section in `templates.ftl` describing each field in GitLab terms ("GitLab group", "GitLab project", "self-managed GitLab host", "merge request title").
 - The new `ChooseForge` screen's prompt strings use neutral language ("Which forge do you want to use for releases?") because at that point in the flow no forge has been chosen yet; the three answer labels are the literal names "GitHub", "GitLab", "Neither".
 
 Existing GitHub-path Fluent keys (`enable-github-question`, `edit-github-question`, etc.) are not renamed. They remain the keys used by the GitHub branch of the wizard.
+
+The same rule applies to the wizard's tab bar: the third tab label shall be rendered dynamically based on the active screen — `tab-github` while on `EditGitHub`, `tab-gitlab` while on `EditGitLab`, and the neutral `tab-forge` on the `ChooseForge` screen and any other screen where no forge has been chosen yet. A statically-labelled forge tab would either commit to one forge's vocabulary on a screen that has not yet picked a forge, or stay neutral even after the user has chosen a specific forge; binding the label to the active screen avoids both.
 
 ### Documentation site
 
@@ -101,6 +107,7 @@ The docs site shall gain a `cursus init` walkthrough page for GitLab projects, p
 - Self-managed GitLab instances are handled by surfacing the `host` field only when needed, keeping the common (`gitlab.com`) case a single-screen confirmation while still supporting the self-managed case without forcing the user to back out of init and hand-edit the config.
 - The "neutral abstraction, native vocabulary" rule from [ADR-056](056-gitlab-support-client-config-and-ci.md) is reinforced in the init layer: a GitLab user never sees "owner/repo" or "pull request" terminology, only "group/project" and "merge request".
 - Writing only one `enabled = true` forge section keeps the wizard output trivially compliant with the cross-validation rule defined in [ADR-059](059-forge-selection-runtime-rules.md), regardless of which forge the user picked.
+- Active-sections-first ordering in the generated config keeps the parts of the file the user actually configured visible at the top, and the property holds as future ADRs introduce additional optional sections — the user's live configuration does not get pushed further down the file as the schema grows.
 
 ### Negative
 
@@ -115,6 +122,8 @@ The docs site shall gain a `cursus init` walkthrough page for GitLab projects, p
 - The `ratatui-textarea` dependency adopted in [ADR-019](019-improved-init-workflow.md) is reused for the new GitLab fields. No new TUI input library is introduced.
 - All new strings are localisable from day one via [ADR-034](034-compile-time-embedded-localisation.md), matching every other init prompt.
 - The wizard does not introduce any new config keys; it only writes values that [ADR-056](056-gitlab-support-client-config-and-ci.md) already defined under `[gitlab]`.
+- The active-sections-first layout is still fully deterministic: a given set of user choices always produces the same file, only the relative ordering of active vs. commented blocks has changed from a naive single-canonical-order layout.
+- The third tab label in the wizard is screen-dependent rather than constant; this is a minor rendering branch but does not affect navigation, key handling, or the underlying screen state machine.
 
 ## Alternatives Considered
 

@@ -2,7 +2,7 @@ use crate::model::config::Strategy;
 use crate::tui::screens::ButtonScreen;
 use crate::tui::widgets::{ButtonDef, KeyResult};
 
-use super::{InitResult, Screen, WizardState, edit_github::make_edit_github_screen};
+use super::{ForgeChoice, InitResult, Screen, WizardState};
 
 /// Button screen state for the [`Screen::GitStrategy`] screen.
 pub(super) struct GitStrategyButtons {
@@ -58,23 +58,23 @@ impl ButtonScreen for GitStrategyButtons {
 		(state, Screen::GitStrategy(self.strategy))
 	}
 
-	/// Selects the git strategy and advances:
-	/// - `Push` → [`Screen::EnableGitHub`]
-	/// - `Branch` → auto-enables GitHub and skips to [`Screen::EditGitHub`]
+	/// Selects the git strategy and advances to the forge-choice prompt.
+	///
+	/// - `Push` → [`Screen::ChooseForge`] defaulting to [`ForgeChoice::Neither`],
+	///   preserving the opt-in default established by ADR-005.
+	/// - `Branch` → [`Screen::ChooseForge`] defaulting to [`ForgeChoice::GitHub`],
+	///   preserving ADR-019's "Branch implies GitHub" default while still
+	///   letting the user choose GitLab or Neither.
 	fn on_confirm(
 		self,
 		mut state: WizardState,
 	) -> anyhow::Result<KeyResult<(WizardState, Screen), InitResult>> {
 		state.git_strategy = Some(self.strategy);
-		match self.strategy {
-			Strategy::Push => Ok(KeyResult::Continue((state, Screen::EnableGitHub(false)))),
-			Strategy::Branch => {
-				// Branch implies GitHub enabled
-				state.github_enabled = true;
-				let screen = make_edit_github_screen(&state);
-				Ok(KeyResult::Continue((state, screen)))
-			}
-		}
+		let default = match self.strategy {
+			Strategy::Push => ForgeChoice::Neither,
+			Strategy::Branch => ForgeChoice::GitHub,
+		};
+		Ok(KeyResult::Continue((state, Screen::ChooseForge(default))))
 	}
 }
 
@@ -101,7 +101,7 @@ mod tests {
 	}
 
 	#[test]
-	fn git_strategy_push_advances_to_enable_github() {
+	fn git_strategy_push_advances_to_choose_forge_neither() {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let (new_state, s) = unwrap_continue(handle_key(
@@ -110,11 +110,14 @@ mod tests {
 			key(KeyCode::Enter),
 		));
 		assert_eq!(new_state.git_strategy, Some(Strategy::Push));
-		assert!(matches!(s, Screen::EnableGitHub(_)));
+		assert!(matches!(s, Screen::ChooseForge(ForgeChoice::Neither)));
+		// Branch implies forge is not yet enabled — that decision is deferred to ChooseForge.
+		assert!(!new_state.github_enabled);
+		assert!(!new_state.gitlab_enabled);
 	}
 
 	#[test]
-	fn git_strategy_branch_skips_enable_github_and_enables_it() {
+	fn git_strategy_branch_advances_to_choose_forge_github_default() {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let (new_state, s) = unwrap_continue(handle_key(
@@ -123,8 +126,11 @@ mod tests {
 			key(KeyCode::Enter),
 		));
 		assert_eq!(new_state.git_strategy, Some(Strategy::Branch));
-		assert!(new_state.github_enabled);
-		assert!(matches!(s, Screen::EditGitHub { .. }));
+		// Branch defaults the forge prompt to GitHub but does not enable it yet —
+		// the user can still pick GitLab or Neither.
+		assert!(matches!(s, Screen::ChooseForge(ForgeChoice::GitHub)));
+		assert!(!new_state.github_enabled);
+		assert!(!new_state.gitlab_enabled);
 	}
 
 	#[test]
@@ -139,7 +145,7 @@ mod tests {
 	}
 
 	#[test]
-	fn git_strategy_click_push_button_advances_to_enable_github() {
+	fn git_strategy_click_push_button_advances_to_choose_forge() {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let area = test_content_area();
@@ -150,11 +156,11 @@ mod tests {
 			.handle_event(state, mouse_click(10, area.y + 7), area),
 		);
 		assert_eq!(new_state.git_strategy, Some(Strategy::Push));
-		assert!(matches!(s, Screen::EnableGitHub(_)));
+		assert!(matches!(s, Screen::ChooseForge(ForgeChoice::Neither)));
 	}
 
 	#[test]
-	fn git_strategy_click_branch_button_enables_github_and_goes_to_edit_github() {
+	fn git_strategy_click_branch_button_advances_to_choose_forge_github() {
 		let dir = temp_dir();
 		let state = make_state(&dir);
 		let area = test_content_area();
@@ -165,8 +171,7 @@ mod tests {
 			.handle_event(state, mouse_click(65, area.y + 7), area),
 		);
 		assert_eq!(new_state.git_strategy, Some(Strategy::Branch));
-		assert!(new_state.github_enabled);
-		assert!(matches!(s, Screen::EditGitHub { .. }));
+		assert!(matches!(s, Screen::ChooseForge(ForgeChoice::GitHub)));
 	}
 
 	#[test]

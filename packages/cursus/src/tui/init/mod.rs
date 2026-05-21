@@ -9,17 +9,21 @@ use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
 use crate::forge::github::GitHubRepo;
+use crate::forge::gitlab::remote::GitLabProject;
 use crate::model::config::{PackageManager, Strategy};
 use crate::path::AbsolutePath;
 
+mod choose_forge;
 mod confirm_overwrite;
 mod edit_github;
+mod edit_gitlab;
 mod enable_git;
-mod enable_github;
 mod git_strategy;
 mod manifest_path;
 mod open_editor;
 mod select_pms;
+
+use choose_forge::ForgeChoice;
 
 /// The result of completing the init wizard.
 #[derive(Debug, Clone)]
@@ -54,6 +58,31 @@ pub struct InitResult {
 	pub detected_github_owner: Option<String>,
 	/// Auto-detected GitHub repo from the git remote, for use as a template hint.
 	pub detected_github_repo: Option<String>,
+	/// Whether GitLab releases integration is enabled.
+	pub gitlab_enabled: bool,
+	/// GitLab group (or namespace) path, if explicitly confirmed by the user.
+	///
+	/// `None` means "auto-detect from git remote". Supports subgroup paths
+	/// (e.g. `acme/sub`). When `None` and `detected_gitlab_group` is `Some`,
+	/// the template renders the detected value as a commented-out hint.
+	pub gitlab_group: Option<String>,
+	/// GitLab project name, if explicitly confirmed by the user.
+	///
+	/// `None` means "auto-detect from git remote". When `None` and
+	/// `detected_gitlab_project` is `Some`, the template renders the detected
+	/// value as a commented-out hint.
+	pub gitlab_project: Option<String>,
+	/// GitLab host for self-managed instances (e.g. `gitlab.example.com`).
+	///
+	/// `None` means the gitlab.com default is used. When `Some`, the template
+	/// emits the value as `host = "..."`.
+	pub gitlab_host: Option<String>,
+	/// Auto-detected GitLab group from the git remote, for use as a template hint.
+	pub detected_gitlab_group: Option<String>,
+	/// Auto-detected GitLab project from the git remote, for use as a template hint.
+	pub detected_gitlab_project: Option<String>,
+	/// Auto-detected GitLab host from the git remote, for use as a template hint.
+	pub detected_gitlab_host: Option<String>,
 	/// Whether to open the config file in an editor after writing.
 	pub open_editor: bool,
 }
@@ -73,6 +102,11 @@ struct WizardState {
 	github_owner: Option<String>,
 	github_repo: Option<String>,
 	detected_github: Option<GitHubRepo>,
+	gitlab_enabled: bool,
+	gitlab_group: Option<String>,
+	gitlab_project: Option<String>,
+	gitlab_host: Option<String>,
+	detected_gitlab: Option<GitLabProject>,
 	remaining_manifest_pms: Vec<PackageManager>,
 }
 
@@ -107,11 +141,12 @@ enum Screen {
 	},
 	EnableGit(bool),
 	GitStrategy(Strategy),
-	EnableGitHub(bool),
+	ChooseForge(ForgeChoice),
 	EditGitHub {
 		textarea: TextArea<'static>,
 		error: bool,
 	},
+	EditGitLab(Box<edit_gitlab::EditGitLabState>),
 	OpenEditor(bool),
 }
 
@@ -144,6 +179,9 @@ fn advance_from_manifest_queue(mut state: WizardState) -> (WizardState, Screen) 
 fn complete(state: WizardState, open_editor: bool) -> InitResult {
 	let detected_github_owner = state.detected_github.as_ref().map(|gh| gh.owner.clone());
 	let detected_github_repo = state.detected_github.as_ref().map(|gh| gh.repo.clone());
+	let detected_gitlab_group = state.detected_gitlab.as_ref().map(|gl| gl.group.clone());
+	let detected_gitlab_project = state.detected_gitlab.as_ref().map(|gl| gl.project.clone());
+	let detected_gitlab_host = state.detected_gitlab.as_ref().map(|gl| gl.host.clone());
 	InitResult {
 		cargo_enabled: state.cargo_enabled,
 		npm_enabled: state.npm_enabled,
@@ -156,6 +194,13 @@ fn complete(state: WizardState, open_editor: bool) -> InitResult {
 		github_repo: state.github_repo,
 		detected_github_owner,
 		detected_github_repo,
+		gitlab_enabled: state.gitlab_enabled,
+		gitlab_group: state.gitlab_group,
+		gitlab_project: state.gitlab_project,
+		gitlab_host: state.gitlab_host,
+		detected_gitlab_group,
+		detected_gitlab_project,
+		detected_gitlab_host,
 		open_editor,
 	}
 }
@@ -175,31 +220,31 @@ fn handle_event(
 	event: Event,
 	content_area: Rect,
 ) -> HandleResult {
-	let result = match screen {
-		Screen::ConfirmOverwrite(yes) => confirm_overwrite::ConfirmOverwriteButtons { yes }
-			.handle_event(state, event, content_area),
-		Screen::SelectPackageManagers { cargo, npm, focus } => {
-			select_pms::handle_select_pms(state, cargo, npm, focus, event, content_area)
-		}
-		Screen::ManifestPath { pm, textarea } => {
-			manifest_path::handle_manifest_path(state, pm, textarea, event)
-		}
-		Screen::EnableGit(yes) => {
-			enable_git::EnableGitButtons { yes }.handle_event(state, event, content_area)
-		}
-		Screen::GitStrategy(strategy) => {
-			git_strategy::GitStrategyButtons { strategy }.handle_event(state, event, content_area)
-		}
-		Screen::EnableGitHub(yes) => {
-			enable_github::EnableGitHubButtons { yes }.handle_event(state, event, content_area)
-		}
-		Screen::EditGitHub { textarea, error } => {
-			edit_github::handle_edit_github(state, textarea, error, event)
-		}
-		Screen::OpenEditor(yes) => {
-			open_editor::OpenEditorButtons { yes }.handle_event(state, event, content_area)
-		}
-	}?;
+	let result =
+		match screen {
+			Screen::ConfirmOverwrite(yes) => confirm_overwrite::ConfirmOverwriteButtons { yes }
+				.handle_event(state, event, content_area),
+			Screen::SelectPackageManagers { cargo, npm, focus } => {
+				select_pms::handle_select_pms(state, cargo, npm, focus, event, content_area)
+			}
+			Screen::ManifestPath { pm, textarea } => {
+				manifest_path::handle_manifest_path(state, pm, textarea, event)
+			}
+			Screen::EnableGit(yes) => {
+				enable_git::EnableGitButtons { yes }.handle_event(state, event, content_area)
+			}
+			Screen::GitStrategy(strategy) => git_strategy::GitStrategyButtons { strategy }
+				.handle_event(state, event, content_area),
+			Screen::ChooseForge(selected) => choose_forge::ChooseForgeButtons { selected }
+				.handle_event(state, event, content_area),
+			Screen::EditGitHub { textarea, error } => {
+				edit_github::handle_edit_github(state, textarea, error, event)
+			}
+			Screen::EditGitLab(s) => edit_gitlab::handle_edit_gitlab(state, s, event),
+			Screen::OpenEditor(yes) => {
+				open_editor::OpenEditorButtons { yes }.handle_event(state, event, content_area)
+			}
+		}?;
 	// In dry-run mode the config is never written to disk, so skip the
 	// OpenEditor screen and complete immediately with open_editor = false.
 	Ok(match result {
@@ -210,7 +255,7 @@ fn handle_event(
 	})
 }
 
-/// Maps a screen to the `[Managers, Git, GitHub]` tab statuses.
+/// Maps a screen to the `[Managers, Git, Forge]` tab statuses.
 fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 	match screen {
 		Screen::ConfirmOverwrite(_)
@@ -219,7 +264,10 @@ fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 		Screen::EnableGit(_) | Screen::GitStrategy(_) => {
 			[TabStatus::Completed, TabStatus::Current, TabStatus::Future]
 		}
-		Screen::EnableGitHub(_) | Screen::EditGitHub { .. } | Screen::OpenEditor(_) => [
+		Screen::ChooseForge(_)
+		| Screen::EditGitHub { .. }
+		| Screen::EditGitLab { .. }
+		| Screen::OpenEditor(_) => [
 			TabStatus::Completed,
 			TabStatus::Completed,
 			TabStatus::Current,
@@ -227,10 +275,19 @@ fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 	}
 }
 
+/// Returns the Fluent key for the third tab label based on the current screen.
+fn forge_tab_key(screen: &Screen) -> &'static str {
+	match screen {
+		Screen::EditGitHub { .. } => "tab-github",
+		Screen::EditGitLab { .. } => "tab-gitlab",
+		_ => "tab-forge",
+	}
+}
+
 const TAB_HEIGHT: u16 = 3;
 
 fn render_tab_bar(frame: &mut Frame, tab_area: Rect, screen: &Screen) {
-	let [managers, git, github] = tab_states(screen);
+	let [managers, git, forge] = tab_states(screen);
 	let managers_label_long = crate::t!("select-pms-tab-long");
 	let managers_label_short = crate::t!("select-pms-tab-short");
 	let managers_label = if tab_area.width >= 72 {
@@ -239,18 +296,19 @@ fn render_tab_bar(frame: &mut Frame, tab_area: Rect, screen: &Screen) {
 		managers_label_short.as_str()
 	};
 	let tab_git = crate::t!("tab-git");
-	let tab_github = crate::t!("tab-github");
+	let tab_forge = crate::t!(forge_tab_key(screen));
 	widgets::render_tabs(
 		frame,
 		tab_area,
 		&[
 			(managers_label, managers),
 			(tab_git.as_str(), git),
-			(tab_github.as_str(), github),
+			(tab_forge.as_str(), forge),
 		],
 	);
 }
 
+#[allow(clippy::too_many_lines)]
 fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 	let full = frame.area();
 	let tab_area = Rect {
@@ -281,12 +339,14 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 			strategy: *strategy,
 		}
 		.render(frame, content_area),
-		Screen::EnableGitHub(yes) => {
-			enable_github::EnableGitHubButtons { yes: *yes }.render(frame, content_area)
+		Screen::ChooseForge(selected) => choose_forge::ChooseForgeButtons {
+			selected: *selected,
 		}
+		.render(frame, content_area),
 		Screen::EditGitHub { textarea, error } => {
 			edit_github::render_edit_github(frame, content_area, textarea, *error)
 		}
+		Screen::EditGitLab(s) => edit_gitlab::render_edit_gitlab(frame, content_area, s),
 		Screen::OpenEditor(yes) => {
 			open_editor::OpenEditorButtons { yes: *yes }.render(frame, content_area)
 		}
@@ -296,7 +356,8 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 /// Runs the interactive TUI init wizard for Cursus configuration.
 ///
 /// Guides the user through selecting package managers, manifest paths,
-/// git automation, GitHub integration, and opening the config file in an editor.
+/// git automation, forge selection (GitHub, GitLab, or Neither), per-forge
+/// configuration, and opening the config file in an editor.
 ///
 /// When `dry_run` is `true`, the wizard skips the overwrite-confirmation prompt
 /// (since nothing will be written) and skips the "open in editor" screen (since
@@ -314,6 +375,7 @@ pub fn run(
 	env: &Env,
 	dry_run: bool,
 	detected_github: Option<crate::forge::github::remote::GitHubRepo>,
+	detected_gitlab: Option<GitLabProject>,
 ) -> anyhow::Result<Option<InitResult>> {
 	let git = env.git();
 	let (cargo_detected, npm_detected) = detect_package_managers(git.path());
@@ -331,6 +393,11 @@ pub fn run(
 		github_owner: None,
 		github_repo: None,
 		detected_github,
+		gitlab_enabled: false,
+		gitlab_group: None,
+		gitlab_project: None,
+		gitlab_host: None,
+		detected_gitlab,
 		remaining_manifest_pms: Vec::new(),
 	};
 
@@ -413,6 +480,11 @@ pub(super) mod test_helpers {
 			github_owner: None,
 			github_repo: None,
 			detected_github: None,
+			gitlab_enabled: false,
+			gitlab_group: None,
+			gitlab_project: None,
+			gitlab_host: None,
+			detected_gitlab: None,
 			remaining_manifest_pms: Vec::new(),
 		}
 	}
@@ -554,7 +626,7 @@ mod tests {
 	}
 
 	#[test]
-	fn workflow_branch_strategy_skips_enable_github() {
+	fn workflow_branch_strategy_defaults_to_choose_forge_github() {
 		let dir = temp_dir();
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
 		let mut state = make_state(&dir);
@@ -565,11 +637,72 @@ mod tests {
 			Screen::GitStrategy(Strategy::Branch),
 			key(KeyCode::Enter),
 		));
+		// Branch defaults the forge choice to GitHub but does not enable it yet —
+		// the user can still pick GitLab or Neither at the prompt.
+		assert!(!state.github_enabled);
+		assert!(matches!(screen, Screen::ChooseForge(ForgeChoice::GitHub)));
+
+		let (state, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
 		assert!(state.github_enabled);
 		assert!(matches!(screen, Screen::EditGitHub { .. }));
 
 		let (_, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
 		assert!(matches!(screen, Screen::OpenEditor(_)));
+	}
+
+	#[test]
+	fn workflow_push_then_choose_forge_neither_skips_to_open_editor() {
+		let dir = temp_dir();
+		let mut state = make_state(&dir);
+		state.git_enabled = true;
+
+		let (state, screen) = unwrap_continue(handle_key(
+			state,
+			Screen::GitStrategy(Strategy::Push),
+			key(KeyCode::Enter),
+		));
+		assert!(matches!(screen, Screen::ChooseForge(ForgeChoice::Neither)));
+
+		let (state, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
+		assert!(!state.github_enabled);
+		assert!(!state.gitlab_enabled);
+		assert!(matches!(screen, Screen::OpenEditor(_)));
+	}
+
+	#[test]
+	fn workflow_push_then_choose_forge_gitlab_lands_on_edit_gitlab() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		let (state, screen) = unwrap_continue(handle_key(
+			state,
+			Screen::ChooseForge(ForgeChoice::GitLab),
+			key(KeyCode::Enter),
+		));
+		assert!(state.gitlab_enabled);
+		assert!(!state.github_enabled);
+		assert!(matches!(screen, Screen::EditGitLab { .. }));
+	}
+
+	#[test]
+	fn workflow_branch_then_choose_gitlab_overrides_default() {
+		let dir = temp_dir();
+		let state = make_state(&dir);
+		// Land on the Branch-default ChooseForge prompt, then actively pick GitLab.
+		let (state, screen) = unwrap_continue(handle_key(
+			state,
+			Screen::GitStrategy(Strategy::Branch),
+			key(KeyCode::Enter),
+		));
+		assert!(matches!(screen, Screen::ChooseForge(ForgeChoice::GitHub)));
+
+		// Tab once to GitLab.
+		let (state, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Tab)));
+		assert!(matches!(screen, Screen::ChooseForge(ForgeChoice::GitLab)));
+
+		let (state, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
+		assert!(state.gitlab_enabled);
+		assert!(!state.github_enabled);
+		assert!(matches!(screen, Screen::EditGitLab { .. }));
 	}
 
 	#[test]
@@ -597,6 +730,29 @@ mod tests {
 		assert_eq!(result.github_owner, Some("acme".to_string()));
 		assert_eq!(result.github_repo, Some("my-app".to_string()));
 		assert!(result.open_editor);
+	}
+
+	#[test]
+	fn workflow_full_gitlab_state_preserved_in_result() {
+		let dir = temp_dir();
+		let mut state = make_state(&dir);
+		state.cargo_enabled = true;
+		state.git_enabled = true;
+		state.git_strategy = Some(Strategy::Push);
+		state.gitlab_enabled = true;
+		state.gitlab_group = Some("acme".to_string());
+		state.gitlab_project = Some("my-app".to_string());
+		state.gitlab_host = Some("gitlab.example.com".to_string());
+
+		let result = unwrap_complete(handle_key(
+			state,
+			Screen::OpenEditor(false),
+			key(KeyCode::Enter),
+		));
+		assert!(result.gitlab_enabled);
+		assert_eq!(result.gitlab_group, Some("acme".to_string()));
+		assert_eq!(result.gitlab_project, Some("my-app".to_string()));
+		assert_eq!(result.gitlab_host, Some("gitlab.example.com".to_string()));
 	}
 
 	/// Catches the `state.dry_run` guard deletion at line 209: when dry_run is set,

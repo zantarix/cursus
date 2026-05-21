@@ -2,19 +2,28 @@
 source: packages/cursus/src/model/config/template.rs
 expression: render(&result)
 ---
-[npm]
+[cargo]
 enabled = true
-path = "frontend/"
-# lock_command = "npm install"  # Custom command to update the lock file
-# access = "restricted"         # Access level for scoped packages: "public" or "restricted" (default: "restricted")
+# path = "subdir/"              # Subdirectory for Cargo.toml (relative to git root)
+
+[gitlab]
+enabled = true
+group = "acme"
+project = "my-app"
+host = "gitlab.example.com"
+# build_command = ""                # Shell command to build release artifacts
+# merge_request_title = ""          # Custom MR title (default: "Release updates")
+# [gitlab.artifacts.<package-name>] # Per-package: display name -> file path for release assets
 
 # [global]
 # disable_dependency_cycle_warnings = false  # Suppress warnings about circular dependencies between packages (two or more packages in a cycle)
 # ignore = ["example-*"]                     # Glob patterns for packages to exclude from enumeration
 
-# [cargo]
+# [npm]
 # enabled = false
-# path = "subdir/"              # Subdirectory for Cargo.toml (relative to git root)
+# path = "subdir/"              # Subdirectory for package.json (relative to git root)
+# lock_command = "npm install"  # Custom command to update the lock file
+# access = "restricted"         # Access level for scoped packages: "public" or "restricted" (default: "restricted")
 
 # [prepare]
 # dependency_bump = "auto"      # Bump level for dependents: "auto" (default), "match", "patch", "minor", or "major"
@@ -43,12 +52,3 @@ path = "frontend/"
 # build_command = ""                # Shell command to build release artifacts
 # pull_request_title = ""           # Custom PR title (default: "Release updates")
 # [github.artifacts.<package-name>] # Per-package: display name -> file path for release assets
-
-# [gitlab]
-# enabled = false
-# group = ""                        # GitLab group (auto-detected from remote if omitted)
-# project = ""                      # GitLab project (auto-detected from remote if omitted)
-# host = ""                         # GitLab instance hostname (defaults to gitlab.com)
-# build_command = ""                # Shell command to build release artifacts
-# merge_request_title = ""          # Custom MR title (default: "Release updates")
-# [gitlab.artifacts.<package-name>] # Per-package: display name -> file path for release assets

@@ -13,7 +13,7 @@ Run the setup wizard in the root of your Git repository:
 cursus init
 ```
 
-This creates a `.cursus/config.toml` file and the `.cursus/` directory where changesets are stored. The wizard will ask which package managers you use and configure them.
+This creates a `.cursus/config.toml` file and the `.cursus/` directory where changesets are stored. The wizard asks which package managers you use, whether to enable git automation, and which forge (GitHub, GitLab, or neither) to use for releases. See the [CLI reference](/cursus/reference/cli/#cursus-init) for the full screen-by-screen walkthrough.
 
 ## 2. Record a change
 

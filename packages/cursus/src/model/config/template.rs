@@ -229,20 +229,92 @@ fn write_github_section(
 	writeln!(out)
 }
 
-/// Renders a `.cursus/config.toml` string from the given [`InitResult`].
+fn write_gitlab_advanced_comments(out: &mut String) -> fmt::Result {
+	writeln!(
+		out,
+		"# build_command = \"\"                # {}",
+		crate::t!("gitlab-build-command-comment")
+	)?;
+	writeln!(
+		out,
+		"# merge_request_title = \"\"          # {}",
+		crate::t!("gitlab-mr-title-comment")
+	)?;
+	writeln!(
+		out,
+		"# [gitlab.artifacts.<package-name>] # {}",
+		crate::t!("gitlab-artifacts-comment")
+	)
+}
+
+fn write_group_comment(out: &mut String, detected: &Option<String>) -> fmt::Result {
+	match detected {
+		Some(v) => writeln!(out, "# group = {}", toml_quoted(v)),
+		None => writeln!(
+			out,
+			"# group = \"\"                        # {}",
+			crate::t!("gitlab-group-auto-detect-comment")
+		),
+	}
+}
+
+fn write_project_comment(out: &mut String, detected: &Option<String>) -> fmt::Result {
+	match detected {
+		Some(v) => writeln!(out, "# project = {}", toml_quoted(v)),
+		None => writeln!(
+			out,
+			"# project = \"\"                      # {}",
+			crate::t!("gitlab-project-auto-detect-comment")
+		),
+	}
+}
+
+fn write_host_comment(out: &mut String) -> fmt::Result {
+	// The host hint is always the empty placeholder: a non-gitlab.com detected
+	// host is only meaningful when the user explicitly chose "self-managed",
+	// in which case the value is emitted actively (not as a commented hint).
+	writeln!(
+		out,
+		"# host = \"\"                         # {}",
+		crate::t!("gitlab-host-comment")
+	)
+}
+
+fn write_gitlab_section(out: &mut String, result: &InitResult) -> fmt::Result {
+	if result.gitlab_enabled {
+		writeln!(out, "[gitlab]")?;
+		writeln!(out, "enabled = true")?;
+		if let Some(g) = &result.gitlab_group {
+			writeln!(out, "group = {}", toml_quoted(g))?;
+		} else {
+			write_group_comment(out, &result.detected_gitlab_group)?;
+		}
+		if let Some(p) = &result.gitlab_project {
+			writeln!(out, "project = {}", toml_quoted(p))?;
+		} else {
+			write_project_comment(out, &result.detected_gitlab_project)?;
+		}
+		if let Some(h) = &result.gitlab_host {
+			writeln!(out, "host = {}", toml_quoted(h))?;
+		} else {
+			write_host_comment(out)?;
+		}
+	} else {
+		writeln!(out, "# [gitlab]")?;
+		writeln!(out, "# enabled = false")?;
+		write_group_comment(out, &result.detected_gitlab_group)?;
+		write_project_comment(out, &result.detected_gitlab_project)?;
+		write_host_comment(out)?;
+	}
+	write_gitlab_advanced_comments(out)?;
+	writeln!(out)
+}
+
+/// Always-commented `[global]` header block.
 ///
-/// Enabled sections are emitted as active TOML. Disabled or advanced options
-/// are included as commented-out blocks so users can discover and uncomment them
-/// without consulting documentation.
-///
-/// Section ordering: `[global]`, cargo, npm (enabled first as active TOML,
-/// disabled as comments), `[prepare]`, `[linked-versions]`, `[git]`, `[github]`.
-///
-/// # Errors
-///
-/// Returns an error if writing to the internal string buffer fails.
-pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String> {
-	let mut out = String::new();
+/// Extracted so the section dispatcher in [`render_init_template`] can treat it
+/// uniformly alongside the other sections.
+fn write_global_section(out: &mut String) -> fmt::Result {
 	writeln!(out, "# [global]")?;
 	writeln!(
 		out,
@@ -254,20 +326,96 @@ pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String
 		"# ignore = [\"example-*\"]                     # {}",
 		crate::t!("global-ignore-comment")
 	)?;
-	writeln!(out)?;
-	write_cargo_section(&mut out, result.cargo_enabled, &result.cargo_path)?;
-	write_npm_section(&mut out, result.npm_enabled, &result.npm_path)?;
-	write_prepare_section(&mut out)?;
-	write_linked_versions_section(&mut out)?;
-	write_git_section(&mut out, result.git_enabled, result.git_strategy)?;
-	write_github_section(
-		&mut out,
-		result.github_enabled,
-		&result.github_owner,
-		&result.github_repo,
-		&result.detected_github_owner,
-		&result.detected_github_repo,
-	)?;
+	writeln!(out)
+}
+
+/// Identifier for each writable section, used to order output deterministically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Section {
+	Global,
+	Cargo,
+	Npm,
+	Prepare,
+	LinkedVersions,
+	Git,
+	Github,
+	Gitlab,
+}
+
+/// Canonical section order (also the relative order preserved within both the
+/// active and commented groups when sections are reordered for output).
+const SECTION_ORDER: [Section; 8] = [
+	Section::Global,
+	Section::Cargo,
+	Section::Npm,
+	Section::Prepare,
+	Section::LinkedVersions,
+	Section::Git,
+	Section::Github,
+	Section::Gitlab,
+];
+
+impl Section {
+	/// Returns true when the user has opted this section in, so it should be
+	/// emitted as active TOML rather than a commented-out template.
+	///
+	/// Sections that are always commented-out (`Global`, `Prepare`,
+	/// `LinkedVersions`) return `false` here.
+	fn is_active(self, result: &InitResult) -> bool {
+		match self {
+			Self::Global | Self::Prepare | Self::LinkedVersions => false,
+			Self::Cargo => result.cargo_enabled,
+			Self::Npm => result.npm_enabled,
+			Self::Git => result.git_enabled,
+			Self::Github => result.github_enabled,
+			Self::Gitlab => result.gitlab_enabled,
+		}
+	}
+
+	fn write(self, out: &mut String, result: &InitResult) -> fmt::Result {
+		match self {
+			Self::Global => write_global_section(out),
+			Self::Cargo => write_cargo_section(out, result.cargo_enabled, &result.cargo_path),
+			Self::Npm => write_npm_section(out, result.npm_enabled, &result.npm_path),
+			Self::Prepare => write_prepare_section(out),
+			Self::LinkedVersions => write_linked_versions_section(out),
+			Self::Git => write_git_section(out, result.git_enabled, result.git_strategy),
+			Self::Github => write_github_section(
+				out,
+				result.github_enabled,
+				&result.github_owner,
+				&result.github_repo,
+				&result.detected_github_owner,
+				&result.detected_github_repo,
+			),
+			Self::Gitlab => write_gitlab_section(out, result),
+		}
+	}
+}
+
+/// Renders a `.cursus/config.toml` string from the given [`InitResult`].
+///
+/// Sections the user has opted into (Cargo, npm, git, GitHub, GitLab) are
+/// emitted first as active TOML, in the canonical section order. Disabled and
+/// always-commented sections (`[global]`, `[prepare]`, `[linked-versions]`,
+/// and any forge the user did not choose) follow as commented-out templates,
+/// also in the canonical relative order.
+///
+/// Lifting the active sections to the top keeps the most-relevant configuration
+/// visible without scrolling as the file grows; the canonical order within each
+/// group keeps the output deterministic.
+///
+/// # Errors
+///
+/// Returns an error if writing to the internal string buffer fails.
+pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String> {
+	let mut out = String::new();
+	let (active, commented): (Vec<Section>, Vec<Section>) = SECTION_ORDER
+		.into_iter()
+		.partition(|section| section.is_active(result));
+	for section in active.into_iter().chain(commented) {
+		section.write(&mut out, result)?;
+	}
 	Ok(out)
 }
 
@@ -292,6 +440,13 @@ mod tests {
 			github_repo: None,
 			detected_github_owner: None,
 			detected_github_repo: None,
+			gitlab_enabled: false,
+			gitlab_group: None,
+			gitlab_project: None,
+			gitlab_host: None,
+			detected_gitlab_group: None,
+			detected_gitlab_project: None,
+			detected_gitlab_host: None,
 			open_editor: false,
 		}
 	}
@@ -300,16 +455,7 @@ mod tests {
 		InitResult {
 			cargo_enabled: false,
 			npm_enabled: true,
-			cargo_path: None,
-			npm_path: None,
-			git_enabled: false,
-			git_strategy: None,
-			github_enabled: false,
-			github_owner: None,
-			github_repo: None,
-			detected_github_owner: None,
-			detected_github_repo: None,
-			open_editor: false,
+			..cargo_only_result()
 		}
 	}
 
@@ -317,16 +463,23 @@ mod tests {
 		InitResult {
 			cargo_enabled: true,
 			npm_enabled: true,
-			cargo_path: None,
-			npm_path: None,
 			git_enabled: true,
 			git_strategy: Some(Strategy::Branch),
 			github_enabled: true,
 			github_owner: Some("acme".to_string()),
 			github_repo: Some("my-app".to_string()),
-			detected_github_owner: None,
-			detected_github_repo: None,
-			open_editor: false,
+			..cargo_only_result()
+		}
+	}
+
+	fn gitlab_explicit_result() -> InitResult {
+		InitResult {
+			git_enabled: true,
+			git_strategy: Some(Strategy::Push),
+			gitlab_enabled: true,
+			gitlab_group: Some("acme".to_string()),
+			gitlab_project: Some("my-app".to_string()),
+			..cargo_only_result()
 		}
 	}
 
@@ -433,6 +586,133 @@ mod tests {
 			..cargo_only_result()
 		};
 		insta::assert_snapshot!(render(&result));
+	}
+
+	#[test]
+	fn snapshot_gitlab_explicit_group_project() {
+		insta::assert_snapshot!(render(&gitlab_explicit_result()));
+	}
+
+	/// When the user picked GitLab + unchecked self-managed (so `gitlab_host = None`),
+	/// the host hint must be the empty placeholder even if a self-managed host was
+	/// previously auto-detected — the user's explicit choice overrides the detection.
+	#[test]
+	fn gitlab_host_hint_ignores_detected_when_user_unchecked_self_managed() {
+		let result = InitResult {
+			gitlab_enabled: true,
+			gitlab_group: Some("acme".to_string()),
+			gitlab_project: Some("app".to_string()),
+			gitlab_host: None,
+			detected_gitlab_host: Some("gitlab.example.com".to_string()),
+			..cargo_only_result()
+		};
+		let rendered = render(&result);
+		assert!(
+			!rendered.contains("gitlab.example.com"),
+			"detected self-managed host must not leak into the hint when the user \
+			 left gitlab_host = None:\n{rendered}"
+		);
+		assert!(
+			rendered.contains("# host = \"\""),
+			"empty placeholder hint must be emitted when gitlab_host is None"
+		);
+	}
+
+	#[test]
+	fn snapshot_gitlab_detected_values_as_hints() {
+		let result = InitResult {
+			gitlab_enabled: true,
+			gitlab_group: None,
+			gitlab_project: None,
+			detected_gitlab_group: Some("acme".to_string()),
+			detected_gitlab_project: Some("my-app".to_string()),
+			detected_gitlab_host: Some("gitlab.com".to_string()),
+			..cargo_only_result()
+		};
+		insta::assert_snapshot!(render(&result));
+	}
+
+	#[test]
+	fn snapshot_gitlab_self_managed_host() {
+		let result = InitResult {
+			gitlab_enabled: true,
+			gitlab_group: Some("acme".to_string()),
+			gitlab_project: Some("my-app".to_string()),
+			gitlab_host: Some("gitlab.example.com".to_string()),
+			detected_gitlab_host: Some("gitlab.example.com".to_string()),
+			..cargo_only_result()
+		};
+		insta::assert_snapshot!(render(&result));
+	}
+
+	// --- Reordering tests ---
+
+	#[test]
+	fn snapshot_active_sections_lifted_to_top_cargo_git_github() {
+		let result = InitResult {
+			git_enabled: true,
+			git_strategy: Some(Strategy::Push),
+			github_enabled: true,
+			github_owner: Some("acme".to_string()),
+			github_repo: Some("my-app".to_string()),
+			..cargo_only_result()
+		};
+		insta::assert_snapshot!(render(&result));
+	}
+
+	#[test]
+	fn snapshot_nothing_active_preserves_canonical_order() {
+		let result = InitResult {
+			cargo_enabled: false,
+			..cargo_only_result()
+		};
+		insta::assert_snapshot!(render(&result));
+	}
+
+	/// Active sections must precede every commented-out section header.
+	#[test]
+	fn active_sections_appear_before_any_commented_section() {
+		let rendered = render(&InitResult {
+			git_enabled: true,
+			git_strategy: Some(Strategy::Push),
+			gitlab_enabled: true,
+			gitlab_group: Some("acme".to_string()),
+			gitlab_project: Some("app".to_string()),
+			..cargo_only_result()
+		});
+		let lines: Vec<&str> = rendered.lines().collect();
+		let last_active = lines
+			.iter()
+			.rposition(|l| l.starts_with('['))
+			.expect("expected at least one active section header");
+		let first_commented = lines
+			.iter()
+			.position(|l| l.starts_with("# ["))
+			.expect("expected at least one commented section header");
+		assert!(
+			last_active < first_commented,
+			"all active sections must precede all commented sections;\n\
+			 last active line index: {last_active}, first commented line index: {first_commented}\n\
+			 rendered:\n{rendered}"
+		);
+	}
+
+	/// Within the active group, sections appear in the canonical order
+	/// (`cargo`, `npm`, `git`, `github`, `gitlab`).
+	#[test]
+	fn relative_order_within_active_group_is_canonical() {
+		let rendered = render(&InitResult {
+			cargo_enabled: true,
+			npm_enabled: true,
+			git_enabled: true,
+			git_strategy: Some(Strategy::Push),
+			..cargo_only_result()
+		});
+		let cargo_pos = rendered.find("[cargo]").expect("[cargo] must be present");
+		let npm_pos = rendered.find("[npm]").expect("[npm] must be present");
+		let git_pos = rendered.find("[git]").expect("[git] must be present");
+		assert!(cargo_pos < npm_pos, "[cargo] must precede [npm]");
+		assert!(npm_pos < git_pos, "[npm] must precede [git]");
 	}
 
 	// --- TOML validity tests (behavioural, not snapshot) ---
