@@ -107,10 +107,12 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 }
 
 pub(crate) mod github_signed_commit;
+pub(crate) mod gitlab_signed_commit;
 mod operations;
 pub(crate) mod ref_format;
 
 pub use github_signed_commit::GitHubSignedCommit;
+pub use gitlab_signed_commit::GitLabSignedCommit;
 pub use operations::GitWorkdir;
 
 #[cfg(test)]

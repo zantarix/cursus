@@ -1,4 +1,5 @@
 mod github_signed_commit;
+mod gitlab_signed_commit;
 mod ref_format;
 
 use crate::filesystem::LocalFilesystem;

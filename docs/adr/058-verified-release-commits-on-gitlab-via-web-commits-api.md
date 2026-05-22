@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-05-12)
+Accepted (2026-05-22)
 
 ## Context
 
@@ -28,7 +28,7 @@ This ADR adds the GitLab counterpart and, for naming symmetry, renames the exist
 
 A new `GitLabSignedCommit` decorator shall be introduced in the cursus library that wraps any `Arc<dyn Git>` (typically `GitWorkdir`) and overrides `commit()`, `push()`, and `force_push_branch()` to route the prepare commit through GitLab's `POST /projects/:id/repository/commits` endpoint, relying on GitLab 18.10's web-commit signing behaviour to produce a Verified commit. All other `Git` trait methods shall delegate unchanged to the inner implementation. The decorator shall be installed by the binary crate's environment-detection layer ([ADR-030](030-bin-lib-crate-separation.md)) when the configured `signed_commits` policy and the runtime GitLab CI environment both warrant it.
 
-For naming symmetry with the new GitLab decorator, the existing GitHub decorator `SignedCommitGit` (introduced in [ADR-050](050-verified-release-commits-via-git-data-api.md)) shall be renamed to `GitHubSignedCommit`, and the file `packages/cursus/src/git/signed_commit.rs` shall be renamed to `packages/cursus/src/git/github_signed_commit.rs`. The module wiring in `packages/cursus/src/git/mod.rs` and the construction site in `packages/cursus-bin/src/main.rs` shall be updated to match.
+For naming symmetry with the new GitLab decorator, the existing GitHub decorator `SignedCommitGit` (introduced in [ADR-050](050-verified-release-commits-via-git-data-api.md)) shall be renamed to `GitHubSignedCommit`, and the file `packages/cursus/src/git/signed_commit.rs` shall be renamed to `packages/cursus/src/git/github_signed_commit.rs`. The module wiring in `packages/cursus/src/git/mod.rs` and the construction site in the binary crate's git-setup boundary (`packages/cursus-bin/src/git_setup.rs`) shall be updated to match.
 
 ### File and type layout
 
@@ -45,8 +45,11 @@ The trait method overrides shall behave as follows:
 
 - **`add(files)`**: delegates to the inner `Git` impl so that `git add` still runs against the local index for working-tree consistency, and additionally records the staged paths in an internal list. The recorded list is what the API commit will read from disk and turn into `actions`.
 - **`commit(message)`**: for each path recorded by `add`, the decorator reads the file's bytes via the `Filesystem` trait, classifies each path as `create`, `update`, or `delete` (a path that no longer exists on disk is a delete; a path that exists but has no prior commit object reachable is a create; everything else is an update), and builds a single `POST /projects/:id/repository/commits` request whose `actions` array carries all of those operations. **The request body must omit `author_email` and `author_name`** — see "Author fields must be omitted" below. The target branch and parent SHA are recorded but the API call is not yet made; that happens at `push()` time, because the `branch` field on this endpoint is what advances the remote ref. The local working tree is not touched at this point.
-- **`push()`**: calls `POST /projects/:id/repository/commits` with the recorded `branch` set to the current branch, `start_branch` set to the parent branch where appropriate, and `force: false`. On success, runs `git fetch origin {branch}` and `git reset --hard FETCH_HEAD` through the inner runner to bring the verified commit object into the local object store and sync the local branch ref, index, and working tree. Equivalent semantics to a normal fast-forward push.
-- **`force_push_branch(branch)`**: same as `push()` but with `force: true` and the target branch passed explicitly. GitLab's commits endpoint accepts `force: true` together with `start_branch` (or `start_sha`) to overwrite the named branch with a new commit based on the chosen parent reference, replacing the branch's existing commit history. This is the closest API-level equivalent of `git push --force-with-lease` for this workflow. The same post-call `git fetch` + `git reset --hard FETCH_HEAD` then realigns the local state.
+- **`push()`**: calls `POST /projects/:id/repository/commits` with the recorded `branch` set to the current branch, `start_sha` set to the parent commit SHA recorded at `commit()` time, and `force: false`. On success, runs `git fetch origin {branch}` and `git reset --hard FETCH_HEAD` through the inner runner to bring the verified commit object into the local object store and sync the local branch ref, index, and working tree. Equivalent semantics to a normal fast-forward push.
+- **`force_push_branch(branch)`**: same as `push()` but with `force: true` and the target branch passed explicitly. GitLab's commits endpoint accepts `force: true` together with `start_sha` to overwrite the named branch with a new commit based on the chosen parent reference, replacing the branch's existing commit history. This is the closest API-level equivalent of `git push --force-with-lease` for this workflow. The same post-call `git fetch` + `git reset --hard FETCH_HEAD` then realigns the local state.
+
+`start_sha` is chosen over `start_branch` because the parent SHA is captured at `commit()` time (after `add()`), so locking the parent to that specific SHA at `push()` time prevents any race where the branch tip on the remote moves between the user staging the commit and the API call landing it. Using `start_branch` would silently re-parent the API commit onto whatever the branch points at when the request is processed; `start_sha` makes the parent reference deterministic.
+
 - All other methods (`tag`, `push_tag`, `delete_tag`, `checkout`, `is_dirty`, diff/log/ref operations, etc.): delegate unchanged to the inner impl.
 
 The post-API `git fetch origin {branch}` + `git reset --hard FETCH_HEAD` sequence performed inside `push()` and `force_push_branch()` is non-optional, for exactly the reasons given in [ADR-050](050-verified-release-commits-via-git-data-api.md): no local `git commit` runs, so the local index, working tree, and branch ref are all out of sync with the API-produced commit until the local state is synced from the now-advanced remote ref. The fetch downloads the new commit object (and its tree and blobs) into the local object store and advances the `origin/{branch}` remote-tracking ref; the subsequent `git reset --hard FETCH_HEAD` moves the local branch ref, index, and working tree to the fetched SHA.
@@ -65,7 +68,7 @@ This is the GitLab analogue of [ADR-050](050-verified-release-commits-via-git-da
 
 The `signed_commits` field defined in `packages/cursus/src/model/config/git.rs` and introduced by [ADR-050](050-verified-release-commits-via-git-data-api.md) shall be reused unchanged. The enum values (`auto` / `force` / `off`) keep their existing meanings; what changes is how the binary boundary interprets them when GitLab is the active forge.
 
-The binary-boundary logic in `cursus-bin/src/main.rs` shall be extended as follows:
+The binary-boundary logic in `cursus-bin/src/git_setup.rs` shall be extended as follows:
 
 - **`auto`** (default): the API commit path is enabled when both conditions hold for the active forge. For GitHub, the existing rule is unchanged: `GITHUB_ACTIONS=true` and a GitHub token available via `GH_TOKEN`/`GITHUB_TOKEN`. For GitLab, the equivalent rule is `GITLAB_CI=true` and a GitLab token available via `GITLAB_TOKEN` (or `CI_JOB_TOKEN` as a fallback, consistent with [ADR-056](056-gitlab-support-client-config-and-ci.md)'s token-precedence rule). Outside CI or without a token, the decorator is not installed and commits go through the local `git` binary as today.
 - **`force`**: the API commit path is enabled whenever a token is available for the active forge, regardless of CI environment. As with [ADR-050](050-verified-release-commits-via-git-data-api.md)'s GitHub `force` mode, this is documented as experimental and not exercised in real-world conditions by this ADR.

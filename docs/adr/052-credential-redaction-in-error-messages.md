@@ -95,3 +95,9 @@ Limit the contract to `GitWorkdir` stderr capture, on the grounds that the most 
 ### Enforce redaction via a wrapper error type
 
 Introduce a `RedactedError` newtype that wraps `anyhow::Error` and applies redaction in its `Display` impl, then ban direct `anyhow::Error` construction from external text. This was rejected because it spreads a typed obligation across the entire codebase to solve a problem that is local to a few dozen call sites, and because the redaction must happen at error-*construction* time (before the message becomes part of the error chain), not at *display* time -- by display time, the unredacted text has already been preserved in the chain via `context()` and may be re-emitted by any consumer that walks `error.chain()`. Display-time redaction would also need to be applied identically by every renderer (terminal, log file, JSON output), whereas construction-time redaction guarantees the unredacted bytes never enter the error chain in the first place.
+
+## Errata
+
+### 2026-05-22: `SignedCommitGit` renamed and a second forge decorator now in scope
+
+The Context bullet 3 and the Decision section's third surface bullet name the GitHub API response-body redaction site as `SignedCommitGit`. That name is now incorrect: [ADR-058](058-verified-release-commits-on-gitlab-via-web-commits-api.md) renames the GitHub decorator to `GitHubSignedCommit` and adds a sibling `GitLabSignedCommit` decorator whose error paths must redact GitLab API response bodies and post-API `git fetch` / `git reset` stderr on identical terms. The cross-cutting redaction contract itself is unchanged — it always applied to "any `CodeForgeClient` consumer that includes an HTTP response body in an error" — but the named-decorator example in the Decision section now stands for two decorators rather than one, and the older name no longer exists in the codebase.

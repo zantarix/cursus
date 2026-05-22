@@ -13,6 +13,7 @@ mod tests;
 use std::sync::Arc;
 
 pub(crate) use github::build_octocrab;
+pub(crate) use gitlab::{GitLabHandles, gitlab_handles};
 
 /// Outcome of resolving the active forge client.
 pub(crate) struct ForgeClientOutcome {
@@ -30,6 +31,7 @@ pub(crate) async fn resolve_forge_client(
 	env: &cursus::Env,
 	config: &Option<cursus::model::config::Config>,
 	octocrab: Option<Arc<octocrab::Octocrab>>,
+	gitlab_handles: Option<&GitLabHandles>,
 ) -> Result<ForgeClientOutcome, String> {
 	let cfg = config.as_ref();
 	let github_enabled = cfg.is_some_and(|c| c.github.enabled);
@@ -40,10 +42,12 @@ pub(crate) async fn resolve_forge_client(
 			gitlab_uses_job_token_only: false,
 		}),
 		(false, true) => {
-			let gitlab_outcome = gitlab::resolve_gitlab_forge_client(env, config).await?;
+			let handles = gitlab_handles
+				.ok_or_else(|| "GitLab client unavailable; check credentials".to_string())?;
+			let outcome = gitlab::resolve_gitlab_forge_client_from_handles(handles);
 			Ok(ForgeClientOutcome {
-				client: gitlab_outcome.client,
-				gitlab_uses_job_token_only: gitlab_outcome.uses_job_token_only,
+				client: outcome.client,
+				gitlab_uses_job_token_only: outcome.uses_job_token_only,
 			})
 		}
 		(false, false) => Err(
@@ -64,11 +68,12 @@ pub(crate) async fn resolve_forge_client_for_env(
 	env: &cursus::Env,
 	config: &Option<cursus::model::config::Config>,
 	octocrab: Option<Arc<octocrab::Octocrab>>,
+	gitlab_handles: Option<&GitLabHandles>,
 ) -> (
 	Result<Arc<dyn cursus::forge::CodeForgeClient>, String>,
 	bool,
 ) {
-	match resolve_forge_client(env, config, octocrab).await {
+	match resolve_forge_client(env, config, octocrab, gitlab_handles).await {
 		Ok(outcome) => (Ok(outcome.client), outcome.gitlab_uses_job_token_only),
 		Err(reason) => (Err(reason), false),
 	}

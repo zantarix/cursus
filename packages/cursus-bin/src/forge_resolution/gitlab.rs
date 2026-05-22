@@ -8,13 +8,17 @@
 
 use std::sync::Arc;
 
+use gitlab::{AsyncGitlab, GitlabBuilder};
+
 use crate::env_helpers::env_first;
 
-/// Outcome of constructing a GitLab forge client, carrying the auth-kind
-/// signal that callers need to apply token-scope preconditions later in the
-/// pipeline.
-pub(crate) struct GitLabClientOutcome {
-	pub(crate) client: Arc<dyn cursus::forge::CodeForgeClient>,
+/// Shared GitLab connection handles built once at the binary boundary and
+/// passed to both the [`cursus::git::GitLabSignedCommit`] decorator and the
+/// [`cursus::forge::gitlab::ReqwestGitLabClient`] forge client so they share
+/// a single underlying HTTP connection.
+pub(crate) struct GitLabHandles {
+	pub(crate) client: Arc<AsyncGitlab>,
+	pub(crate) project: cursus::forge::gitlab::GitLabProject,
 	/// `true` when the client was built from `CI_JOB_TOKEN` with no
 	/// `GITLAB_TOKEN` PAT fallback. Used by the `prepare` preflight to fail
 	/// fast before any merge-request API call (ADR-056 — `CI_JOB_TOKEN` cannot
@@ -22,30 +26,37 @@ pub(crate) struct GitLabClientOutcome {
 	pub(crate) uses_job_token_only: bool,
 }
 
-/// Attempts to construct the GitLab code forge client from environment and config.
+/// Outcome of constructing a GitLab forge client, carrying the auth-kind
+/// signal that callers need to apply token-scope preconditions later in the
+/// pipeline.
+pub(crate) struct GitLabClientOutcome {
+	pub(crate) client: Arc<dyn cursus::forge::CodeForgeClient>,
+	pub(crate) uses_job_token_only: bool,
+}
+
+/// Builds the GitLab `AsyncGitlab` HTTP client and resolves the project
+/// identity from environment, config, and the git remote. Used by both
+/// `build_git` (signed commits) and `resolve_gitlab_forge_client` (forge
+/// client) so the underlying HTTP connection is shared.
 ///
 /// Token precedence: `GITLAB_TOKEN` (project- or group-access PAT) first,
-/// falling back to `CI_JOB_TOKEN` (GitLab CI). When only `CI_JOB_TOKEN` is
-/// available the client is still constructed (publish flows work fine with a
-/// job token); the prepare preflight checks
-/// [`cursus::Env::gitlab_uses_job_token_only`] before any merge-request API call.
+/// falling back to `CI_JOB_TOKEN` (GitLab CI).
 ///
 /// Base URL precedence: `CI_API_V4_URL` (set on every GitLab CI job) →
 /// `[gitlab].host` from config → `https://gitlab.com`.
 ///
-/// Binary-boundary glue: reads env vars, builds the Kitware GitLab HTTP
-/// client, and resolves the project identity from a real Git checkout.
-/// Excluded from coverage in line with the `cursus-bin/src/main.rs`
-/// convention for IO entrypoints.
+/// Binary-boundary glue: reads env vars, builds an HTTP client, and resolves
+/// the project identity from a real Git checkout. Excluded from coverage in
+/// line with the `cursus-bin/src/main.rs` convention for IO entrypoints.
 #[coverage(off)]
-pub(crate) async fn resolve_gitlab_forge_client(
-	env: &cursus::Env,
+pub(crate) async fn gitlab_handles(
+	git: &dyn cursus::git::Git,
 	config: &Option<cursus::model::config::Config>,
-) -> Result<GitLabClientOutcome, String> {
+) -> Result<GitLabHandles, String> {
 	let cfg = config
 		.as_ref()
 		.ok_or_else(|| "No configuration file found".to_string())?;
-	let project = cursus::forge::gitlab::GitLabProject::resolve(&cfg.gitlab, env.git())
+	let project = cursus::forge::gitlab::GitLabProject::resolve(&cfg.gitlab, git)
 		.await
 		.map_err(|e| format!("{e:#}"))?;
 
@@ -71,14 +82,41 @@ pub(crate) async fn resolve_gitlab_forge_client(
 			);
 		}
 	};
-	let client =
-		cursus::forge::gitlab::ReqwestGitLabClient::build(&host, &token, token_kind, project)
-			.await
-			.map_err(|e| format!("{e:#}"))?;
-	Ok(GitLabClientOutcome {
-		client: Arc::new(client) as Arc<dyn cursus::forge::CodeForgeClient>,
+	let builder = match token_kind {
+		cursus::forge::gitlab::GitLabTokenKind::PersonalAccessToken => {
+			GitlabBuilder::new(&host, &token)
+		}
+		cursus::forge::gitlab::GitLabTokenKind::JobToken => {
+			GitlabBuilder::new_with_job_token(&host, &token)
+		}
+	};
+	let async_client = builder
+		.build_async()
+		.await
+		.map_err(|e| format!("Failed to initialise GitLab client for host '{host}': {e:#}"))?;
+	Ok(GitLabHandles {
+		client: Arc::new(async_client),
+		project,
 		uses_job_token_only,
 	})
+}
+
+/// Constructs the GitLab code forge client from pre-built [`GitLabHandles`].
+///
+/// Binary-boundary glue; excluded from coverage in line with the
+/// `cursus-bin/src/main.rs` convention for IO entrypoints.
+#[coverage(off)]
+pub(crate) fn resolve_gitlab_forge_client_from_handles(
+	handles: &GitLabHandles,
+) -> GitLabClientOutcome {
+	let client = cursus::forge::gitlab::ReqwestGitLabClient::new(
+		(*handles.client).clone(),
+		handles.project.clone(),
+	);
+	GitLabClientOutcome {
+		client: Arc::new(client) as Arc<dyn cursus::forge::CodeForgeClient>,
+		uses_job_token_only: handles.uses_job_token_only,
+	}
 }
 
 /// Resolves the GitLab API base host the client should target by reading the

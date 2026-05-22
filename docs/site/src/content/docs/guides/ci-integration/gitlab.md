@@ -72,6 +72,20 @@ This is transparent — the `[gitlab].artifacts` schema is identical to `[github
 - **Generic Package Registry must be enabled** at the instance and project level. If it is disabled (some self-managed deployments turn it off), asset attachment will fail.
 - **Storage cost.** Uploaded artifacts consume Generic Package Registry storage on your GitLab project. On self-managed instances with quotas, this is a real cost the GitHub flow does not impose.
 
+## Verified commits
+
+By default, commits made by the release workflow appear as **Unverified** in the GitLab UI because they are produced by the local `git` binary on the runner. To get the green **Verified** badge on your release commits, Cursus can route the prepare commit through GitLab's commits API; commits created this way are SSH-signed by the instance's web-commits key.
+
+When Cursus detects it is running on GitLab CI (`GITLAB_CI=true`) with a token available, it automatically routes the prepare commit through the GitLab commits API. The default is `signed_commits = "auto"` — no `.cursus/config.toml` change is required. Either `GITLAB_TOKEN` (a project- or group-access PAT with `api` scope) or `CI_JOB_TOKEN` (the default CI token) satisfies the auth requirement.
+
+Requirements:
+
+- **GitLab 18.10 or later.** Older versions accept the API call but do not produce a Verified signature.
+- A project- or group-access token, or `CI_JOB_TOKEN`. No long-lived signing key custody is required.
+- The token's user identity is what GitLab records as the author and committer; `author_email` / `author_name` are deliberately omitted from the request so GitLab can sign the commit.
+
+To opt out, set `[git].signed_commits = "off"` in `.cursus/config.toml`. To force the API path outside CI (e.g. for local testing against a dev instance), set `[git].signed_commits = "force"`.
+
 ## Releases vs draft releases
 
 GitLab has no concept of a "draft" release — releases are created in their final state and become visible immediately. This differs from GitHub, where Cursus creates a draft release, uploads artifacts, then transitions it to published. On the GitLab path:

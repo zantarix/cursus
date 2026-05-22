@@ -16,7 +16,7 @@ mod logging;
 mod tests;
 
 use env_helpers::{detect_locale, env_first};
-use forge_resolution::{build_octocrab, resolve_forge_client_for_env};
+use forge_resolution::{build_octocrab, gitlab_handles, resolve_forge_client_for_env};
 use git_setup::build_git;
 use logging::{determine_log_level, init_logging};
 
@@ -105,11 +105,7 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 		git_workdir,
 	));
 
-	// Build one octocrab client for the whole process; both the Git decorator
-	// (signed commits) and the forge client (PRs/releases) share it.
-	let octocrab: Option<Arc<octocrab::Octocrab>> = env_first(&["GH_TOKEN", "GITHUB_TOKEN"])
-		.and_then(|t| build_octocrab(&t).ok())
-		.map(Arc::new);
+	let (octocrab, gitlab_handles) = build_forge_handles(&*git_inner, &config).await;
 
 	let git = build_git(
 		git_inner,
@@ -118,6 +114,7 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 		&config,
 		cli.global.dry_run,
 		octocrab.clone(),
+		gitlab_handles.as_ref(),
 	)
 	.await?;
 
@@ -135,10 +132,40 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 		.with_locale(locale);
 
 	let (forge_client_result, gitlab_uses_job_token_only) =
-		resolve_forge_client_for_env(&env, &config, octocrab).await;
+		resolve_forge_client_for_env(&env, &config, octocrab, gitlab_handles.as_ref()).await;
 	let env = env
 		.with_code_forge_client_result(forge_client_result)
 		.with_gitlab_uses_job_token_only(gitlab_uses_job_token_only);
 
 	cursus::run(cli, env, config).await
+}
+
+/// Builds the shared per-process forge HTTP handles.
+///
+/// Returns `(octocrab, gitlab_handles)` — each is `Some` only when the
+/// corresponding token / forge config is available. Both the signed-commit
+/// decorators and the forge clients share these handles.
+///
+/// Binary-boundary IO; excluded from coverage like the other setup helpers
+/// in this file.
+#[coverage(off)]
+#[mutants::skip]
+async fn build_forge_handles(
+	git: &dyn cursus::git::Git,
+	config: &Option<cursus::model::config::Config>,
+) -> (
+	Option<Arc<octocrab::Octocrab>>,
+	Option<forge_resolution::GitLabHandles>,
+) {
+	let octocrab: Option<Arc<octocrab::Octocrab>> = env_first(&["GH_TOKEN", "GITHUB_TOKEN"])
+		.and_then(|t| build_octocrab(&t).ok())
+		.map(Arc::new);
+	// Resolution failures are tolerated here — they resurface from
+	// `resolve_forge_client_for_env` later with a stable error message.
+	let gitlab_handles = if config.as_ref().is_some_and(|c| c.gitlab.enabled) {
+		gitlab_handles(git, config).await.ok()
+	} else {
+		None
+	};
+	(octocrab, gitlab_handles)
 }

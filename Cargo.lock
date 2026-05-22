@@ -698,6 +698,7 @@ dependencies = [
  "anyhow",
  "clap",
  "cursus",
+ "gitlab",
  "log",
  "mutants",
  "octocrab",
