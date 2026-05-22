@@ -98,6 +98,16 @@ fn enable_git_click_outside_does_nothing() {
 }
 
 #[test]
+fn enable_git_with_index_zero_selects_yes() {
+	// Direct unit-level coverage of the `with_index` ButtonScreen impl;
+	// the handle_key paths exercise `next`/`prev` but not `with_index`.
+	let buttons = EnableGitButtons { yes: false }.with_index(0);
+	assert!(buttons.yes);
+	let buttons = EnableGitButtons { yes: true }.with_index(1);
+	assert!(!buttons.yes);
+}
+
+#[test]
 fn ui_renders_enable_git() {
 	crate::locale::set_locale("en");
 	use crate::tui::test_utils::{buffer_to_string, create_test_terminal};

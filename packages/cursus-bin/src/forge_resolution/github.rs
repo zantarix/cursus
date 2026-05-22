@@ -5,6 +5,10 @@ use std::sync::Arc;
 use crate::env_helpers::env_first;
 
 /// Builds an [`octocrab::Octocrab`] client configured with standard timeouts.
+///
+/// Binary-boundary HTTP-client construction; excluded from coverage in line with
+/// the `cursus-bin/src/main.rs` convention for IO entrypoints.
+#[coverage(off)]
 pub(crate) fn build_octocrab(token: &str) -> Result<octocrab::Octocrab, octocrab::Error> {
 	octocrab::Octocrab::builder()
 		.personal_token(token.to_string())
@@ -21,6 +25,11 @@ pub(crate) fn build_octocrab(token: &str) -> Result<octocrab::Octocrab, octocrab
 ///
 /// Accepts a pre-built `octocrab` instance (shared with the Git decorator when
 /// signed commits are enabled) to avoid constructing a second HTTP client.
+///
+/// Binary-boundary glue: reads env vars, builds an HTTP client, and resolves
+/// the repo identity from a real Git checkout. Excluded from coverage in line
+/// with the `cursus-bin/src/main.rs` convention for IO entrypoints.
+#[coverage(off)]
 pub(crate) async fn resolve_github_forge_client(
 	env: &cursus::Env,
 	config: &Option<cursus::model::config::Config>,

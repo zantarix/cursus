@@ -376,6 +376,33 @@ mod real_command_tests {
 	}
 
 	#[tokio::test]
+	async fn real_runner_run_returns_success() {
+		// `run` is the read-only variant; `git --version` is the same prerequisite
+		// used by other RealCommandRunner tests.
+		let runner = RealCommandRunner;
+		let cwd = std::env::temp_dir();
+		let output = runner
+			.run("git", &["--version"], &cwd)
+			.await
+			.expect("git --version should succeed");
+		assert!(output.status.success());
+		assert!(String::from_utf8_lossy(&output.stdout).contains("git"));
+	}
+
+	#[tokio::test]
+	async fn real_runner_run_mut_returns_success() {
+		// `run_mut` is the mutating variant; structurally identical to `run` for
+		// RealCommandRunner but the dry-run decorator changes their behaviour.
+		let runner = RealCommandRunner;
+		let cwd = std::env::temp_dir();
+		let output = runner
+			.run_mut("git", &["--version"], &cwd)
+			.await
+			.expect("git --version should succeed");
+		assert!(output.status.success());
+	}
+
+	#[tokio::test]
 	async fn real_runner_run_streaming_logs_running_at_info() {
 		// The centralised pre-log is load-bearing: callers delete their own
 		// pre-logs on the strength of this guarantee (ADR-046 line 38).

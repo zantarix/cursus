@@ -211,7 +211,12 @@ struct TerminalGuard {
 	kbd_enhancement: bool,
 }
 
+// `TerminalGuard` setup methods and `Drop` flush directly to the real `stdout`
+// via crossterm — there is no in-process seam available, so they are excluded
+// from coverage in line with the convention used in `cursus-bin/src/main.rs`
+// for true IO boundaries.
 impl TerminalGuard {
+	#[coverage(off)]
 	fn new() -> Self {
 		Self {
 			raw_mode: false,
@@ -221,24 +226,28 @@ impl TerminalGuard {
 		}
 	}
 
+	#[coverage(off)]
 	fn enable_raw_mode(&mut self) -> io::Result<()> {
 		enable_raw_mode()?;
 		self.raw_mode = true;
 		Ok(())
 	}
 
+	#[coverage(off)]
 	fn enter_alternate_screen(&mut self) -> io::Result<()> {
 		io::stdout().execute(EnterAlternateScreen)?;
 		self.alt_screen = true;
 		Ok(())
 	}
 
+	#[coverage(off)]
 	fn enable_mouse_capture(&mut self) -> io::Result<()> {
 		io::stdout().execute(EnableMouseCapture)?;
 		self.mouse_capture = true;
 		Ok(())
 	}
 
+	#[coverage(off)]
 	fn push_keyboard_enhancement(&mut self) -> io::Result<()> {
 		io::stdout().execute(PushKeyboardEnhancementFlags(
 			KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
@@ -249,6 +258,7 @@ impl TerminalGuard {
 }
 
 impl Drop for TerminalGuard {
+	#[coverage(off)]
 	fn drop(&mut self) {
 		if self.kbd_enhancement {
 			io::stdout().execute(PopKeyboardEnhancementFlags).ok();
@@ -283,6 +293,10 @@ impl Drop for TerminalGuard {
 /// # Errors
 ///
 /// Returns an error if terminal setup or I/O operations fail.
+// Drives the real terminal: owns `stdout`, blocks on `crossterm::event::read()`,
+// and cannot be exercised without a live tty. Excluded from coverage in line with
+// the `cursus-bin/src/main.rs` convention for true IO entrypoints.
+#[coverage(off)]
 pub fn run_tui<S, T, DrawFn, HandleFn>(
 	mut state: S,
 	mut draw_fn: DrawFn,

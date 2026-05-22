@@ -32,6 +32,12 @@ pub(crate) struct GitLabClientOutcome {
 ///
 /// Base URL precedence: `CI_API_V4_URL` (set on every GitLab CI job) →
 /// `[gitlab].host` from config → `https://gitlab.com`.
+///
+/// Binary-boundary glue: reads env vars, builds the Kitware GitLab HTTP
+/// client, and resolves the project identity from a real Git checkout.
+/// Excluded from coverage in line with the `cursus-bin/src/main.rs`
+/// convention for IO entrypoints.
+#[coverage(off)]
 pub(crate) async fn resolve_gitlab_forge_client(
 	env: &cursus::Env,
 	config: &Option<cursus::model::config::Config>,
@@ -77,6 +83,11 @@ pub(crate) async fn resolve_gitlab_forge_client(
 
 /// Resolves the GitLab API base host the client should target by reading the
 /// `CI_API_V4_URL` env var and the configured host.
+///
+/// Binary-boundary env-var reader; the precedence logic lives in
+/// [`gitlab_base_url_from`] (which is fully tested). Excluded from coverage
+/// in line with the `cursus-bin/src/main.rs` convention for IO entrypoints.
+#[coverage(off)]
 fn gitlab_base_url(config_host: &str) -> String {
 	gitlab_base_url_from(env_first(&["CI_API_V4_URL"]).as_deref(), config_host)
 }

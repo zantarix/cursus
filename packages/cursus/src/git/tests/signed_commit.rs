@@ -590,3 +590,269 @@ async fn dry_run_runner_suppresses_fetch_and_reset() {
 		"DryRunCommandRunner should suppress fetch and reset"
 	);
 }
+
+/// Builds a `SignedCommitGit` whose inner `Git` impl uses the supplied runner.
+/// Convenience wrapper for the trait-delegation tests below.
+fn make_delegating_decorator(
+	runner: Arc<dyn CommandRunner>,
+) -> (tempfile::TempDir, SignedCommitGit) {
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let git = make_git(Arc::clone(&runner), &root);
+	let server = MockServer::start();
+	let dec = make_decorator(git, make_octocrab(&server), runner);
+	(dir, dec)
+}
+
+#[tokio::test]
+async fn path_delegates_to_inner() {
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let (dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(dec.path().as_path(), dir.path());
+}
+
+#[tokio::test]
+async fn head_sha_delegates_to_inner() {
+	let runner = git_runner("deadbeef", "main");
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(dec.head_sha().await.unwrap(), "deadbeef");
+}
+
+#[tokio::test]
+async fn is_dirty_delegates_to_inner() {
+	// Returning non-empty stdout for `status --porcelain` means dirty.
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec!["status".to_string(), "--porcelain".to_string()],
+		0,
+		b" M foo\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert!(dec.is_dirty().await.unwrap());
+}
+
+#[tokio::test]
+async fn current_branch_delegates_to_inner() {
+	let runner = git_runner("abc", "feature/foo");
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(
+		dec.current_branch().await.unwrap().as_deref(),
+		Some("feature/foo")
+	);
+}
+
+#[tokio::test]
+async fn tag_exists_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec![
+			"rev-parse".to_string(),
+			"--verify".to_string(),
+			"--quiet".to_string(),
+			"refs/tags/v1.0.0".to_string(),
+		],
+		0,
+		b"sha\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert!(dec.tag_exists("v1.0.0").await.unwrap());
+}
+
+#[tokio::test]
+async fn remote_origin_url_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec![
+			"remote".to_string(),
+			"get-url".to_string(),
+			"origin".to_string(),
+		],
+		0,
+		b"git@github.com:owner/repo.git\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(
+		dec.remote_origin_url().await.unwrap().as_deref(),
+		Some("git@github.com:owner/repo.git"),
+	);
+}
+
+#[tokio::test]
+async fn rev_list_count_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec![
+			"rev-list".to_string(),
+			"--count".to_string(),
+			"origin/main..HEAD".to_string(),
+		],
+		0,
+		b"3\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(dec.rev_list_count("origin/main..HEAD").await.unwrap(), 3);
+}
+
+#[tokio::test]
+async fn log_message_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec![
+			"log".to_string(),
+			"-1".to_string(),
+			"--format=%B".to_string(),
+			"HEAD".to_string(),
+		],
+		0,
+		b"hello\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(dec.log_message("HEAD").await.unwrap().trim(), "hello");
+}
+
+#[tokio::test]
+async fn log_subject_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec![
+			"log".to_string(),
+			"-1".to_string(),
+			"--format=%s".to_string(),
+			"HEAD".to_string(),
+		],
+		0,
+		b"subject line\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(
+		dec.log_subject("HEAD").await.unwrap().trim(),
+		"subject line"
+	);
+}
+
+#[tokio::test]
+async fn diff_tree_names_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_with_args_stdout(
+		"git",
+		vec![
+			"diff-tree".to_string(),
+			"--no-commit-id".to_string(),
+			"-r".to_string(),
+			"--name-only".to_string(),
+			"HEAD".to_string(),
+		],
+		0,
+		b"a.txt\nb.txt\n".to_vec(),
+	));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	assert_eq!(
+		dec.diff_tree_names("HEAD").await.unwrap(),
+		vec!["a.txt".to_string(), "b.txt".to_string()],
+	);
+}
+
+#[tokio::test]
+async fn diff_names_delegates_to_inner() {
+	let runner = Arc::new(DispatchingCommandRunner::new(0).on_stdout("git", 0, b"x.md\n".to_vec()));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	let out = dec.diff_names(&["--name-only"]).await.unwrap();
+	assert_eq!(out, vec!["x.md".to_string()]);
+}
+
+#[tokio::test]
+async fn log_added_commit_delegates_to_inner() {
+	use std::path::Path;
+	let runner =
+		Arc::new(DispatchingCommandRunner::new(0).on_stdout("git", 0, b"shaaaa\n".to_vec()));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	let result = dec.log_added_commit(Path::new("README.md")).await.unwrap();
+	assert_eq!(result.as_deref(), Some("shaaaa"));
+}
+
+#[tokio::test]
+async fn tag_delegates_to_inner() {
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	dec.tag("v1.0.0", "rel").await.unwrap();
+	let calls = runner.invocations();
+	assert!(
+		calls
+			.iter()
+			.any(|c| c.program == "git" && c.args.contains(&"tag".to_string())),
+		"expected inner git tag invocation",
+	);
+}
+
+#[tokio::test]
+async fn checkout_delegates_to_inner() {
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	dec.checkout("main").await.unwrap();
+	let calls = runner.invocations();
+	assert!(
+		calls
+			.iter()
+			.any(|c| c.program == "git" && c.args.contains(&"checkout".to_string())),
+		"expected inner git checkout invocation",
+	);
+}
+
+#[tokio::test]
+async fn checkout_or_reset_branch_delegates_to_inner() {
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	dec.checkout_or_reset_branch("release").await.unwrap();
+	let calls = runner.invocations();
+	assert!(
+		calls.iter().any(|c| c.program == "git"),
+		"expected inner git invocation",
+	);
+}
+
+#[tokio::test]
+async fn delete_tag_delegates_to_inner() {
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	dec.delete_tag("v1.0.0").await.unwrap();
+	let calls = runner.invocations();
+	assert!(
+		calls.iter().any(|c| c.program == "git"
+			&& c.args.contains(&"tag".to_string())
+			&& c.args.contains(&"-d".to_string())),
+		"expected inner git tag -d invocation",
+	);
+}
+
+#[tokio::test]
+async fn push_tag_delegates_to_inner() {
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let (_dir, dec) = make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>);
+	dec.push_tag("v1.0.0").await.unwrap();
+	let calls = runner.invocations();
+	assert!(
+		calls
+			.iter()
+			.any(|c| c.program == "git" && c.args.contains(&"push".to_string())),
+		"expected inner git push invocation",
+	);
+}
+
+#[tokio::test]
+async fn debug_impl_shows_owner_repo_dry_run() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	let dec = make_decorator(
+		git,
+		make_octocrab(&server),
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	);
+	let formatted = format!("{dec:?}");
+	assert!(formatted.contains("owner"));
+	assert!(formatted.contains("repo"));
+	assert!(formatted.contains("dry_run"));
+}
