@@ -34,7 +34,6 @@ skip = [
 	"rand",
 	"rand_core",
 	"r-efi",
-	"windows-sys",
 	"wit-bindgen",
 	# Duplicates pulled in transitively by the `gitlab` crate (cron 0.15, derive_builder,
 	# graphql_client, etc.) until upstream catches up. These crates also appear via toml /
