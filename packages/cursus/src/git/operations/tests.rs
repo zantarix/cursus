@@ -1084,3 +1084,56 @@ async fn diff_tree_names_rejects_leading_dash() {
 		"Runner must not be invoked"
 	);
 }
+
+#[tokio::test]
+async fn path_exists_at_head_returns_true_on_exit_zero() {
+	let dir = temp_dir();
+	let runner = recording(0);
+	let (git, runner) = make_git(runner, abs(&dir));
+	let result = git
+		.path_exists_at_head(std::path::Path::new("Cargo.toml"))
+		.await
+		.expect("should succeed");
+	assert!(result);
+	let invocations = runner.invocations();
+	assert_eq!(invocations.len(), 1);
+	assert_eq!(invocations[0].program, "git");
+	assert_eq!(invocations[0].args, ["cat-file", "-e", "HEAD:Cargo.toml"]);
+	assert_eq!(invocations[0].cwd, dir.path());
+}
+
+#[tokio::test]
+async fn path_exists_at_head_returns_false_on_exit_128() {
+	let dir = temp_dir();
+	let runner = recording(128);
+	let (git, _) = make_git(runner, abs(&dir));
+	let result = git
+		.path_exists_at_head(std::path::Path::new("new-file.txt"))
+		.await
+		.expect("should succeed");
+	assert!(!result);
+}
+
+#[tokio::test]
+async fn path_exists_at_head_errors_on_other_exit_with_redaction() {
+	let dir = temp_dir();
+	let runner = recording_with_stderr(
+		1,
+		b"fatal: remote https://x-access-token:ghs_secret@github.com/foo/bar.git rejected",
+	);
+	let (git, _) = make_git(runner, abs(&dir));
+	let err = git
+		.path_exists_at_head(std::path::Path::new("file.txt"))
+		.await
+		.expect_err("should error on non-0/128 exit");
+	let msg = err.to_string();
+	assert!(
+		msg.contains("git cat-file -e HEAD:file.txt failed"),
+		"missing context: {msg}"
+	);
+	assert!(
+		msg.contains("[REDACTED]"),
+		"credentials not redacted: {msg}"
+	);
+	assert!(!msg.contains("ghs_secret"), "raw credential leaked: {msg}");
+}

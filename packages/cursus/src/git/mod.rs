@@ -68,6 +68,14 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 	/// Returns the full SHA of the current HEAD commit.
 	async fn head_sha(&self) -> anyhow::Result<String>;
 
+	/// Returns `true` if the given path exists in the tree of the current HEAD commit.
+	///
+	/// Used to classify a staged path as a `create` (no entry at HEAD) vs an
+	/// `update` (entry exists at HEAD) when constructing a forge-API commit
+	/// payload. Tracks the on-disk filesystem only as far as HEAD — uncommitted
+	/// changes are not considered.
+	async fn path_exists_at_head(&self, path: &Path) -> anyhow::Result<bool>;
+
 	// ── mutations ────────────────────────────────────────────────────────
 
 	/// Stages the given files for the next git commit.
@@ -98,12 +106,12 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 	async fn push_tag(&self, tag: &str) -> anyhow::Result<()>;
 }
 
+pub(crate) mod github_signed_commit;
 mod operations;
 pub(crate) mod ref_format;
-pub(crate) mod signed_commit;
 
+pub use github_signed_commit::GitHubSignedCommit;
 pub use operations::GitWorkdir;
-pub use signed_commit::SignedCommitGit;
 
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,7 @@
 //! Production [`cursus::git::Git`] construction for the cursus binary.
 //!
 //! Selects between [`cursus::git::GitWorkdir`] (subprocess `git`) and the
-//! [`cursus::git::SignedCommitGit`] decorator that routes commits through
+//! [`cursus::git::GitHubSignedCommit`] decorator that routes commits through
 //! the GitHub Git Data API for Verified commits (ADR-050).
 
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use anyhow::Context as _;
 
 /// Constructs the `Git` implementation for the current environment.
 ///
-/// Returns a [`cursus::git::SignedCommitGit`] decorator when
+/// Returns a [`cursus::git::GitHubSignedCommit`] decorator when
 /// [`resolve_signed_commits_mode`] indicates the API path is warranted, or a plain
 /// [`cursus::git::GitWorkdir`] otherwise.
 #[coverage(off)]
@@ -44,7 +44,7 @@ pub(crate) async fn build_git(
 		log::info!(
 			"Routing git commit and push operations through the GitHub API for verified commits."
 		);
-		let g: Arc<dyn cursus::git::Git> = Arc::new(cursus::git::SignedCommitGit::new(
+		let g: Arc<dyn cursus::git::Git> = Arc::new(cursus::git::GitHubSignedCommit::new(
 			inner, filesystem, octocrab, runner, repo.owner, repo.repo, dry_run,
 		));
 		Ok(g)
@@ -63,7 +63,7 @@ pub(crate) async fn build_git(
 /// `Force` engages whenever a token is available.
 /// `Off` never engages.
 ///
-/// Dry-run is intentionally NOT checked here — the [`cursus::git::SignedCommitGit`]
+/// Dry-run is intentionally NOT checked here — the [`cursus::git::GitHubSignedCommit`]
 /// decorator is constructed even in dry-run mode but short-circuits all API calls
 /// via its own explicit dry-run guard (ADR-050, ADR-017 exception).
 pub(crate) fn resolve_signed_commits_mode(

@@ -1,4 +1,4 @@
-//! [`SignedCommitGit`] decorator that creates verified commits via the GitHub Git Data API.
+//! [`GitHubSignedCommit`] decorator that creates verified commits via the GitHub Git Data API.
 //!
 //! See ADR-050 for the full design rationale.
 
@@ -112,7 +112,7 @@ pub(crate) struct State {
 /// object store and sync the local branch ref, index, and working tree.
 ///
 /// All other [`Git`] methods delegate to the wrapped inner implementation.
-pub struct SignedCommitGit {
+pub struct GitHubSignedCommit {
 	inner: Arc<dyn Git>,
 	fs: Arc<dyn Filesystem>,
 	octocrab: Arc<Octocrab>,
@@ -123,9 +123,9 @@ pub struct SignedCommitGit {
 	pub(crate) state: Mutex<State>,
 }
 
-impl std::fmt::Debug for SignedCommitGit {
+impl std::fmt::Debug for GitHubSignedCommit {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("SignedCommitGit")
+		f.debug_struct("GitHubSignedCommit")
 			.field("owner", &self.owner)
 			.field("repo", &self.repo)
 			.field("dry_run", &self.dry_run)
@@ -133,8 +133,8 @@ impl std::fmt::Debug for SignedCommitGit {
 	}
 }
 
-impl SignedCommitGit {
-	/// Creates a new `SignedCommitGit` decorator.
+impl GitHubSignedCommit {
+	/// Creates a new `GitHubSignedCommit` decorator.
 	///
 	/// `runner` is used for the post-push `git fetch` / `git reset --hard` operations
 	/// that sync the local working tree after a remote ref update.
@@ -337,13 +337,17 @@ async fn upsert_branch_ref(
 
 #[allow(clippy::too_many_lines)]
 #[async_trait]
-impl Git for SignedCommitGit {
+impl Git for GitHubSignedCommit {
 	fn path(&self) -> &AbsolutePath {
 		self.inner.path()
 	}
 
 	async fn head_sha(&self) -> anyhow::Result<String> {
 		self.inner.head_sha().await
+	}
+
+	async fn path_exists_at_head(&self, path: &Path) -> anyhow::Result<bool> {
+		self.inner.path_exists_at_head(path).await
 	}
 
 	async fn is_dirty(&self) -> anyhow::Result<bool> {

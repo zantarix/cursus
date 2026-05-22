@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::LocalFilesystem;
-use crate::git::signed_commit::{PendingCommit, SignedCommitGit};
+use crate::git::github_signed_commit::{GitHubSignedCommit, PendingCommit};
 use crate::git::{Git, GitWorkdir};
 use crate::path::AbsolutePath;
 
@@ -29,8 +29,8 @@ fn make_decorator(
 	git: Arc<dyn Git>,
 	octocrab: Arc<Octocrab>,
 	runner: Arc<dyn CommandRunner>,
-) -> SignedCommitGit {
-	SignedCommitGit::new(
+) -> GitHubSignedCommit {
+	GitHubSignedCommit::new(
 		git,
 		Arc::new(LocalFilesystem),
 		octocrab,
@@ -45,8 +45,8 @@ fn make_decorator_dry_run(
 	git: Arc<dyn Git>,
 	octocrab: Arc<Octocrab>,
 	runner: Arc<dyn CommandRunner>,
-) -> SignedCommitGit {
-	SignedCommitGit::new(
+) -> GitHubSignedCommit {
+	GitHubSignedCommit::new(
 		git,
 		Arc::new(LocalFilesystem),
 		octocrab,
@@ -565,7 +565,7 @@ async fn dry_run_runner_suppresses_fetch_and_reset() {
 		then.status(200).json_body(json!({}));
 	});
 
-	let dec = SignedCommitGit::new(
+	let dec = GitHubSignedCommit::new(
 		git,
 		Arc::new(LocalFilesystem),
 		make_octocrab(&server),
@@ -591,11 +591,11 @@ async fn dry_run_runner_suppresses_fetch_and_reset() {
 	);
 }
 
-/// Builds a `SignedCommitGit` whose inner `Git` impl uses the supplied runner.
+/// Builds a `GitHubSignedCommit` whose inner `Git` impl uses the supplied runner.
 /// Convenience wrapper for the trait-delegation tests below.
 fn make_delegating_decorator(
 	runner: Arc<dyn CommandRunner>,
-) -> (tempfile::TempDir, SignedCommitGit) {
+) -> (tempfile::TempDir, GitHubSignedCommit) {
 	let dir = tempfile::tempdir().unwrap();
 	let root = AbsolutePath::new(dir.path()).unwrap();
 	std::fs::create_dir(dir.path().join(".git")).unwrap();

@@ -183,6 +183,36 @@ impl Git for GitWorkdir {
 		Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 	}
 
+	/// Returns `true` if the given path exists in the tree of the current HEAD commit.
+	///
+	/// Runs `git cat-file -e HEAD:<path>`. A zero exit status means the path is
+	/// tracked at HEAD; exit code 128 means the path does not exist at HEAD; any
+	/// other exit code is reported as an error with redacted stderr.
+	///
+	/// # Errors
+	///
+	/// Returns an error if `git cat-file` cannot be executed, or exits with a
+	/// status other than 0 or 128.
+	async fn path_exists_at_head(&self, path: &std::path::Path) -> anyhow::Result<bool> {
+		let path_str = path.to_string_lossy();
+		let spec = format!("HEAD:{path_str}");
+		let output = self
+			.runner
+			.run("git", &["cat-file", "-e", &spec], &self.path)
+			.await
+			.context("Failed to run git cat-file -e HEAD:<path>")?;
+
+		match output.status.code() {
+			Some(0) => Ok(true),
+			Some(128) => Ok(false),
+			_ => {
+				let raw = String::from_utf8_lossy(&output.stderr);
+				let stderr = redact_credentials(&raw);
+				bail!("git cat-file -e HEAD:{path_str} failed: {stderr}");
+			}
+		}
+	}
+
 	/// Returns the name of the current branch, or `None` when HEAD is detached.
 	///
 	/// Runs `git rev-parse --abbrev-ref HEAD`. Returns `None` if the output is `"HEAD"`

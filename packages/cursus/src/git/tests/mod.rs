@@ -1,5 +1,5 @@
+mod github_signed_commit;
 mod ref_format;
-mod signed_commit;
 
 use crate::filesystem::LocalFilesystem;
 use crate::git::*;
