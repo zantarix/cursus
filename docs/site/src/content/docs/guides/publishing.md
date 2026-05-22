@@ -69,6 +69,7 @@ See the [configuration reference](/cursus/reference/configuration/#gitlab) for d
 - **Cargo** — uses your existing `cargo login` credentials or the `CARGO_REGISTRY_TOKEN` environment variable
 - **npm** — uses your existing `npm login` credentials or the `NODE_AUTH_TOKEN` environment variable
 - **GitHub** — uses the `GH_TOKEN` or `GITHUB_TOKEN` environment variable (checked in that order)
+- **GitLab** — uses the `GITLAB_TOKEN` (personal-, project-, or group-access token with `api` scope) environment variable, falling back to `CI_JOB_TOKEN` when running inside a GitLab CI job. See the [GitLab CI integration guide](/cursus/guides/ci-integration/gitlab/) for token-scope details.
 
 ### crates.io trusted publishing
 

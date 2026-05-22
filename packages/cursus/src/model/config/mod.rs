@@ -195,19 +195,22 @@ impl Config {
 	/// Returns `true` when at least one forge integration is enabled.
 	///
 	/// Used by orchestration code that wants to gate forge interaction
-	/// without caring which concrete forge is active. ADR-059 will define
-	/// the "both enabled" precedence; today the binary boundary picks GitHub
-	/// first when both are enabled.
+	/// without caring which concrete forge is active. Per ADR-059,
+	/// [`Config::load`] rejects configurations that enable both forges at
+	/// once; the GitHub-first precedence applied internally below is a
+	/// defensive fallback for `Config` values constructed programmatically
+	/// (e.g. via the builder in tests) that bypass the loader.
 	pub fn forge_enabled(&self) -> bool {
 		self.data.github.enabled || self.data.gitlab.enabled
 	}
 
-	/// Returns the release-request title for the active forge, using
-	/// GitHub-first precedence when both are enabled.
+	/// Returns the release-request title for the active forge.
 	///
 	/// Falls back to the GitHub default (`"Release updates"`) when no forge
 	/// is enabled — callers should normally have already gated on
-	/// [`forge_enabled`](Self::forge_enabled).
+	/// [`forge_enabled`](Self::forge_enabled). The GitHub-first precedence
+	/// is internal-only; see [`forge_enabled`](Self::forge_enabled) for
+	/// why both-enabled cannot happen via [`Config::load`].
 	pub fn release_request_title(&self) -> &str {
 		if self.data.github.enabled {
 			self.data.github.pull_request_title()
@@ -218,9 +221,11 @@ impl Config {
 		}
 	}
 
-	/// Returns the build command for the active forge, using GitHub-first
-	/// precedence when both are enabled. Empty string when no forge is enabled
-	/// or the active forge has no build command configured.
+	/// Returns the build command for the active forge. Empty string when no
+	/// forge is enabled or the active forge has no build command configured.
+	/// The GitHub-first precedence is internal-only; see
+	/// [`forge_enabled`](Self::forge_enabled) for why both-enabled cannot
+	/// happen via [`Config::load`].
 	pub fn build_command(&self) -> &str {
 		if self.data.github.enabled {
 			&self.data.github.build_command
@@ -231,9 +236,11 @@ impl Config {
 		}
 	}
 
-	/// Returns the per-package artifact map for the active forge, using
-	/// GitHub-first precedence when both are enabled. Empty when no forge is
-	/// enabled or the active forge has no artifacts configured.
+	/// Returns the per-package artifact map for the active forge. Empty when
+	/// no forge is enabled or the active forge has no artifacts configured.
+	/// The GitHub-first precedence is internal-only; see
+	/// [`forge_enabled`](Self::forge_enabled) for why both-enabled cannot
+	/// happen via [`Config::load`].
 	pub fn forge_artifacts(
 		&self,
 	) -> &std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {

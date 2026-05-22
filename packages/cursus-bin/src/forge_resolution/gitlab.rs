@@ -56,49 +56,86 @@ pub(crate) async fn gitlab_handles(
 	let cfg = config
 		.as_ref()
 		.ok_or_else(|| "No configuration file found".to_string())?;
-	let project = cursus::forge::gitlab::GitLabProject::resolve(&cfg.gitlab, git)
+	let resolved = cursus::forge::gitlab::GitLabProject::resolve(&cfg.gitlab, git)
 		.await
 		.map_err(|e| format!("{e:#}"))?;
-
-	let pat = env_first(&["GITLAB_TOKEN"]);
-	let job_token = env_first(&["CI_JOB_TOKEN"]);
-	let host = gitlab_base_url(&cfg.gitlab.host);
+	let (scheme, host) = gitlab_endpoint(&cfg.gitlab.host);
 	validate_gitlab_host(&host)?;
-	let (token, token_kind, uses_job_token_only) = match (pat, job_token) {
-		(Some(token), _) => (
-			token,
-			cursus::forge::gitlab::GitLabTokenKind::PersonalAccessToken,
-			false,
-		),
-		(_, Some(token)) => (
-			token,
-			cursus::forge::gitlab::GitLabTokenKind::JobToken,
-			true,
-		),
-		(None, None) => {
-			return Err(
-				"No GitLab token found (GITLAB_TOKEN, or CI_JOB_TOKEN for publish flows)"
-					.to_string(),
-			);
-		}
-	};
-	let builder = match token_kind {
-		cursus::forge::gitlab::GitLabTokenKind::PersonalAccessToken => {
-			GitlabBuilder::new(&host, &token)
-		}
-		cursus::forge::gitlab::GitLabTokenKind::JobToken => {
-			GitlabBuilder::new_with_job_token(&host, &token)
-		}
-	};
-	let async_client = builder
-		.build_async()
-		.await
-		.map_err(|e| format!("Failed to initialise GitLab client for host '{host}': {e:#}"))?;
+	let project = pin_endpoint_on_project(&scheme, &host, resolved);
+	let (token, token_kind, uses_job_token_only) = pick_gitlab_token()?;
+	let async_client = build_async_gitlab(&host, &scheme, &token, token_kind).await?;
 	Ok(GitLabHandles {
 		client: Arc::new(async_client),
 		project,
 		uses_job_token_only,
 	})
+}
+
+/// Pins the resolved API endpoint (`scheme`, `host`) onto a `GitLabProject`
+/// so asset URLs composed via the project can never diverge from the host
+/// the upload actually targeted. This matters when `CI_API_V4_URL` points at
+/// a self-managed host while `[gitlab].host` or the git remote points
+/// elsewhere (e.g. a stale mirror).
+pub(super) fn pin_endpoint_on_project(
+	scheme: &str,
+	host: &str,
+	resolved: cursus::forge::gitlab::GitLabProject,
+) -> cursus::forge::gitlab::GitLabProject {
+	cursus::forge::gitlab::GitLabProject {
+		host: host.to_string(),
+		..resolved.with_scheme(scheme)
+	}
+}
+
+/// Selects a GitLab auth token from the environment, preferring `GITLAB_TOKEN`
+/// (PAT) over `CI_JOB_TOKEN`. Returns the token, its kind, and a flag set
+/// when no PAT fallback is available (needed by the MR preflight).
+#[coverage(off)]
+fn pick_gitlab_token() -> Result<(String, cursus::forge::gitlab::GitLabTokenKind, bool), String> {
+	let pat = env_first(&["GITLAB_TOKEN"]);
+	let job_token = env_first(&["CI_JOB_TOKEN"]);
+	match (pat, job_token) {
+		(Some(token), _) => Ok((
+			token,
+			cursus::forge::gitlab::GitLabTokenKind::PersonalAccessToken,
+			false,
+		)),
+		(_, Some(token)) => Ok((
+			token,
+			cursus::forge::gitlab::GitLabTokenKind::JobToken,
+			true,
+		)),
+		(None, None) => Err(
+			"No GitLab token found (GITLAB_TOKEN, or CI_JOB_TOKEN for publish flows)".to_string(),
+		),
+	}
+}
+
+/// Builds the `AsyncGitlab` HTTP client for the resolved endpoint. Switches
+/// the builder off the default HTTPS when `scheme == "http"` so self-managed
+/// instances served over plain HTTP remain reachable.
+#[coverage(off)]
+async fn build_async_gitlab(
+	host: &str,
+	scheme: &str,
+	token: &str,
+	token_kind: cursus::forge::gitlab::GitLabTokenKind,
+) -> Result<AsyncGitlab, String> {
+	let mut builder = match token_kind {
+		cursus::forge::gitlab::GitLabTokenKind::PersonalAccessToken => {
+			GitlabBuilder::new(host, token)
+		}
+		cursus::forge::gitlab::GitLabTokenKind::JobToken => {
+			GitlabBuilder::new_with_job_token(host, token)
+		}
+	};
+	if scheme == "http" {
+		builder.insecure();
+	}
+	builder
+		.build_async()
+		.await
+		.map_err(|e| format!("Failed to initialise GitLab client for host '{host}': {e:#}"))
 }
 
 /// Constructs the GitLab code forge client from pre-built [`GitLabHandles`].
@@ -119,42 +156,61 @@ pub(crate) fn resolve_gitlab_forge_client_from_handles(
 	}
 }
 
-/// Resolves the GitLab API base host the client should target by reading the
-/// `CI_API_V4_URL` env var and the configured host.
+/// Resolves the GitLab API endpoint the client should target by reading the
+/// `CI_API_V4_URL` env var and the configured host. Returns `(scheme, host)`.
 ///
 /// Binary-boundary env-var reader; the precedence logic lives in
-/// [`gitlab_base_url_from`] (which is fully tested). Excluded from coverage
+/// [`gitlab_endpoint_from`] (which is fully tested). Excluded from coverage
 /// in line with the `cursus-bin/src/main.rs` convention for IO entrypoints.
 #[coverage(off)]
-fn gitlab_base_url(config_host: &str) -> String {
-	gitlab_base_url_from(env_first(&["CI_API_V4_URL"]).as_deref(), config_host)
+fn gitlab_endpoint(config_host: &str) -> (String, String) {
+	gitlab_endpoint_from(env_first(&["CI_API_V4_URL"]).as_deref(), config_host)
 }
 
-/// Pure resolution of the GitLab API base host. Split from
-/// [`gitlab_base_url`] so the precedence rules are unit-testable without
-/// env-var manipulation.
+/// Pure resolution of the GitLab API endpoint. Split from
+/// [`gitlab_endpoint`] so the precedence rules are unit-testable without
+/// env-var manipulation. Returns `(scheme, host)` where `scheme` is
+/// `"https"` or `"http"` and `host` is a bare hostname (optionally with
+/// `:<port>` suffix).
 ///
 /// `CI_API_V4_URL` (provided by every GitLab CI job and the most reliable
 /// indicator of the correct base on self-managed instances) wins. Otherwise
-/// the `[gitlab].host` config value is used. Empty fall back to `gitlab.com`.
-pub(super) fn gitlab_base_url_from(ci_api_v4_url: Option<&str>, config_host: &str) -> String {
+/// the `[gitlab].host` config value is used. Empty fall back to
+/// `https://gitlab.com`. Any scheme other than `https`/`http` is normalised
+/// to `https` so a typo in config cannot produce an unreachable URL.
+pub(super) fn gitlab_endpoint_from(
+	ci_api_v4_url: Option<&str>,
+	config_host: &str,
+) -> (String, String) {
 	if let Some(ci_url) = ci_api_v4_url {
 		// CI_API_V4_URL ends in `/api/v4`; strip it to recover the bare host.
-		let host = ci_url.trim_end_matches('/');
-		let host = host.strip_suffix("/api/v4").unwrap_or(host);
-		strip_scheme(host).to_string()
+		let trimmed = ci_url.trim_end_matches('/');
+		let trimmed = trimmed.strip_suffix("/api/v4").unwrap_or(trimmed);
+		split_scheme(trimmed)
 	} else if !config_host.trim().is_empty() {
-		strip_scheme(config_host.trim().trim_end_matches('/')).to_string()
+		split_scheme(config_host.trim().trim_end_matches('/'))
 	} else {
-		"gitlab.com".to_string()
+		("https".to_string(), "gitlab.com".to_string())
 	}
 }
 
-/// Strips a leading `https://` or `http://` from a URL-like host string.
-pub(super) fn strip_scheme(s: &str) -> &str {
-	s.strip_prefix("https://")
-		.or_else(|| s.strip_prefix("http://"))
-		.unwrap_or(s)
+/// Splits a URL-like string into `(scheme, host)`. Recognises only `https://`
+/// and `http://` prefixes; any other `<word>://` form is rejected by stripping
+/// the prefix and returning the bare host with the default `"https"` scheme.
+/// Strings with no `://` at all are treated as bare hostnames.
+pub(super) fn split_scheme(s: &str) -> (String, String) {
+	if let Some(rest) = s.strip_prefix("https://") {
+		("https".to_string(), rest.to_string())
+	} else if let Some(rest) = s.strip_prefix("http://") {
+		("http".to_string(), rest.to_string())
+	} else if let Some(idx) = s.find("://") {
+		// Unknown scheme — strip the prefix so downstream host validation
+		// rejects the bare host cleanly, rather than carrying the bogus
+		// scheme into validator error messages.
+		("https".to_string(), s[idx + 3..].to_string())
+	} else {
+		("https".to_string(), s.to_string())
+	}
 }
 
 /// Validates that a resolved GitLab host contains only characters that are

@@ -11,13 +11,19 @@ use anyhow::bail;
 use crate::git::Git;
 use crate::model::config::GitLabConfig;
 
-/// A parsed GitLab project identity: host, group path, and project name.
+/// A parsed GitLab project identity: scheme, host, group path, and project name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitLabProject {
+	/// URL scheme the GitLab API and asset URLs should use
+	/// (`"https"` or `"http"`). Defaults to `"https"` from [`GitLabProject::new`];
+	/// `parse_url` preserves the scheme detected from the input URL, and the
+	/// binary boundary may override it via [`GitLabProject::with_scheme`] when
+	/// `CI_API_V4_URL` or `[gitlab].host` specifies a non-default scheme.
+	pub scheme: String,
 	/// Hostname of the GitLab instance (e.g. `gitlab.com`, `gitlab.example.com`).
 	///
-	/// The scheme is not included; callers compose the base URL by combining
-	/// this with the configured or detected scheme.
+	/// The scheme is stored in [`Self::scheme`]; callers compose the base URL
+	/// by combining the two.
 	pub host: String,
 	/// Group (or namespace) path the project belongs to.
 	///
@@ -52,10 +58,24 @@ impl GitLabProject {
 		Self::validate_group_path(&group)?;
 		Self::validate_identifier(&project, "project")?;
 		Ok(Self {
+			scheme: "https".to_string(),
 			host,
 			group,
 			project,
 		})
+	}
+
+	/// Builder-style override for the URL scheme (`"https"` or `"http"`).
+	///
+	/// Returns the project unchanged for any scheme other than `"https"` or
+	/// `"http"` so callers cannot inject arbitrary scheme strings into the
+	/// composed base URL.
+	pub fn with_scheme(mut self, scheme: impl Into<String>) -> Self {
+		let s = scheme.into();
+		if s == "https" || s == "http" {
+			self.scheme = s;
+		}
+		self
 	}
 
 	fn validate_identifier(value: &str, field: &str) -> anyhow::Result<()> {
@@ -121,19 +141,24 @@ impl GitLabProject {
 	pub(crate) fn parse_url(url: &str) -> Option<Self> {
 		let url = url.trim();
 
-		let (host, path) = if let Some(rest) = url.strip_prefix("https://") {
-			split_host_and_path(rest)?
+		let (scheme, host, path) = if let Some(rest) = url.strip_prefix("https://") {
+			let (h, p) = split_host_and_path(rest)?;
+			("https", h, p)
 		} else if let Some(rest) = url.strip_prefix("http://") {
-			split_host_and_path(rest)?
+			let (h, p) = split_host_and_path(rest)?;
+			("http", h, p)
 		} else if let Some(rest) = url.strip_prefix("ssh://") {
-			// ssh:// scheme: optional 'user@', then host[:port]/path
+			// ssh:// scheme: optional 'user@', then host[:port]/path. The web
+			// API the asset URLs target is virtually always HTTPS even when the
+			// repo is cloned over SSH, so default to "https" here.
 			let rest = rest.split_once('@').map_or(rest, |(_, after)| after);
-			split_host_and_path(rest)?
+			let (h, p) = split_host_and_path(rest)?;
+			("https", h, p)
 		} else {
-			// SCP syntax: git@host:group/project
+			// SCP syntax: git@host:group/project — same HTTPS default as ssh://.
 			let rest = url.strip_prefix("git@")?;
 			let (host, path) = rest.split_once(':')?;
-			(host.to_string(), path.to_string())
+			("https", host.to_string(), path.to_string())
 		};
 
 		let path = path.strip_suffix(".git").unwrap_or(&path);
@@ -141,7 +166,9 @@ impl GitLabProject {
 		if group.is_empty() {
 			return None;
 		}
-		GitLabProject::new(host, group, project).ok()
+		GitLabProject::new(host, group, project)
+			.map(|p| p.with_scheme(scheme))
+			.ok()
 	}
 
 	/// Detects the GitLab project for a git working directory.
@@ -175,8 +202,8 @@ impl GitLabProject {
 	pub async fn resolve(gitlab_config: &GitLabConfig, git: &dyn Git) -> anyhow::Result<Self> {
 		match (gitlab_config.group(), gitlab_config.project()) {
 			(Some(group), Some(project)) => {
-				let host = host_from_config(&gitlab_config.host);
-				return GitLabProject::new(host, group, project);
+				let (scheme, host) = scheme_and_host_from_config(&gitlab_config.host);
+				return GitLabProject::new(host, group, project).map(|p| p.with_scheme(scheme));
 			}
 			(Some(_), None) | (None, Some(_)) => bail!(
 				"[gitlab].group and [gitlab].project must be set together; \
@@ -211,18 +238,27 @@ fn split_host_and_path(s: &str) -> Option<(String, String)> {
 	Some((host_with_port.to_string(), path.to_string()))
 }
 
-/// Resolves the host from a `[gitlab].host` config value.
+/// Splits a `[gitlab].host` config value into its `(scheme, host)` parts.
 ///
-/// Empty resolves to `gitlab.com`. Otherwise strips a leading scheme
-/// (`https://`, `http://`) so the returned value is the bare hostname only.
-pub(crate) fn host_from_config(host: &str) -> String {
+/// Returns `("https", "gitlab.com")` for an empty/whitespace value. An
+/// explicit `http://` prefix is preserved so a self-managed instance served
+/// over plain HTTP propagates the correct scheme into the constructed
+/// [`GitLabProject`]. Any other `<word>://` prefix is stripped (with the
+/// scheme defaulted to `"https"`) so downstream host validation rejects the
+/// bare host cleanly rather than echoing the bogus scheme back in the error.
+pub(crate) fn scheme_and_host_from_config(host: &str) -> (String, String) {
 	let host = host.trim();
 	if host.is_empty() {
-		return "gitlab.com".to_string();
+		return ("https".to_string(), "gitlab.com".to_string());
 	}
-	host.strip_prefix("https://")
-		.or_else(|| host.strip_prefix("http://"))
-		.unwrap_or(host)
-		.trim_end_matches('/')
-		.to_string()
+	let (scheme, rest) = if let Some(rest) = host.strip_prefix("https://") {
+		("https", rest)
+	} else if let Some(rest) = host.strip_prefix("http://") {
+		("http", rest)
+	} else if let Some(idx) = host.find("://") {
+		("https", &host[idx + 3..])
+	} else {
+		("https", host)
+	};
+	(scheme.to_string(), rest.trim_end_matches('/').to_string())
 }

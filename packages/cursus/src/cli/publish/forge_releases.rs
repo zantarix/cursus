@@ -1,4 +1,8 @@
-//! GitHub Release creation, artifact upload, and build command orchestration.
+//! Forge release creation, artifact upload, and build command orchestration.
+//!
+//! Forge-neutral: dispatches to whichever [`crate::forge::CodeForgeClient`]
+//! the binary boundary provided (GitHub or GitLab). User-facing log lines
+//! pick up the active forge's vocabulary via [`CodeForgeClient::forge_name`].
 
 use anyhow::Context;
 use log::{error, info, warn};
@@ -115,7 +119,7 @@ enum ReleaseAction {
 	Failed,
 }
 
-/// Processes a single package's GitHub Release.
+/// Processes a single package's forge release on the active forge.
 async fn process_one_release(
 	code_forge_client: &dyn CodeForgeClient,
 	git: &dyn Git,
@@ -171,7 +175,7 @@ async fn process_one_release(
 	}
 }
 
-/// Orchestrates GitHub Release creation for all successfully published packages.
+/// Orchestrates forge release creation for all successfully published packages.
 ///
 /// The caller must ensure that the code forge client is available (i.e. `code_forge_client`
 /// is `Ok`) before calling this function (enforced by the early check in `cmd_publish`).
@@ -205,7 +209,7 @@ pub(super) async fn orchestrate_forge_releases(
 	Ok((created_count, already_present_count, forge_failed))
 }
 
-/// Uploads all configured artifacts to a GitHub release.
+/// Uploads all configured artifacts to a forge release on the active forge.
 ///
 /// Returns `true` if any upload failed, `false` if all succeeded.
 pub(super) async fn upload_release_artifacts(

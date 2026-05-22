@@ -1,76 +1,141 @@
-use crate::forge_resolution::gitlab::{gitlab_base_url_from, strip_scheme, validate_gitlab_host};
+use cursus::forge::gitlab::GitLabProject;
 
-// ── strip_scheme ─────────────────────────────────────────────────────────
+use crate::forge_resolution::gitlab::{
+	gitlab_endpoint_from, pin_endpoint_on_project, split_scheme, validate_gitlab_host,
+};
+
+// ── split_scheme ─────────────────────────────────────────────────────────
 
 #[test]
-fn strip_scheme_removes_https_prefix() {
+fn split_scheme_extracts_https_prefix() {
 	assert_eq!(
-		strip_scheme("https://gitlab.example.com"),
-		"gitlab.example.com"
+		split_scheme("https://gitlab.example.com"),
+		("https".to_string(), "gitlab.example.com".to_string())
 	);
 }
 
 #[test]
-fn strip_scheme_removes_http_prefix() {
+fn split_scheme_extracts_http_prefix() {
 	assert_eq!(
-		strip_scheme("http://gitlab.example.com"),
-		"gitlab.example.com"
+		split_scheme("http://gitlab.example.com"),
+		("http".to_string(), "gitlab.example.com".to_string())
 	);
 }
 
 #[test]
-fn strip_scheme_passes_through_bare_host() {
-	assert_eq!(strip_scheme("gitlab.example.com"), "gitlab.example.com");
-}
-
-#[test]
-fn strip_scheme_does_not_strip_other_schemes() {
+fn split_scheme_defaults_to_https_for_bare_host() {
 	assert_eq!(
-		strip_scheme("ftp://gitlab.example.com"),
-		"ftp://gitlab.example.com"
+		split_scheme("gitlab.example.com"),
+		("https".to_string(), "gitlab.example.com".to_string())
 	);
 }
 
-// ── gitlab_base_url_from ─────────────────────────────────────────────────
+#[test]
+fn split_scheme_strips_unknown_scheme_and_defaults_to_https() {
+	// Unknown schemes (e.g. ftp://) are stripped so downstream host
+	// validation rejects the bare host cleanly rather than echoing the
+	// bogus scheme back in the error message.
+	assert_eq!(
+		split_scheme("ftp://gitlab.example.com"),
+		("https".to_string(), "gitlab.example.com".to_string())
+	);
+}
+
+// ── gitlab_endpoint_from ─────────────────────────────────────────────────
 
 #[test]
-fn gitlab_base_url_ci_api_v4_url_takes_precedence() {
-	let host = gitlab_base_url_from(
+fn gitlab_endpoint_ci_api_v4_url_takes_precedence() {
+	let (scheme, host) = gitlab_endpoint_from(
 		Some("https://gitlab.example.com/api/v4"),
 		"https://override.example.com",
 	);
+	assert_eq!(scheme, "https");
 	assert_eq!(host, "gitlab.example.com");
 }
 
 #[test]
-fn gitlab_base_url_ci_api_v4_url_trailing_slash() {
-	let host = gitlab_base_url_from(Some("https://gitlab.example.com/api/v4/"), "");
+fn gitlab_endpoint_ci_api_v4_url_trailing_slash() {
+	let (scheme, host) = gitlab_endpoint_from(Some("https://gitlab.example.com/api/v4/"), "");
+	assert_eq!(scheme, "https");
 	assert_eq!(host, "gitlab.example.com");
 }
 
 #[test]
-fn gitlab_base_url_ci_api_v4_url_without_api_v4_suffix() {
+fn gitlab_endpoint_ci_api_v4_url_without_api_v4_suffix() {
 	// `strip_suffix("/api/v4")` returns `None`, so the host falls through unchanged.
-	let host = gitlab_base_url_from(Some("https://gitlab.example.com/"), "");
+	let (scheme, host) = gitlab_endpoint_from(Some("https://gitlab.example.com/"), "");
+	assert_eq!(scheme, "https");
 	assert_eq!(host, "gitlab.example.com");
 }
 
 #[test]
-fn gitlab_base_url_falls_back_to_config_host() {
-	let host = gitlab_base_url_from(None, "https://gitlab.example.com/");
+fn gitlab_endpoint_ci_api_v4_url_http_scheme_preserved() {
+	// Self-managed GitLab CI instances on plain HTTP must propagate the
+	// scheme so the API client and asset URLs agree.
+	let (scheme, host) = gitlab_endpoint_from(Some("http://gitlab.internal/api/v4"), "");
+	assert_eq!(scheme, "http");
+	assert_eq!(host, "gitlab.internal");
+}
+
+#[test]
+fn gitlab_endpoint_falls_back_to_config_host() {
+	let (scheme, host) = gitlab_endpoint_from(None, "https://gitlab.example.com/");
+	assert_eq!(scheme, "https");
 	assert_eq!(host, "gitlab.example.com");
 }
 
 #[test]
-fn gitlab_base_url_config_host_without_scheme() {
-	let host = gitlab_base_url_from(None, "gitlab.example.com");
+fn gitlab_endpoint_config_host_http_scheme_preserved() {
+	let (scheme, host) = gitlab_endpoint_from(None, "http://gitlab.internal");
+	assert_eq!(scheme, "http");
+	assert_eq!(host, "gitlab.internal");
+}
+
+#[test]
+fn gitlab_endpoint_config_host_without_scheme() {
+	let (scheme, host) = gitlab_endpoint_from(None, "gitlab.example.com");
+	assert_eq!(scheme, "https");
 	assert_eq!(host, "gitlab.example.com");
 }
 
 #[test]
-fn gitlab_base_url_defaults_to_gitlab_com_when_empty() {
-	assert_eq!(gitlab_base_url_from(None, ""), "gitlab.com");
-	assert_eq!(gitlab_base_url_from(None, "   "), "gitlab.com");
+fn gitlab_endpoint_defaults_to_gitlab_com_when_empty() {
+	assert_eq!(
+		gitlab_endpoint_from(None, ""),
+		("https".to_string(), "gitlab.com".to_string())
+	);
+	assert_eq!(
+		gitlab_endpoint_from(None, "   "),
+		("https".to_string(), "gitlab.com".to_string())
+	);
+}
+
+// ── pin_endpoint_on_project ──────────────────────────────────────────────
+
+#[test]
+fn pin_endpoint_overrides_resolved_host_and_scheme() {
+	// `CI_API_V4_URL` says HTTPS at one host, but the resolved project
+	// (e.g. from a stale mirror remote) points at another. The pin must
+	// overwrite both so asset URLs target the host the upload actually
+	// went to.
+	let resolved = GitLabProject::new("mirror.example.com", "acme", "app").unwrap();
+	let pinned = pin_endpoint_on_project("https", "gitlab.example.com", resolved);
+	assert_eq!(pinned.scheme, "https");
+	assert_eq!(pinned.host, "gitlab.example.com");
+	assert_eq!(pinned.group, "acme");
+	assert_eq!(pinned.project, "app");
+}
+
+#[test]
+fn pin_endpoint_downgrades_scheme_when_endpoint_is_http() {
+	// `CI_API_V4_URL=http://gitlab.internal/api/v4` against an HTTPS-default
+	// resolved project — the API client will use HTTP, so asset URLs must
+	// match.
+	let resolved = GitLabProject::new("gitlab.example.com", "acme", "app").unwrap();
+	assert_eq!(resolved.scheme, "https");
+	let pinned = pin_endpoint_on_project("http", "gitlab.internal", resolved);
+	assert_eq!(pinned.scheme, "http");
+	assert_eq!(pinned.host, "gitlab.internal");
 }
 
 // ── validate_gitlab_host ─────────────────────────────────────────────────

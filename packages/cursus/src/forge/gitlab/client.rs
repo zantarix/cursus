@@ -21,6 +21,7 @@ use serde::Deserialize;
 
 use super::remote::GitLabProject;
 use crate::forge::{CodeForgeClient, ExistingRelease, PullRequest};
+use crate::redact::redact_credentials;
 
 /// The constant Generic Package Registry "package" used to host release
 /// artifacts. All asset uploads for the same release share this key,
@@ -98,17 +99,10 @@ impl ReqwestGitLabClient {
 
 	/// Composes the public Generic Package Registry download URL for a single asset.
 	///
-	/// GitLab serves uploaded files at the same path the upload used, so the
-	/// URL is fully determined by `(host, project, package_name, version, file_name)`.
+	/// Delegates to the free [`compose_package_file_url`] so the URL template
+	/// can be unit-tested directly without standing up a mock HTTP server.
 	fn package_file_url(&self, version: &str, file_name: &str) -> String {
-		format!(
-			"https://{host}/api/v4/projects/{path}/packages/generic/{pkg}/{ver}/{file}",
-			host = self.project.host,
-			path = percent_encode_path(&self.project_path()),
-			pkg = RELEASE_ASSETS_PACKAGE,
-			ver = percent_encode_path(version),
-			file = percent_encode_path(file_name),
-		)
+		compose_package_file_url(&self.project, version, file_name)
 	}
 }
 
@@ -146,6 +140,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 		gitlab::api::ignore(endpoint)
 			.query_async(&self.client)
 			.await
+			.map_err(redact_api_error)
 			.with_context(|| format!("Failed to create GitLab release for tag '{tag_name}'"))?;
 		info!("Created GitLab release for {tag_name}");
 		// Releases on GitLab are identified by tag; we use it as the opaque
@@ -181,6 +176,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 		gitlab::api::ignore(upload)
 			.query_async(&self.client)
 			.await
+			.map_err(redact_api_error)
 			.with_context(|| {
 				format!("Failed to upload '{file_name}' to the GitLab Generic Package Registry")
 			})?;
@@ -198,6 +194,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 		gitlab::api::ignore(link)
 			.query_async(&self.client)
 			.await
+			.map_err(redact_api_error)
 			.with_context(|| {
 				format!("Failed to attach '{file_name}' to GitLab release '{release_id}'")
 			})?;
@@ -224,6 +221,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 		let mr: MergeRequestResponse = endpoint
 			.query_async(&self.client)
 			.await
+			.map_err(redact_api_error)
 			.with_context(|| format!("Failed to create merge request '{title}'"))?;
 		info!("Created merge request: {}", mr.web_url);
 		Ok(mr.web_url)
@@ -241,6 +239,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 		let mrs: Vec<MergeRequestResponse> = endpoint
 			.query_async(&self.client)
 			.await
+			.map_err(redact_api_error)
 			.with_context(|| format!("Failed to list merge requests for branch '{head}'"))?;
 		// GitLab's MR `iid` is per-project, matching what the trait expects;
 		// `state=opened` is enforced server-side, so we just take the first hit.
@@ -268,6 +267,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 		let mr: MergeRequestResponse = endpoint
 			.query_async(&self.client)
 			.await
+			.map_err(redact_api_error)
 			.with_context(|| format!("Failed to update merge request !{pull_number}"))?;
 		info!("Updated merge request: {}", mr.web_url);
 		Ok(mr.web_url)
@@ -292,7 +292,7 @@ impl CodeForgeClient for ReqwestGitLabClient {
 				is_draft: false,
 			})),
 			Err(e) if is_not_found(&e) => Ok(None),
-			Err(e) => Err(anyhow!(e))
+			Err(e) => Err(redact_api_error(e))
 				.with_context(|| format!("Failed to look up GitLab release for tag '{tag}'")),
 		}
 	}
@@ -306,6 +306,20 @@ impl CodeForgeClient for ReqwestGitLabClient {
 	}
 }
 
+/// Converts a `gitlab::api::ApiError` into an [`anyhow::Error`] after running
+/// its `Display` output through [`redact_credentials`]. Used at every
+/// `query_async` call site so a future upstream change that surfaces a
+/// credential-bearing URL (proxy URL, redirect target, etc.) inside an
+/// `ApiError` cannot leak that URL into user-visible logs or wrapped error
+/// chains.
+pub(crate) fn redact_api_error<T>(err: ApiError<T>) -> anyhow::Error
+where
+	T: std::error::Error + Send + Sync + 'static,
+{
+	let raw = format!("{err}");
+	anyhow!("{}", redact_credentials(&raw).into_owned())
+}
+
 /// Detects whether a `gitlab::api::ApiError` corresponds to an HTTP 404 response.
 pub(crate) fn is_not_found<E>(err: &ApiError<E>) -> bool
 where
@@ -317,6 +331,29 @@ where
 		| ApiError::GitlabUnrecognizedWithStatus { status, .. } => status.as_u16() == 404,
 		_ => false,
 	}
+}
+
+/// Composes the public Generic Package Registry download URL for a single asset.
+///
+/// GitLab serves uploaded files at the same path the upload used, so the URL
+/// is fully determined by `(scheme, host, project, package_name, version,
+/// file_name)`. The scheme is read from the project identity so HTTP-only
+/// self-managed instances and HTTPS upstream gitlab.com both produce
+/// reachable links.
+pub(crate) fn compose_package_file_url(
+	project: &GitLabProject,
+	version: &str,
+	file_name: &str,
+) -> String {
+	format!(
+		"{scheme}://{host}/api/v4/projects/{path}/packages/generic/{pkg}/{ver}/{file}",
+		scheme = project.scheme,
+		host = project.host,
+		path = percent_encode_path(&format!("{}/{}", project.group, project.project)),
+		pkg = RELEASE_ASSETS_PACKAGE,
+		ver = percent_encode_path(version),
+		file = percent_encode_path(file_name),
+	)
 }
 
 /// Replaces characters disallowed by GitLab's package_version regex

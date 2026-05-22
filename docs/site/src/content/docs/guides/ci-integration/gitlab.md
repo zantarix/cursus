@@ -41,7 +41,16 @@ Non-standard ports are supported — include the port as part of the host:
 host = "https://gitlab.example.com:8443"
 ```
 
-When running under GitLab CI, `CI_API_V4_URL` is set automatically and takes precedence over `host` — this is the most reliable indicator of the correct API base on self-managed instances, especially behind reverse proxies.
+Self-managed instances served over plain HTTP are also supported — set the scheme explicitly:
+
+```toml
+[gitlab]
+host = "http://gitlab.internal"
+```
+
+Plain HTTP transmits the auth token in cleartext on the wire; only use it on a trusted network.
+
+When running under GitLab CI, `CI_API_V4_URL` is set automatically and takes precedence over `host` — this is the most reliable indicator of the correct API base on self-managed instances, especially behind reverse proxies. The scheme from `CI_API_V4_URL` is preserved as well, so a CI job running against an HTTP instance reaches the same instance the runner does.
 
 ## Authentication
 

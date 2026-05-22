@@ -117,7 +117,7 @@ At most one forge section (`[github]` or `[gitlab]`) may have `enabled = true` a
 | `enabled` | bool | `false` | Enable GitLab integration |
 | `group` | string | auto-detected | GitLab namespace (user or group). Subgroup paths like `acme/sub` are supported |
 | `project` | string | auto-detected | GitLab project name (the final path segment) |
-| `host` | string | `""` (→ `gitlab.com`) | Base URL of the GitLab instance for self-managed deployments. Non-standard ports are supported (e.g. `https://gitlab.example.com:8443`). Overridden by `CI_API_V4_URL` when running under GitLab CI |
+| `host` | string | `""` (→ `gitlab.com`) | Base URL of the GitLab instance for self-managed deployments. Both `https://` and `http://` schemes are accepted (`http://` enables plain-HTTP self-managed instances; the token will be sent in cleartext). Non-standard ports are supported (e.g. `https://gitlab.example.com:8443`). Overridden by `CI_API_V4_URL` when running under GitLab CI |
 | `build_command` | string | `""` | Shell command to build release artifacts |
 | `artifacts` | table of tables | `{}` | Per-package artifact maps: `[gitlab.artifacts.<package-name>]` sections mapping display names to file paths |
 | `merge_request_title` | string | `"Release updates"` | Title for release merge requests (branch strategy only) |

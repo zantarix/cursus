@@ -159,6 +159,45 @@ async fn parse_https_malformed_port_returns_none() {
 	assert!(GitLabProject::parse_url("https://gitlab.com:/acme/app.git").is_none());
 }
 
+// --- GitLabProject scheme handling ---
+
+#[tokio::test]
+async fn new_defaults_to_https_scheme() {
+	let project = GitLabProject::new("gitlab.com", "acme", "app").unwrap();
+	assert_eq!(project.scheme, "https");
+}
+
+#[tokio::test]
+async fn with_scheme_accepts_https_and_http() {
+	let project = GitLabProject::new("gitlab.com", "acme", "app").unwrap();
+	assert_eq!(project.clone().with_scheme("https").scheme, "https");
+	assert_eq!(project.with_scheme("http").scheme, "http");
+}
+
+#[tokio::test]
+async fn with_scheme_ignores_unknown_schemes() {
+	// A typo or attacker-controlled config value cannot inject `ftp` or
+	// `file` into the composed asset URL — unknown schemes leave the field
+	// at its previous value.
+	let project = GitLabProject::new("gitlab.com", "acme", "app").unwrap();
+	let updated = project.with_scheme("ftp");
+	assert_eq!(updated.scheme, "https");
+}
+
+#[tokio::test]
+async fn parse_url_preserves_http_scheme() {
+	let project = GitLabProject::parse_url("http://gitlab.internal/acme/app.git").unwrap();
+	assert_eq!(project.scheme, "http");
+	assert_eq!(project.host, "gitlab.internal");
+}
+
+#[tokio::test]
+async fn parse_url_defaults_https_for_ssh_remotes() {
+	// SSH-cloned remotes still surface assets over HTTPS in practice.
+	let project = GitLabProject::parse_url("git@gitlab.example.com:acme/app.git").unwrap();
+	assert_eq!(project.scheme, "https");
+}
+
 // --- GitLabProject::new validation ---
 
 #[tokio::test]
@@ -278,6 +317,21 @@ async fn resolve_uses_config_host_when_set() {
 	let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
 	let project = GitLabProject::resolve(&config, &git).await.unwrap();
 	assert_eq!(project.host, "gitlab.example.com");
+	assert_eq!(project.scheme, "https");
+}
+
+#[tokio::test]
+async fn resolve_preserves_http_scheme_from_config_host() {
+	// Self-managed instances served over plain HTTP must propagate the
+	// scheme through `resolve` so callers that do not perform the
+	// binary-boundary endpoint override still produce reachable URLs.
+	let config = make_config(Some("acme"), Some("app"), "http://gitlab.internal");
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let wd = workdir();
+	let git = GitWorkdir::new(Arc::clone(&runner) as Arc<dyn CommandRunner>, wd.clone());
+	let project = GitLabProject::resolve(&config, &git).await.unwrap();
+	assert_eq!(project.host, "gitlab.internal");
+	assert_eq!(project.scheme, "http");
 }
 
 #[tokio::test]
@@ -345,35 +399,63 @@ async fn resolve_errors_when_only_project_set() {
 	assert!(result.is_err());
 }
 
-// --- host_from_config ---
+// --- scheme_and_host_from_config ---
 
 #[test]
 fn host_from_empty_returns_gitlab_com() {
-	assert_eq!(host_from_config(""), "gitlab.com");
+	assert_eq!(
+		scheme_and_host_from_config(""),
+		("https".to_string(), "gitlab.com".to_string())
+	);
 }
 
 #[test]
 fn host_from_whitespace_returns_gitlab_com() {
-	assert_eq!(host_from_config("   "), "gitlab.com");
+	assert_eq!(
+		scheme_and_host_from_config("   "),
+		("https".to_string(), "gitlab.com".to_string())
+	);
 }
 
 #[test]
 fn host_strips_https_scheme() {
 	assert_eq!(
-		host_from_config("https://gitlab.example.com"),
-		"gitlab.example.com"
+		scheme_and_host_from_config("https://gitlab.example.com"),
+		("https".to_string(), "gitlab.example.com".to_string())
+	);
+}
+
+#[test]
+fn host_preserves_http_scheme() {
+	assert_eq!(
+		scheme_and_host_from_config("http://gitlab.internal"),
+		("http".to_string(), "gitlab.internal".to_string())
 	);
 }
 
 #[test]
 fn host_strips_trailing_slash() {
 	assert_eq!(
-		host_from_config("https://gitlab.example.com/"),
-		"gitlab.example.com"
+		scheme_and_host_from_config("https://gitlab.example.com/"),
+		("https".to_string(), "gitlab.example.com".to_string())
 	);
 }
 
 #[test]
 fn host_passes_through_bare_host() {
-	assert_eq!(host_from_config("gitlab.example.com"), "gitlab.example.com");
+	assert_eq!(
+		scheme_and_host_from_config("gitlab.example.com"),
+		("https".to_string(), "gitlab.example.com".to_string())
+	);
+}
+
+#[test]
+fn host_strips_unknown_scheme_and_defaults_to_https() {
+	// Mirrors `split_scheme` semantics so library-layer and binary-layer
+	// scheme handling stay consistent. The bare host that comes back then
+	// fails validation cleanly inside `GitLabProject::new`.
+	assert_eq!(
+		scheme_and_host_from_config("ftp://gitlab.internal"),
+		("https".to_string(), "gitlab.internal".to_string())
+	);
 }
