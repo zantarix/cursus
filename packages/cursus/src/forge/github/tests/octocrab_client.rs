@@ -71,13 +71,60 @@ fn asset_body(name: &str) -> Value {
 	})
 }
 
-/// Returns a JSON body that satisfies octocrab's [`PullRequest`] deserialiser.
+/// Returns a JSON body that satisfies octocrab's user deserialisers
+/// ([`Author`]/`SimpleUser`), both of which require a full set of URL fields.
+fn user_body() -> Value {
+	json!({
+		"login": "octocat",
+		"id": 1,
+		"node_id": "U_1",
+		"avatar_url": "https://github.com/images/avatar.png",
+		"gravatar_id": "",
+		"url": "https://api.github.com/users/octocat",
+		"html_url": "https://github.com/octocat",
+		"followers_url": "https://api.github.com/users/octocat/followers",
+		"following_url": "https://api.github.com/users/octocat/following",
+		"gists_url": "https://api.github.com/users/octocat/gists",
+		"starred_url": "https://api.github.com/users/octocat/starred",
+		"subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
+		"organizations_url": "https://api.github.com/users/octocat/orgs",
+		"repos_url": "https://api.github.com/users/octocat/repos",
+		"events_url": "https://api.github.com/users/octocat/events",
+		"received_events_url": "https://api.github.com/users/octocat/received_events",
+		"type": "User",
+		"site_admin": false,
+	})
+}
+
+/// Returns a JSON body that deserialises as either octocrab's
+/// [`PullRequest`] (returned by create/update) or `SimplePullRequest`
+/// (returned by list). The body is a superset of both models' required
+/// fields; serde ignores the fields the narrower type does not declare.
 fn pull_request_body(number: u64, html_url: &str) -> Value {
 	json!({
-		"url": "https://example.com/api/pull",
+		"url": "https://api.github.com/repos/owner/repo/pulls/1",
 		"id": 1,
+		"node_id": "PR_1",
 		"html_url": html_url,
+		"diff_url": "https://github.com/owner/repo/pull/1.diff",
+		"patch_url": "https://github.com/owner/repo/pull/1.patch",
+		"issue_url": "https://api.github.com/repos/owner/repo/issues/1",
+		"commits_url": "https://api.github.com/repos/owner/repo/pulls/1/commits",
+		"review_comments_url": "https://api.github.com/repos/owner/repo/pulls/1/comments",
+		"review_comment_url": "https://api.github.com/repos/owner/repo/pulls/comments{/number}",
+		"comments_url": "https://api.github.com/repos/owner/repo/issues/1/comments",
+		"statuses_url": "https://api.github.com/repos/owner/repo/statuses/deadbeef",
 		"number": number,
+		"state": "open",
+		"title": "Release",
+		"user": user_body(),
+		"labels": [],
+		"created_at": "2024-01-01T00:00:00Z",
+		"updated_at": "2024-01-01T00:00:00Z",
+		"merged": false,
+		"assignees": [],
+		"requested_reviewers": [],
+		"requested_teams": [],
 		"head": {
 			"ref": "release",
 			"sha": "deadbeef",
@@ -86,6 +133,14 @@ fn pull_request_body(number: u64, html_url: &str) -> Value {
 			"ref": "main",
 			"sha": "cafebabe",
 		},
+		"_links": {},
+		"author_association": "OWNER",
+		"additions": 0,
+		"deletions": 0,
+		"changed_files": 0,
+		"commits": 0,
+		"review_comments": 0,
+		"comments": 0,
 	})
 }
 

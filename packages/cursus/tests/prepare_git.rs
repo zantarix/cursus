@@ -762,8 +762,16 @@ async fn prepare_branch_strategy_rerun_is_idempotent() {
 	);
 }
 
-const PR_JSON: &str = r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}"#;
-const PR_LIST_JSON: &str = r#"[{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "number": 7, "html_url": "https://github.com/acme/app/pull/7", "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}}]"#;
+// A PR object that satisfies octocrab 0.51's `PullRequest`/`SimplePullRequest`
+// deserialisers, both of which require a full set of URLs, a user object, and
+// diff stats. Written once and reused for the single and list responses.
+const PR_OBJECT: &str = r#"{"url": "https://api.github.com/repos/acme/app/pulls/7", "id": 1, "node_id": "PR_7", "number": 7, "html_url": "https://github.com/acme/app/pull/7", "diff_url": "https://github.com/acme/app/pull/7.diff", "patch_url": "https://github.com/acme/app/pull/7.patch", "issue_url": "https://api.github.com/repos/acme/app/issues/7", "commits_url": "https://api.github.com/repos/acme/app/pulls/7/commits", "review_comments_url": "https://api.github.com/repos/acme/app/pulls/7/comments", "review_comment_url": "https://api.github.com/repos/acme/app/pulls/comments", "comments_url": "https://api.github.com/repos/acme/app/issues/7/comments", "statuses_url": "https://api.github.com/repos/acme/app/statuses/abc123", "state": "open", "title": "Release", "user": {"login": "octocat", "id": 1, "node_id": "U_1", "avatar_url": "https://github.com/images/avatar.png", "gravatar_id": "", "url": "https://api.github.com/users/octocat", "html_url": "https://github.com/octocat", "followers_url": "https://api.github.com/users/octocat/followers", "following_url": "https://api.github.com/users/octocat/following", "gists_url": "https://api.github.com/users/octocat/gists", "starred_url": "https://api.github.com/users/octocat/starred", "subscriptions_url": "https://api.github.com/users/octocat/subscriptions", "organizations_url": "https://api.github.com/users/octocat/orgs", "repos_url": "https://api.github.com/users/octocat/repos", "events_url": "https://api.github.com/users/octocat/events", "received_events_url": "https://api.github.com/users/octocat/received_events", "type": "User", "site_admin": false}, "labels": [], "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z", "merged": false, "assignees": [], "requested_reviewers": [], "requested_teams": [], "head": {"ref": "cursus-release/main", "sha": "abc123"}, "base": {"ref": "main", "sha": "def456"}, "_links": {}, "author_association": "OWNER", "additions": 0, "deletions": 0, "changed_files": 0, "commits": 0, "review_comments": 0, "comments": 0}"#;
+const PR_JSON: &str = PR_OBJECT;
+
+/// Builds a single-element list response wrapping [`PR_OBJECT`].
+fn pr_list_json() -> String {
+	format!("[{PR_OBJECT}]")
+}
 
 fn make_github_test_env(api_url: &str, dir: &std::path::Path) -> cursus::Env {
 	use std::sync::Arc;
@@ -875,7 +883,7 @@ async fn prepare_branch_strategy_with_github_upserts_pr_on_rerun() {
 			.query_param("state", "open");
 		then.status(200)
 			.header("Content-Type", "application/json")
-			.body(PR_LIST_JSON);
+			.body(pr_list_json());
 	});
 	let mock_update = server.mock(|when, then| {
 		when.method(PATCH).path("/repos/acme/app/pulls/7");
