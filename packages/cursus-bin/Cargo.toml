@@ -15,7 +15,7 @@ name = "cursus"
 path = "src/main.rs"
 
 [dependencies]
-cursus = { path = "../cursus", version = "=0.6.3" }
+cursus = { path = "../cursus", version = "=0.7.0" }
 anyhow = "=1.0.102"
 clap = { version = "=4.6.1", features = ["derive"] }
 gitlab = "=0.1811.0"
@@ -36,7 +36,7 @@ nix-tests = []
 test-support = []
 
 [dev-dependencies]
-cursus = { path = "../cursus", version = "=0.6.3", features = ["test-support"], default-features = false }
+cursus = { path = "../cursus", version = "=0.7.0", features = ["test-support"], default-features = false }
 tempfile = "=3.27.0"
 tokio = { version = "=1.52.3", features = ["rt-multi-thread", "macros"] }
 

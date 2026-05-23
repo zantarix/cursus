@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0 - 2026-05-23
+
+### Features
+
+- Adds GitLab verified release commits. When running on GitLab CI ≥18.10 with a token, the prepare commit is routed through the GitLab commits API and appears as **Verified** in the GitLab UI — no signing key custody required. Reuses the existing `[git].signed_commits` config knob (`"auto"`, `"force"`, `"off"`); `"auto"` engages whenever `GITLAB_CI=true` and a token is present. See the [GitLab CI guide](https://zantarix.github.io/cursus/guides/ci-integration/gitlab/#verified-commits) for setup. [9f13b24] via #150
+- Harden GitLab forge support. Self-managed instances served over plain HTTP are now reachable end-to-end: the API client and the asset URLs surfaced in release notes both honour the scheme from `CI_API_V4_URL` or `[gitlab].host`. The release-asset host is also pinned to the same endpoint the API client used, so a stale or mirrored git remote can no longer cause asset links to point at the wrong instance. GitLab API errors run through credential redaction before being logged, matching the protection already in place for the signed-commit decorator. [9f13b24] via #150
+- Cursus now rejects configurations with more than one forge section enabled at load time. Setting both `[github].enabled = true` and `[gitlab].enabled = true` in `.cursus/config.toml` produces a hard error that names the offending flags and explains the fix. Configs with a single enabled forge — or no enabled forge — continue to work as before. [9f13b24] via #150
+- Add GitLab support to `cursus init`. The wizard now prompts you to pick GitHub, GitLab, or Neither as your forge, with a dedicated GitLab editor screen that auto-detects `group/project` from your git origin and surfaces a self-managed host field for non-gitlab.com instances. The generated `.cursus/config.toml` writes the chosen forge as `enabled = true` and emits the other forge as a commented-out template, so switching forges later is a hand-edit away. The config also reorders active sections to the top of the file so your live configuration is visible without scrolling as the schema grows. [9f13b24] via #150
+- Add first-class GitLab support: [gitlab] config section, ReqwestGitLabClient implementing CodeForgeClient via the Kitware gitlab crate, GitLab CI token detection at the binary boundary, and a forge-neutral crate::forge module layout (relocates crate::github to crate::forge::github) [9f13b24] via #150
+
+### Bug Fixes
+
+- update rust crate octocrab to v0.51.0 [9f13b24] via #150
+
 ## 0.6.3 - 2026-05-12
 
 ### Bug Fixes
