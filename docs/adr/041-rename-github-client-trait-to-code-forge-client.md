@@ -39,3 +39,9 @@ The trait works today and renaming is pure cosmetics until a second forge is act
 ### Use a more generic name like ForgeClient or RemoteForge
 
 Shorter names were considered but `CodeForgeClient` is more descriptive and avoids ambiguity with unrelated uses of "forge" (e.g. Minecraft Forge, metal forging).
+
+## Errata
+
+### 2026-05-13: `github/` module relocated to `forge::github`
+
+The Decision's closing remark that "the `github/` module directory retains its name for now" is no longer accurate. [ADR-056](056-gitlab-support-client-config-and-ci.md) realises the deferred reorganisation by relocating `github/` to `forge::github` and moving the `CodeForgeClient` trait to `forge::client::CodeForgeClient` (re-exported from `forge`). The trait rename established by this ADR is itself unchanged; only the module path is corrected.

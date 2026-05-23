@@ -94,6 +94,10 @@ Add a flag like `--dry-run=local` vs `--dry-run=validate` to let users choose be
 
 ## Errata
 
-**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) adds git tag creation and pushing to the `cursus publish` workflow when `[git].enabled = true`. The Scope section of this ADR lists `cursus publish --dry-run` as skipping "No registry uploads, no GitHub Release creation, no subprocess invocations that contact remotes." Tag creation and tag pushing must now also be skipped during dry-run. The invariant itself ("no remote operations during dry-run") is unchanged; the set of operations it covers has expanded. See [ADR-015](015-ci-managed-release-workflow.md).
+### 2026-03-09: Scope enumeration for `publish --dry-run` is incomplete
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. References to `cursus release` in this ADR now refer to `cursus prepare`. The behavior and dry-run guarantees are unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+The Scope section's enumeration of what `cursus publish --dry-run` must skip ("No registry uploads, no GitHub Release creation, no subprocess invocations that contact remotes") is no longer exhaustive. [ADR-015](015-ci-managed-release-workflow.md) adds tag creation and tag pushing to `cursus publish` when `[git].enabled = true`, both of which must also be suppressed under `--dry-run`. The invariant itself ("no remote operations during dry-run") is unchanged; only the set of operations it must cover has grown.
+
+### 2026-03-09: `cursus release` renamed to `cursus prepare`
+
+References to `cursus release` in this ADR are incorrect: [ADR-016](016-rename-release-to-prepare.md) renames the subcommand to `cursus prepare`. The dry-run guarantees are unchanged; only the user-facing name differs.

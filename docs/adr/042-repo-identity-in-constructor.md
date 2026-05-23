@@ -72,3 +72,9 @@ Add a `CodeRepo` marker trait, have `CodeForgeClient` methods take `&dyn CodeRep
 ### Concrete enum (`CodeRepo { GitHub(GitHubRepo), GitLab(GitLabRepo), ... }`)
 
 Define a `CodeRepo` enum with a variant per supported forge. This is fully object-safe and requires no wrapper. However, adding a new forge requires modifying the enum (a closed set), and every implementation must handle or ignore variants for other forges. This violates the open/closed principle and couples all forge implementations together. Rejected because it undermines the extensibility goal and creates dead branches in every implementation.
+
+## Errata
+
+### 2026-05-13: `GitHubRepo` location and resolution call site have moved
+
+The Neutral bullet describing `GitHubRepo` resolution moving "from command handlers to `main.rs`" and the bullet stating that "the `github/` module directory retains its name per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md)" are both incorrect after [ADR-056](056-gitlab-support-client-config-and-ci.md): the `github/` module is relocated to `forge::github`, `GitHubRepo` and `GitHubRepo::resolve()` move with it, and resolution is now performed in `cursus-bin/src/forge_resolution/github.rs` (extracted from `main.rs`). The same ADR adds a parallel `GitLabProject { host, group, project }` identity in `forge::gitlab` as a second concrete instance of the per-client identity model this ADR introduced; the construct-time identity-storage decision is unchanged.

@@ -229,20 +229,92 @@ fn write_github_section(
 	writeln!(out)
 }
 
-/// Renders a `.cursus/config.toml` string from the given [`InitResult`].
+fn write_gitlab_advanced_comments(out: &mut String) -> fmt::Result {
+	writeln!(
+		out,
+		"# build_command = \"\"                # {}",
+		crate::t!("gitlab-build-command-comment")
+	)?;
+	writeln!(
+		out,
+		"# merge_request_title = \"\"          # {}",
+		crate::t!("gitlab-mr-title-comment")
+	)?;
+	writeln!(
+		out,
+		"# [gitlab.artifacts.<package-name>] # {}",
+		crate::t!("gitlab-artifacts-comment")
+	)
+}
+
+fn write_group_comment(out: &mut String, detected: &Option<String>) -> fmt::Result {
+	match detected {
+		Some(v) => writeln!(out, "# group = {}", toml_quoted(v)),
+		None => writeln!(
+			out,
+			"# group = \"\"                        # {}",
+			crate::t!("gitlab-group-auto-detect-comment")
+		),
+	}
+}
+
+fn write_project_comment(out: &mut String, detected: &Option<String>) -> fmt::Result {
+	match detected {
+		Some(v) => writeln!(out, "# project = {}", toml_quoted(v)),
+		None => writeln!(
+			out,
+			"# project = \"\"                      # {}",
+			crate::t!("gitlab-project-auto-detect-comment")
+		),
+	}
+}
+
+fn write_host_comment(out: &mut String) -> fmt::Result {
+	// The host hint is always the empty placeholder: a non-gitlab.com detected
+	// host is only meaningful when the user explicitly chose "self-managed",
+	// in which case the value is emitted actively (not as a commented hint).
+	writeln!(
+		out,
+		"# host = \"\"                         # {}",
+		crate::t!("gitlab-host-comment")
+	)
+}
+
+fn write_gitlab_section(out: &mut String, result: &InitResult) -> fmt::Result {
+	if result.gitlab_enabled {
+		writeln!(out, "[gitlab]")?;
+		writeln!(out, "enabled = true")?;
+		if let Some(g) = &result.gitlab_group {
+			writeln!(out, "group = {}", toml_quoted(g))?;
+		} else {
+			write_group_comment(out, &result.detected_gitlab_group)?;
+		}
+		if let Some(p) = &result.gitlab_project {
+			writeln!(out, "project = {}", toml_quoted(p))?;
+		} else {
+			write_project_comment(out, &result.detected_gitlab_project)?;
+		}
+		if let Some(h) = &result.gitlab_host {
+			writeln!(out, "host = {}", toml_quoted(h))?;
+		} else {
+			write_host_comment(out)?;
+		}
+	} else {
+		writeln!(out, "# [gitlab]")?;
+		writeln!(out, "# enabled = false")?;
+		write_group_comment(out, &result.detected_gitlab_group)?;
+		write_project_comment(out, &result.detected_gitlab_project)?;
+		write_host_comment(out)?;
+	}
+	write_gitlab_advanced_comments(out)?;
+	writeln!(out)
+}
+
+/// Always-commented `[global]` header block.
 ///
-/// Enabled sections are emitted as active TOML. Disabled or advanced options
-/// are included as commented-out blocks so users can discover and uncomment them
-/// without consulting documentation.
-///
-/// Section ordering: `[global]`, cargo, npm (enabled first as active TOML,
-/// disabled as comments), `[prepare]`, `[linked-versions]`, `[git]`, `[github]`.
-///
-/// # Errors
-///
-/// Returns an error if writing to the internal string buffer fails.
-pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String> {
-	let mut out = String::new();
+/// Extracted so the section dispatcher in [`render_init_template`] can treat it
+/// uniformly alongside the other sections.
+fn write_global_section(out: &mut String) -> fmt::Result {
 	writeln!(out, "# [global]")?;
 	writeln!(
 		out,
@@ -254,218 +326,95 @@ pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String
 		"# ignore = [\"example-*\"]                     # {}",
 		crate::t!("global-ignore-comment")
 	)?;
-	writeln!(out)?;
-	write_cargo_section(&mut out, result.cargo_enabled, &result.cargo_path)?;
-	write_npm_section(&mut out, result.npm_enabled, &result.npm_path)?;
-	write_prepare_section(&mut out)?;
-	write_linked_versions_section(&mut out)?;
-	write_git_section(&mut out, result.git_enabled, result.git_strategy)?;
-	write_github_section(
-		&mut out,
-		result.github_enabled,
-		&result.github_owner,
-		&result.github_repo,
-		&result.detected_github_owner,
-		&result.detected_github_repo,
-	)?;
-	Ok(out)
+	writeln!(out)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
+/// Identifier for each writable section, used to order output deterministically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Section {
+	Global,
+	Cargo,
+	Npm,
+	Prepare,
+	LinkedVersions,
+	Git,
+	Github,
+	Gitlab,
+}
 
-	fn render(result: &InitResult) -> String {
-		render_init_template(result).expect("render_init_template should not fail")
-	}
+/// Canonical section order (also the relative order preserved within both the
+/// active and commented groups when sections are reordered for output).
+const SECTION_ORDER: [Section; 8] = [
+	Section::Global,
+	Section::Cargo,
+	Section::Npm,
+	Section::Prepare,
+	Section::LinkedVersions,
+	Section::Git,
+	Section::Github,
+	Section::Gitlab,
+];
 
-	fn cargo_only_result() -> InitResult {
-		InitResult {
-			cargo_enabled: true,
-			npm_enabled: false,
-			cargo_path: None,
-			npm_path: None,
-			git_enabled: false,
-			git_strategy: None,
-			github_enabled: false,
-			github_owner: None,
-			github_repo: None,
-			detected_github_owner: None,
-			detected_github_repo: None,
-			open_editor: false,
+impl Section {
+	/// Returns true when the user has opted this section in, so it should be
+	/// emitted as active TOML rather than a commented-out template.
+	///
+	/// Sections that are always commented-out (`Global`, `Prepare`,
+	/// `LinkedVersions`) return `false` here.
+	fn is_active(self, result: &InitResult) -> bool {
+		match self {
+			Self::Global | Self::Prepare | Self::LinkedVersions => false,
+			Self::Cargo => result.cargo_enabled,
+			Self::Npm => result.npm_enabled,
+			Self::Git => result.git_enabled,
+			Self::Github => result.github_enabled,
+			Self::Gitlab => result.gitlab_enabled,
 		}
 	}
 
-	fn npm_only_result() -> InitResult {
-		InitResult {
-			cargo_enabled: false,
-			npm_enabled: true,
-			cargo_path: None,
-			npm_path: None,
-			git_enabled: false,
-			git_strategy: None,
-			github_enabled: false,
-			github_owner: None,
-			github_repo: None,
-			detected_github_owner: None,
-			detected_github_repo: None,
-			open_editor: false,
+	fn write(self, out: &mut String, result: &InitResult) -> fmt::Result {
+		match self {
+			Self::Global => write_global_section(out),
+			Self::Cargo => write_cargo_section(out, result.cargo_enabled, &result.cargo_path),
+			Self::Npm => write_npm_section(out, result.npm_enabled, &result.npm_path),
+			Self::Prepare => write_prepare_section(out),
+			Self::LinkedVersions => write_linked_versions_section(out),
+			Self::Git => write_git_section(out, result.git_enabled, result.git_strategy),
+			Self::Github => write_github_section(
+				out,
+				result.github_enabled,
+				&result.github_owner,
+				&result.github_repo,
+				&result.detected_github_owner,
+				&result.detected_github_repo,
+			),
+			Self::Gitlab => write_gitlab_section(out, result),
 		}
 	}
+}
 
-	fn both_pms_git_github_result() -> InitResult {
-		InitResult {
-			cargo_enabled: true,
-			npm_enabled: true,
-			cargo_path: None,
-			npm_path: None,
-			git_enabled: true,
-			git_strategy: Some(Strategy::Branch),
-			github_enabled: true,
-			github_owner: Some("acme".to_string()),
-			github_repo: Some("my-app".to_string()),
-			detected_github_owner: None,
-			detected_github_repo: None,
-			open_editor: false,
-		}
+/// Renders a `.cursus/config.toml` string from the given [`InitResult`].
+///
+/// Sections the user has opted into (Cargo, npm, git, GitHub, GitLab) are
+/// emitted first as active TOML, in the canonical section order. Disabled and
+/// always-commented sections (`[global]`, `[prepare]`, `[linked-versions]`,
+/// and any forge the user did not choose) follow as commented-out templates,
+/// also in the canonical relative order.
+///
+/// Lifting the active sections to the top keeps the most-relevant configuration
+/// visible without scrolling as the file grows; the canonical order within each
+/// group keeps the output deterministic.
+///
+/// # Errors
+///
+/// Returns an error if writing to the internal string buffer fails.
+pub(crate) fn render_init_template(result: &InitResult) -> anyhow::Result<String> {
+	let mut out = String::new();
+	let (active, commented): (Vec<Section>, Vec<Section>) = SECTION_ORDER
+		.into_iter()
+		.partition(|section| section.is_active(result));
+	for section in active.into_iter().chain(commented) {
+		section.write(&mut out, result)?;
 	}
-
-	fn strip_comments(s: &str) -> String {
-		s.lines()
-			.filter(|l| !l.trim_start().starts_with('#'))
-			.filter(|l| !l.trim().is_empty())
-			.map(|l| format!("{l}\n"))
-			.collect()
-	}
-
-	// --- Snapshot tests ---
-
-	#[test]
-	fn snapshot_cargo_only() {
-		insta::assert_snapshot!(render(&cargo_only_result()));
-	}
-
-	#[test]
-	fn snapshot_npm_only() {
-		insta::assert_snapshot!(render(&npm_only_result()));
-	}
-
-	#[test]
-	fn snapshot_both_pms_git_github() {
-		insta::assert_snapshot!(render(&both_pms_git_github_result()));
-	}
-
-	#[test]
-	fn snapshot_cargo_with_path() {
-		let result = InitResult {
-			cargo_path: Some("rust/".to_string()),
-			..cargo_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	#[test]
-	fn snapshot_npm_with_path() {
-		let result = InitResult {
-			npm_enabled: true,
-			cargo_enabled: false,
-			npm_path: Some("frontend/".to_string()),
-			..npm_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	#[test]
-	fn snapshot_git_push_strategy() {
-		let result = InitResult {
-			git_enabled: true,
-			git_strategy: Some(Strategy::Push),
-			..cargo_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	/// `git_strategy: None` should render identically to `Some(Strategy::Push)`.
-	#[test]
-	fn snapshot_git_none_strategy_defaults_to_push() {
-		let result = InitResult {
-			git_enabled: true,
-			git_strategy: None,
-			..cargo_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	#[test]
-	fn snapshot_github_no_owner_repo_no_detection() {
-		let result = InitResult {
-			git_enabled: true,
-			git_strategy: Some(Strategy::Push),
-			github_enabled: true,
-			github_owner: None,
-			github_repo: None,
-			..cargo_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	#[test]
-	fn snapshot_github_detected_values_as_hints() {
-		let result = InitResult {
-			github_enabled: true,
-			github_owner: None,
-			github_repo: None,
-			detected_github_owner: Some("acme".to_string()),
-			detected_github_repo: Some("my-app".to_string()),
-			..cargo_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	#[test]
-	fn snapshot_github_explicit_owner_repo() {
-		let result = InitResult {
-			github_enabled: true,
-			github_owner: Some("acme".to_string()),
-			github_repo: Some("my-app".to_string()),
-			detected_github_owner: Some("acme".to_string()),
-			detected_github_repo: Some("my-app".to_string()),
-			..cargo_only_result()
-		};
-		insta::assert_snapshot!(render(&result));
-	}
-
-	// --- TOML validity tests (behavioural, not snapshot) ---
-
-	#[test]
-	fn both_pms_git_github_active_toml_is_valid() {
-		let active = strip_comments(&render(&both_pms_git_github_result()));
-		toml::from_str::<toml::Value>(&active)
-			.expect("Active TOML lines should parse as valid TOML");
-	}
-
-	#[test]
-	fn cargo_only_active_toml_is_valid() {
-		let active = strip_comments(&render(&cargo_only_result()));
-		toml::from_str::<toml::Value>(&active)
-			.expect("Active TOML lines should parse as valid TOML");
-	}
-
-	/// Values containing `"` or `\` must be escaped so the output is valid TOML.
-	#[test]
-	fn special_chars_in_user_values_produce_valid_toml() {
-		let result = InitResult {
-			cargo_enabled: true,
-			cargo_path: Some("sub/\"evil\"\\ path/".to_string()),
-			npm_enabled: true,
-			npm_path: Some("front\"end\\".to_string()),
-			github_enabled: true,
-			github_owner: Some("ac\"me".to_string()),
-			github_repo: Some("my\\app".to_string()),
-			..both_pms_git_github_result()
-		};
-		let active = strip_comments(&render(&result));
-		toml::from_str::<toml::Value>(&active)
-			.expect("Special characters must be escaped so the TOML is still valid");
-	}
+	Ok(out)
 }

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::Filesystem;
+use crate::forge::CodeForgeClient;
 use crate::git::Git;
-use crate::github::client::CodeForgeClient;
 
 /// Environment variables and runtime dependencies used by Cursus.
 ///
@@ -47,6 +47,23 @@ pub struct Env {
 	node_auth_token_present: bool,
 	/// Whether `CARGO_REGISTRY_TOKEN` is set in the environment.
 	cargo_registry_token_present: bool,
+	/// `true` when the active GitLab forge client was built from `CI_JOB_TOKEN`
+	/// with no `GITLAB_TOKEN` PAT available.
+	///
+	/// Used by the `prepare` preflight to surface a clear error before any
+	/// merge-request API call is attempted — `CI_JOB_TOKEN` has read-only
+	/// access to the Merge Requests API on GitLab (see ADR-056). Always
+	/// `false` when the active forge is GitHub or when no forge is configured.
+	gitlab_uses_job_token_only: bool,
+	/// User-facing label for the active forge (e.g. `"GitHub"`, `"GitLab"`).
+	///
+	/// Captured automatically from [`CodeForgeClient::forge_name`] when a
+	/// client is wired up via [`with_code_forge_client`](Self::with_code_forge_client)
+	/// or a successful [`with_code_forge_client_result`](Self::with_code_forge_client_result).
+	/// Defaults to `"the configured forge"` when no client has been set
+	/// (e.g. token missing in dry-run), so dry-run preview messages and
+	/// pre-flight errors still have a sensible noun phrase to interpolate.
+	code_forge_name: &'static str,
 	/// The BCP 47 locale tag to use for all user-visible messages.
 	///
 	/// Resolved from `CURSUS_LOCALE`, then the system locale, then `"en"` by
@@ -74,6 +91,8 @@ impl Env {
 			oidc_environment: false,
 			node_auth_token_present: false,
 			cargo_registry_token_present: false,
+			gitlab_uses_job_token_only: false,
+			code_forge_name: "the configured forge",
 			locale: crate::locale::DEFAULT_LOCALE.to_string(),
 		}
 	}
@@ -96,6 +115,16 @@ impl Env {
 		self
 	}
 
+	/// Sets whether the active GitLab client was constructed from `CI_JOB_TOKEN`
+	/// only (no `GITLAB_TOKEN` PAT).
+	///
+	/// Consumed by the prepare preflight to fail fast before any merge-request
+	/// API call when the token cannot create or update merge requests.
+	pub fn with_gitlab_uses_job_token_only(mut self, value: bool) -> Self {
+		self.gitlab_uses_job_token_only = value;
+		self
+	}
+
 	/// Sets the editor to open changeset files with.
 	pub fn with_editor(mut self, editor: String) -> Self {
 		self.editor = Some(editor);
@@ -103,7 +132,12 @@ impl Env {
 	}
 
 	/// Sets the code forge client for API operations.
+	///
+	/// Also captures the forge's user-facing name (via
+	/// [`CodeForgeClient::forge_name`]) so [`code_forge_name`](Self::code_forge_name)
+	/// stays in sync with the configured client without a second setter call.
 	pub fn with_code_forge_client(mut self, client: Arc<dyn CodeForgeClient>) -> Self {
+		self.code_forge_name = client.forge_name();
 		self.code_forge_client = Ok(client);
 		self
 	}
@@ -118,11 +152,16 @@ impl Env {
 
 	/// Sets the code forge client from a `Result`, overwriting any previously set value.
 	///
-	/// Passing `Err(reason)` records why the client is unavailable.
+	/// Passing `Err(reason)` records why the client is unavailable. On `Ok`,
+	/// also captures [`CodeForgeClient::forge_name`] so
+	/// [`code_forge_name`](Self::code_forge_name) reflects the active forge.
 	pub fn with_code_forge_client_result(
 		mut self,
 		client: Result<Arc<dyn CodeForgeClient>, String>,
 	) -> Self {
+		if let Ok(c) = &client {
+			self.code_forge_name = c.forge_name();
+		}
 		self.code_forge_client = client;
 		self
 	}
@@ -154,6 +193,8 @@ impl Env {
 			oidc_environment: self.oidc_environment,
 			node_auth_token_present: self.node_auth_token_present,
 			cargo_registry_token_present: self.cargo_registry_token_present,
+			gitlab_uses_job_token_only: self.gitlab_uses_job_token_only,
+			code_forge_name: self.code_forge_name,
 			locale: self.locale,
 		}
 	}
@@ -211,6 +252,23 @@ impl Env {
 	/// Returns `true` when `CARGO_REGISTRY_TOKEN` is present in the environment.
 	pub(crate) fn cargo_registry_token_present(&self) -> bool {
 		self.cargo_registry_token_present
+	}
+
+	/// Returns `true` when the active GitLab client was built from `CI_JOB_TOKEN`
+	/// without a `GITLAB_TOKEN` PAT fallback.
+	pub(crate) fn gitlab_uses_job_token_only(&self) -> bool {
+		self.gitlab_uses_job_token_only
+	}
+
+	/// Returns the user-facing label for the active forge.
+	///
+	/// Prefer this over `env.code_forge_client().map(|c| c.forge_name())`
+	/// when the active code path needs a forge name without a specific
+	/// client invocation in scope (dry-run previews, pre-flight error
+	/// messages, etc.). Falls back to `"the configured forge"` when no
+	/// forge has been wired up.
+	pub(crate) fn code_forge_name(&self) -> &'static str {
+		self.code_forge_name
 	}
 
 	/// Returns the BCP 47 locale tag for user-visible messages.
@@ -323,406 +381,5 @@ impl Env {
 	/// Delegates to the underlying [`CommandRunner`]. Skipped by [`DryRunCommandRunner`].
 	pub async fn run_streaming(&self, command: &str, cwd: &Path) -> anyhow::Result<ExitStatus> {
 		self.runner.run_streaming(command, cwd).await
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::path::Path;
-	use std::sync::Arc;
-
-	use crate::command::test_support::RecordingCommandRunner;
-	use crate::command::{CommandRunner, shell_program};
-	use crate::filesystem::LocalFilesystem;
-	use crate::github::client::CodeForgeClient;
-	use crate::github::client::test_support::RecordingCodeForgeClient;
-
-	use super::*;
-
-	fn recording_env(exit_code: i32) -> (Arc<RecordingCommandRunner>, Env, tempfile::TempDir) {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let runner = Arc::new(RecordingCommandRunner::new(exit_code));
-		let git = Arc::new(crate::git::GitWorkdir::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			crate::path::AbsolutePath::new(dir.path()).unwrap(),
-		));
-		let env = Env::new(
-			Arc::clone(&runner) as Arc<dyn CommandRunner>,
-			Arc::new(LocalFilesystem),
-			git,
-		);
-		(runner, env, dir)
-	}
-
-	#[test]
-	fn new_has_no_editor_or_code_forge_client() {
-		let (_, env, _dir) = recording_env(0);
-		assert!(env.editor().is_none());
-		assert!(env.code_forge_client().is_err());
-	}
-
-	#[test]
-	fn new_has_false_auth_flags() {
-		let (_, env, _dir) = recording_env(0);
-		assert!(!env.oidc_environment());
-		assert!(!env.node_auth_token_present());
-		assert!(!env.cargo_registry_token_present());
-	}
-
-	#[test]
-	fn with_oidc_environment_sets_flag() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_oidc_environment(true);
-		assert!(env.oidc_environment());
-	}
-
-	#[test]
-	fn with_node_auth_token_present_sets_flag() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_node_auth_token_present(true);
-		assert!(env.node_auth_token_present());
-	}
-
-	#[test]
-	fn with_cargo_registry_token_present_sets_flag() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_cargo_registry_token_present(true);
-		assert!(env.cargo_registry_token_present());
-	}
-
-	#[test]
-	fn new_has_default_locale() {
-		let (_, env, _dir) = recording_env(0);
-		assert_eq!(env.locale(), crate::locale::DEFAULT_LOCALE);
-	}
-
-	#[test]
-	fn with_locale_sets_locale() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_locale("pt-BR".to_string());
-		assert_eq!(env.locale(), "pt-BR");
-	}
-
-	#[test]
-	fn with_dry_run_runner_preserves_auth_flags() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env
-			.with_oidc_environment(true)
-			.with_node_auth_token_present(true)
-			.with_cargo_registry_token_present(true);
-		let dry_env = env.with_dry_run_runner();
-		assert!(dry_env.oidc_environment());
-		assert!(dry_env.node_auth_token_present());
-		assert!(dry_env.cargo_registry_token_present());
-	}
-
-	#[test]
-	fn with_dry_run_runner_preserves_locale() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_locale("fr".to_string());
-		let dry_env = env.with_dry_run_runner();
-		assert_eq!(dry_env.locale(), "fr");
-	}
-
-	#[test]
-	fn with_dry_run_runner_preserves_git() {
-		let (_, env, _dir) = recording_env(0);
-		let path = env.git().path().clone();
-		let dry_env = env.with_dry_run_runner();
-		assert_eq!(dry_env.git().path(), &path);
-	}
-
-	#[test]
-	fn with_editor_sets_editor() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_editor("vim".to_string());
-		assert_eq!(env.editor(), Some("vim"));
-	}
-
-	#[test]
-	fn with_code_forge_client_sets_client() {
-		let (_, env, _dir) = recording_env(0);
-		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
-		let env = env.with_code_forge_client(Arc::clone(&client));
-		assert!(env.code_forge_client().is_ok());
-	}
-
-	#[test]
-	fn with_editor_opt_some_sets_editor() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_editor_opt(Some("nano".to_string()));
-		assert_eq!(env.editor(), Some("nano"));
-	}
-
-	#[test]
-	fn with_editor_opt_none_clears_editor() {
-		let (_, env, _dir) = recording_env(0);
-		let env = env.with_editor("vim".to_string()).with_editor_opt(None);
-		assert!(env.editor().is_none());
-	}
-
-	#[test]
-	fn with_code_forge_client_result_ok_sets_client() {
-		let (_, env, _dir) = recording_env(0);
-		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
-		let env = env.with_code_forge_client_result(Ok(client));
-		assert!(env.code_forge_client().is_ok());
-	}
-
-	#[test]
-	fn with_code_forge_client_result_err_clears_client() {
-		let (_, env, _dir) = recording_env(0);
-		let client = Arc::new(RecordingCodeForgeClient::new()) as Arc<dyn CodeForgeClient>;
-		let env = env
-			.with_code_forge_client(client)
-			.with_code_forge_client_result(Err("no token".into()));
-		assert!(env.code_forge_client().is_err());
-	}
-
-	#[tokio::test]
-	async fn run_delegates_to_runner() {
-		let (runner, env, _dir) = recording_env(0);
-		env.run("echo", &["hello"], Path::new(".")).await.unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "echo");
-		assert_eq!(invocations[0].args, ["hello"]);
-	}
-
-	#[tokio::test]
-	async fn run_mut_delegates_to_runner() {
-		let (runner, env, _dir) = recording_env(0);
-		env.run_mut("git", &["commit", "-m", "msg"], Path::new("."))
-			.await
-			.unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "git");
-		assert_eq!(invocations[0].args, ["commit", "-m", "msg"]);
-	}
-
-	#[tokio::test]
-	async fn run_streaming_delegates_to_runner() {
-		let (runner, env, _dir) = recording_env(0);
-		env.run_streaming("npm install", Path::new("."))
-			.await
-			.unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, shell_program());
-		assert!(invocations[0].is_shell);
-		assert!(invocations[0].is_streaming);
-	}
-
-	#[tokio::test]
-	async fn run_interactive_delegates_to_runner() {
-		let (runner, env, _dir) = recording_env(0);
-		env.run_interactive("vim", &[], Path::new("."))
-			.await
-			.unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations[0].program, "vim");
-		assert!(invocations[0].is_interactive);
-	}
-
-	#[tokio::test]
-	async fn with_dry_run_runner_suppresses_run_mut() {
-		let (runner, env, _dir) = recording_env(0);
-		let dry_env = env.with_dry_run_runner();
-		dry_env
-			.run_mut("git", &["push", "origin", "HEAD"], Path::new("."))
-			.await
-			.unwrap();
-		// The inner recording runner must NOT have been called (DryRunCommandRunner intercepts)
-		assert!(runner.invocations().is_empty());
-	}
-
-	#[tokio::test]
-	async fn with_dry_run_runner_still_forwards_run() {
-		let (runner, env, _dir) = recording_env(0);
-		let dry_env = env.with_dry_run_runner();
-		dry_env
-			.run("git", &["status"], Path::new("."))
-			.await
-			.unwrap();
-		// Read-only run is forwarded to the inner runner
-		assert_eq!(runner.invocations().len(), 1);
-		assert_eq!(runner.invocations()[0].program, "git");
-	}
-
-	// run_editor_on tests
-
-	#[tokio::test]
-	async fn run_editor_on_uses_editor_when_set() {
-		let workdir = tempfile::tempdir().unwrap();
-		let path = workdir.path().join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		let (runner, env, _dir) = recording_env(0);
-		let env = env.with_editor("vim".to_string());
-		env.run_editor_on(&path, workdir.path()).await.unwrap();
-
-		let invocations = runner.invocations();
-		let editor_call = invocations
-			.iter()
-			.find(|i| i.is_interactive && i.is_shell)
-			.expect("Expected a shell interactive invocation");
-		let expected = format!("vim {}", crate::shell::shell_quote(&path.to_string_lossy()));
-		assert_eq!(editor_call.args[1], expected);
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_ignores_empty_editor_string() {
-		let workdir = tempfile::tempdir().unwrap();
-		let path = workdir.path().join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		// Empty editor → falls back to find_default_editor → runner returns 0 → "nano"
-		let (runner, env, _dir) = recording_env(0);
-		let env = env.with_editor(String::new());
-		env.run_editor_on(&path, workdir.path()).await.unwrap();
-
-		let invocations = runner.invocations();
-		let editor_call = invocations
-			.iter()
-			.find(|i| i.is_interactive && i.is_shell)
-			.expect("Expected a shell interactive invocation");
-		let expected = format!(
-			"nano {}",
-			crate::shell::shell_quote(&path.to_string_lossy())
-		);
-		assert_eq!(editor_call.args[1], expected, "Should fall back to nano");
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_nonzero_exit_returns_error() {
-		let workdir = tempfile::tempdir().unwrap();
-		let path = workdir.path().join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		let (_, env, _dir) = recording_env(1);
-		let env = env.with_editor("vim".to_string());
-		let result = env.run_editor_on(&path, workdir.path()).await;
-
-		assert!(result.is_err());
-		assert!(
-			result
-				.unwrap_err()
-				.to_string()
-				.contains("Editor exited with status")
-		);
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_falls_back_to_default_editor() {
-		let workdir = tempfile::tempdir().unwrap();
-		let path = workdir.path().join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		// No editor set, runner exit_code=0 → which nano succeeds → "nano"
-		let (runner, env, _dir) = recording_env(0);
-		env.run_editor_on(&path, workdir.path()).await.unwrap();
-
-		let invocations = runner.invocations();
-		let editor_call = invocations
-			.iter()
-			.find(|i| i.is_interactive && i.is_shell)
-			.expect("Expected a shell interactive invocation");
-		let expected = format!(
-			"nano {}",
-			crate::shell::shell_quote(&path.to_string_lossy())
-		);
-		assert_eq!(editor_call.args[1], expected);
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_no_editor_found_returns_error() {
-		let workdir = tempfile::tempdir().unwrap();
-		let path = workdir.path().join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		// Runner exit_code=1 → all which calls fail → no default found
-		let (_, env, _dir) = recording_env(1);
-		let result = env.run_editor_on(&path, workdir.path()).await;
-
-		assert!(result.is_err());
-		assert!(result.unwrap_err().to_string().contains("No editor found"));
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_uses_provided_cwd() {
-		let workdir = tempfile::tempdir().unwrap();
-		let cursus_dir = workdir.path().join(".cursus");
-		std::fs::create_dir_all(&cursus_dir).unwrap();
-		let path = cursus_dir.join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		let (runner, env, _dir) = recording_env(0);
-		let env = env.with_editor("vim".to_string());
-		env.run_editor_on(&path, workdir.path()).await.unwrap();
-
-		let invocations = runner.invocations();
-		let editor_call = invocations
-			.iter()
-			.find(|i| i.is_interactive && i.is_shell)
-			.expect("Expected a shell interactive editor invocation");
-		assert_eq!(
-			editor_call.cwd,
-			workdir.path(),
-			"Editor should be invoked with the provided cwd, not the file's parent"
-		);
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_handles_multi_word_editor() {
-		let workdir = tempfile::tempdir().unwrap();
-		let path = workdir.path().join("config.toml");
-		std::fs::write(&path, "").unwrap();
-
-		let (runner, env, _dir) = recording_env(0);
-		let env = env.with_editor("code --wait".to_string());
-		env.run_editor_on(&path, workdir.path()).await.unwrap();
-
-		let invocations = runner.invocations();
-		let editor_call = invocations
-			.iter()
-			.find(|i| i.is_interactive && i.is_shell)
-			.expect("Expected a shell interactive invocation");
-		let expected = format!(
-			"code --wait {}",
-			crate::shell::shell_quote(&path.to_string_lossy())
-		);
-		assert_eq!(editor_call.args[1], expected);
-	}
-
-	#[tokio::test]
-	async fn run_editor_on_handles_path_with_single_quote() {
-		let workdir = tempfile::tempdir().unwrap();
-		// Path whose name contains a single quote — tests the '\\'' escaping logic.
-		let path = workdir.path().join("it's a file.toml");
-		std::fs::write(&path, "").unwrap();
-
-		let (runner, env, _dir) = recording_env(0);
-		let env = env.with_editor("vim".to_string());
-		env.run_editor_on(&path, workdir.path()).await.unwrap();
-
-		let invocations = runner.invocations();
-		let editor_call = invocations
-			.iter()
-			.find(|i| i.is_interactive && i.is_shell)
-			.expect("Expected a shell interactive invocation");
-		let expected = format!("vim {}", crate::shell::shell_quote(&path.to_string_lossy()));
-		assert_eq!(editor_call.args[1], expected);
-	}
-
-	#[tokio::test]
-	async fn run_shell_interactive_delegates_to_runner() {
-		let (runner, env, _dir) = recording_env(0);
-		let cwd = tempfile::tempdir().unwrap();
-		env.run_shell_interactive("echo hello", cwd.path())
-			.await
-			.unwrap();
-		let invocations = runner.invocations();
-		assert_eq!(invocations.len(), 1);
-		assert!(invocations[0].is_shell);
-		assert!(invocations[0].is_interactive);
 	}
 }

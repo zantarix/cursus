@@ -39,7 +39,17 @@ export default defineConfig({
             },
             { label: "Publishing", slug: "guides/publishing" },
             { label: "Utility Commands", slug: "guides/utility-commands" },
-            { label: "CI Integration", slug: "guides/ci-integration" },
+            {
+              label: "CI Integration",
+              items: [
+                { label: "Overview", slug: "guides/ci-integration" },
+                {
+                  label: "GitHub Actions",
+                  slug: "guides/ci-integration/github-actions",
+                },
+                { label: "GitLab", slug: "guides/ci-integration/gitlab" },
+              ],
+            },
           ],
         },
         {

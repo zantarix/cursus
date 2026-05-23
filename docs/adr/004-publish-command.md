@@ -97,10 +97,18 @@ Failed to publish @mscharley/cursus@0.2.0 to npm: authentication required
 
 ## Errata
 
-**2026-02-21**: [ADR-008](008-dry-run-local-only-guarantee.md) establishes a project-wide invariant that `--dry-run` must never perform remote operations. This supersedes the dry-run approach described in this ADR's "Dry-run support" section: `publish --dry-run` no longer delegates to the underlying package manager (e.g., `cargo publish --dry-run`). Instead, Cursus skips the publish invocation entirely and prints a summary of what would have been published. See [ADR-008](008-dry-run-local-only-guarantee.md) for full details.
+### 2026-02-21: `publish --dry-run` no longer delegates to the package manager
 
-**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) adds git tag creation and pushing as part of the `cursus publish` workflow when `[git].enabled = true`. The publish ordering described in this ADR (publish to registries, then summary) is now: publish to registries, create and push tags, create GitHub Releases, then summary. Additionally, ADR-015 extends the `--no-git` flag (originally defined for `release` in [ADR-006](006-git-lifecycle-hooks.md)) to `publish`, allowing users to skip tag creation and pushing for a single invocation. See [ADR-015](015-ci-managed-release-workflow.md) for the full publish workflow.
+The "Dry-run support" section's description of `publish --dry-run` as delegating to the underlying package manager (e.g. `cargo publish --dry-run`) is incorrect. [ADR-008](008-dry-run-local-only-guarantee.md) establishes a project-wide invariant that `--dry-run` must never perform remote operations, and `cargo publish --dry-run` does perform a remote authentication round-trip; `publish --dry-run` therefore now skips the publish invocation entirely and prints a summary of what would have been published.
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. References to `cursus release` in this ADR now refer to `cursus prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+### 2026-03-09: Publish ordering extended with tag and release stages
 
-**2026-05-02**: [ADR-055](055-end-to-end-idempotent-publish-recovery.md) extends the idempotency model described in this ADR's "Idempotency" section. The registry-only idempotency contract ("treat 'version already exists' as success") is preserved, but the downstream consequences change: packages reported as `Skipped` by the registry now also flow into the tag and GitHub Release stages so that re-running `cursus publish` after a partial failure can complete those stages. See [ADR-055](055-end-to-end-idempotent-publish-recovery.md) for the end-to-end recovery model.
+The publish ordering described here ("publish to registries, then summary") is incomplete once git lifecycle hooks are enabled. [ADR-015](015-ci-managed-release-workflow.md) adds tag creation and pushing plus GitHub Release creation to the `cursus publish` workflow when `[git].enabled = true`, making the real ordering: publish to registries, create and push tags, create GitHub Releases, then summary. The same ADR also extends the `--no-git` flag (originally defined for `release` by [ADR-006](006-git-lifecycle-hooks.md)) to `publish`.
+
+### 2026-03-09: `cursus release` renamed to `cursus prepare`
+
+References to `cursus release` in this ADR are incorrect: [ADR-016](016-rename-release-to-prepare.md) renames the subcommand to `cursus prepare`. The behaviour is unchanged; only the user-facing name differs.
+
+### 2026-05-02: Skipped packages now flow into tag and release stages
+
+The "Idempotency" section implies that packages reported as `Skipped` by the registry are terminal for that invocation. This is no longer accurate: [ADR-055](055-end-to-end-idempotent-publish-recovery.md) extends the model so that registry-skipped packages still flow into the tag and GitHub Release stages, allowing re-running `cursus publish` after a partial failure to complete those downstream stages. The registry-side contract ("treat 'version already exists' as success") is itself unchanged.

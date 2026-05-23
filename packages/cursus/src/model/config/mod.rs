@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 mod cargo;
 mod git;
 mod github;
+mod gitlab;
 mod linked_versions;
 mod npm;
 mod prepare;
@@ -21,6 +22,7 @@ const MAX_CONFIG_BYTES: u64 = 256 * 1024;
 pub use cargo::CargoConfig;
 pub use git::{GitConfig, SignedCommitsMode, Strategy, TagFormat};
 pub use github::GitHubConfig;
+pub use gitlab::GitLabConfig;
 pub use linked_versions::{LinkedVersionGroup, LinkedVersionsConfig};
 pub use npm::{NpmAccess, NpmConfig};
 pub use prepare::{DependencyBump, PrepareConfig};
@@ -96,6 +98,9 @@ pub struct ConfigData {
 	/// GitHub Releases configuration.
 	#[serde(default)]
 	pub github: GitHubConfig,
+	/// GitLab releases configuration.
+	#[serde(default)]
+	pub gitlab: GitLabConfig,
 	/// Linked package versions configuration.
 	#[serde(default, rename = "linked-versions")]
 	pub linked_versions: LinkedVersionsConfig,
@@ -169,6 +174,12 @@ impl Config {
 		self
 	}
 
+	/// Sets GitLab releases configuration (builder pattern).
+	pub fn with_gitlab(mut self, config: GitLabConfig) -> Self {
+		self.data.gitlab = config;
+		self
+	}
+
 	/// Sets linked package versions configuration (builder pattern).
 	pub fn with_linked_versions(mut self, config: LinkedVersionsConfig) -> Self {
 		self.data.linked_versions = config;
@@ -179,6 +190,67 @@ impl Config {
 	pub fn with_prepare(mut self, config: PrepareConfig) -> Self {
 		self.data.prepare = config;
 		self
+	}
+
+	/// Returns `true` when at least one forge integration is enabled.
+	///
+	/// Used by orchestration code that wants to gate forge interaction
+	/// without caring which concrete forge is active. Per ADR-059,
+	/// [`Config::load`] rejects configurations that enable both forges at
+	/// once; the GitHub-first precedence applied internally below is a
+	/// defensive fallback for `Config` values constructed programmatically
+	/// (e.g. via the builder in tests) that bypass the loader.
+	pub fn forge_enabled(&self) -> bool {
+		self.data.github.enabled || self.data.gitlab.enabled
+	}
+
+	/// Returns the release-request title for the active forge.
+	///
+	/// Falls back to the GitHub default (`"Release updates"`) when no forge
+	/// is enabled — callers should normally have already gated on
+	/// [`forge_enabled`](Self::forge_enabled). The GitHub-first precedence
+	/// is internal-only; see [`forge_enabled`](Self::forge_enabled) for
+	/// why both-enabled cannot happen via [`Config::load`].
+	pub fn release_request_title(&self) -> &str {
+		if self.data.github.enabled {
+			self.data.github.pull_request_title()
+		} else if self.data.gitlab.enabled {
+			self.data.gitlab.merge_request_title()
+		} else {
+			self.data.github.pull_request_title()
+		}
+	}
+
+	/// Returns the build command for the active forge. Empty string when no
+	/// forge is enabled or the active forge has no build command configured.
+	/// The GitHub-first precedence is internal-only; see
+	/// [`forge_enabled`](Self::forge_enabled) for why both-enabled cannot
+	/// happen via [`Config::load`].
+	pub fn build_command(&self) -> &str {
+		if self.data.github.enabled {
+			&self.data.github.build_command
+		} else if self.data.gitlab.enabled {
+			&self.data.gitlab.build_command
+		} else {
+			""
+		}
+	}
+
+	/// Returns the per-package artifact map for the active forge. Empty when
+	/// no forge is enabled or the active forge has no artifacts configured.
+	/// The GitHub-first precedence is internal-only; see
+	/// [`forge_enabled`](Self::forge_enabled) for why both-enabled cannot
+	/// happen via [`Config::load`].
+	pub fn forge_artifacts(
+		&self,
+	) -> &std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+		if self.data.github.enabled {
+			&self.data.github.artifacts
+		} else if self.data.gitlab.enabled {
+			&self.data.gitlab.artifacts
+		} else {
+			&self.data.github.artifacts
+		}
 	}
 
 	/// Returns an iterator over all enabled package managers.
@@ -469,8 +541,28 @@ pub async fn load(
 		bail!("Configuration must have at least one package manager enabled");
 	}
 
+	let enabled_forges: Vec<&str> = [
+		("[github].enabled", config.data.github.enabled),
+		("[gitlab].enabled", config.data.gitlab.enabled),
+	]
+	.into_iter()
+	.filter_map(|(name, on)| on.then_some(name))
+	.collect();
+	if enabled_forges.len() > 1 {
+		bail!(
+			"More than one forge is enabled in .cursus/config.toml ({}). \
+			 At most one forge section may have `enabled = true`. \
+			 Set `enabled = true` on no more than one forge section, \
+			 and set the others to `false` (or remove them).",
+			enabled_forges.join(", ")
+		);
+	}
+
 	// Apply cross-config derived defaults (git.enabled, git.strategy).
-	config.data.git.resolve_defaults(config.data.github.enabled);
+	config
+		.data
+		.git
+		.resolve_defaults(config.data.github.enabled || config.data.gitlab.enabled);
 
 	Ok(Some(config))
 }

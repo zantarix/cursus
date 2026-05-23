@@ -108,4 +108,6 @@ Rejected. The editor case already has `run_shell_interactive`, which is designed
 
 ## Errata
 
-- **2026-05-01**: [ADR-052](052-credential-redaction-in-error-messages.md) places `run_streaming` explicitly out of scope for credential redaction. Because the child process inherits the parent's stdout and stderr file descriptors, cursus never sees the streamed bytes and has no point at which it could redact them before they reach the terminal or CI log. Operators configuring `github.build_command` or `npm.lock_command` must continue to rely on CI-side secret masking (e.g. `::add-mask::`) for any credentials those commands may print.
+### 2026-05-01: `run_streaming` is out of scope for credential redaction
+
+The Decision section is silent on credential redaction, which is no longer accurate given the cross-cutting expectation set by [ADR-052](052-credential-redaction-in-error-messages.md). That ADR explicitly places `run_streaming` out of scope: because the child process inherits the parent's stdout and stderr file descriptors, cursus never sees the streamed bytes and has no point at which it could redact them before they reach the terminal or CI log. Operators configuring `github.build_command` or `npm.lock_command` must rely on CI-side secret masking (e.g. `::add-mask::`) for credentials those commands may print.

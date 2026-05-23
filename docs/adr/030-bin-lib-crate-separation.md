@@ -89,5 +89,10 @@ Instead of bundling capabilities into `Env`, each function could accept the spec
 
 ## Errata
 
-- **2026-03-22:** The "Full trait abstraction for filesystem access" alternative, rejected above for testing-only benefit, is revisited and adopted in [ADR-036](036-filesystem-trait-abstraction.md) to support non-local backends (remote code forges, in-memory filesystems). The core decision of this ADR (environment injection via `Env`) is preserved and extended with the new `Filesystem` trait on `Env`.
-- `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+### 2026-03-22: Filesystem-abstraction rejection was revisited
+
+The "Full trait abstraction for filesystem access" alternative, rejected above as testing-only benefit, was revisited and adopted by [ADR-036](036-filesystem-trait-abstraction.md) to support non-local backends (remote code forges, in-memory filesystems). The core decision of this ADR — environment injection via `Env` — is preserved and extended with a new `Filesystem` trait carried on `Env`.
+
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
+
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The bin/lib separation and environment-injection model are unchanged; only the trait name differs.

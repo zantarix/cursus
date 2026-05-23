@@ -38,7 +38,10 @@ confirm-overwrite-question = Config already exists. Overwrite?
 
 enable-git-question = Enable git automation? (commits, tags, push/branch on prepare and publish)
 
-enable-github-question = Enable GitHub Releases? (creates a release on GitHub after publish)
+choose-forge-question = Which forge do you want to use for releases?
+button-github = GitHub
+button-gitlab = GitLab
+button-neither = Neither
 
 git-strategy-question = Git strategy? Push: commit to current branch. Branch: create release branch (for PRs).
 
@@ -62,9 +65,18 @@ edit-github-question = GitHub repository (owner/repo, e.g. acme/my-app, or leave
 edit-github-invalid-question = Invalid format. Enter owner/repo (e.g. acme/my-app), or leave empty:
 edit-github-help = { help-confirm } | { help-cancel }
 
+# Edit GitLab screen
+edit-gitlab-question = GitLab project (group/project, e.g. acme/my-app, or leave empty):
+edit-gitlab-invalid-question = Invalid format. Enter group/project (e.g. acme/my-app), or leave empty:
+edit-gitlab-help = { help-confirm } | { help-cancel } | Tab: cycle fields | Space: toggle
+edit-gitlab-self-managed-label = Self-managed instance
+edit-gitlab-host-question = GitLab host (e.g. gitlab.example.com):
+
 # Tab labels
 tab-git = Git
 tab-github = GitHub
+tab-gitlab = GitLab
+tab-forge = Forge
 
 # Change wizard screens
 single-package-question = What type of change is this?

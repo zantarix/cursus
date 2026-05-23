@@ -7,8 +7,8 @@ pub mod command;
 pub mod conventional_commit;
 pub(crate) mod env;
 pub mod filesystem;
+pub mod forge;
 pub mod git;
-pub mod github;
 pub mod locale;
 pub mod model;
 pub mod package_manager;
@@ -20,6 +20,9 @@ pub mod utils;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_logging;
+
+#[cfg(test)]
+mod tests;
 
 use std::process::ExitCode;
 

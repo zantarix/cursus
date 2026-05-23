@@ -114,4 +114,6 @@ Adopting `log` only for new diagnostic output while leaving existing `println!()
 
 ## Errata
 
-- **2026-03-11:** The backend sub-decision (choosing `fern` as the `log::Log` implementation) is superseded by [ADR-018](018-replace-fern-with-cli-logger.md), which replaces fern with a hand-rolled `CliLogger`. The `log` facade decision and all other aspects of this ADR remain valid.
+### 2026-03-11: `fern` backend choice no longer in effect
+
+The Decision section's backend sub-decision (selecting `fern` as the `log::Log` implementation) is incorrect: [ADR-018](018-replace-fern-with-cli-logger.md) replaces `fern` with a hand-rolled `CliLogger`. The `log` facade decision and the rest of this ADR are unaffected.

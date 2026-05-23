@@ -68,6 +68,14 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 	/// Returns the full SHA of the current HEAD commit.
 	async fn head_sha(&self) -> anyhow::Result<String>;
 
+	/// Returns `true` if the given path exists in the tree of the current HEAD commit.
+	///
+	/// Used to classify a staged path as a `create` (no entry at HEAD) vs an
+	/// `update` (entry exists at HEAD) when constructing a forge-API commit
+	/// payload. Tracks the on-disk filesystem only as far as HEAD — uncommitted
+	/// changes are not considered.
+	async fn path_exists_at_head(&self, path: &Path) -> anyhow::Result<bool>;
+
 	// ── mutations ────────────────────────────────────────────────────────
 
 	/// Stages the given files for the next git commit.
@@ -98,12 +106,17 @@ pub trait Git: Send + Sync + std::fmt::Debug {
 	async fn push_tag(&self, tag: &str) -> anyhow::Result<()>;
 }
 
+pub(crate) mod github_signed_commit;
+pub(crate) mod gitlab_signed_commit;
 mod operations;
 pub(crate) mod ref_format;
-mod signed_commit;
 
+pub use github_signed_commit::GitHubSignedCommit;
+pub use gitlab_signed_commit::GitLabSignedCommit;
 pub use operations::GitWorkdir;
-pub use signed_commit::SignedCommitGit;
+
+#[cfg(test)]
+mod tests;
 
 /// Finds the git working directory by walking up from the given path.
 ///
@@ -122,63 +135,5 @@ pub async fn find_workdir(
 		if !dir.pop() {
 			return None;
 		}
-	}
-}
-
-#[cfg(test)]
-mod find_workdir_tests {
-	use super::*;
-	use crate::filesystem::LocalFilesystem;
-
-	fn fs() -> LocalFilesystem {
-		LocalFilesystem
-	}
-
-	#[tokio::test]
-	async fn returns_none_when_no_git() {
-		let dir = tempfile::tempdir().unwrap();
-		assert!(
-			find_workdir(&AbsolutePath::new(dir.path()).unwrap(), &fs())
-				.await
-				.is_none()
-		);
-	}
-
-	#[tokio::test]
-	async fn finds_git_in_current_dir() {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let result = find_workdir(&AbsolutePath::new(dir.path()).unwrap(), &fs()).await;
-		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
-	}
-
-	#[tokio::test]
-	async fn finds_git_in_parent_dir() {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let subdir = dir.path().join("subdir");
-		std::fs::create_dir(&subdir).unwrap();
-		let result = find_workdir(&AbsolutePath::new(&subdir).unwrap(), &fs()).await;
-		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
-	}
-
-	#[tokio::test]
-	async fn finds_git_in_nested_parent() {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let nested = dir.path().join("a/b/c");
-		std::fs::create_dir_all(&nested).unwrap();
-		let result = find_workdir(&AbsolutePath::new(&nested).unwrap(), &fs()).await;
-		assert_eq!(result, Some(AbsolutePath::new(dir.path()).unwrap()));
-	}
-
-	#[tokio::test]
-	async fn stops_at_first_git() {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::create_dir(dir.path().join(".git")).unwrap();
-		let inner = dir.path().join("inner");
-		std::fs::create_dir_all(inner.join(".git")).unwrap();
-		let result = find_workdir(&AbsolutePath::new(&inner).unwrap(), &fs()).await;
-		assert_eq!(result, Some(AbsolutePath::new(inner).unwrap()));
 	}
 }

@@ -13,7 +13,7 @@ Initialises a new Cursus configuration in your repository:
 cursus init
 ```
 
-This runs an interactive TUI wizard that asks which package managers you use and writes a `.cursus/config.toml` with sensible defaults. It also creates the `.cursus/` directory if it doesn't already exist.
+This runs an interactive TUI wizard that asks which package managers you use, whether to enable git lifecycle automation, and which forge (GitHub, GitLab, or neither) to use for releases. It writes a `.cursus/config.toml` with sensible defaults and creates the `.cursus/` directory if it doesn't already exist. The full screen-by-screen flow is documented in the [CLI reference](/cursus/reference/cli/#cursus-init).
 
 `init` is interactive-only. Projects that need to generate config programmatically can write `.cursus/config.toml` directly — see the [configuration reference](/cursus/reference/configuration/) for the full schema.
 

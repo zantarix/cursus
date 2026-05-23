@@ -110,6 +110,14 @@ Accept generic `&Path` in trait method signatures, allowing both absolute and re
 
 ## Errata
 
-- **2026-03-29**: The `rest.rs` streaming upload exception noted in the Neutral consequences changed character with [ADR-038](038-octocrab-github-client.md). `OctocrabGitHubClient.upload_asset` uses `tokio::fs::read()` (async in-memory read) instead of `std::fs::File::open` (sync streaming), but still accesses the filesystem directly rather than through the `Filesystem` trait. The exception remains because `GitHubClient` receives `&Path` and has no access to a `Filesystem` instance.
-- `GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
-- **2026-05-01**: A tenth method was added to the `Filesystem` trait: `file_size(&self, path: &AbsolutePath) -> anyhow::Result<u64>`. The method returns the size in bytes of the file at the given path without reading its contents. It was added as part of a security hardening change that pre-checks file sizes before reading user-supplied inputs to prevent denial-of-service and out-of-memory conditions: changeset files are capped at 64 KiB and `config.toml` is capped at 256 KiB, with the size check performed via `file_size` before any `read_to_string` call. All `Filesystem` implementations must provide it; `LocalFilesystem` implements it by delegating to `tokio::fs::metadata`. The Decision section's "nine methods" count is therefore superseded by ten.
+### 2026-03-29: `rest.rs` streaming-upload exception is now async in-memory
+
+The Neutral consequence describing the `rest.rs` streaming upload as the sole direct-filesystem exception is partially incorrect in mechanism. [ADR-038](038-octocrab-github-client.md) replaces the sync `std::fs::File::open` streaming read with an async in-memory `tokio::fs::read()` in `OctocrabGitHubClient.upload_asset`. The exception itself remains — the call site still accesses the filesystem directly rather than through the `Filesystem` trait, because `CodeForgeClient` receives `&Path` and has no `Filesystem` instance.
+
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
+
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The `Filesystem` abstraction itself is unchanged; only the related trait name differs.
+
+### 2026-05-01: Trait now has ten methods, not nine
+
+The Decision section's "nine methods" count for the `Filesystem` trait is no longer accurate. A tenth method, `file_size(&self, path: &AbsolutePath) -> anyhow::Result<u64>`, was added as part of a security-hardening change that pre-checks file sizes (changesets capped at 64 KiB, `config.toml` at 256 KiB) before any `read_to_string` call to prevent denial-of-service and out-of-memory conditions on user-supplied inputs. All `Filesystem` implementations must provide it; `LocalFilesystem` delegates to `tokio::fs::metadata`.

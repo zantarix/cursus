@@ -8,18 +8,25 @@ use ratatui_textarea::TextArea;
 use super::screens::ButtonScreen;
 use super::widgets::{self, KeyResult, TabStatus};
 use crate::Env;
-use crate::github::GitHubRepo;
+use crate::forge::github::GitHubRepo;
+use crate::forge::gitlab::remote::GitLabProject;
 use crate::model::config::{PackageManager, Strategy};
 use crate::path::AbsolutePath;
 
+mod choose_forge;
 mod confirm_overwrite;
 mod edit_github;
+mod edit_gitlab;
 mod enable_git;
-mod enable_github;
 mod git_strategy;
 mod manifest_path;
 mod open_editor;
 mod select_pms;
+
+#[cfg(test)]
+mod tests;
+
+use choose_forge::ForgeChoice;
 
 /// The result of completing the init wizard.
 #[derive(Debug, Clone)]
@@ -54,31 +61,61 @@ pub struct InitResult {
 	pub detected_github_owner: Option<String>,
 	/// Auto-detected GitHub repo from the git remote, for use as a template hint.
 	pub detected_github_repo: Option<String>,
+	/// Whether GitLab releases integration is enabled.
+	pub gitlab_enabled: bool,
+	/// GitLab group (or namespace) path, if explicitly confirmed by the user.
+	///
+	/// `None` means "auto-detect from git remote". Supports subgroup paths
+	/// (e.g. `acme/sub`). When `None` and `detected_gitlab_group` is `Some`,
+	/// the template renders the detected value as a commented-out hint.
+	pub gitlab_group: Option<String>,
+	/// GitLab project name, if explicitly confirmed by the user.
+	///
+	/// `None` means "auto-detect from git remote". When `None` and
+	/// `detected_gitlab_project` is `Some`, the template renders the detected
+	/// value as a commented-out hint.
+	pub gitlab_project: Option<String>,
+	/// GitLab host for self-managed instances (e.g. `gitlab.example.com`).
+	///
+	/// `None` means the gitlab.com default is used. When `Some`, the template
+	/// emits the value as `host = "..."`.
+	pub gitlab_host: Option<String>,
+	/// Auto-detected GitLab group from the git remote, for use as a template hint.
+	pub detected_gitlab_group: Option<String>,
+	/// Auto-detected GitLab project from the git remote, for use as a template hint.
+	pub detected_gitlab_project: Option<String>,
+	/// Auto-detected GitLab host from the git remote, for use as a template hint.
+	pub detected_gitlab_host: Option<String>,
 	/// Whether to open the config file in an editor after writing.
 	pub open_editor: bool,
 }
 
 /// Internal state accumulated as the wizard progresses.
 #[derive(Debug, Clone)]
-struct WizardState {
-	env: crate::Env,
-	dry_run: bool,
-	cargo_enabled: bool,
-	npm_enabled: bool,
-	cargo_path: Option<String>,
-	npm_path: Option<String>,
-	git_enabled: bool,
-	git_strategy: Option<Strategy>,
-	github_enabled: bool,
-	github_owner: Option<String>,
-	github_repo: Option<String>,
-	detected_github: Option<GitHubRepo>,
-	remaining_manifest_pms: Vec<PackageManager>,
+pub(crate) struct WizardState {
+	pub(crate) env: crate::Env,
+	pub(crate) dry_run: bool,
+	pub(crate) cargo_enabled: bool,
+	pub(crate) npm_enabled: bool,
+	pub(crate) cargo_path: Option<String>,
+	pub(crate) npm_path: Option<String>,
+	pub(crate) git_enabled: bool,
+	pub(crate) git_strategy: Option<Strategy>,
+	pub(crate) github_enabled: bool,
+	pub(crate) github_owner: Option<String>,
+	pub(crate) github_repo: Option<String>,
+	pub(crate) detected_github: Option<GitHubRepo>,
+	pub(crate) gitlab_enabled: bool,
+	pub(crate) gitlab_group: Option<String>,
+	pub(crate) gitlab_project: Option<String>,
+	pub(crate) gitlab_host: Option<String>,
+	pub(crate) detected_gitlab: Option<GitLabProject>,
+	pub(crate) remaining_manifest_pms: Vec<PackageManager>,
 }
 
 /// Keyboard focus within the [`Screen::SelectPackageManagers`] screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PmFocus {
+pub(crate) enum PmFocus {
 	Cargo,
 	Npm,
 }
@@ -94,7 +131,7 @@ impl PmFocus {
 
 /// TUI wizard screens.
 #[derive(Debug)]
-enum Screen {
+pub(crate) enum Screen {
 	ConfirmOverwrite(bool),
 	SelectPackageManagers {
 		cargo: bool,
@@ -107,18 +144,19 @@ enum Screen {
 	},
 	EnableGit(bool),
 	GitStrategy(Strategy),
-	EnableGitHub(bool),
+	ChooseForge(ForgeChoice),
 	EditGitHub {
 		textarea: TextArea<'static>,
 		error: bool,
 	},
+	EditGitLab(Box<edit_gitlab::EditGitLabState>),
 	OpenEditor(bool),
 }
 
-type HandleResult = anyhow::Result<KeyResult<(WizardState, Screen), InitResult>>;
+pub(crate) type HandleResult = anyhow::Result<KeyResult<(WizardState, Screen), InitResult>>;
 
 /// Creates a [`TextArea`] with a standard bordered block.
-fn bordered_textarea() -> TextArea<'static> {
+pub(crate) fn bordered_textarea() -> TextArea<'static> {
 	let mut ta = TextArea::default();
 	ta.set_block(Block::default().borders(Borders::ALL));
 	ta
@@ -126,7 +164,7 @@ fn bordered_textarea() -> TextArea<'static> {
 
 /// Advances to the next [`Screen::ManifestPath`] screen or [`Screen::EnableGit`],
 /// depending on whether any package managers still need a manifest path.
-fn advance_from_manifest_queue(mut state: WizardState) -> (WizardState, Screen) {
+pub(crate) fn advance_from_manifest_queue(mut state: WizardState) -> (WizardState, Screen) {
 	if state.remaining_manifest_pms.is_empty() {
 		return (state, Screen::EnableGit(true));
 	}
@@ -141,9 +179,12 @@ fn advance_from_manifest_queue(mut state: WizardState) -> (WizardState, Screen) 
 }
 
 /// Converts the accumulated state plus the final `open_editor` flag into an [`InitResult`].
-fn complete(state: WizardState, open_editor: bool) -> InitResult {
+pub(crate) fn complete(state: WizardState, open_editor: bool) -> InitResult {
 	let detected_github_owner = state.detected_github.as_ref().map(|gh| gh.owner.clone());
 	let detected_github_repo = state.detected_github.as_ref().map(|gh| gh.repo.clone());
+	let detected_gitlab_group = state.detected_gitlab.as_ref().map(|gl| gl.group.clone());
+	let detected_gitlab_project = state.detected_gitlab.as_ref().map(|gl| gl.project.clone());
+	let detected_gitlab_host = state.detected_gitlab.as_ref().map(|gl| gl.host.clone());
 	InitResult {
 		cargo_enabled: state.cargo_enabled,
 		npm_enabled: state.npm_enabled,
@@ -156,6 +197,13 @@ fn complete(state: WizardState, open_editor: bool) -> InitResult {
 		github_repo: state.github_repo,
 		detected_github_owner,
 		detected_github_repo,
+		gitlab_enabled: state.gitlab_enabled,
+		gitlab_group: state.gitlab_group,
+		gitlab_project: state.gitlab_project,
+		gitlab_host: state.gitlab_host,
+		detected_gitlab_group,
+		detected_gitlab_project,
+		detected_gitlab_host,
 		open_editor,
 	}
 }
@@ -163,43 +211,43 @@ fn complete(state: WizardState, open_editor: bool) -> InitResult {
 /// Detects which package managers have manifest files at the git root.
 ///
 /// Returns `(cargo_detected, npm_detected)`.
-fn detect_package_managers(git_workdir: &AbsolutePath) -> (bool, bool) {
+pub(crate) fn detect_package_managers(git_workdir: &AbsolutePath) -> (bool, bool) {
 	let cargo = git_workdir.child("Cargo.toml").as_path().exists();
 	let npm = git_workdir.child("package.json").as_path().exists();
 	(cargo, npm)
 }
 
-fn handle_event(
+pub(crate) fn handle_event(
 	state: WizardState,
 	screen: Screen,
 	event: Event,
 	content_area: Rect,
 ) -> HandleResult {
-	let result = match screen {
-		Screen::ConfirmOverwrite(yes) => confirm_overwrite::ConfirmOverwriteButtons { yes }
-			.handle_event(state, event, content_area),
-		Screen::SelectPackageManagers { cargo, npm, focus } => {
-			select_pms::handle_select_pms(state, cargo, npm, focus, event, content_area)
-		}
-		Screen::ManifestPath { pm, textarea } => {
-			manifest_path::handle_manifest_path(state, pm, textarea, event)
-		}
-		Screen::EnableGit(yes) => {
-			enable_git::EnableGitButtons { yes }.handle_event(state, event, content_area)
-		}
-		Screen::GitStrategy(strategy) => {
-			git_strategy::GitStrategyButtons { strategy }.handle_event(state, event, content_area)
-		}
-		Screen::EnableGitHub(yes) => {
-			enable_github::EnableGitHubButtons { yes }.handle_event(state, event, content_area)
-		}
-		Screen::EditGitHub { textarea, error } => {
-			edit_github::handle_edit_github(state, textarea, error, event)
-		}
-		Screen::OpenEditor(yes) => {
-			open_editor::OpenEditorButtons { yes }.handle_event(state, event, content_area)
-		}
-	}?;
+	let result =
+		match screen {
+			Screen::ConfirmOverwrite(yes) => confirm_overwrite::ConfirmOverwriteButtons { yes }
+				.handle_event(state, event, content_area),
+			Screen::SelectPackageManagers { cargo, npm, focus } => {
+				select_pms::handle_select_pms(state, cargo, npm, focus, event, content_area)
+			}
+			Screen::ManifestPath { pm, textarea } => {
+				manifest_path::handle_manifest_path(state, pm, textarea, event)
+			}
+			Screen::EnableGit(yes) => {
+				enable_git::EnableGitButtons { yes }.handle_event(state, event, content_area)
+			}
+			Screen::GitStrategy(strategy) => git_strategy::GitStrategyButtons { strategy }
+				.handle_event(state, event, content_area),
+			Screen::ChooseForge(selected) => choose_forge::ChooseForgeButtons { selected }
+				.handle_event(state, event, content_area),
+			Screen::EditGitHub { textarea, error } => {
+				edit_github::handle_edit_github(state, textarea, error, event)
+			}
+			Screen::EditGitLab(s) => edit_gitlab::handle_edit_gitlab(state, s, event),
+			Screen::OpenEditor(yes) => {
+				open_editor::OpenEditorButtons { yes }.handle_event(state, event, content_area)
+			}
+		}?;
 	// In dry-run mode the config is never written to disk, so skip the
 	// OpenEditor screen and complete immediately with open_editor = false.
 	Ok(match result {
@@ -210,8 +258,8 @@ fn handle_event(
 	})
 }
 
-/// Maps a screen to the `[Managers, Git, GitHub]` tab statuses.
-fn tab_states(screen: &Screen) -> [TabStatus; 3] {
+/// Maps a screen to the `[Managers, Git, Forge]` tab statuses.
+pub(crate) fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 	match screen {
 		Screen::ConfirmOverwrite(_)
 		| Screen::SelectPackageManagers { .. }
@@ -219,7 +267,10 @@ fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 		Screen::EnableGit(_) | Screen::GitStrategy(_) => {
 			[TabStatus::Completed, TabStatus::Current, TabStatus::Future]
 		}
-		Screen::EnableGitHub(_) | Screen::EditGitHub { .. } | Screen::OpenEditor(_) => [
+		Screen::ChooseForge(_)
+		| Screen::EditGitHub { .. }
+		| Screen::EditGitLab { .. }
+		| Screen::OpenEditor(_) => [
 			TabStatus::Completed,
 			TabStatus::Completed,
 			TabStatus::Current,
@@ -227,10 +278,19 @@ fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 	}
 }
 
-const TAB_HEIGHT: u16 = 3;
+/// Returns the Fluent key for the third tab label based on the current screen.
+fn forge_tab_key(screen: &Screen) -> &'static str {
+	match screen {
+		Screen::EditGitHub { .. } => "tab-github",
+		Screen::EditGitLab { .. } => "tab-gitlab",
+		_ => "tab-forge",
+	}
+}
+
+pub(crate) const TAB_HEIGHT: u16 = 3;
 
 fn render_tab_bar(frame: &mut Frame, tab_area: Rect, screen: &Screen) {
-	let [managers, git, github] = tab_states(screen);
+	let [managers, git, forge] = tab_states(screen);
 	let managers_label_long = crate::t!("select-pms-tab-long");
 	let managers_label_short = crate::t!("select-pms-tab-short");
 	let managers_label = if tab_area.width >= 72 {
@@ -239,19 +299,20 @@ fn render_tab_bar(frame: &mut Frame, tab_area: Rect, screen: &Screen) {
 		managers_label_short.as_str()
 	};
 	let tab_git = crate::t!("tab-git");
-	let tab_github = crate::t!("tab-github");
+	let tab_forge = crate::t!(forge_tab_key(screen));
 	widgets::render_tabs(
 		frame,
 		tab_area,
 		&[
 			(managers_label, managers),
 			(tab_git.as_str(), git),
-			(tab_github.as_str(), github),
+			(tab_forge.as_str(), forge),
 		],
 	);
 }
 
-fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
+#[allow(clippy::too_many_lines)]
+pub(crate) fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 	let full = frame.area();
 	let tab_area = Rect {
 		height: TAB_HEIGHT,
@@ -281,12 +342,14 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 			strategy: *strategy,
 		}
 		.render(frame, content_area),
-		Screen::EnableGitHub(yes) => {
-			enable_github::EnableGitHubButtons { yes: *yes }.render(frame, content_area)
+		Screen::ChooseForge(selected) => choose_forge::ChooseForgeButtons {
+			selected: *selected,
 		}
+		.render(frame, content_area),
 		Screen::EditGitHub { textarea, error } => {
 			edit_github::render_edit_github(frame, content_area, textarea, *error)
 		}
+		Screen::EditGitLab(s) => edit_gitlab::render_edit_gitlab(frame, content_area, s),
 		Screen::OpenEditor(yes) => {
 			open_editor::OpenEditorButtons { yes: *yes }.render(frame, content_area)
 		}
@@ -296,7 +359,8 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 /// Runs the interactive TUI init wizard for Cursus configuration.
 ///
 /// Guides the user through selecting package managers, manifest paths,
-/// git automation, GitHub integration, and opening the config file in an editor.
+/// git automation, forge selection (GitHub, GitLab, or Neither), per-forge
+/// configuration, and opening the config file in an editor.
 ///
 /// When `dry_run` is `true`, the wizard skips the overwrite-confirmation prompt
 /// (since nothing will be written) and skips the "open in editor" screen (since
@@ -313,7 +377,8 @@ fn ui(frame: &mut Frame, _state: &WizardState, screen: &Screen) {
 pub fn run(
 	env: &Env,
 	dry_run: bool,
-	detected_github: Option<crate::github::remote::GitHubRepo>,
+	detected_github: Option<crate::forge::github::remote::GitHubRepo>,
+	detected_gitlab: Option<GitLabProject>,
 ) -> anyhow::Result<Option<InitResult>> {
 	let git = env.git();
 	let (cargo_detected, npm_detected) = detect_package_managers(git.path());
@@ -331,6 +396,11 @@ pub fn run(
 		github_owner: None,
 		github_repo: None,
 		detected_github,
+		gitlab_enabled: false,
+		gitlab_group: None,
+		gitlab_project: None,
+		gitlab_host: None,
+		detected_gitlab,
 		remaining_manifest_pms: Vec::new(),
 	};
 
@@ -362,7 +432,11 @@ pub fn run(
 /// Thin wrapper used by tests so existing test code can call `handle_key(state, screen, key)`
 /// without needing to construct an `Event` or supply a content area.
 #[cfg(test)]
-fn handle_key(state: WizardState, screen: Screen, k: crossterm::event::KeyEvent) -> HandleResult {
+pub(crate) fn handle_key(
+	state: WizardState,
+	screen: Screen,
+	k: crossterm::event::KeyEvent,
+) -> HandleResult {
 	handle_event(
 		state,
 		screen,
@@ -373,27 +447,27 @@ fn handle_key(state: WizardState, screen: Screen, k: crossterm::event::KeyEvent)
 
 /// Shared test utilities used by all screen submodule test suites.
 #[cfg(test)]
-pub(super) mod test_helpers {
+pub(crate) mod test_helpers {
 	use super::*;
 	use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 	use tempfile::TempDir;
 
-	pub(super) use crate::tui::test_utils::mouse_click;
+	pub(crate) use crate::tui::test_utils::mouse_click;
 
 	/// Content area matching an 80×24 terminal with the 3-row tab bar subtracted.
-	pub(super) const fn test_content_area() -> Rect {
+	pub(crate) const fn test_content_area() -> Rect {
 		Rect::new(0, TAB_HEIGHT, 80, 24 - TAB_HEIGHT)
 	}
 
-	pub(super) fn key(code: KeyCode) -> KeyEvent {
+	pub(crate) fn key(code: KeyCode) -> KeyEvent {
 		KeyEvent::new(code, KeyModifiers::NONE)
 	}
 
-	pub(super) fn temp_dir() -> TempDir {
+	pub(crate) fn temp_dir() -> TempDir {
 		tempfile::tempdir().expect("Failed to create temp dir")
 	}
 
-	pub(super) fn make_state(dir: &TempDir) -> WizardState {
+	pub(crate) fn make_state(dir: &TempDir) -> WizardState {
 		use std::sync::Arc;
 		let path = crate::path::AbsolutePath::new(dir.path()).unwrap();
 		let runner: Arc<dyn crate::command::CommandRunner> =
@@ -413,239 +487,33 @@ pub(super) mod test_helpers {
 			github_owner: None,
 			github_repo: None,
 			detected_github: None,
+			gitlab_enabled: false,
+			gitlab_group: None,
+			gitlab_project: None,
+			gitlab_host: None,
+			detected_gitlab: None,
 			remaining_manifest_pms: Vec::new(),
 		}
 	}
 
-	pub(super) fn unwrap_continue(result: HandleResult) -> (WizardState, Screen) {
+	pub(crate) fn unwrap_continue(result: HandleResult) -> (WizardState, Screen) {
 		match result.unwrap() {
 			KeyResult::Continue(s) => s,
 			other => panic!("Expected Continue, got {other:?}"),
 		}
 	}
 
-	pub(super) fn unwrap_complete(result: HandleResult) -> InitResult {
+	pub(crate) fn unwrap_complete(result: HandleResult) -> InitResult {
 		match result.unwrap() {
 			KeyResult::Complete(r) => r,
 			other => panic!("Expected Complete, got {other:?}"),
 		}
 	}
 
-	pub(super) fn assert_cancelled(result: HandleResult) {
+	pub(crate) fn assert_cancelled(result: HandleResult) {
 		assert!(
 			matches!(result.unwrap(), KeyResult::Cancelled),
 			"Expected Cancelled"
-		);
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use crossterm::event::KeyCode;
-
-	use super::test_helpers::*;
-	use super::*;
-
-	// --- tab_states ---
-
-	#[test]
-	fn tab_states_managers_screens_show_current_managers() {
-		let [m, g, gh] = tab_states(&Screen::SelectPackageManagers {
-			cargo: true,
-			npm: false,
-			focus: PmFocus::Cargo,
-		});
-		assert_eq!(m, TabStatus::Current);
-		assert_eq!(g, TabStatus::Future);
-		assert_eq!(gh, TabStatus::Future);
-	}
-
-	#[test]
-	fn tab_states_git_screens_show_completed_managers() {
-		let [m, g, gh] = tab_states(&Screen::EnableGit(true));
-		assert_eq!(m, TabStatus::Completed);
-		assert_eq!(g, TabStatus::Current);
-		assert_eq!(gh, TabStatus::Future);
-	}
-
-	#[test]
-	fn tab_states_github_screens_show_completed_git() {
-		let [m, g, gh] = tab_states(&Screen::OpenEditor(false));
-		assert_eq!(m, TabStatus::Completed);
-		assert_eq!(g, TabStatus::Completed);
-		assert_eq!(gh, TabStatus::Current);
-	}
-
-	// --- detect_package_managers ---
-
-	#[test]
-	fn detect_package_managers_defaults_to_neither() {
-		let dir = temp_dir();
-		let (cargo, npm) =
-			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		assert!(!cargo);
-		assert!(!npm);
-	}
-
-	#[test]
-	fn detect_package_managers_detects_cargo() {
-		let dir = temp_dir();
-		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let (cargo, npm) =
-			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		assert!(cargo);
-		assert!(!npm);
-	}
-
-	#[test]
-	fn detect_package_managers_detects_npm() {
-		let dir = temp_dir();
-		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-		let (cargo, npm) =
-			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		assert!(!cargo);
-		assert!(npm);
-	}
-
-	#[test]
-	fn detect_package_managers_detects_both() {
-		let dir = temp_dir();
-		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-		let (cargo, npm) =
-			detect_package_managers(&crate::path::AbsolutePath::new(dir.path()).unwrap());
-		assert!(cargo);
-		assert!(npm);
-	}
-
-	// --- Workflow tests ---
-
-	#[test]
-	fn workflow_cargo_only_git_disabled() {
-		let dir = temp_dir();
-		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let state = make_state(&dir);
-		let screen = Screen::SelectPackageManagers {
-			cargo: true,
-			npm: false,
-			focus: PmFocus::Cargo,
-		};
-
-		let (state, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
-		assert!(matches!(screen, Screen::EnableGit(_)));
-
-		let (state, screen) = unwrap_continue(handle_key(
-			state,
-			Screen::EnableGit(false),
-			key(KeyCode::Enter),
-		));
-		assert!(matches!(screen, Screen::OpenEditor(_)));
-
-		let result = unwrap_complete(handle_key(
-			state,
-			Screen::OpenEditor(false),
-			key(KeyCode::Enter),
-		));
-		assert!(result.cargo_enabled);
-		assert!(!result.npm_enabled);
-		assert!(!result.git_enabled);
-		assert!(!result.github_enabled);
-		assert!(!result.open_editor);
-	}
-
-	#[test]
-	fn workflow_branch_strategy_skips_enable_github() {
-		let dir = temp_dir();
-		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let mut state = make_state(&dir);
-		state.git_enabled = true;
-
-		let (state, screen) = unwrap_continue(handle_key(
-			state,
-			Screen::GitStrategy(Strategy::Branch),
-			key(KeyCode::Enter),
-		));
-		assert!(state.github_enabled);
-		assert!(matches!(screen, Screen::EditGitHub { .. }));
-
-		let (_, screen) = unwrap_continue(handle_key(state, screen, key(KeyCode::Enter)));
-		assert!(matches!(screen, Screen::OpenEditor(_)));
-	}
-
-	#[test]
-	fn workflow_complete_state_preserved_in_result() {
-		let dir = temp_dir();
-		let mut state = make_state(&dir);
-		state.cargo_enabled = true;
-		state.npm_enabled = true;
-		state.git_enabled = true;
-		state.git_strategy = Some(Strategy::Push);
-		state.github_enabled = true;
-		state.github_owner = Some("acme".to_string());
-		state.github_repo = Some("my-app".to_string());
-
-		let result = unwrap_complete(handle_key(
-			state,
-			Screen::OpenEditor(true),
-			key(KeyCode::Enter),
-		));
-		assert!(result.cargo_enabled);
-		assert!(result.npm_enabled);
-		assert!(result.git_enabled);
-		assert_eq!(result.git_strategy, Some(Strategy::Push));
-		assert!(result.github_enabled);
-		assert_eq!(result.github_owner, Some("acme".to_string()));
-		assert_eq!(result.github_repo, Some("my-app".to_string()));
-		assert!(result.open_editor);
-	}
-
-	/// Catches the `state.dry_run` guard deletion at line 209: when dry_run is set,
-	/// transitioning to OpenEditor should immediately Complete rather than Continue.
-	#[test]
-	fn dry_run_skips_open_editor_and_completes() {
-		let dir = temp_dir();
-		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let mut state = make_state(&dir);
-		state.dry_run = true;
-		// EnableGit(false) + Enter → would normally give OpenEditor, but dry_run
-		// should intercept and immediately Complete.
-		let result = handle_key(state, Screen::EnableGit(false), key(KeyCode::Enter));
-		let init_result = unwrap_complete(result);
-		assert!(!init_result.open_editor, "dry_run must skip the editor");
-	}
-
-	/// Catches the `>= 72`→`> 72` or `>= 72`→`>= 73` mutation at line 242:
-	/// a terminal narrower than 72 columns must show the short label "Managers".
-	#[test]
-	fn narrow_terminal_uses_short_managers_label() {
-		use ratatui::Terminal;
-		use ratatui::backend::TestBackend;
-		// Width 71 is below the 72-column threshold
-		let backend = TestBackend::new(71, 24);
-		let mut terminal = Terminal::new(backend).unwrap();
-		let dir = temp_dir();
-		let state = make_state(&dir);
-		let screen = Screen::SelectPackageManagers {
-			cargo: true,
-			npm: false,
-			focus: PmFocus::Cargo,
-		};
-		terminal.draw(|frame| ui(frame, &state, &screen)).unwrap();
-		let content = crate::tui::test_utils::buffer_to_string(terminal.backend().buffer());
-		// Only inspect the tab bar (first TAB_HEIGHT rows); the screen body can say
-		// "Package Managers" independently of the tab label.
-		let tab_area: String = content
-			.lines()
-			.take(TAB_HEIGHT as usize)
-			.collect::<Vec<_>>()
-			.join("\n");
-		assert!(
-			tab_area.contains("Managers"),
-			"Short label must appear in tab on narrow terminal, got: {tab_area:?}"
-		);
-		assert!(
-			!tab_area.contains("Package Managers"),
-			"Long label must not appear in tab on narrow terminal, got: {tab_area:?}"
 		);
 	}
 }

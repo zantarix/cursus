@@ -12,9 +12,13 @@ Cursus is a Rust CLI application built with [clap](https://docs.rs/clap) for arg
 | `src/cli/` | clap-based CLI with global flags and subcommands |
 | `src/tui/` | Interactive terminal UI wizards (ratatui/crossterm) |
 | `src/model/` | Core domain types: config, changesets, changelogs |
-| `src/package_manager/` | Adapter trait for Cargo and npm workspace enumeration, versioning, and publishing |
+| `src/package_manager/` | `PackageManagerAdapter` trait for cross-ecosystem workspace enumeration, versioning, and publishing |
+| `src/package_manager/cargo/` | Cargo adapter — reads `Cargo.toml` / `Cargo.lock`, publishes to crates.io |
+| `src/package_manager/npm/` | npm / pnpm / Yarn adapter — reads `package.json` plus the matching lockfile, publishes to the npm registry |
 | `src/git/` | Git lifecycle management (commit, tag, push, branch) |
-| `src/github/` | GitHub API integration (releases, PRs, asset uploads) |
+| `src/forge/` | Forge-neutral `CodeForgeClient` trait. The trait, parameter names, and shared types stay forge-neutral; user-visible vocabulary is forge-native at the API boundary |
+| `src/forge/github/` | GitHub forge client built on [octocrab](https://docs.rs/octocrab); covers GitHub.com |
+| `src/forge/gitlab/` | GitLab forge client built on the Kitware [`gitlab`](https://docs.rs/gitlab) crate; covers gitlab.com and self-managed instances |
 | `src/command/` | `CommandRunner` trait for shell command execution with dry-run support |
 | `src/env.rs` | Dependency injection and runner composition |
 | `src/conventional_commit.rs` | Conventional Commit parser |

@@ -66,3 +66,7 @@ Once an ADR is accepted and committed, it is treated as immutable. If a decision
 | [ADR-053](053-npm-package-node-spawner.md) | Use a Node.js Spawner Script for the npm Package Binary Entry Point | Accepted (2026-05-02) |
 | [ADR-054](054-cargo-binstall-support.md) | Add cargo-binstall Support for Prebuilt Binary Installation | Accepted (2026-05-02) |
 | [ADR-055](055-end-to-end-idempotent-publish-recovery.md) | End-to-End Idempotent Publish Recovery | Accepted (2026-05-03) |
+| [ADR-056](056-gitlab-support-client-config-and-ci.md) | GitLab Support — Client, Config, and CI Integration | Accepted (2026-05-13) |
+| [ADR-057](057-cursus-init-gitlab-support.md) | `cursus init` GitLab Support | Accepted (2026-05-21) |
+| [ADR-058](058-verified-release-commits-on-gitlab-via-web-commits-api.md) | Produce Verified Release Commits on GitLab via the Web Commits API | Accepted (2026-05-22) |
+| [ADR-059](059-forge-selection-runtime-rules.md) | Forge Selection Runtime Rules | Accepted (2026-05-13) |

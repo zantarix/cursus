@@ -45,19 +45,3 @@ pub fn init_test_logger() {
 pub fn take_logs() -> Vec<(log::Level, String)> {
 	CAPTURED_LOGS.with(|logs| std::mem::take(&mut *logs.borrow_mut()))
 }
-
-#[cfg(test)]
-mod tests {
-	use log::Log as _;
-
-	use super::*;
-
-	#[test]
-	fn test_logger_enabled_returns_true_for_any_metadata() {
-		let meta = log::Metadata::builder()
-			.level(log::Level::Info)
-			.target("test")
-			.build();
-		assert!(TestLogger.enabled(&meta));
-	}
-}

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use log::info;
 
-use crate::github::client::CodeForgeClient;
+use crate::forge::CodeForgeClient;
 use crate::model::config::Config;
 
 use super::ReleaseInfo;
@@ -10,12 +10,14 @@ use super::ReleaseInfo;
 ///
 /// If an open pull request already exists for `head`, it is updated with the
 /// new `title` and `body`. Otherwise a new pull request is created from `head`
-/// into `base`. Returns the URL of the created or updated pull request.
+/// into `base`. Returns the URL of the created or updated request. The
+/// concrete client emits its own user-visible success log line using
+/// forge-native vocabulary; this layer does not log success.
 ///
 /// # Errors
 ///
 /// Returns an error if the find, create, or update API call fails.
-pub(super) async fn upsert_pull_request(
+pub(crate) async fn upsert_pull_request(
 	client: &dyn CodeForgeClient,
 	title: &str,
 	body: &str,
@@ -23,21 +25,13 @@ pub(super) async fn upsert_pull_request(
 	base: &str,
 ) -> anyhow::Result<String> {
 	match client.find_open_pull_request(head).await? {
-		Some(pr) => {
-			let url = client.update_pull_request(pr.number, title, body).await?;
-			info!("Updated pull request: {url}");
-			Ok(url)
-		}
-		None => {
-			let url = client.create_pull_request(title, body, head, base).await?;
-			info!("Created pull request: {url}");
-			Ok(url)
-		}
+		Some(pr) => client.update_pull_request(pr.number, title, body).await,
+		None => client.create_pull_request(title, body, head, base).await,
 	}
 }
 
 /// Builds the pull request body with an introduction and per-package changelog sections.
-pub(super) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
+pub(crate) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> String {
 	let mut body = format!(
 		"This PR was opened by Cursus. When ready to release, you should merge this PR \
 		 which will trigger a release. If you're not ready to do a release then simply leave \
@@ -57,11 +51,13 @@ pub(super) fn build_pr_body(releases: &[ReleaseInfo], base_branch: &str) -> Stri
 	body
 }
 
-/// Creates or updates the GitHub pull request for the release branch.
+/// Creates or updates the forge release request (pull request on GitHub,
+/// merge request on GitLab) for the release branch.
 ///
-/// No-ops in dry-run mode or when no GitHub client is available. The dry-run
-/// short-circuit is intentional per ADR-017: the PR upsert is the side-effecting
-/// operation being guarded, so the check lives here rather than at the call site.
+/// No-ops in dry-run mode or when no forge client is available. The dry-run
+/// short-circuit is intentional per ADR-017: the request upsert is the
+/// side-effecting operation being guarded, so the check lives here rather
+/// than at the call site.
 pub(super) async fn upsert_release_pull_request(
 	config: &Config,
 	env: &crate::Env,
@@ -71,213 +67,25 @@ pub(super) async fn upsert_release_pull_request(
 	dry_run: bool,
 ) -> anyhow::Result<()> {
 	if dry_run {
-		info!("Would attempt to create or update a PR in GitHub.");
+		info!(
+			"Would attempt to create or update a release request on {}.",
+			env.code_forge_name()
+		);
 		return Ok(());
 	}
 	let Ok(client) = env.code_forge_client() else {
 		return Ok(());
 	};
-	let base = original_branch.context("HEAD is detached; cannot determine PR base branch")?;
-	let title = config.github.pull_request_title();
+	let base = original_branch.context("HEAD is detached; cannot determine release base branch")?;
+	let title = config.release_request_title();
 	let pr_body = build_pr_body(release_infos, base);
 	upsert_pull_request(client, title, &pr_body, branch, base)
 		.await
-		.context("Failed to create or update pull request")?;
+		.with_context(|| {
+			format!(
+				"Failed to create or update release request on {}",
+				client.forge_name()
+			)
+		})?;
 	Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[tokio::test]
-	async fn build_pr_body_empty_releases() {
-		let body = build_pr_body(&[], "main");
-		assert!(body.contains("# Releases"));
-		assert!(body.contains("`main`"));
-		assert!(body.contains("Cursus"));
-	}
-
-	#[tokio::test]
-	async fn build_pr_body_formats_single_release() {
-		let releases = vec![ReleaseInfo {
-			package_name: "my-pkg".to_string(),
-			new_version: "1.2.0".parse().unwrap(),
-			changelog_entry: "### Features\n\n- Added something\n".to_string(),
-		}];
-		let body = build_pr_body(&releases, "main");
-		assert!(body.contains("## my-pkg@1.2.0"));
-		assert!(body.contains("### Features"));
-		assert!(body.contains("- Added something"));
-		assert!(body.contains("`main`"));
-	}
-
-	#[tokio::test]
-	async fn build_pr_body_formats_multiple_releases() {
-		let releases = vec![
-			ReleaseInfo {
-				package_name: "pkg-a".to_string(),
-				new_version: "1.0.0".parse().unwrap(),
-				changelog_entry: "### Bug Fixes\n\n- Fixed a bug\n".to_string(),
-			},
-			ReleaseInfo {
-				package_name: "pkg-b".to_string(),
-				new_version: "2.1.0".parse().unwrap(),
-				changelog_entry: String::new(),
-			},
-		];
-		let body = build_pr_body(&releases, "develop");
-		assert!(body.contains("## pkg-a@1.0.0"));
-		assert!(body.contains("### Bug Fixes"));
-		assert!(body.contains("- Fixed a bug"));
-		assert!(body.contains("## pkg-b@2.1.0"));
-		assert!(body.contains("`develop`"));
-		// pkg-a section must appear before pkg-b
-		let pos_a = body.find("## pkg-a").unwrap();
-		let pos_b = body.find("## pkg-b").unwrap();
-		assert!(pos_a < pos_b);
-	}
-
-	#[tokio::test]
-	async fn build_pr_body_includes_base_branch_in_intro() {
-		let body = build_pr_body(&[], "my-feature-branch");
-		assert!(body.contains("`my-feature-branch`"));
-	}
-
-	#[tokio::test]
-	async fn build_pr_body_snapshot() {
-		let releases = vec![
-			ReleaseInfo {
-				package_name: "pkg-a".to_string(),
-				new_version: "2.0.0".parse().unwrap(),
-				changelog_entry: "### Breaking Changes\n\n- Removed old API\n".to_string(),
-			},
-			ReleaseInfo {
-				package_name: "pkg-b".to_string(),
-				new_version: "1.3.0".parse().unwrap(),
-				changelog_entry:
-					"### Features\n\n- Added widget\n\n### Bug Fixes\n\n- Fixed crash\n".to_string(),
-			},
-			ReleaseInfo {
-				package_name: "pkg-c".to_string(),
-				new_version: "0.9.1".parse().unwrap(),
-				changelog_entry: String::new(),
-			},
-		];
-		insta::assert_snapshot!(build_pr_body(&releases, "main"));
-	}
-
-	// ── upsert_pull_request ───────────────────────────────────────────────────
-
-	#[tokio::test]
-	async fn upsert_pull_request_creates_when_no_existing() {
-		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
-		let client = RecordingCodeForgeClient::new(); // no existing PR
-		let result =
-			upsert_pull_request(&client, "Release PR", "body", "cursus-release/main", "main").await;
-		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
-		let invocations = client.invocations();
-		// Should have called find then create
-		assert!(
-			invocations
-				.iter()
-				.any(|i| matches!(i, CodeForgeInvocation::FindOpenPullRequest { .. })),
-			"Expected FindOpenPullRequest invocation"
-		);
-		assert!(
-			invocations
-				.iter()
-				.any(|i| matches!(i, CodeForgeInvocation::CreatePullRequest { .. })),
-			"Expected CreatePullRequest invocation"
-		);
-	}
-
-	#[tokio::test]
-	async fn upsert_pull_request_updates_when_existing() {
-		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::{CodeForgeInvocation, RecordingCodeForgeClient};
-		let existing_pr = PullRequest {
-			number: 7,
-			html_url: "https://github.com/acme/app/pull/7".to_string(),
-		};
-		let client = RecordingCodeForgeClient::new().with_existing_pr(existing_pr);
-		let result = upsert_pull_request(
-			&client,
-			"Release PR",
-			"updated body",
-			"cursus-release/main",
-			"main",
-		)
-		.await;
-		assert!(result.is_ok(), "Expected Ok, got: {result:?}");
-		let invocations = client.invocations();
-		assert!(
-			invocations
-				.iter()
-				.any(|i| matches!(i, CodeForgeInvocation::FindOpenPullRequest { .. })),
-			"Expected FindOpenPullRequest invocation"
-		);
-		assert!(
-			invocations.iter().any(|i| matches!(
-				i,
-				CodeForgeInvocation::UpdatePullRequest { pull_number, .. } if *pull_number == 7
-			)),
-			"Expected UpdatePullRequest invocation for PR #7"
-		);
-		assert!(
-			!invocations
-				.iter()
-				.any(|i| matches!(i, CodeForgeInvocation::CreatePullRequest { .. })),
-			"Should NOT call CreatePullRequest when existing PR found"
-		);
-	}
-
-	#[tokio::test]
-	async fn upsert_pull_request_propagates_find_error() {
-		use crate::github::client::test_support::RecordingCodeForgeClient;
-		let client = RecordingCodeForgeClient::new().with_find_pr_failure();
-		let result =
-			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
-		assert!(result.is_err());
-		let msg = format!("{:#}", result.unwrap_err());
-		assert!(
-			msg.contains("simulated find_open_pull_request failure"),
-			"Expected find failure error, got: {msg}"
-		);
-	}
-
-	#[tokio::test]
-	async fn upsert_pull_request_propagates_update_error() {
-		use crate::github::client::PullRequest;
-		use crate::github::client::test_support::RecordingCodeForgeClient;
-		let existing_pr = PullRequest {
-			number: 1,
-			html_url: "https://github.com/acme/app/pull/1".to_string(),
-		};
-		let client = RecordingCodeForgeClient::new()
-			.with_existing_pr(existing_pr)
-			.with_update_pr_failure();
-		let result =
-			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
-		assert!(result.is_err());
-		let msg = format!("{:#}", result.unwrap_err());
-		assert!(
-			msg.contains("simulated update_pull_request failure"),
-			"Expected update failure error, got: {msg}"
-		);
-	}
-
-	#[tokio::test]
-	async fn upsert_pull_request_propagates_create_error() {
-		use crate::github::client::test_support::RecordingCodeForgeClient;
-		let client = RecordingCodeForgeClient::new().with_create_pr_failure();
-		let result =
-			upsert_pull_request(&client, "Release PR", "body", "release-branch", "main").await;
-		assert!(result.is_err());
-		let msg = format!("{:#}", result.unwrap_err());
-		assert!(
-			msg.contains("simulated create_pull_request failure"),
-			"Expected create failure error, got: {msg}"
-		);
-	}
 }

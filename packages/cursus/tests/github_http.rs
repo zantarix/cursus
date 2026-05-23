@@ -7,9 +7,9 @@ use std::path::Path;
 
 use httpmock::prelude::*;
 
-use cursus::github::OctocrabGitHubClient;
-use cursus::github::client::CodeForgeClient;
-use cursus::github::remote::GitHubRepo;
+use cursus::forge::CodeForgeClient;
+use cursus::forge::github::OctocrabGitHubClient;
+use cursus::forge::github::remote::GitHubRepo;
 
 /// Builds an `OctocrabGitHubClient` pointing at the given mock server.
 fn mock_client(server: &MockServer) -> OctocrabGitHubClient {
@@ -42,14 +42,62 @@ const RELEASE_JSON: &str = r#"{
 	"assets": []
 }"#;
 
-// Minimal JSON for a PR response.
+// JSON for a PR response. octocrab 0.51's `PullRequest`/`SimplePullRequest`
+// models require a full set of fields (URLs, a user object, diff stats), so
+// this body is a superset that satisfies both deserialisers.
 const PR_JSON: &str = r#"{
 	"url": "https://api.github.com/repos/owner/repo/pulls/7",
 	"id": 1,
+	"node_id": "PR_7",
 	"number": 7,
 	"html_url": "https://github.com/owner/repo/pull/7",
+	"diff_url": "https://github.com/owner/repo/pull/7.diff",
+	"patch_url": "https://github.com/owner/repo/pull/7.patch",
+	"issue_url": "https://api.github.com/repos/owner/repo/issues/7",
+	"commits_url": "https://api.github.com/repos/owner/repo/pulls/7/commits",
+	"review_comments_url": "https://api.github.com/repos/owner/repo/pulls/7/comments",
+	"review_comment_url": "https://api.github.com/repos/owner/repo/pulls/comments",
+	"comments_url": "https://api.github.com/repos/owner/repo/issues/7/comments",
+	"statuses_url": "https://api.github.com/repos/owner/repo/statuses/abc123",
+	"state": "open",
+	"title": "Release",
+	"user": {
+		"login": "octocat",
+		"id": 1,
+		"node_id": "U_1",
+		"avatar_url": "https://github.com/images/avatar.png",
+		"gravatar_id": "",
+		"url": "https://api.github.com/users/octocat",
+		"html_url": "https://github.com/octocat",
+		"followers_url": "https://api.github.com/users/octocat/followers",
+		"following_url": "https://api.github.com/users/octocat/following",
+		"gists_url": "https://api.github.com/users/octocat/gists",
+		"starred_url": "https://api.github.com/users/octocat/starred",
+		"subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
+		"organizations_url": "https://api.github.com/users/octocat/orgs",
+		"repos_url": "https://api.github.com/users/octocat/repos",
+		"events_url": "https://api.github.com/users/octocat/events",
+		"received_events_url": "https://api.github.com/users/octocat/received_events",
+		"type": "User",
+		"site_admin": false
+	},
+	"labels": [],
+	"created_at": "2024-01-01T00:00:00Z",
+	"updated_at": "2024-01-01T00:00:00Z",
+	"merged": false,
+	"assignees": [],
+	"requested_reviewers": [],
+	"requested_teams": [],
 	"head": {"ref": "feature", "sha": "abc123"},
-	"base": {"ref": "main", "sha": "def456"}
+	"base": {"ref": "main", "sha": "def456"},
+	"_links": {},
+	"author_association": "OWNER",
+	"additions": 0,
+	"deletions": 0,
+	"changed_files": 0,
+	"commits": 0,
+	"review_comments": 0,
+	"comments": 0
 }"#;
 
 // ── create_release ────────────────────────────────────────────────────────────

@@ -121,6 +121,10 @@ Cursus could treat an explicit `--package my-private-pkg` as an error, on the th
 
 ## Errata
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. References to `cursus release` in this ADR now refer to `cursus prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+### 2026-03-09: `cursus release` renamed to `cursus prepare`
 
-**2026-04-06**: [ADR-043](043-publish-private-packages-to-github-releases.md) introduces `[git].publish_private_packages`, a Cursus-specific configuration that opts listed private packages into receiving git tags and GitHub Releases during `cursus publish` without registry publication. This creates an exception to this ADR's "No new configuration" principle and its rule that private packages are silently excluded from the entire publish workflow. Packages not listed in `publish_private_packages` continue to be silently skipped per this ADR. See [ADR-043](043-publish-private-packages-to-github-releases.md) for details.
+References to `cursus release` in this ADR are incorrect: [ADR-016](016-rename-release-to-prepare.md) renames the subcommand to `cursus prepare`. The behaviour is unchanged; only the user-facing name differs.
+
+### 2026-04-06: "No new configuration" principle and silent-exclusion rule have an exception
+
+This ADR's "No new configuration" principle and its rule that private packages are silently excluded from the entire publish workflow are no longer absolute. [ADR-043](043-publish-private-packages-to-github-releases.md) introduces `[git].publish_private_packages`, a Cursus-specific configuration that opts listed private packages into receiving git tags and GitHub Releases (without registry publication) during `cursus publish`. Packages not listed in `publish_private_packages` continue to be silently skipped per this ADR.

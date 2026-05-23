@@ -81,6 +81,14 @@ Store git as `Option<Arc<dyn Git>>` with a `.with_git()` builder method, so comm
 
 ## Errata
 
-`GitHubClient` was renamed to `CodeForgeClient` per [ADR-041](041-rename-github-client-trait-to-code-forge-client.md).
+### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
 
-- **2026-04-29**: [ADR-050](050-verified-release-commits-via-git-data-api.md) adds a `head_sha()` method to the `Git` trait, returning the full SHA of the current HEAD commit. The method is required for the new `SignedCommitGit` decorator to determine the parent SHA when building a commit object via the GitHub Git Data API. All `Git` implementations must provide it; `GitWorkdir` implements it by delegating to the `git` binary. ADR-050 also introduces `SignedCommitGit` itself as an additional `Git` impl that decorates an inner `Git` to route `commit()`, `push()`, and `force_push_branch()` through the GitHub API while delegating all other methods unchanged.
+References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The `Git` trait abstraction itself is unchanged; only the related trait name differs.
+
+### 2026-04-29: `Git` trait gains `head_sha()` and a `SignedCommitGit` decorator
+
+The Decision section's enumeration of `Git` methods is incomplete and its single-impl framing is no longer accurate. [ADR-050](050-verified-release-commits-via-git-data-api.md) adds a `head_sha()` method (returning the full HEAD SHA, required so the `SignedCommitGit` decorator can determine the parent when building a commit object via the GitHub Git Data API); all `Git` implementations must provide it, with `GitWorkdir` delegating to the `git` binary. The same ADR introduces `SignedCommitGit` as a second `Git` impl that decorates an inner `Git` to route `commit()`, `push()`, and `force_push_branch()` through the GitHub API while delegating all other methods unchanged.
+
+### 2026-05-22: `SignedCommitGit` renamed; second decorator added for GitLab
+
+The 2026-04-29 erratum above names the decorator as `SignedCommitGit` and frames the trait as having one production impl plus one decorator. Both points are now incorrect: [ADR-058](058-verified-release-commits-on-gitlab-via-web-commits-api.md) renames the GitHub decorator to `GitHubSignedCommit` and adds a sibling `GitLabSignedCommit` decorator that wraps any `Arc<dyn Git>` and routes `commit()`, `push()`, and `force_push_branch()` through GitLab's commits API. The trait itself is unchanged — both decorators implement the same `Git` surface — but the production picture is now one `GitWorkdir` plus two forge-specific decorators, selected at the binary-boundary based on the active forge.

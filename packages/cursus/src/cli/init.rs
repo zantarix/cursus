@@ -29,21 +29,26 @@ pub(crate) async fn cmd_init(
 	let git = env.git();
 	let git_workdir = git.path();
 
-	let detected_github = crate::github::remote::GitHubRepo::detect_in(git)
+	let detected_github = crate::forge::github::remote::GitHubRepo::detect_in(git)
+		.await
+		.ok()
+		.flatten();
+	let detected_gitlab = crate::forge::gitlab::remote::GitLabProject::detect_in(git)
 		.await
 		.ok()
 		.flatten();
 
 	let env_clone = env.clone();
 	let dry_run = global.dry_run;
-	let result =
-		match tokio::task::spawn_blocking(move || init::run(&env_clone, dry_run, detected_github))
-			.await
-			.context("TUI task panicked")??
-		{
-			Some(r) => r,
-			None => return Ok(ExitCode::from(2)),
-		};
+	let result = match tokio::task::spawn_blocking(move || {
+		init::run(&env_clone, dry_run, detected_github, detected_gitlab)
+	})
+	.await
+	.context("TUI task panicked")??
+	{
+		Some(r) => r,
+		None => return Ok(ExitCode::from(2)),
+	};
 
 	let config_toml = render_init_template(&result)?;
 

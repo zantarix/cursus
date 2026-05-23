@@ -128,8 +128,14 @@ The release command does not require a TUI. It is a batch operation suitable for
 
 ## Errata
 
-**2026-02-20**: [ADR-006](006-git-lifecycle-hooks.md) introduces opt-in git lifecycle hooks that allow Cursus to optionally handle commit, tag, and push operations after the filesystem modifications described in this ADR. When `[git].enabled = false` (the default), ADR-003's original behaviour applies: Cursus only modifies the filesystem, and users manage source control manually. When git hooks are enabled, Cursus automates the commit step described in line 16 as part of the `cursus release` workflow. See [ADR-006](006-git-lifecycle-hooks.md) for details.
+### 2026-02-20: Commit step no longer always user-managed
 
-**2026-03-09**: [ADR-015](015-ci-managed-release-workflow.md) further extends git integration beyond what [ADR-006](006-git-lifecycle-hooks.md) introduced. The three-step workflow described in this ADR's Context section listed step 2 as "Commit to source control -- managed by the user or CI, not by Cursus." When `[git].strategy = "branch"` ([ADR-015](015-ci-managed-release-workflow.md)), Cursus also creates a release branch, pushes it to origin, and optionally opens a pull request. The statement that Cursus "intentionally does not handle the commit step" is now only accurate when `[git].enabled = false`. See [ADR-015](015-ci-managed-release-workflow.md) for the full CI-managed release workflow.
+The Context section's claim that "Cursus intentionally does not handle the commit step" is incorrect when git lifecycle hooks are enabled. [ADR-006](006-git-lifecycle-hooks.md) introduces opt-in handling of commit, tag, and push after the filesystem modifications described here; when `[git].enabled = false` (the default) the original behaviour still applies, but when enabled Cursus automates the commit step itself.
 
-**2026-03-09**: [ADR-016](016-rename-release-to-prepare.md) renames the `cursus release` subcommand to `cursus prepare`. All references to `cursus release` in this ADR now refer to `cursus prepare`. The behavior is unchanged. See [ADR-016](016-rename-release-to-prepare.md) for details.
+### 2026-03-09: Branch strategy adds Cursus-managed push and PR
+
+The "commit to source control — managed by the user or CI, not by Cursus" framing of step 2 in the Context's three-step workflow is no longer accurate under `[git].strategy = "branch"` introduced by [ADR-015](015-ci-managed-release-workflow.md). In that strategy Cursus also creates a release branch, pushes it to origin, and optionally opens a pull request, so the "intentionally does not handle the commit step" statement only holds when `[git].enabled = false`.
+
+### 2026-03-09: `cursus release` renamed to `cursus prepare`
+
+The subcommand name `cursus release` used throughout this ADR is incorrect: [ADR-016](016-rename-release-to-prepare.md) renames the subcommand to `cursus prepare`. The behaviour is unchanged; only the user-facing name differs.

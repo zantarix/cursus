@@ -46,7 +46,7 @@ When a package is bumped, its dependents may need a bump too. The `dependency_bu
 The `[git]` configuration controls how prepare interacts with Git:
 
 - **`push`** (default) — commits and pushes directly to the current branch
-- **`branch`** — creates a release branch (e.g., `cursus-release/my-package`) with a pull request if GitHub integration is enabled
+- **`branch`** — creates a release branch (e.g., `cursus-release/my-package`) with a pull request (or merge request) if a forge integration (GitHub or GitLab) is enabled
 
 ## Dry run
 

@@ -22,8 +22,16 @@ pub(super) fn make_env_with_git(dir: &std::path::Path) -> crate::Env {
 }
 
 pub(super) mod builder;
+pub(super) mod cargo;
+pub(super) mod git;
+pub(super) mod github;
+pub(super) mod gitlab;
 pub(super) mod ignore;
+pub(super) mod linked_versions;
 pub(super) mod load_projects;
+pub(super) mod npm;
 pub(super) mod persistence;
+pub(super) mod prepare;
 pub(super) mod serialization;
+pub(super) mod template;
 pub(super) mod workspace_version;

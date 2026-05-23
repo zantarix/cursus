@@ -238,4 +238,10 @@ Using `toml::to_string_pretty` to generate the config file, relying on serde's `
 
 ## Errata
 
-- **2026-04-19:** The inline comment on the generated `[global].disable_dependency_cycle_warnings` config line has been reworded. The example config blocks above show the original text `Suppress circular dependency warnings`; the Fluent template `global-disable-dep-cycle-comment` now reads `Suppress warnings about circular dependencies between packages (two or more packages in a cycle)`. The wording was updated because `cycle_groups()` was changed to exclude single-package self-loops, so the warning is only emitted for multi-package cycles and the comment should reflect that scope. No other aspect of this ADR is affected.
+### 2026-04-19: Dependency-cycle comment wording updated
+
+The example config blocks show the inline comment on `[global].disable_dependency_cycle_warnings` as `Suppress circular dependency warnings`. That wording is now incorrect: the Fluent template `global-disable-dep-cycle-comment` reads `Suppress warnings about circular dependencies between packages (two or more packages in a cycle)`. The wording changed because `cycle_groups()` was tightened to exclude single-package self-loops, so the warning only fires for multi-package cycles and the comment must reflect that narrower scope.
+
+### 2026-05-21: `EnableGitHub` Yes/No screen replaced by three-way `ChooseForge`
+
+The wizard flow's step 6 `EnableGitHub` Yes/No screen no longer exists. [ADR-057](057-cursus-init-gitlab-support.md) replaces it with a three-way `ChooseForge` prompt (GitHub / GitLab / Neither). The "Branch strategy implies GitHub" shortcut from step 5 is preserved by defaulting the new prompt to GitHub when Branch was chosen, but the user can now actively select GitLab or Neither; the companion `EditGitHub` screen and its auto-detection behaviour are unchanged.

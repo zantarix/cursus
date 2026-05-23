@@ -17,7 +17,7 @@ git-tag-format-comment = Tag format: "auto", "prefixed", or "simple"
 git-release-branch-prefix-comment = Prefix for release branches (branch strategy)
 git-extra-files-comment = Additional files to stage before committing
 git-prepare-commit-message-comment = Commit message for the prepare step
-git-publish-private-packages-comment = Private packages that receive git tags and GitHub Releases (no registry publish)
+git-publish-private-packages-comment = Private packages that receive git tags and forge releases (no registry publish)
 
 # [prepare] section comments
 prepare-dependency-bump-comment = Bump level for dependents: "auto" (default), "match", "patch", "minor", or "major"
@@ -32,3 +32,11 @@ github-repo-auto-detect-comment = GitHub repo (auto-detected from remote if omit
 github-build-command-comment = Shell command to build release artifacts
 github-pr-title-comment = Custom PR title (default: "Release updates")
 github-artifacts-comment = Per-package: display name -> file path for release assets
+
+# [gitlab] section comments
+gitlab-group-auto-detect-comment = GitLab group (auto-detected from remote if omitted)
+gitlab-project-auto-detect-comment = GitLab project (auto-detected from remote if omitted)
+gitlab-host-comment = GitLab instance hostname (defaults to gitlab.com)
+gitlab-build-command-comment = Shell command to build release artifacts
+gitlab-mr-title-comment = Custom MR title (default: "Release updates")
+gitlab-artifacts-comment = Per-package: display name -> file path for release assets

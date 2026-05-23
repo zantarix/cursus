@@ -68,10 +68,4 @@ Changesets are explicitly opt-in. Changes that don't warrant a changelog entry �
 
 ### 2026-04-27: Default project selection in non-interactive mode
 
-The Decision section above states that in non-interactive mode, omitting `-p <project-name>` defaults to selecting all projects. This default behavior has been changed to align with the TUI's pre-selection logic.
-
-- When `cursus change --no-interactive` is invoked without any `--project` flags, the command now selects only git-changed projects, using the same three-source diff logic as the TUI pre-selection (committed changes since `origin/HEAD`, staged changes, and unstaged changes).
-- If no git-changed projects are detected, the command falls back to selecting all projects (preserving the original default for repositories with no detectable changes).
-- Explicit `--project` flags continue to take exact precedence and are unaffected by this change.
-
-No new ADR was written for this change. It is a bug fix and behavior alignment between the interactive and non-interactive modes (consistent with the original Decision intent that "interactive and non-interactive modes share the same underlying logic"), rather than a new architectural decision.
+The Decision section's statement that omitting `-p <project-name>` in non-interactive mode defaults to selecting all projects is now incorrect. The default has been changed to match the TUI's pre-selection logic: `cursus change --no-interactive` invoked without any `--project` flags now selects only git-changed projects (using the same three-source diff — committed since `origin/HEAD`, staged, and unstaged — as the TUI), falling back to all projects only when no git-changed projects are detected; explicit `--project` flags continue to take exact precedence. This was a bug-fix alignment of the two modes consistent with the ADR's original "shared underlying logic" intent rather than a new architectural decision, so no superseding ADR was written.

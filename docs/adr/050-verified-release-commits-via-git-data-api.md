@@ -142,4 +142,10 @@ Rejected because it splits release-commit logic across the workflow file and the
 
 ## Errata
 
-- **2026-05-01**: [ADR-052](052-credential-redaction-in-error-messages.md) extends the cross-cutting credential-redaction convention to the error paths introduced by this ADR. Specifically, the post-API `git fetch` and `git reset` stderr captured inside `SignedCommitGit::push()` and `SignedCommitGit::force_push_branch()`, and the GitHub API response bodies surfaced from the blob/tree/commit/ref-update calls in `SignedCommitGit::commit()` and the ref-update call in the push helpers, all pass through `redact_credentials` before being embedded in the resulting `anyhow::Error`. This protects against a credential-bearing remote URL (e.g., `https://x-access-token:${GITHUB_TOKEN}@github.com/...`) leaking into CI workflow summaries when a post-API realignment fetch or a Git Data API call fails.
+### 2026-05-01: Error paths must redact credentials
+
+The Decision section is silent on credential handling in the error paths introduced here, which is no longer accurate given the cross-cutting convention established by [ADR-052](052-credential-redaction-in-error-messages.md). The post-API `git fetch` and `git reset` stderr captured inside `SignedCommitGit::push()` and `SignedCommitGit::force_push_branch()`, and the GitHub API response bodies surfaced from the blob/tree/commit/ref-update calls in `SignedCommitGit::commit()` and the ref-update call in the push helpers, must all pass through `redact_credentials` before being embedded in the resulting `anyhow::Error`. This protects against a credential-bearing remote URL (e.g. `https://x-access-token:${GITHUB_TOKEN}@github.com/...`) leaking into CI workflow summaries when a realignment fetch or Git Data API call fails.
+
+### 2026-05-12: `SignedCommitGit` renamed to `GitHubSignedCommit`
+
+References to the `SignedCommitGit` decorator in this ADR are incorrect: [ADR-058](058-verified-release-commits-on-gitlab-via-web-commits-api.md) renames it to `GitHubSignedCommit` for naming symmetry with the GitLab equivalent introduced there. The decorator's behaviour is unchanged; only the name differs.
