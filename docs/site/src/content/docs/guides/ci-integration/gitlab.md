@@ -90,8 +90,13 @@ When Cursus detects it is running on GitLab CI (`GITLAB_CI=true`) with a token a
 Requirements:
 
 - **GitLab 18.10 or later.** Older versions accept the API call but do not produce a Verified signature.
+- **"Sign web-based commits" must be enabled on the project or its group.** This setting is **off by default**, even on gitlab.com running a current version. Without it, the API commit lands successfully but appears **Unverified** with no signature at all. Enable it under **Settings → Repository → General → Sign web-based commits** (project level requires the Maintainer or Owner role; enabling it at the group level applies to every project in the group and disables the per-project checkbox). See [GitLab's web-commit signing docs](https://docs.gitlab.com/user/project/repository/signed_commits/web_commits/) for details.
 - A project- or group-access token, or `CI_JOB_TOKEN`. No long-lived signing key custody is required.
 - The token's user identity is what GitLab records as the author and committer; `author_email` / `author_name` are deliberately omitted from the request so GitLab can sign the commit.
+
+:::caution
+If your release commits show as Unverified despite running on GitLab 18.10+ with a valid token, the most likely cause is that **Sign web-based commits** has not been enabled on the project or group. The commit succeeds either way, so there is no error to alert you — the only signal is the missing Verified badge.
+:::
 
 To opt out, set `[git].signed_commits = "off"` in `.cursus/config.toml`. To force the API path outside CI (e.g. for local testing against a dev instance), set `[git].signed_commits = "force"`.
 
