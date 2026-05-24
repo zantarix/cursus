@@ -9,61 +9,195 @@ use anyhow::Context;
 use crate::model::changeset::ChangeType;
 use crate::path::AbsolutePath;
 
+/// A forge-specific reference to the pull/merge request that introduced a change.
+///
+/// References are self-describing: a `#123` token is inherently a GitHub pull request
+/// and a `!123` token a GitLab merge request, so the variant captures both the number
+/// and the forge it belongs to without consulting any configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForgeReference {
+	/// A GitHub pull request, e.g. `#123`.
+	GitHub {
+		/// The pull request number.
+		number: u64,
+	},
+	/// A GitLab merge request, e.g. `!123` or, cross-project, `group/proj!123`.
+	GitLab {
+		/// The project path (`group/proj`) when the reference is cross-project, else `None`.
+		///
+		/// Preserving the prefix is required for correctness: rendering a cross-project
+		/// `group/proj!71` as a bare `!71` would resolve against the current project and
+		/// link to a different merge request.
+		project: Option<String>,
+		/// The merge request number.
+		number: u64,
+	},
+}
+
+impl ForgeReference {
+	/// Formats this reference as the `via …` portion of a changelog suffix.
+	///
+	/// GitHub renders as `#123`; GitLab renders as `!123+` (the trailing `+` makes GitLab
+	/// inline the merge request title), preserving any cross-project `group/proj` prefix.
+	fn format_token(&self) -> String {
+		match self {
+			Self::GitHub { number } => format!("#{number}"),
+			Self::GitLab {
+				project: Some(project),
+				number,
+			} => format!("{project}!{number}+"),
+			Self::GitLab {
+				project: None,
+				number,
+			} => format!("!{number}+"),
+		}
+	}
+}
+
 /// A reference to the git commit that introduced a changeset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitReference {
 	/// The first 7 characters of the full commit SHA.
 	pub short_hash: String,
-	/// The PR number, if one could be extracted from the commit subject.
-	pub pr_number: Option<u64>,
+	/// The pull/merge request reference, if one could be extracted from the commit message.
+	pub reference: Option<ForgeReference>,
 }
 
 impl CommitReference {
-	/// Creates a new `CommitReference` from a full SHA and the commit subject line.
-	pub fn new(full_sha: &str, subject: &str) -> Self {
+	/// Creates a new `CommitReference` from a full SHA and the full commit message.
+	///
+	/// The whole message is inspected (not just the subject) so that GitLab's
+	/// `See merge request …!NN` line, which lives in the body of a default merge commit,
+	/// is detected.
+	pub fn new(full_sha: &str, message: &str) -> Self {
 		Self {
 			short_hash: full_sha.chars().take(7).collect(),
-			pr_number: extract_pr_number(subject),
+			reference: extract_reference(message),
 		}
+	}
+
+	/// Returns whether a forge reference was extracted from the commit.
+	pub fn has_reference(&self) -> bool {
+		self.reference.is_some()
 	}
 
 	/// Formats the commit reference as a suffix string.
 	///
-	/// Returns ` [abc1234] via #123` when a PR number is present,
-	/// or ` [abc1234]` when no PR number is known.
+	/// Returns ` [abc1234] via #123` (GitHub) or ` [abc1234] via !123+` (GitLab) when a
+	/// reference is present, or ` [abc1234]` when none is known.
 	pub fn format_suffix(&self) -> String {
-		if let Some(pr) = self.pr_number {
-			format!(" [{}] via #{}", self.short_hash, pr)
-		} else {
-			format!(" [{}]", self.short_hash)
+		match &self.reference {
+			Some(reference) => {
+				format!(" [{}] via {}", self.short_hash, reference.format_token())
+			}
+			None => format!(" [{}]", self.short_hash),
 		}
 	}
 }
 
-/// Extracts a PR number from a git commit subject line.
+/// Extracts a forge reference from a git commit message.
 ///
-/// Recognises two patterns:
-/// - Squash-merge: subject contains `(#NNN)` (e.g. `feat: add thing (#42)`)
-/// - Merge commit: subject starts with `Merge pull request #NNN`
-fn extract_pr_number(subject: &str) -> Option<u64> {
-	// Check squash-merge pattern: (#NNN) anywhere in the subject
-	if let Some(pos) = subject.rfind("(#") {
-		let rest = &subject[pos + 2..];
-		if let Some(end) = rest.find(')') {
-			let num_str = &rest[..end];
-			if let Ok(n) = num_str.parse::<u64>() {
-				return Some(n);
-			}
-		}
-	}
-	// Check merge-commit pattern: "Merge pull request #NNN ..."
-	if let Some(rest) = subject.strip_prefix("Merge pull request #") {
+/// References are self-describing, so both GitHub and GitLab conventions are checked and
+/// the first match wins (in this order):
+/// 1. GitHub merge commit: first line starts with `Merge pull request #NNN`.
+/// 2. GitLab merge commit: the message contains `See merge request [<path>]!NNN`.
+/// 3. GitHub squash merge: `(#NNN)` in the first line.
+/// 4. GitLab squash merge: `(!NNN)` in the first line.
+///
+/// The squash patterns are anchored to the first line so that `#`/`!` mentions in the
+/// commit body do not produce false positives.
+fn extract_reference(message: &str) -> Option<ForgeReference> {
+	let first_line = message.lines().next().unwrap_or("");
+
+	// 1. GitHub merge-commit pattern: "Merge pull request #NNN ..."
+	if let Some(rest) = first_line.strip_prefix("Merge pull request #") {
 		let num_str = rest.split_whitespace().next().unwrap_or("");
-		if let Ok(n) = num_str.parse::<u64>() {
-			return Some(n);
+		if let Ok(number) = num_str.parse::<u64>() {
+			return Some(ForgeReference::GitHub { number });
 		}
 	}
+
+	// 2. GitLab merge-commit pattern: "See merge request [<path>]!NNN" (anywhere).
+	if let Some(reference) = extract_gitlab_see_merge_request(message) {
+		return Some(reference);
+	}
+
+	// 3. GitHub squash pattern: "(#NNN)" in the first line.
+	if let Some(number) = extract_parenthesised_number(first_line, "(#") {
+		return Some(ForgeReference::GitHub { number });
+	}
+
+	// 4. GitLab squash pattern: "(!NNN)" in the first line.
+	if let Some(number) = extract_parenthesised_number(first_line, "(!") {
+		return Some(ForgeReference::GitLab {
+			project: None,
+			number,
+		});
+	}
+
 	None
+}
+
+/// Parses the number out of a `<open>NNN)` token (e.g. `(#42)` or `(!42)`) in `text`.
+///
+/// `open` is the opening delimiter including the sigil, e.g. `"(#"` or `"(!"`.
+fn extract_parenthesised_number(text: &str, open: &str) -> Option<u64> {
+	let pos = text.rfind(open)?;
+	let rest = &text[pos + open.len()..];
+	let end = rest.find(')')?;
+	rest[..end].parse::<u64>().ok()
+}
+
+/// Extracts a GitLab merge request reference from a `See merge request …!NNN` line.
+///
+/// The marker is anchored to the **start of a line** (after trimming leading whitespace),
+/// matching the line GitLab generates in a default merge commit. This avoids treating an
+/// attacker-influenced `See merge request …` mention buried in prose (e.g. a GitHub PR body)
+/// as a GitLab reference.
+///
+/// The text between `See merge request ` and the `!` is an optional project path
+/// (`group/proj`); when present it is validated against GitLab's path grammar and carried
+/// through so cross-project references link correctly. An invalid path causes the pattern
+/// to be treated as unmatched rather than emitting an unsafe/wrong link.
+fn extract_gitlab_see_merge_request(message: &str) -> Option<ForgeReference> {
+	const MARKER: &str = "See merge request ";
+	let after = message
+		.lines()
+		.find_map(|line| line.trim_start().strip_prefix(MARKER))?;
+	// The reference token runs until the first whitespace.
+	let token = after.split_whitespace().next().unwrap_or("");
+	let bang = token.find('!')?;
+	let project_part = &token[..bang];
+	let number_part = &token[bang + 1..];
+
+	let number = number_part.parse::<u64>().ok()?;
+
+	let project = if project_part.is_empty() {
+		None
+	} else if is_valid_gitlab_project_path(project_part) {
+		Some(project_part.to_string())
+	} else {
+		// Reject anything that is not a plausible project path rather than render it.
+		return None;
+	};
+
+	Some(ForgeReference::GitLab { project, number })
+}
+
+/// Returns whether `path` matches GitLab's project path grammar.
+///
+/// Must be non-empty, start with an alphanumeric, `_` or `.`, and otherwise contain only
+/// those characters plus `-` and `/`.
+fn is_valid_gitlab_project_path(path: &str) -> bool {
+	let mut chars = path.chars();
+	let Some(first) = chars.next() else {
+		return false;
+	};
+	if !(first.is_ascii_alphanumeric() || first == '_' || first == '.') {
+		return false;
+	}
+	path.chars()
+		.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '/'))
 }
 
 /// A changelog entry for a specific version.

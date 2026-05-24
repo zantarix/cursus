@@ -9,7 +9,7 @@ use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRun
 use crate::command::{CommandRunner, DryRunCommandRunner};
 use crate::filesystem::LocalFilesystem;
 use crate::forge::gitlab::GitLabProject;
-use crate::git::gitlab_signed_commit::{GitLabSignedCommit, PendingCommit};
+use crate::git::gitlab_signed_commit::{GitLabSignedCommit, PendingCommit, PendingTag};
 use crate::git::{Git, GitWorkdir};
 use crate::path::AbsolutePath;
 
@@ -511,6 +511,18 @@ async fn seed_pending(
 		message: "ci(release): version packages".to_string(),
 		paths: paths.to_vec(),
 	});
+}
+
+/// Records a pending tag, as a prior `tag()` call would, so `push_tag` has
+/// something to flush.
+async fn seed_pending_tag(dec: &GitLabSignedCommit, tag: &str, sha: &str) {
+	dec.state.lock().await.tags.insert(
+		tag.to_string(),
+		PendingTag {
+			sha: sha.to_string(),
+			message: format!("Release {tag}"),
+		},
+	);
 }
 
 fn assert_fetch_and_reset(calls: &[crate::command::test_support::Invocation], branch: &str) {
@@ -1056,18 +1068,27 @@ async fn log_added_commit_delegates_to_inner() {
 }
 
 #[tokio::test]
-async fn tag_delegates_to_inner() {
-	let runner = Arc::new(RecordingCommandRunner::new(0));
+async fn tag_records_pending_without_running_git_tag() {
+	// `tag()` records the target SHA + message for a later API push and must
+	// NOT shell out to `git tag -a` (the API path never transfers a local tag).
+	let runner = git_runner("deadbeef", "main");
 	let (_dir, dec) =
 		make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>).await;
-	dec.tag("v1.0.0", "rel").await.unwrap();
+	dec.tag("v1.0.0", "Release foo version 1.0.0")
+		.await
+		.unwrap();
+
 	let calls = runner.invocations();
 	assert!(
-		calls
+		!calls
 			.iter()
-			.any(|c| c.program == "git" && c.args.contains(&"tag".to_string())),
-		"expected inner git tag invocation",
+			.any(|c| c.program == "git" && c.args.first().map(String::as_str) == Some("tag")),
+		"tag() must not run `git tag`: {calls:?}",
 	);
+	let state = dec.state.lock().await;
+	let pending = state.tags.get("v1.0.0").expect("pending tag recorded");
+	assert_eq!(pending.sha, "deadbeef");
+	assert_eq!(pending.message, "Release foo version 1.0.0");
 }
 
 #[tokio::test]
@@ -1099,33 +1120,254 @@ async fn checkout_or_reset_branch_delegates_to_inner() {
 }
 
 #[tokio::test]
-async fn delete_tag_delegates_to_inner() {
+async fn delete_tag_is_a_noop() {
+	// In the API path there is no local tag to delete; `delete_tag` must not
+	// run `git tag -d` (which would emit a spurious warning).
 	let runner = Arc::new(RecordingCommandRunner::new(0));
 	let (_dir, dec) =
 		make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>).await;
 	dec.delete_tag("v1.0.0").await.unwrap();
 	let calls = runner.invocations();
 	assert!(
-		calls.iter().any(|c| c.program == "git"
+		!calls.iter().any(|c| c.program == "git"
 			&& c.args.contains(&"tag".to_string())
 			&& c.args.contains(&"-d".to_string())),
-		"expected inner git tag -d invocation",
+		"delete_tag must not run `git tag -d`: {calls:?}",
+	);
+}
+
+fn tag_endpoint_path() -> &'static str {
+	"/api/v4/projects/acme%2Fapp/repository/tags"
+}
+
+#[tokio::test]
+async fn push_tag_creates_tag_via_api() {
+	let runner = git_runner("abc123", "main");
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	let post_mock = server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path())
+			.body_includes("tag_name=v1.0.0")
+			.body_includes("ref=feedface")
+			.body_includes("message=Release+foo+version+1.0.0");
+		then.status(201).json_body(json!({ "name": "v1.0.0" }));
+	});
+	let dec = make_decorator(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+	{
+		let mut state = dec.state.lock().await;
+		state.tags.insert(
+			"v1.0.0".to_string(),
+			PendingTag {
+				sha: "feedface".to_string(),
+				message: "Release foo version 1.0.0".to_string(),
+			},
+		);
+	}
+
+	dec.push_tag("v1.0.0").await.unwrap();
+	post_mock.assert();
+	assert!(
+		dec.state.lock().await.tags.is_empty(),
+		"pending tag consumed"
 	);
 }
 
 #[tokio::test]
-async fn push_tag_delegates_to_inner() {
-	let runner = Arc::new(RecordingCommandRunner::new(0));
-	let (_dir, dec) =
-		make_delegating_decorator(Arc::clone(&runner) as Arc<dyn CommandRunner>).await;
-	dec.push_tag("v1.0.0").await.unwrap();
-	let calls = runner.invocations();
+async fn push_tag_errors_when_no_pending_tag() {
+	// Pushing a tag that `tag()` never recorded is a broken invariant — the
+	// decorator must error rather than synthesise a tag from HEAD.
+	let runner = git_runner("abc123", "main");
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	let catch_all = server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path());
+		then.status(201).body("{}");
+	});
+	let dec = make_decorator(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+
+	let err = dec
+		.push_tag("v1.0.0")
+		.await
+		.expect_err("push_tag without a recorded tag must error");
+	assert!(format!("{err:#}").contains("no pending tag"));
+	catch_all.assert_calls(0);
+}
+
+#[tokio::test]
+async fn tag_dry_run_records_nothing() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let runner = git_runner("deadbeef", "main");
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	let dec = make_decorator_dry_run(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+
+	dec.tag("v1.0.0", "rel").await.unwrap();
 	assert!(
-		calls
-			.iter()
-			.any(|c| c.program == "git" && c.args.contains(&"push".to_string())),
-		"expected inner git push invocation",
+		dec.state.lock().await.tags.is_empty(),
+		"dry-run tag() must not record pending state"
 	);
+}
+
+#[tokio::test]
+async fn push_tag_tolerates_already_exists_object_body() {
+	// GitLab may render the duplicate-tag error as a structured object
+	// (`{"message": ["...already exists"]}`) → `GitlabObjectWithStatus`.
+	let runner = git_runner("abc123", "main");
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path());
+		then.status(400)
+			.json_body(json!({ "message": ["Tag v1.0.0 already exists"] }));
+	});
+	let dec = make_decorator(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+	seed_pending_tag(&dec, "v1.0.0", "abc123").await;
+
+	dec.push_tag("v1.0.0").await.unwrap();
+}
+
+#[tokio::test]
+async fn push_tag_tolerates_already_exists() {
+	let runner = git_runner("abc123", "main");
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path());
+		then.status(400)
+			.json_body(json!({ "message": "Tag v1.0.0 already exists" }));
+	});
+	let dec = make_decorator(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+	seed_pending_tag(&dec, "v1.0.0", "abc123").await;
+
+	// "already exists" is treated as success (idempotent re-run).
+	dec.push_tag("v1.0.0").await.unwrap();
+}
+
+#[tokio::test]
+async fn push_tag_surfaces_and_redacts_api_errors() {
+	let runner = git_runner("abc123", "main");
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path());
+		then.status(403).json_body(json!({
+			"message": "denied for https://x-access-token:glpat_secret@gitlab.example.com/acme/app.git"
+		}));
+	});
+	let dec = make_decorator(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+	seed_pending_tag(&dec, "v1.0.0", "abc123").await;
+
+	let err = dec.push_tag("v1.0.0").await.expect_err("403 should error");
+	let msg = format!("{err:#}");
+	assert!(
+		!msg.contains("glpat_secret"),
+		"raw credential leaked: {msg}"
+	);
+}
+
+#[tokio::test]
+async fn push_tag_rejects_invalid_tag_name() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	let catch_all = server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path());
+		then.status(201).body("{}");
+	});
+	let dec = make_decorator(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+
+	// A leading dash is rejected by `validate_tag_name` before any API call.
+	let err = dec
+		.push_tag("-bad-tag")
+		.await
+		.expect_err("invalid tag name should error");
+	assert!(format!("{err:#}").to_lowercase().contains("tag"));
+	catch_all.assert_calls(0);
+}
+
+#[tokio::test]
+async fn push_tag_dry_run_makes_no_api_call() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = AbsolutePath::new(dir.path()).unwrap();
+	std::fs::create_dir(dir.path().join(".git")).unwrap();
+	let runner = Arc::new(RecordingCommandRunner::new(0));
+	let git = make_git(Arc::clone(&runner) as Arc<dyn CommandRunner>, &root);
+	let server = MockServer::start();
+	let catch_all = server.mock(|when, then| {
+		when.method(httpmock::Method::POST)
+			.path(tag_endpoint_path());
+		then.status(201).body("{}");
+	});
+	let dec = make_decorator_dry_run(
+		git,
+		make_async_gitlab(&server).await,
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+	)
+	.await;
+
+	dec.push_tag("v1.0.0").await.unwrap();
+	catch_all.assert_calls(0);
 }
 
 #[tokio::test]

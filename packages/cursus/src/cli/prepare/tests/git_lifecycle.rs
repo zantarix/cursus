@@ -200,7 +200,7 @@ async fn extra_files_absolute_path_is_rejected() {
 #[tokio::test]
 async fn compute_release_branch_uses_flag_over_all() {
 	assert_eq!(
-		compute_release_branch(Some("my-branch"), "release/", Some("main")).unwrap(),
+		compute_release_branch(Some("my-branch"), "release/", "main").unwrap(),
 		"my-branch"
 	);
 }
@@ -208,7 +208,7 @@ async fn compute_release_branch_uses_flag_over_all() {
 #[tokio::test]
 async fn compute_release_branch_uses_config_prefix() {
 	assert_eq!(
-		compute_release_branch(None, "release/", Some("main")).unwrap(),
+		compute_release_branch(None, "release/", "main").unwrap(),
 		"release/main"
 	);
 }
@@ -216,22 +216,14 @@ async fn compute_release_branch_uses_config_prefix() {
 #[tokio::test]
 async fn compute_release_branch_uses_default_prefix() {
 	assert_eq!(
-		compute_release_branch(None, "cursus-release/", Some("main")).unwrap(),
+		compute_release_branch(None, "cursus-release/", "main").unwrap(),
 		"cursus-release/main"
 	);
 }
 
 #[tokio::test]
-async fn compute_release_branch_detached_fallback() {
-	assert_eq!(
-		compute_release_branch(None, "cursus-release/", None).unwrap(),
-		"cursus-release/detached"
-	);
-}
-
-#[tokio::test]
 async fn compute_release_branch_rejects_dash_prefix() {
-	let result = compute_release_branch(Some("--detach"), "release/", Some("main"));
+	let result = compute_release_branch(Some("--detach"), "release/", "main");
 	assert!(result.is_err());
 	assert!(
 		result
@@ -243,7 +235,7 @@ async fn compute_release_branch_rejects_dash_prefix() {
 
 #[tokio::test]
 async fn compute_release_branch_rejects_single_dash() {
-	let result = compute_release_branch(Some("-"), "release/", None);
+	let result = compute_release_branch(Some("-"), "release/", "main");
 	assert!(result.is_err());
 	assert!(
 		result
@@ -255,7 +247,7 @@ async fn compute_release_branch_rejects_single_dash() {
 
 #[tokio::test]
 async fn compute_release_branch_rejects_empty() {
-	let result = compute_release_branch(Some(""), "release/", Some("main"));
+	let result = compute_release_branch(Some(""), "release/", "main");
 	assert!(result.is_err());
 	assert!(
 		result
@@ -269,7 +261,7 @@ async fn compute_release_branch_rejects_empty() {
 async fn compute_release_branch_rejects_composed_leading_dash() {
 	// config_prefix itself is attacker-controlled via .cursus/config.toml;
 	// the composed result must still be rejected when it starts with '-'.
-	let result = compute_release_branch(None, "--", Some("main"));
+	let result = compute_release_branch(None, "--", "main");
 	assert!(result.is_err());
 	assert!(
 		result
@@ -283,7 +275,7 @@ async fn compute_release_branch_rejects_composed_leading_dash() {
 async fn compute_release_branch_rejects_composed_control_char() {
 	// A current_branch containing a control character (e.g. BEL) must be
 	// caught before the composed name reaches git.
-	let result = compute_release_branch(None, "cursus-release/", Some("feat\x07ure"));
+	let result = compute_release_branch(None, "cursus-release/", "feat\x07ure");
 	assert!(result.is_err());
 	assert!(
 		result

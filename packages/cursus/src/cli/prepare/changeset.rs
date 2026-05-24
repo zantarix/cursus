@@ -53,8 +53,8 @@ pub(crate) fn aggregate_changesets(
 /// Resolves git commit references for each changeset file.
 ///
 /// For each changeset path, looks up the commit that first added the file using
-/// `git log --first-parent --diff-filter=A`. Extracts the PR number from the commit
-/// subject line when available.
+/// `git log --first-parent --diff-filter=A`. Extracts the PR/MR reference from the
+/// full commit message when available.
 ///
 /// Never fails — always returns a map entry (possibly `None`) for every path.
 pub(crate) async fn resolve_commit_references(
@@ -99,17 +99,17 @@ pub(super) async fn resolve_one_commit_reference(
 		}
 	};
 
-	let subject = match git.log_subject(&sha).await {
+	let message = match git.log_message(&sha).await {
 		Ok(s) => s,
 		Err(e) => {
-			log::warn!("Failed to get commit subject for {sha}: {e:#}");
+			log::warn!("Failed to get commit message for {sha}: {e:#}");
 			return None;
 		}
 	};
 
-	let commit_ref = CommitReference::new(&sha, &subject);
-	if commit_ref.pr_number.is_none() {
-		log::debug!("No PR number found in commit subject: {subject:?}");
+	let commit_ref = CommitReference::new(&sha, &message);
+	if !commit_ref.has_reference() {
+		log::debug!("No PR/MR reference found in commit message: {message:?}");
 	}
 	Some(commit_ref)
 }

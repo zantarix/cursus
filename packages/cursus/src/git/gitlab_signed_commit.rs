@@ -5,15 +5,17 @@
 //! web-commits key when `author_email`/`author_name` are omitted from the
 //! request body, producing a Verified commit with no long-lived key custody.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 use async_trait::async_trait;
 use gitlab::AsyncGitlab;
-use gitlab::api::AsyncQuery;
 use gitlab::api::projects::repository::commits::{CommitAction, CommitActionType, CreateCommit};
 use gitlab::api::projects::repository::files::Encoding;
+use gitlab::api::projects::repository::tags::CreateTag;
+use gitlab::api::{ApiError, AsyncQuery};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
@@ -21,7 +23,7 @@ use crate::command::CommandRunner;
 use crate::filesystem::Filesystem;
 use crate::forge::gitlab::GitLabProject;
 use crate::git::Git;
-use crate::git::ref_format::validate_branch_name;
+use crate::git::ref_format::{validate_branch_name, validate_tag_name};
 use crate::path::AbsolutePath;
 use crate::redact::redact_credentials;
 
@@ -38,9 +40,19 @@ pub(crate) struct PendingCommit {
 	pub(crate) paths: Vec<PathBuf>,
 }
 
+/// A tag awaiting `push_tag()` to flush it to the GitLab Tags API. Records the
+/// target commit SHA (HEAD at `tag()` time — the release commit, already on the
+/// remote) and the annotation message, rather than creating a local `git tag`
+/// object that the API path would never transfer.
+pub(crate) struct PendingTag {
+	pub(crate) sha: String,
+	pub(crate) message: String,
+}
+
 pub(crate) struct State {
 	pub(crate) staged: Vec<PathBuf>,
 	pub(crate) pending: Option<PendingCommit>,
+	pub(crate) tags: HashMap<String, PendingTag>,
 }
 
 // ── Decorator ─────────────────────────────────────────────────────────────────
@@ -106,6 +118,7 @@ impl GitLabSignedCommit {
 			state: Mutex::new(State {
 				staged: Vec::new(),
 				pending: None,
+				tags: HashMap::new(),
 			}),
 		}
 	}
@@ -366,8 +379,33 @@ impl Git for GitLabSignedCommit {
 		Ok(())
 	}
 
+	/// Records the tag's target SHA and message for a later API-driven push.
+	///
+	/// Unlike the inner impl, this does **not** run `git tag -a`: the GitLab Tags
+	/// API re-creates the tag from a target ref and never transfers a local tag
+	/// object, so a local tag would be pure overhead — and `git tag -a` requires
+	/// a configured git identity that the API path deliberately avoids. HEAD here
+	/// is the release commit, already on the remote, so it is the tag's target.
 	async fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
-		self.inner.tag(tag_name, message).await
+		// Validate at record time (mirrors `GitWorkdir::tag`) so a bad name fails
+		// here rather than producing a confusing error later at push time.
+		validate_tag_name(tag_name)?;
+		// Mirror `commit()`: in dry-run, record nothing — `push_tag()` is also
+		// guarded, so there is no pending entry for it to flush.
+		if self.dry_run {
+			log::debug!("(dry-run) skipping tag record for {tag_name}");
+			return Ok(());
+		}
+		let sha = self.inner.head_sha().await?;
+		let mut state = self.state.lock().await;
+		state.tags.insert(
+			tag_name.to_string(),
+			PendingTag {
+				sha,
+				message: message.to_string(),
+			},
+		);
+		Ok(())
 	}
 
 	/// Pushes to origin (non-forced). If a commit is pending, flushes it via
@@ -416,11 +454,92 @@ impl Git for GitLabSignedCommit {
 		}
 	}
 
+	/// No-op: there is no local tag to delete in the API path.
+	///
+	/// `create_and_push_tags` calls this to clean up after a failed push so a
+	/// retry can re-create the tag. API tag creation is idempotent on retry (see
+	/// [`push_tag`](Self::push_tag)), so there is nothing to undo — and delegating
+	/// to the inner `git tag -d` would emit a spurious "Failed to delete local
+	/// tag" warning for a tag that was never created locally.
 	async fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
-		self.inner.delete_tag(tag).await
+		log::debug!("(api) skipping local tag deletion for {tag}; nothing to clean up");
+		Ok(())
 	}
 
+	/// Creates the tag on the remote via the GitLab Tags API.
+	///
+	/// The tag's target SHA and annotation message come from the matching
+	/// [`tag()`](Self::tag) call, which must run first (it always does in the
+	/// publish flow). Pushing a tag that was never recorded is a broken
+	/// invariant, not a recoverable state — synthesising one from HEAD would push
+	/// a tag the caller never asked for — so an absent pending tag is an error.
+	/// Tolerates the "already exists" response so a re-run after a partial
+	/// failure is idempotent.
+	///
+	/// In dry-run mode, logs the intended action and returns without an API call
+	/// (explicit guard required because `AsyncGitlab` is not a [`CommandRunner`]
+	/// and is not intercepted by [`crate::command::DryRunCommandRunner`]).
 	async fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
-		self.inner.push_tag(tag).await
+		// Validate before the dry-run guard so a malformed tag name is rejected
+		// even in dry-run, rather than logged unsanitised.
+		validate_tag_name(tag)?;
+		if self.dry_run {
+			log::info!("(dry-run) would create tag {tag} via GitLab API");
+			return Ok(());
+		}
+
+		let PendingTag { sha, message } =
+			self.state.lock().await.tags.remove(tag).with_context(|| {
+				format!("no pending tag '{tag}' to push; tag() must be called before push_tag()")
+			})?;
+
+		let mut builder = CreateTag::builder();
+		builder.project(self.project_path()).tag_name(tag).ref_(sha);
+		if !message.is_empty() {
+			builder.message(message);
+		}
+		let endpoint = builder
+			.build()
+			.map_err(|e| anyhow!(e.to_string()))
+			.with_context(|| format!("failed to build GitLab tag request for '{tag}'"))?;
+
+		match gitlab::api::ignore(endpoint)
+			.query_async(&*self.client)
+			.await
+		{
+			Ok(()) => {
+				log::info!("Created tag {tag} via GitLab API");
+				Ok(())
+			}
+			// A fresh CI re-run after a partial failure re-attempts the push;
+			// GitLab reports a duplicate tag as `400 Bad Request` with an
+			// "already exists" message, which we treat as success. Gating on the
+			// status code (not just the message substring) avoids masking an
+			// unrelated failure whose body happens to contain that phrase. GitLab
+			// may render the message as a bare string (`GitlabWithStatus`) or as a
+			// structured object (`GitlabObjectWithStatus`), so both are matched.
+			Err(ApiError::GitlabWithStatus { status, msg })
+				if status.as_u16() == 400 && msg.contains("already exists") =>
+			{
+				log::info!("Tag {tag} already exists on the remote, skipping");
+				Ok(())
+			}
+			Err(ApiError::GitlabObjectWithStatus { status, obj })
+				if status.as_u16() == 400 && obj.to_string().contains("already exists") =>
+			{
+				log::info!("Tag {tag} already exists on the remote, skipping");
+				Ok(())
+			}
+			Err(e) => {
+				let raw = format!("{e}");
+				let redacted = redact_credentials(&raw);
+				Err(anyhow!("{}", redacted.into_owned())).with_context(|| {
+					format!(
+						"failed to create tag '{tag}' on project {}",
+						self.project_path()
+					)
+				})
+			}
+		}
 	}
 }

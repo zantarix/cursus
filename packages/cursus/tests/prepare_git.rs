@@ -546,6 +546,54 @@ async fn prepare_branch_strategy_creates_branch_and_returns() {
 }
 
 #[tokio::test]
+async fn prepare_branch_strategy_detached_head_fails_before_side_effects() {
+	// A detached HEAD cannot anchor the branch strategy (no base to PR against or
+	// return to). `prepare` must bail in preflight before any commit/checkout/push.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let initial_branch = git_current_branch(dir.path());
+
+	// Detach HEAD onto the current commit.
+	let output = Command::new("git")
+		.args(["checkout", "--detach", "HEAD"])
+		.current_dir(dir.path())
+		.stdout(Stdio::null())
+		.stderr(Stdio::piped())
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"git checkout --detach failed:\n{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
+	let err = result.expect_err("prepare should fail on a detached HEAD");
+	assert!(
+		err.to_string().contains("HEAD is detached"),
+		"expected detached-HEAD error, got: {err:?}"
+	);
+
+	// No release branch was created — neither the would-be name nor the old
+	// `detached` fallback that this change removes.
+	assert!(
+		!git_local_branch_exists(dir.path(), &format!("cursus-release/{initial_branch}")),
+		"no release branch should have been created"
+	);
+	assert!(
+		!git_local_branch_exists(dir.path(), "cursus-release/detached"),
+		"the `cursus-release/detached` fallback must not be created"
+	);
+}
+
+#[tokio::test]
 async fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	// Dry-run branch strategy must not switch branches.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
@@ -578,6 +626,44 @@ async fn prepare_branch_strategy_dry_run_does_not_checkout() {
 			.iter()
 			.any(|m| m.contains("ci(release):")),
 		"Dry-run should not create a commit"
+	);
+}
+
+#[tokio::test]
+async fn prepare_branch_strategy_dry_run_detached_head_still_fails() {
+	// A dry-run preview of an impossible operation must report the same
+	// detached-HEAD failure rather than silently planning a bogus branch.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let output = Command::new("git")
+		.args(["checkout", "--detach", "HEAD"])
+		.current_dir(dir.path())
+		.stdout(Stdio::null())
+		.stderr(Stdio::piped())
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"git checkout --detach failed:\n{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	let err = result.expect_err("dry-run prepare should fail on a detached HEAD");
+	assert!(
+		err.to_string().contains("HEAD is detached"),
+		"expected detached-HEAD error, got: {err:?}"
 	);
 }
 
@@ -995,6 +1081,36 @@ async fn prepare_with_merge_commit_includes_pr_number() {
 	assert!(
 		changelog.contains("via #99"),
 		"Expected PR reference 'via #99' in changelog, got:\n{changelog}"
+	);
+}
+
+#[tokio::test]
+async fn prepare_with_gitlab_merge_request_includes_mr_reference() {
+	// A changeset introduced by a GitLab default merge commit carries its MR reference in
+	// the commit *body* (`See merge request <path>!NN`). The changelog should render it in
+	// GitLab syntax, preserving the cross-project project prefix.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature from MR\n",
+	);
+	git_commit_all(
+		dir.path(),
+		"Merge branch 'feature' into 'main'\n\nAdd feature\n\nSee merge request group/proj!71",
+	);
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
+	assert!(result.is_ok(), "prepare failed: {result:?}");
+
+	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+	assert!(
+		changelog.contains("via group/proj!71+"),
+		"Expected MR reference 'via group/proj!71+' in changelog, got:\n{changelog}"
 	);
 }
 

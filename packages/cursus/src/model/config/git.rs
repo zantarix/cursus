@@ -105,7 +105,8 @@ pub struct GitConfig {
 	///
 	/// The release branch name is `{prefix}{current_branch}`, defaulting to `cursus-release/`
 	/// (e.g., if on `main`, the release branch is `cursus-release/main`).
-	/// When the current branch cannot be determined (detached HEAD), `detached` is used.
+	/// A detached HEAD has no current branch to compose against, so `prepare`
+	/// rejects it upstream rather than substituting a fallback name.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub(crate) release_branch_prefix: Option<String>,
 	/// Tag name format to use when creating git tags.

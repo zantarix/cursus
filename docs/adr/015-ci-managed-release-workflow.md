@@ -268,3 +268,9 @@ The original design for the `branch` strategy committed the release changes on t
 ### No automatic PR creation (leave to external tooling)
 
 Cursus could push the release branch and leave PR creation entirely to external CI tooling (e.g., `gh pr create`, platform-specific actions). This was considered but rejected as the default because it leaves the CI workflow incomplete: the `branch` strategy's value proposition is the approval flow, and without PR creation the user must wire up additional CI steps. By creating the PR automatically when `[github].enabled = true`, Cursus provides a complete end-to-end workflow. Users who need custom PR configuration (specific reviewers, labels, draft status) can disable GitHub integration and use their own tooling, or use `--no-git` on the release step and create the PR externally.
+
+## Errata
+
+### 2026-05-24: Detached HEAD now hard-errors instead of falling back
+
+The "Branch naming configuration" section above states that when HEAD is detached, Cursus "falls back to appending `detached` to the prefix (e.g., `cursus-release/detached`) and logs a warning suggesting explicit configuration via `--branch`." This is now functionally incorrect. Under the `branch` strategy, a detached HEAD is treated as a hard error: `prepare` bails during its preflight checks — before any commit, checkout, or push — with a message explaining that the branch strategy needs a current branch to use as the release base and to return to afterward, and suggesting the user check out a branch or switch to the `push` strategy. The synthetic `cursus-release/detached` branch name is no longer ever computed. (The deprecated [ADR-047](047-configurable-release-target-branch.md) anticipated this hard-error stance while reasoning about per-branch release targets, but it was never implemented; the change was made directly in the prepare git lifecycle and is not governed by a separate ADR.)

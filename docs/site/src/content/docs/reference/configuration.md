@@ -60,7 +60,7 @@ Git lifecycle management.
 | `extra_files` | list | `[]` | Additional file paths to stage before committing |
 | `prepare_commit_message` | string | `"ci(release): version packages"` | Commit message used for the prepare step |
 | `publish_private_packages` | list | `[]` | Private package names that receive git tags and forge releases (GitHub or GitLab) without registry publish |
-| `signed_commits` | string | `"auto"` | Whether to create the prepare commit via the active forge's web-commit API for a Verified badge — the GitHub Git Data API when `[github].enabled`, or the GitLab commits API when `[gitlab].enabled`. `"auto"`: enabled in CI when a forge token is present (`GITHUB_ACTIONS=true` for GitHub, `GITLAB_CI=true` for GitLab). `"force"`: enabled whenever a token is present (experimental). `"off"`: always use the local `git` binary. |
+| `signed_commits` | string | `"auto"` | Whether to create the prepare commit and push the release tag via the active forge's API for a Verified badge. When enabled, the release tag is created through the forge API rather than `git push`, so the CI git remote needs no code-push permission (the tag itself remains annotated but unsigned). `"auto"`: enabled in CI when a forge token is present (`GITHUB_ACTIONS=true` for GitHub, `GITLAB_CI=true` for GitLab). `"force"`: enabled whenever a token is present (experimental). `"off"`: always use the local `git` binary. |
 
 **Tag formats:**
 

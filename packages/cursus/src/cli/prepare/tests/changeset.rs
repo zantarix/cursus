@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use crate::cli::prepare::changeset::*;
 use crate::command::CommandRunner;
-use crate::command::test_support::RecordingCommandRunner;
+use crate::command::test_support::{DispatchingCommandRunner, RecordingCommandRunner};
 use crate::filesystem::LocalFilesystem;
+use crate::model::changelog::ForgeReference;
 
 fn make_runner() -> Arc<dyn CommandRunner> {
 	Arc::new(RecordingCommandRunner::new(0))
@@ -81,6 +82,50 @@ async fn resolve_commit_references_git_failure_is_nonfatal() {
 	// Should not panic or return an error — just None
 	let result = resolve_commit_references(&changesets, &git, true).await;
 	assert_eq!(result[&changeset_path], None);
+}
+
+#[tokio::test]
+async fn resolve_one_commit_reference_extracts_gitlab_mr_from_message_body() {
+	// The introducing commit is a GitLab default merge commit: the MR reference lives in the
+	// body (`See merge request <path>!NN`), which is only visible via `log_message` (`%B`).
+	let dir = tempfile::tempdir().unwrap();
+	let runner = Arc::new(
+		DispatchingCommandRunner::new(0)
+			// log_added_commit (`git log --first-parent --diff-filter=A --format=%H …`)
+			.on_with_args_stdout(
+				"git",
+				vec!["log".to_string(), "--first-parent".to_string()],
+				0,
+				b"abcdef1234567890\n".to_vec(),
+			)
+			// log_message (`git log -1 --format=%B <rev> --`)
+			.on_with_args_stdout(
+				"git",
+				vec!["log".to_string(), "-1".to_string(), "--format=%B".to_string()],
+				0,
+				b"Merge branch 'feature' into 'main'\n\nAdd thing\n\nSee merge request group/proj!71\n"
+					.to_vec(),
+			),
+	);
+	let dir_abs = crate::path::AbsolutePath::new(dir.path()).unwrap();
+	let git = crate::git::GitWorkdir::new(
+		Arc::clone(&runner) as Arc<dyn CommandRunner>,
+		dir_abs.clone(),
+	);
+
+	let changeset_path =
+		crate::path::AbsolutePath::new(dir.path().join(".cursus/test.md")).unwrap();
+	let commit_ref = resolve_one_commit_reference(&changeset_path, &git)
+		.await
+		.expect("expected a commit reference");
+	assert_eq!(commit_ref.short_hash, "abcdef1");
+	assert_eq!(
+		commit_ref.reference,
+		Some(ForgeReference::GitLab {
+			project: Some("group/proj".to_string()),
+			number: 71,
+		})
+	);
 }
 
 // ── aggregate_changesets ─────────────────────────────────────────────────
