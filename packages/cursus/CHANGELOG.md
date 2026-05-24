@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 - 2026-05-24
+
+### Features
+
+- Adds GitLab merge request references to generated changelog entries. When a changeset's commit came from a GitLab merge request, the changelog now links it using GitLab syntax (`!123+`, including cross-project `group/proj!123+` references) instead of leaving it unlinked. GitHub pull request references are detected and rendered as before. [dcb035c] via #158
+
+### Bug Fixes
+
+- `prepare` now fails immediately with a clear error when run on a detached HEAD under the branch strategy, instead of creating a `cursus-release/detached` branch and failing later. Check out a branch or use the push strategy. [dcb035c] via #158
+- Fixes GitLab releases failing in CI when the runner token cannot push tags. Release tags are now created through the forge API (GitLab Tags API / GitHub Git Data API) when verified commits are enabled, so the git remote no longer needs code-push permission. Tags remain annotated but unsigned. [dcb035c] via #158
+
 ## 0.7.0 - 2026-05-23
 
 ### Features
