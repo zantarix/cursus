@@ -1,56 +1,162 @@
 use super::*;
 
-// --- extract_pr_number ---
+// --- extract_reference: GitHub ---
 
 #[test]
-fn extract_pr_number_squash_merge_format() {
-	assert_eq!(extract_pr_number("feat: add widget (#42)"), Some(42));
-}
-
-#[test]
-fn extract_pr_number_squash_merge_at_start() {
-	assert_eq!(extract_pr_number("fix: thing (#1)"), Some(1));
-}
-
-#[test]
-fn extract_pr_number_merge_commit_format() {
+fn extract_reference_github_squash_merge_format() {
 	assert_eq!(
-		extract_pr_number("Merge pull request #123 from owner/branch"),
-		Some(123)
+		extract_reference("feat: add widget (#42)"),
+		Some(ForgeReference::GitHub { number: 42 })
 	);
 }
 
 #[test]
-fn extract_pr_number_no_match_rebase() {
-	assert_eq!(extract_pr_number("feat: add widget"), None);
+fn extract_reference_github_squash_merge_at_start() {
+	assert_eq!(
+		extract_reference("fix: thing (#1)"),
+		Some(ForgeReference::GitHub { number: 1 })
+	);
 }
 
 #[test]
-fn extract_pr_number_no_match_hash_without_parens() {
-	assert_eq!(extract_pr_number("fix: issue #99 workaround"), None);
+fn extract_reference_github_merge_commit_format() {
+	assert_eq!(
+		extract_reference("Merge pull request #123 from owner/branch"),
+		Some(ForgeReference::GitHub { number: 123 })
+	);
 }
 
 #[test]
-fn extract_pr_number_empty_subject() {
-	assert_eq!(extract_pr_number(""), None);
+fn extract_reference_no_match_rebase() {
+	assert_eq!(extract_reference("feat: add widget"), None);
+}
+
+#[test]
+fn extract_reference_no_match_hash_without_parens() {
+	assert_eq!(extract_reference("fix: issue #99 workaround"), None);
+}
+
+#[test]
+fn extract_reference_empty_message() {
+	assert_eq!(extract_reference(""), None);
+}
+
+// --- extract_reference: GitLab ---
+
+#[test]
+fn extract_reference_gitlab_see_merge_request_with_project() {
+	let message =
+		"Merge branch 'feature' into 'main'\n\nAdd thing\n\nSee merge request group/proj!71";
+	assert_eq!(
+		extract_reference(message),
+		Some(ForgeReference::GitLab {
+			project: Some("group/proj".to_string()),
+			number: 71,
+		})
+	);
+}
+
+#[test]
+fn extract_reference_gitlab_see_merge_request_without_project() {
+	let message = "Merge branch 'feature' into 'main'\n\nSee merge request !71";
+	assert_eq!(
+		extract_reference(message),
+		Some(ForgeReference::GitLab {
+			project: None,
+			number: 71,
+		})
+	);
+}
+
+#[test]
+fn extract_reference_gitlab_squash_format() {
+	assert_eq!(
+		extract_reference("feat: thing (!71)"),
+		Some(ForgeReference::GitLab {
+			project: None,
+			number: 71,
+		})
+	);
+}
+
+#[test]
+fn extract_reference_gitlab_invalid_project_path_does_not_match() {
+	// A space in the path is not valid GitLab path grammar, so the pattern is rejected.
+	let message = "See merge request bad path!71";
+	assert_eq!(extract_reference(message), None);
+}
+
+#[test]
+fn extract_reference_gitlab_marker_must_start_a_line() {
+	// A `See merge request …` mention buried mid-line (e.g. inside an attacker-influenced
+	// GitHub PR body) must NOT be treated as a GitLab reference; the marker is anchored to
+	// the start of a line, matching GitLab's own generated format.
+	let message = "feat: real subject\n\nSomeone wrote: See merge request evil/repo!1 here";
+	assert_eq!(extract_reference(message), None);
+}
+
+#[test]
+fn extract_reference_gitlab_merge_takes_precedence_over_github_squash() {
+	// Contrived message carrying both a first-line `(#5)` and a GitLab merge line. Real forge
+	// output never produces both; this pins the documented precedence (GitLab merge before
+	// GitHub squash) so the ordering is visible in the suite.
+	let message = "fix: thing (#5)\n\nSee merge request !3";
+	assert_eq!(
+		extract_reference(message),
+		Some(ForgeReference::GitLab {
+			project: None,
+			number: 3,
+		})
+	);
+}
+
+#[test]
+fn extract_reference_squash_anchored_to_first_line() {
+	// `(#5)` / `!9` mentions in the body must not be detected; only the subject counts.
+	let message = "feat: real subject\n\nUnrelated body mentioning (#5) and !9 and (!9)";
+	assert_eq!(extract_reference(message), None);
 }
 
 // --- CommitReference::format_suffix ---
 
 #[test]
-fn commit_reference_format_suffix_with_pr() {
+fn commit_reference_format_suffix_with_github_pr() {
 	let r = CommitReference {
 		short_hash: "abc1234".to_string(),
-		pr_number: Some(42),
+		reference: Some(ForgeReference::GitHub { number: 42 }),
 	};
 	assert_eq!(r.format_suffix(), " [abc1234] via #42");
 }
 
 #[test]
-fn commit_reference_format_suffix_without_pr() {
+fn commit_reference_format_suffix_with_gitlab_mr() {
 	let r = CommitReference {
 		short_hash: "abc1234".to_string(),
-		pr_number: None,
+		reference: Some(ForgeReference::GitLab {
+			project: None,
+			number: 42,
+		}),
+	};
+	assert_eq!(r.format_suffix(), " [abc1234] via !42+");
+}
+
+#[test]
+fn commit_reference_format_suffix_with_gitlab_cross_project_mr() {
+	let r = CommitReference {
+		short_hash: "abc1234".to_string(),
+		reference: Some(ForgeReference::GitLab {
+			project: Some("group/proj".to_string()),
+			number: 71,
+		}),
+	};
+	assert_eq!(r.format_suffix(), " [abc1234] via group/proj!71+");
+}
+
+#[test]
+fn commit_reference_format_suffix_without_reference() {
+	let r = CommitReference {
+		short_hash: "abc1234".to_string(),
+		reference: None,
 	};
 	assert_eq!(r.format_suffix(), " [abc1234]");
 }
@@ -59,7 +165,7 @@ fn commit_reference_format_suffix_without_pr() {
 fn commit_reference_new_truncates_sha_to_7_chars() {
 	let r = CommitReference::new("abcdef1234567890", "feat: stuff (#5)");
 	assert_eq!(r.short_hash, "abcdef1");
-	assert_eq!(r.pr_number, Some(5));
+	assert_eq!(r.reference, Some(ForgeReference::GitHub { number: 5 }));
 }
 
 // --- format_sections with commit references ---
@@ -68,7 +174,7 @@ fn commit_reference_new_truncates_sha_to_7_chars() {
 fn format_sections_with_commit_reference_renders_suffix() {
 	let commit_ref = CommitReference {
 		short_hash: "abc1234".to_string(),
-		pr_number: Some(42),
+		reference: Some(ForgeReference::GitHub { number: 42 }),
 	};
 	let changes = vec![(
 		ChangeType::Minor,
@@ -92,7 +198,7 @@ fn format_sections_with_commit_reference_renders_suffix() {
 fn format_sections_multiline_message_suffix_on_first_line() {
 	let commit_ref = CommitReference {
 		short_hash: "abc1234".to_string(),
-		pr_number: None,
+		reference: None,
 	};
 	let changes = vec![(
 		ChangeType::Minor,

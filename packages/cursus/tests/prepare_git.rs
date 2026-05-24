@@ -1085,6 +1085,36 @@ async fn prepare_with_merge_commit_includes_pr_number() {
 }
 
 #[tokio::test]
+async fn prepare_with_gitlab_merge_request_includes_mr_reference() {
+	// A changeset introduced by a GitLab default merge commit carries its MR reference in
+	// the commit *body* (`See merge request <path>!NN`). The changelog should render it in
+	// GitLab syntax, preserving the cross-project project prefix.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature from MR\n",
+	);
+	git_commit_all(
+		dir.path(),
+		"Merge branch 'feature' into 'main'\n\nAdd feature\n\nSee merge request group/proj!71",
+	);
+
+	let _remote = add_local_remote(dir.path());
+	git_push_to_remote(dir.path());
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
+	assert!(result.is_ok(), "prepare failed: {result:?}");
+
+	let changelog = std::fs::read_to_string(dir.path().join("CHANGELOG.md")).unwrap();
+	assert!(
+		changelog.contains("via group/proj!71+"),
+		"Expected MR reference 'via group/proj!71+' in changelog, got:\n{changelog}"
+	);
+}
+
+#[tokio::test]
 async fn prepare_without_git_no_references() {
 	// When git is disabled, no commit references should appear in the changelog.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, git_enabled_config()).await;
