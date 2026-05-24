@@ -54,7 +54,7 @@ jobs:
 
 By default, commits made by the release workflow appear as **Unverified** on GitHub because they are produced by the local `git` binary on the runner. To get the green **Verified** badge on your release commits, use a GitHub App installation token instead of `secrets.GITHUB_TOKEN`.
 
-When Cursus detects it is running on GitHub Actions with a token available, it automatically routes the prepare commit through the GitHub Git Data API (`signed_commits = "auto"` is the default). GitHub signs any commit created this way using its web-flow GPG key — but this signing only activates when the request is authenticated as a GitHub App, not a personal access token or the default `GITHUB_TOKEN`.
+When Cursus detects it is running on GitHub Actions with a token available, it automatically routes the prepare commit through the GitHub Git Data API (`signed_commits = "auto"` is the default). GitHub signs any commit created this way using its web-flow GPG key — but this signing only activates when the request is authenticated as a GitHub App, not a personal access token or the default `GITHUB_TOKEN`. With `signed_commits` enabled, Cursus also creates the release tag through the same API rather than `git push`, so the git remote needs no push access (the tag remains annotated but unsigned).
 
 ### Setting up a GitHub App
 
@@ -87,6 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # trusted publishing
+      contents: read    # read-only clone/fetch via the default GITHUB_TOKEN
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -95,19 +96,12 @@ jobs:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      # A read-only clone is enough: the release commit and tag are both created
+      # through the GitHub API with the App token, so the git remote is never
+      # pushed to. `fetch-depth: 0` lets `cursus ci` see existing tags.
       - uses: actions/checkout@v6
         with:
-          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
-
-      # Tags are still created via the local git binary during publish, so set
-      # the identity here to attribute them to the App bot rather than the
-      # default runner identity. The release commit itself does not need this —
-      # its committer is set by GitHub when the API commit is created.
-      - name: Configure git identity
-        run: |
-          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
-          git config user.email "${{ vars.APP_USER_ID }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
 
       - uses: rust-lang/crates-io-auth-action@v1
 
@@ -116,7 +110,9 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 ```
 
-The `contents: write` permission is no longer needed in the workflow because the App token carries it on behalf of the installation. No changes to `.cursus/config.toml` are required — `signed_commits = "auto"` is the default.
+Both the release commit and the release tag are created through the GitHub API using the App token, so the workflow needs no local `git commit`/`git tag` and therefore no committer-identity step. The git remote is only cloned (read-only), so the job's `permissions` block grants `contents: read` rather than `contents: write` — the App token, passed as `GITHUB_TOKEN` on the `cursus ci` step, carries the write access for the API operations (verified commit, tag, PR, release). No changes to `.cursus/config.toml` are required — `signed_commits = "auto"` is the default.
+
+This couples the workflow to the API-commit path being active. If you set `signed_commits = "off"`, the local `git commit`/`git tag` run again and need both a committer identity and a token authorised to push code.
 
 :::note
 GitHub Apps can be configured to bypass branch protection rules (e.g. requiring PRs). This is useful if your main branch is protected but you want the release commit to land directly. Enable **Allow bypass** for your app under the branch protection settings if needed.

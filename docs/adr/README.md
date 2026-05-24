@@ -70,3 +70,4 @@ Once an ADR is accepted and committed, it is treated as immutable. If a decision
 | [ADR-057](057-cursus-init-gitlab-support.md) | `cursus init` GitLab Support | Accepted (2026-05-21) |
 | [ADR-058](058-verified-release-commits-on-gitlab-via-web-commits-api.md) | Produce Verified Release Commits on GitLab via the Web Commits API | Accepted (2026-05-22) |
 | [ADR-059](059-forge-selection-runtime-rules.md) | Forge Selection Runtime Rules | Accepted (2026-05-13) |
+| [ADR-060](060-push-release-tags-via-forge-api.md) | Push Release Tags via the Forge API in the Signed-Commit Decorators | Accepted (2026-05-24) |

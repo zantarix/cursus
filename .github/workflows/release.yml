@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+      contents: read
     defaults:
       run:
         shell: nix develop -c bash -e {0}
@@ -27,25 +28,17 @@ jobs:
           private-key: ${{ secrets.ZANTARIX_APP_PRIVATE_KEY }}
 
       # Fetch full history so that `cursus ci` can detect existing git tags.
+      # The default GITHUB_TOKEN suffices for the read-only clone/fetch; the
+      # release commit and tag are created through the GitHub API with the App
+      # token, so the git remote is never pushed to.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
         with:
           use-flakehub: false
-
-      # Use the GitHub App bot as the git committer so release commits are
-      # attributed to the App rather than to a personal account.
-      - name: Configure git identity
-        env:
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          APP_USER_ID: ${{ vars.ZANTARIX_APP_USER_ID }}
-        run: |
-          git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
       - name: Install NPM dependencies
         run: npm ci
@@ -65,4 +58,3 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: ./target/release/cursus ci --no-interactive
-

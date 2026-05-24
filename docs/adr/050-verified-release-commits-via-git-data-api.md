@@ -149,3 +149,7 @@ The Decision section is silent on credential handling in the error paths introdu
 ### 2026-05-12: `SignedCommitGit` renamed to `GitHubSignedCommit`
 
 References to the `SignedCommitGit` decorator in this ADR are incorrect: [ADR-058](058-verified-release-commits-on-gitlab-via-web-commits-api.md) renames it to `GitHubSignedCommit` for naming symmetry with the GitLab equivalent introduced there. The decorator's behaviour is unchanged; only the name differs.
+
+### 2026-05-24: Release tag push no longer delegates to the local `git` binary
+
+The Decision section's claim that `tag`, `push_tag`, and `delete_tag` delegate unchanged to the inner impl, and the Scope section's statement that the release tag is created via the local `git` binary, are now functionally incorrect: [ADR-060](060-push-release-tags-via-forge-api.md) moves the release tag-push mechanism into the decorator itself. `tag()` now records the target SHA and message into pending state, `push_tag()` creates the annotated tag object and ref via the GitHub Git Data API (tolerating an "already exists" 422 for idempotency), and `delete_tag()` is a no-op. Only the push mechanism moved; the still-true statement that the release tag remains annotated but unsigned (tag-object signing stays out of scope) is unchanged.

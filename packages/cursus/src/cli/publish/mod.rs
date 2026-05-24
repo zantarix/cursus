@@ -31,7 +31,7 @@ pub(super) enum PublishResult {
 	Failed,
 }
 
-/// Data about a successfully published package needed for GitHub Release creation.
+/// Data about a successfully published package needed for forge release creation.
 pub(super) struct PublishedPackage {
 	/// Package name.
 	pub(super) name: String,
@@ -49,9 +49,13 @@ pub(crate) struct PublishFlags {
 	pub(crate) forge_enabled: bool,
 	pub(crate) no_git: bool,
 	pub(crate) is_multi_package: bool,
+	/// The active forge's user-facing label (e.g. `"GitHub"`, `"GitLab"`), used
+	/// to compose forge-aware summary lines. Falls back to `"the configured
+	/// forge"` when no forge client is available.
+	pub(crate) forge_name: &'static str,
 }
 
-/// Outcome of git tag and GitHub Release operations.
+/// Outcome of git tag and forge release operations.
 #[derive(Debug)]
 pub(crate) struct GitReleaseOutcome {
 	pub(crate) tags_created: usize,
@@ -69,7 +73,7 @@ pub struct PublishArgs {
 	/// Only publish specific packages (repeatable)
 	#[arg(short = 'p', long = "package")]
 	pub packages: Vec<String>,
-	/// Skip git tag creation, tag pushing, and GitHub Releases even if enabled in config
+	/// Skip git tag creation, tag pushing, and forge releases even if enabled in config
 	#[arg(long)]
 	pub no_git: bool,
 }
@@ -141,9 +145,9 @@ pub(crate) fn add_transitive_dependents(
 	}
 }
 
-/// Creates git tags and GitHub Releases for all published packages.
+/// Creates git tags and forge releases for all published packages.
 ///
-/// Returns a [`GitReleaseOutcome`] with tag and GitHub Release counts.
+/// Returns a [`GitReleaseOutcome`] with tag and forge release counts.
 async fn run_git_release_operations(
 	git: &dyn Git,
 	config: &Config,
@@ -208,7 +212,7 @@ async fn maybe_create_tags(
 	create_and_push_tags(published_packages, config, git, is_multi_package).await
 }
 
-/// Orchestrates GitHub Releases when enabled, or logs dry-run intent.
+/// Orchestrates forge releases when enabled, or logs dry-run intent.
 ///
 /// Returns `(releases_created, releases_already_present, any_failed)`.
 async fn maybe_orchestrate_forge_releases(
@@ -246,10 +250,10 @@ async fn maybe_orchestrate_forge_releases(
 	.await
 }
 
-/// Runs pre-publish GitHub checks: validates token presence and runs the build command.
+/// Runs pre-publish forge checks: validates token presence and runs the build command.
 ///
 /// Returns `Ok(true)` if the build command failed (caller should return `ExitCode::FAILURE`),
-/// `Ok(false)` if checks pass or GitHub is not enabled, or `Err` if no token was found.
+/// `Ok(false)` if checks pass or the forge is not enabled, or `Err` if no token was found.
 async fn run_pre_publish_forge_checks(
 	env: &crate::Env,
 	config: &Config,
@@ -291,6 +295,7 @@ pub(crate) async fn cmd_publish(
 		forge_enabled: config.forge_enabled(),
 		no_git: args.no_git,
 		is_multi_package: projects.len() > 1,
+		forge_name: env.code_forge_name(),
 	};
 	let publish = publish_projects(&sorted_projects, &graph, dry_run, env.fs(), &config).await?;
 	let outcome = run_git_release_operations(git, &config, env, &publish.published, &flags).await?;
@@ -331,7 +336,7 @@ impl PublishState {
 	/// Adds a private package to the published list for tag-only publishing (ADR-043).
 	///
 	/// The package is added to `published` so that `run_git_release_operations` creates
-	/// its tag and GitHub Release. No registry publish is performed.
+	/// its tag and forge release. No registry publish is performed.
 	///
 	/// Dry-run tag logging is handled by `maybe_create_tags`, which uses the configured
 	/// tag format and iterates all `published` packages uniformly.
@@ -348,7 +353,7 @@ impl PublishState {
 	///
 	/// In dry-run mode, logs what would be published and pushes to `published`.
 	/// In real mode, both `Published` and `Skipped` (already-on-registry) outcomes push onto
-	/// `published` so that downstream tag and GitHub Release stages can recover from prior partial
+	/// `published` so that downstream tag and forge release stages can recover from prior partial
 	/// failures (ADR-055). Only `Failed` skips the package from `published`.
 	pub(crate) async fn record_outcome(
 		&mut self,
@@ -378,7 +383,7 @@ impl PublishState {
 					project_path: project.path().clone(),
 				}),
 				// Package version is already on the registry (published in a prior run).
-				// Still add it to `published` so tag and GitHub Release creation are
+				// Still add it to `published` so tag and forge release creation are
 				// retried — both are already idempotent and handle the pre-existing state.
 				PublishResult::Skipped => {
 					self.published.push(PublishedPackage {
@@ -402,7 +407,7 @@ impl PublishState {
 /// Projects should be pre-sorted in dependency order (leaves first).
 /// Private packages (marked with `private: true` in npm or `publish = false` in Cargo)
 /// are silently skipped unless listed in `[git].publish_private_packages`, in which case they
-/// receive git tags and GitHub Releases but are not published to any registry.
+/// receive git tags and forge releases but are not published to any registry.
 /// Releasable packages without a `CHANGELOG.md` (never prepared) are warned about and skipped
 /// without blocking their dependents.
 ///
@@ -461,21 +466,24 @@ async fn publish_projects(
 	Ok(state)
 }
 
-/// Logs the GitHub Releases portion of the publish summary.
+/// Logs the forge releases portion of the publish summary.
 ///
+/// `forge_name` is the active forge's user-facing label (e.g. `"GitHub"`,
+/// `"GitLab"`), used to compose the release count line.
 /// `registry_published` excludes private-tagged and registry-skipped packages.
 /// `skipped_count` covers packages already on the registry (whose releases are still
 /// attempted). `failed_count` is derived from the combined total minus created and
 /// already-present releases.
 pub(crate) fn log_forge_releases_summary(
+	forge_name: &str,
 	registry_published: usize,
 	private_tagged_count: usize,
 	skipped_count: usize,
 	suffix_note: &str,
-	releases_created: usize,
-	releases_already_present: usize,
-	forge_failed: bool,
+	outcome: &GitReleaseOutcome,
 ) {
+	let releases_created = outcome.releases_created;
+	let releases_already_present = outcome.releases_already_present;
 	let private_note = if private_tagged_count > 0 {
 		format!(", {private_tagged_count} private (tag only)")
 	} else {
@@ -486,21 +494,21 @@ pub(crate) fn log_forge_releases_summary(
 	} else {
 		String::new()
 	};
-	// GitHub Releases are attempted for registry-published, registry-skipped, and
+	// Forge releases are attempted for registry-published, registry-skipped, and
 	// private-tagged packages — the full `state.published` slice.
 	let total_releasable = registry_published + private_tagged_count + skipped_count;
-	match (releases_created, forge_failed) {
+	match (releases_created, outcome.forge_failed) {
 		(created, false) => info!(
 			"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
-			 {created} GitHub Release{} created{already_note}{suffix_note}",
+			 {created} {forge_name} Release{} created{already_note}{suffix_note}",
 			if created == 1 { "" } else { "s" },
 		),
 		(created, true) => {
 			let failed_count = total_releasable.saturating_sub(created + releases_already_present);
 			info!(
 				"Summary: {registry_published} published{private_note}, {skipped_count} skipped, \
-				 {created} GitHub Release{} created{already_note}, {failed_count} GitHub Release{} \
-				 failed{suffix_note}",
+				 {created} {forge_name} Release{} created{already_note}, {failed_count} {forge_name} \
+				 Release{} failed{suffix_note}",
 				if created == 1 { "" } else { "s" },
 				if failed_count == 1 { "" } else { "s" },
 			);
@@ -508,7 +516,7 @@ pub(crate) fn log_forge_releases_summary(
 	}
 }
 
-/// Logs the first line of the publish summary (published/skipped/GitHub counts).
+/// Logs the first line of the publish summary (published/skipped/forge-release counts).
 pub(crate) fn log_summary_line(
 	state: &PublishState,
 	flags: &PublishFlags,
@@ -548,13 +556,12 @@ pub(crate) fn log_summary_line(
 	} else if flags.forge_enabled && !flags.no_git {
 		let suffix_note = format!("{dep_skipped_note}{unprepared_note}");
 		log_forge_releases_summary(
+			flags.forge_name,
 			registry_published,
 			state.private_tagged_count,
 			state.skipped_count,
 			&suffix_note,
-			outcome.releases_created,
-			outcome.releases_already_present,
-			outcome.forge_failed,
+			outcome,
 		);
 	} else {
 		info!(

@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use crate::command::CommandRunner;
 use crate::filesystem::Filesystem;
 use crate::git::Git;
-use crate::git::ref_format::validate_branch_name;
+use crate::git::ref_format::{validate_branch_name, validate_tag_name};
 use crate::path::AbsolutePath;
 use crate::redact::redact_credentials;
 
@@ -83,6 +83,19 @@ struct CreateRefRequest<'a> {
 	sha: &'a str,
 }
 
+#[derive(Serialize)]
+struct CreateTagObjectRequest<'a> {
+	tag: &'a str,
+	message: &'a str,
+	object: &'a str,
+	r#type: &'static str,
+}
+
+#[derive(Deserialize)]
+struct CreateTagObjectResponse {
+	sha: String,
+}
+
 // ── Internal state ────────────────────────────────────────────────────────────
 
 pub(crate) struct PendingCommit {
@@ -90,9 +103,19 @@ pub(crate) struct PendingCommit {
 	pub(crate) sha: String,
 }
 
+/// A tag awaiting `push_tag()` to flush it to the GitHub Git Data API. Records
+/// the target commit SHA (HEAD at `tag()` time — the release commit, already on
+/// the remote) and the annotation message, rather than creating a local
+/// `git tag` object that the API path would never transfer.
+pub(crate) struct PendingTag {
+	pub(crate) sha: String,
+	pub(crate) message: String,
+}
+
 pub(crate) struct State {
 	pub(crate) staged: Vec<PathBuf>,
 	pub(crate) pending: Option<PendingCommit>,
+	pub(crate) tags: std::collections::HashMap<String, PendingTag>,
 }
 
 // ── Decorator ─────────────────────────────────────────────────────────────────
@@ -158,6 +181,7 @@ impl GitHubSignedCommit {
 			state: Mutex::new(State {
 				staged: Vec::new(),
 				pending: None,
+				tags: std::collections::HashMap::new(),
 			}),
 		}
 	}
@@ -333,6 +357,64 @@ async fn upsert_branch_ref(
 	);
 }
 
+/// Creates an annotated tag on the remote via the Git Data API.
+///
+/// First `POST /git/tags` creates the annotated tag object (preserving the
+/// annotation and message), then `POST /git/refs` points `refs/tags/{tag}` at
+/// that object. Tolerates a 422 "Reference already exists" on the ref create so
+/// a re-run after a partial failure is idempotent.
+///
+/// Idempotency is anchored on the **ref** create, not the tag object: a re-run
+/// after a partial failure (tag object created, ref create failed) creates a
+/// fresh, unreferenced tag object. Those dangling objects are harmless — GitHub
+/// garbage-collects them — and the `refs/tags/{tag}` ref ends up pointing at
+/// exactly one object regardless of how many attempts ran.
+async fn create_tag_ref(
+	client: &Octocrab,
+	owner: &str,
+	repo: &str,
+	tag: &str,
+	sha: &str,
+	message: &str,
+) -> anyhow::Result<()> {
+	let tag_req = CreateTagObjectRequest {
+		tag,
+		message,
+		object: sha,
+		r#type: "commit",
+	};
+	let tag_url = format!("/repos/{owner}/{repo}/git/tags");
+	let tag_obj: CreateTagObjectResponse = api_post(client, tag_url, &tag_req)
+		.await
+		.with_context(|| format!("failed to create tag object for '{tag}'"))?;
+
+	let full_ref = format!("refs/tags/{tag}");
+	let create_req = CreateRefRequest {
+		r#ref: &full_ref,
+		sha: &tag_obj.sha,
+	};
+	let refs_url = format!("/repos/{owner}/{repo}/git/refs");
+	let response = client
+		._post(refs_url, Some(&create_req))
+		.await
+		.context("GitHub API POST failed")?;
+	let status = response.status();
+	if status.is_success() {
+		return Ok(());
+	}
+	let text = client.body_to_string(response).await.unwrap_or_default();
+	// A fresh CI re-run after a partial failure re-attempts the push; GitHub
+	// reports an existing ref as 422 "Reference already exists", treated as success.
+	if status.as_u16() == 422 && text.contains("Reference already exists") {
+		log::info!("Tag {tag} already exists on the remote, skipping");
+		return Ok(());
+	}
+	anyhow::bail!(
+		"GitHub API returned {status}: {}",
+		redact_credentials(&text)
+	);
+}
+
 // ── Git trait impl ────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_lines)]
@@ -478,8 +560,34 @@ impl Git for GitHubSignedCommit {
 		Ok(())
 	}
 
+	/// Records the tag's target SHA and message for a later API-driven push.
+	///
+	/// Unlike the inner impl, this does **not** run `git tag -a`: the Git Data
+	/// API re-creates the tag object from a target SHA and never transfers a
+	/// local tag object, so a local tag would be pure overhead — and `git tag -a`
+	/// requires a configured git identity that the API path deliberately avoids.
+	/// HEAD here is the release commit, already on the remote, so it is the
+	/// tag's target.
 	async fn tag(&self, tag_name: &str, message: &str) -> anyhow::Result<()> {
-		self.inner.tag(tag_name, message).await
+		// Validate at record time (mirrors `GitWorkdir::tag`) so a bad name fails
+		// here rather than producing a confusing error later at push time.
+		validate_tag_name(tag_name)?;
+		// Mirror `commit()`: in dry-run, record nothing — `push_tag()` is also
+		// guarded, so there is no pending entry for it to flush.
+		if self.dry_run {
+			log::debug!("(dry-run) skipping tag record for {tag_name}");
+			return Ok(());
+		}
+		let sha = self.inner.head_sha().await?;
+		let mut state = self.state.lock().await;
+		state.tags.insert(
+			tag_name.to_string(),
+			PendingTag {
+				sha,
+				message: message.to_string(),
+			},
+		);
+		Ok(())
 	}
 
 	/// Pushes to origin (non-forced) and syncs the local git state.
@@ -517,11 +625,49 @@ impl Git for GitHubSignedCommit {
 		}
 	}
 
+	/// No-op: there is no local tag to delete in the API path.
+	///
+	/// `create_and_push_tags` calls this to clean up after a failed push so a
+	/// retry can re-create the tag. API tag creation is idempotent on retry (see
+	/// [`push_tag`](Self::push_tag)), so there is nothing to undo — and delegating
+	/// to the inner `git tag -d` would emit a spurious "Failed to delete local
+	/// tag" warning for a tag that was never created locally.
 	async fn delete_tag(&self, tag: &str) -> anyhow::Result<()> {
-		self.inner.delete_tag(tag).await
+		log::debug!("(api) skipping local tag deletion for {tag}; nothing to clean up");
+		Ok(())
 	}
 
+	/// Creates the tag on the remote via the Git Data API.
+	///
+	/// The tag's target SHA and annotation message come from the matching
+	/// [`tag()`](Self::tag) call, which must run first (it always does in the
+	/// publish flow). Pushing a tag that was never recorded is a broken
+	/// invariant, not a recoverable state — synthesising one from HEAD would push
+	/// a tag the caller never asked for — so an absent pending tag is an error.
+	/// Tolerates the "already exists" response so a re-run after a partial
+	/// failure is idempotent.
+	///
+	/// In dry-run mode, logs the intended action and returns without making any
+	/// API calls (explicit guard required because octocrab is not a
+	/// [`CommandRunner`] and is not intercepted by [`crate::command::DryRunCommandRunner`]).
 	async fn push_tag(&self, tag: &str) -> anyhow::Result<()> {
-		self.inner.push_tag(tag).await
+		// Validate before the dry-run guard so a malformed tag name is rejected
+		// even in dry-run, rather than logged unsanitised.
+		validate_tag_name(tag)?;
+		if self.dry_run {
+			log::info!("(dry-run) would create tag {tag} via GitHub API");
+			return Ok(());
+		}
+
+		let PendingTag { sha, message } =
+			self.state.lock().await.tags.remove(tag).with_context(|| {
+				format!("no pending tag '{tag}' to push; tag() must be called before push_tag()")
+			})?;
+
+		create_tag_ref(&self.octocrab, &self.owner, &self.repo, tag, &sha, &message)
+			.await
+			.with_context(|| format!("failed to create tag '{tag}' via the GitHub API"))?;
+		log::info!("Created tag {tag} via GitHub API");
+		Ok(())
 	}
 }

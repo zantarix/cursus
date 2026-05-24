@@ -98,7 +98,9 @@ Requirements:
 If your release commits show as Unverified despite running on GitLab 18.10+ with a valid token, the most likely cause is that **Sign web-based commits** has not been enabled on the project or group. The commit succeeds either way, so there is no error to alert you — the only signal is the missing Verified badge.
 :::
 
-To opt out, set `[git].signed_commits = "off"` in `.cursus/config.toml`. To force the API path outside CI (e.g. for local testing against a dev instance), set `[git].signed_commits = "force"`.
+When `signed_commits` is enabled, Cursus also creates the release tag through the GitLab Tags API rather than `git push origin <tag>`. This matters in CI: pushing a tag over the git remote requires code-push permission, which `CI_JOB_TOKEN` does not have (the push fails with a 403, and the release creation then fails because the tag never reached the remote). Routing the tag through the API sidesteps this — the tag is created with the same token used for the commit. The tag itself remains annotated but unsigned.
+
+To opt out, set `[git].signed_commits = "off"` in `.cursus/config.toml`. To force the API path outside CI (e.g. for local testing against a dev instance), set `[git].signed_commits = "force"`. With `"off"`, the tag is pushed over the git remote instead, which requires a token (such as `GITLAB_TOKEN`) authorised to push code.
 
 ## Releases vs draft releases
 

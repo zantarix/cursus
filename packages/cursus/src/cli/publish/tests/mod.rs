@@ -70,6 +70,23 @@ async fn add_transitive_dependents_independent_subtree_not_blocked() {
 
 // ── log_summary_line tests ────────────────────────────────────────────────
 
+/// Builds a [`GitReleaseOutcome`] carrying only the forge-release counts that
+/// `log_forge_releases_summary` reads (tag counts are irrelevant to it).
+fn release_outcome(
+	releases_created: usize,
+	releases_already_present: usize,
+	forge_failed: bool,
+) -> GitReleaseOutcome {
+	GitReleaseOutcome {
+		tags_created: 0,
+		tags_skipped: 0,
+		tags_push_failed: 0,
+		releases_created,
+		releases_already_present,
+		forge_failed,
+	}
+}
+
 fn make_empty_outcome() -> GitReleaseOutcome {
 	GitReleaseOutcome {
 		tags_created: 0,
@@ -103,6 +120,7 @@ async fn log_summary_line_non_dry_run_dep_skipped_note_in_log() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
@@ -127,6 +145,7 @@ async fn log_summary_line_non_dry_run_unprepared_note_in_log() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
@@ -150,6 +169,7 @@ async fn log_summary_line_dry_run_git_disabled_no_tag_note() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
@@ -172,6 +192,7 @@ async fn log_summary_line_dry_run_git_enabled_tag_note_present() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
@@ -194,6 +215,7 @@ async fn log_publish_summary_tags_created_appears_in_log() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	let outcome = GitReleaseOutcome {
 		tags_created: 2,
@@ -223,6 +245,7 @@ async fn log_publish_summary_tags_push_failed_appears_in_log() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	let outcome = GitReleaseOutcome {
 		tags_created: 0,
@@ -252,6 +275,7 @@ async fn log_publish_summary_dry_run_no_tag_log_lines() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	let outcome = GitReleaseOutcome {
 		tags_created: 3,
@@ -283,12 +307,14 @@ async fn log_publish_summary_dry_run_no_tag_log_lines() {
 async fn log_forge_releases_summary_no_failure_logs_created_count() {
 	crate::test_logging::init_test_logger();
 	let _ = crate::test_logging::take_logs();
-	log_forge_releases_summary(3, 0, 0, "", 2, 0, false);
+	// Uses the GitLab label to guard against the summary regressing to a
+	// hardcoded "GitHub Release" on non-GitHub forges.
+	log_forge_releases_summary("GitLab", 3, 0, 0, "", &release_outcome(2, 0, false));
 	let logs = crate::test_logging::take_logs();
 	assert!(
 		logs.iter()
-			.any(|(_, m)| m.contains("3 published") && m.contains("2 GitHub Release")),
-		"Expected GitHub Release summary: {logs:?}"
+			.any(|(_, m)| m.contains("3 published") && m.contains("2 GitLab Release")),
+		"Expected GitLab Release summary: {logs:?}"
 	);
 }
 
@@ -296,7 +322,7 @@ async fn log_forge_releases_summary_no_failure_logs_created_count() {
 async fn log_forge_releases_summary_with_failure_logs_failed_count() {
 	crate::test_logging::init_test_logger();
 	let _ = crate::test_logging::take_logs();
-	log_forge_releases_summary(3, 0, 0, "", 2, 0, true);
+	log_forge_releases_summary("GitHub", 3, 0, 0, "", &release_outcome(2, 0, true));
 	let logs = crate::test_logging::take_logs();
 	assert!(
 		logs.iter()
@@ -348,7 +374,7 @@ async fn log_forge_releases_summary_private_note_appears_when_nonzero() {
 	// Guards `> 0` → `> 1` on `private_tagged_count` condition.
 	crate::test_logging::init_test_logger();
 	let _ = crate::test_logging::take_logs();
-	log_forge_releases_summary(2, 1, 0, "", 3, 0, false);
+	log_forge_releases_summary("GitHub", 2, 1, 0, "", &release_outcome(3, 0, false));
 	let logs = crate::test_logging::take_logs();
 	assert!(
 		logs.iter().any(|(_, m)| m.contains("private (tag only)")),
@@ -360,7 +386,7 @@ async fn log_forge_releases_summary_private_note_appears_when_nonzero() {
 async fn log_forge_releases_summary_no_private_note_when_zero() {
 	crate::test_logging::init_test_logger();
 	let _ = crate::test_logging::take_logs();
-	log_forge_releases_summary(2, 0, 0, "", 2, 0, false);
+	log_forge_releases_summary("GitHub", 2, 0, 0, "", &release_outcome(2, 0, false));
 	let logs = crate::test_logging::take_logs();
 	assert!(
 		!logs.iter().any(|(_, m)| m.contains("private (tag only)")),
@@ -382,6 +408,7 @@ async fn log_summary_line_dry_run_shows_private_note() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
@@ -408,6 +435,7 @@ async fn log_summary_line_dry_run_registry_published_excludes_private() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
@@ -431,6 +459,7 @@ async fn log_summary_line_non_dry_run_shows_private_note() {
 		forge_enabled: false,
 		no_git: false,
 		is_multi_package: false,
+		forge_name: "GitHub",
 	};
 	log_summary_line(&state, &flags, &make_empty_outcome());
 	let logs = crate::test_logging::take_logs();
