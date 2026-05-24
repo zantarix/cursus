@@ -546,6 +546,54 @@ async fn prepare_branch_strategy_creates_branch_and_returns() {
 }
 
 #[tokio::test]
+async fn prepare_branch_strategy_detached_head_fails_before_side_effects() {
+	// A detached HEAD cannot anchor the branch strategy (no base to PR against or
+	// return to). `prepare` must bail in preflight before any commit/checkout/push.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let initial_branch = git_current_branch(dir.path());
+
+	// Detach HEAD onto the current commit.
+	let output = Command::new("git")
+		.args(["checkout", "--detach", "HEAD"])
+		.current_dir(dir.path())
+		.stdout(Stdio::null())
+		.stderr(Stdio::piped())
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"git checkout --detach failed:\n{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = common::run_cursus(["cursus", "--no-interactive", "prepare"], dir.path()).await;
+	let err = result.expect_err("prepare should fail on a detached HEAD");
+	assert!(
+		err.to_string().contains("HEAD is detached"),
+		"expected detached-HEAD error, got: {err:?}"
+	);
+
+	// No release branch was created — neither the would-be name nor the old
+	// `detached` fallback that this change removes.
+	assert!(
+		!git_local_branch_exists(dir.path(), &format!("cursus-release/{initial_branch}")),
+		"no release branch should have been created"
+	);
+	assert!(
+		!git_local_branch_exists(dir.path(), "cursus-release/detached"),
+		"the `cursus-release/detached` fallback must not be created"
+	);
+}
+
+#[tokio::test]
 async fn prepare_branch_strategy_dry_run_does_not_checkout() {
 	// Dry-run branch strategy must not switch branches.
 	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
@@ -578,6 +626,44 @@ async fn prepare_branch_strategy_dry_run_does_not_checkout() {
 			.iter()
 			.any(|m| m.contains("ci(release):")),
 		"Dry-run should not create a commit"
+	);
+}
+
+#[tokio::test]
+async fn prepare_branch_strategy_dry_run_detached_head_still_fails() {
+	// A dry-run preview of an impossible operation must report the same
+	// detached-HEAD failure rather than silently planning a bogus branch.
+	let dir = temp_real_git_repo_with_config(PackageManager::Cargo, branch_strategy_config()).await;
+	setup_single_cargo_package(dir.path(), "my-pkg", "0.1.0");
+	write_changeset(
+		dir.path(),
+		"change.md",
+		"+++\nmy-pkg = \"minor\"\n+++\n\nFeature\n",
+	);
+	git_commit_all(dir.path(), "chore: add changeset");
+
+	let output = Command::new("git")
+		.args(["checkout", "--detach", "HEAD"])
+		.current_dir(dir.path())
+		.stdout(Stdio::null())
+		.stderr(Stdio::piped())
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"git checkout --detach failed:\n{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = common::run_cursus(
+		["cursus", "--no-interactive", "prepare", "--dry-run"],
+		dir.path(),
+	)
+	.await;
+	let err = result.expect_err("dry-run prepare should fail on a detached HEAD");
+	assert!(
+		err.to_string().contains("HEAD is detached"),
+		"expected detached-HEAD error, got: {err:?}"
 	);
 }
 

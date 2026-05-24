@@ -43,23 +43,26 @@ pub(crate) async fn check_dirty_tree(git: &dyn Git) -> anyhow::Result<()> {
 /// Priority order:
 /// 1. `args_branch` — explicit `--branch` flag
 /// 2. `{config_prefix}{current_branch}` — derived from config prefix and current branch
-/// 3. `{config_prefix}detached` — fallback when HEAD is detached
+///
+/// Callers must resolve a concrete current branch first; a detached HEAD is
+/// rejected upstream in [`preflight_checks`] before this is reached.
 ///
 /// # Errors
 ///
-/// Returns an error if `args_branch` starts with `-`, which would cause git to
-/// interpret the value as a flag rather than a branch name.
+/// Returns an error if the resolved branch name fails [`validate_branch_name`]:
+/// it starts with `-` (which git would interpret as a flag), is empty, or
+/// contains control characters. The composed `{config_prefix}{current_branch}`
+/// is validated as a whole, so a hostile config prefix or branch name is caught.
 pub(crate) fn compute_release_branch(
 	args_branch: Option<&str>,
 	config_prefix: &str,
-	current_branch: Option<&str>,
+	current_branch: &str,
 ) -> anyhow::Result<String> {
 	if let Some(branch) = args_branch {
 		validate_branch_name(branch)?;
 		return Ok(branch.to_string());
 	}
-	let base = current_branch.unwrap_or("detached");
-	let composed = format!("{config_prefix}{base}");
+	let composed = format!("{config_prefix}{current_branch}");
 	validate_branch_name(&composed)?;
 	Ok(composed)
 }
@@ -160,14 +163,21 @@ pub(super) async fn preflight_checks(
 		} else {
 			git.current_branch().await?
 		};
+		let Some(current_branch) = current else {
+			anyhow::bail!(
+				"HEAD is detached; the branch release strategy needs a current branch \
+				 to use as the release base and to return to afterward. Check out a \
+				 branch before running `prepare`, or switch to the push strategy."
+			);
+		};
 		let branch = compute_release_branch(
 			args.branch.as_deref(),
 			config.git.release_branch_prefix(),
-			current.as_deref(),
+			&current_branch,
 		)?;
 		git.checkout_or_reset_branch(&branch).await?;
 		Ok(BranchState {
-			original: current,
+			original: Some(current_branch),
 			release: Some(branch),
 		})
 	} else {
