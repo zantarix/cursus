@@ -60,12 +60,33 @@ jobs:
             "./cursus-osx-x86_64#cursus-osx-x86_64" \
             "./cursus-osx-aarch64#cursus-osx-aarch64"
 
-      - name: Attest macOS artifacts
+      - name: Attest macOS x86_64
+        id: attest_osx_x86_64
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
         with:
-          subject-path: |
-            ./cursus-osx-x86_64
-            ./cursus-osx-aarch64
+          subject-path: ./cursus-osx-x86_64
+
+      - name: Attest macOS aarch64
+        id: attest_osx_aarch64
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ./cursus-osx-aarch64
+
+      - name: Upload attestation bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          BUNDLE_X86_64: ${{ steps.attest_osx_x86_64.outputs.bundle-path }}
+          BUNDLE_AARCH64: ${{ steps.attest_osx_aarch64.outputs.bundle-path }}
+        run: |
+          # actions/attest writes every bundle as `attestation.json`; the Release
+          # asset name is taken from the basename, so rename each to match its
+          # binary before upload (same naming fix as the binaries themselves).
+          cp "$BUNDLE_X86_64" ./cursus-osx-x86_64.sigstore.json
+          cp "$BUNDLE_AARCH64" ./cursus-osx-aarch64.sigstore.json
+          gh release upload "$TAG_NAME" \
+            ./cursus-osx-x86_64.sigstore.json \
+            ./cursus-osx-aarch64.sigstore.json
 
   windows:
     name: Build Windows artifacts
@@ -106,12 +127,34 @@ jobs:
             "./cursus-windows-x86_64.exe#cursus-windows-x86_64.exe" \
             "./cursus-windows-aarch64.exe#cursus-windows-aarch64.exe"
 
-      - name: Attest Windows artifacts
+      - name: Attest Windows x86_64
+        id: attest_windows_x86_64
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
         with:
-          subject-path: |
-            ./cursus-windows-x86_64.exe
-            ./cursus-windows-aarch64.exe
+          subject-path: ./cursus-windows-x86_64.exe
+
+      - name: Attest Windows aarch64
+        id: attest_windows_aarch64
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ./cursus-windows-aarch64.exe
+
+      - name: Upload attestation bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          BUNDLE_X86_64: ${{ steps.attest_windows_x86_64.outputs.bundle-path }}
+          BUNDLE_AARCH64: ${{ steps.attest_windows_aarch64.outputs.bundle-path }}
+        shell: bash
+        run: |
+          # actions/attest writes every bundle as `attestation.json`; the Release
+          # asset name is taken from the basename, so rename each to match its
+          # binary before upload (same naming fix as the binaries themselves).
+          cp "$BUNDLE_X86_64" ./cursus-windows-x86_64.exe.sigstore.json
+          cp "$BUNDLE_AARCH64" ./cursus-windows-aarch64.exe.sigstore.json
+          gh release upload "$TAG_NAME" \
+            ./cursus-windows-x86_64.exe.sigstore.json \
+            ./cursus-windows-aarch64.exe.sigstore.json
 
   linux:
     name: Build Linux artifacts
@@ -150,10 +193,39 @@ jobs:
             "./cursus-linux-aarch64#cursus-linux-aarch64" \
             "./cursus-linux-riscv64gc#cursus-linux-riscv64gc"
 
-      - name: Attest Linux artifacts
+      - name: Attest Linux x86_64
+        id: attest_linux_x86_64
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
         with:
-          subject-path: |
-            ./cursus-linux-x86_64
-            ./cursus-linux-aarch64
-            ./cursus-linux-riscv64gc
+          subject-path: ./cursus-linux-x86_64
+
+      - name: Attest Linux aarch64
+        id: attest_linux_aarch64
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ./cursus-linux-aarch64
+
+      - name: Attest Linux riscv64
+        id: attest_linux_riscv64
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ./cursus-linux-riscv64gc
+
+      - name: Upload attestation bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          BUNDLE_X86_64: ${{ steps.attest_linux_x86_64.outputs.bundle-path }}
+          BUNDLE_AARCH64: ${{ steps.attest_linux_aarch64.outputs.bundle-path }}
+          BUNDLE_RISCV64: ${{ steps.attest_linux_riscv64.outputs.bundle-path }}
+        run: |
+          # actions/attest writes every bundle as `attestation.json`; the Release
+          # asset name is taken from the basename, so rename each to match its
+          # binary before upload (same naming fix as the binaries themselves).
+          cp "$BUNDLE_X86_64" ./cursus-linux-x86_64.sigstore.json
+          cp "$BUNDLE_AARCH64" ./cursus-linux-aarch64.sigstore.json
+          cp "$BUNDLE_RISCV64" ./cursus-linux-riscv64gc.sigstore.json
+          gh release upload "$TAG_NAME" \
+            ./cursus-linux-x86_64.sigstore.json \
+            ./cursus-linux-aarch64.sigstore.json \
+            ./cursus-linux-riscv64gc.sigstore.json

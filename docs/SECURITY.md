@@ -17,14 +17,22 @@ specific SLA.
 ## Verifying release artifacts
 
 Every binary on the [GitHub Releases page](https://github.com/zantarix/cursus/releases)
-is signed with a Sigstore-backed attestation produced by GitHub Actions. The
-`@zantarix/cursus` npm package verifies the attestation in-memory during
-`postinstall` before the binary is written to disk or made executable.
+is signed with a Sigstore-backed attestation produced by GitHub Actions, and the
+attestation bundle is published as a Release asset named `<binary>.sigstore.json`
+alongside the binary. The `@zantarix/cursus` npm package fetches that bundle and
+verifies the attestation in-memory during `postinstall` before the binary is
+written to disk or made executable. Because the bundle is self-contained and
+anchored on the Sigstore public-good trust root, verification is token-free and
+makes no GitHub API call — see
+[`docs/adr/061-token-free-cross-platform-artifact-verification.md`](adr/061-token-free-cross-platform-artifact-verification.md).
 
 For a complete description of the verification chain, the Subject Alternative
-Name pin, and manual audit steps (including `gh attestation verify` and
-`npm audit signatures`), see:
+Name pin, and manual audit steps (token-free `cosign verify-blob-attestation`
+against the published bundle, or `gh attestation verify` / `npm audit signatures`),
+see:
 
+- [`docs/adr/061-token-free-cross-platform-artifact-verification.md`](adr/061-token-free-cross-platform-artifact-verification.md) —
+  the Release-asset bundle transport and the token-free cosign verification flow.
 - [`docs/adr/049-signed-release-artifacts.md`](adr/049-signed-release-artifacts.md) —
   the full verification sequence and trust roots.
 - [`docs/adr/051-bundle-sigstore-deps-via-workspace-removal.md`](adr/051-bundle-sigstore-deps-via-workspace-removal.md) —

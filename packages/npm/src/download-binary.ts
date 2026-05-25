@@ -51,6 +51,11 @@ const isWindows = platform === 'win32';
 const binaryName = isWindows ? 'cursus.exe' : 'cursus-bin';
 const binaryPath = join(__dirname, binaryName);
 const downloadUrl = `https://github.com/zantarix/cursus/releases/download/${encodeURIComponent(tag)}/${artifact}`;
+// The Sigstore bundle is published as a Release asset alongside each binary
+// (ADR-061), named `<artifact>.sigstore.json`. Sourcing it from the Release CDN
+// rather than the GitHub attestations API keeps verification token-free and free
+// of the 60-request-per-hour unauthenticated REST rate limit.
+const bundleUrl = `${downloadUrl}.sigstore.json`;
 
 const TIMEOUT_MS = 60_000;
 const UNIX_EXECUTABLE_MODE = 0o755;
@@ -92,7 +97,7 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
 	'release-assets.githubusercontent.com',
 ]);
 
-async function downloadBuffer(fileUrl: string): Promise<Buffer> {
+async function downloadBuffer(fileUrl: string, maxBytes: number = MAX_BINARY_BYTES): Promise<Buffer> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => {
 		controller.abort();
@@ -128,7 +133,7 @@ async function downloadBuffer(fileUrl: string): Promise<Buffer> {
 			}
 
 			// eslint-disable-next-line no-await-in-loop
-			return await readBounded(response, MAX_BINARY_BYTES);
+			return await readBounded(response, maxBytes);
 		}
 		throw new Error(`Too many redirects fetching ${fileUrl}`);
 	} finally {
@@ -158,44 +163,16 @@ function expectedWorkflow(): string {
 async function verifyAttestation(buffer: Buffer): Promise<void> {
 	const digest = createHash('sha256').update(buffer).digest('hex');
 
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-	let bundles: AttestationBundle[];
+	// The bundle is co-located with the binary as a Release asset (ADR-061), so it
+	// is fetched over the same un-rate-limited CDN path and verified fully offline
+	// against the Sigstore public-good trust root — no GitHub API call, no token.
+	let bundle: AttestationBundle;
 	try {
-		const url = `https://api.github.com/repos/zantarix/cursus/attestations/sha256:${digest}`;
-		const response = await fetch(url, {
-			headers: { Accept: 'application/vnd.github+json' },
-			signal: controller.signal,
-		});
-		if (!response.ok) {
-			const isRateLimited = response.status === 403
-				&& response.headers.get('x-ratelimit-remaining') === '0';
-			if (isRateLimited) {
-				const retryAfter = response.headers.get('retry-after');
-				let when = '';
-				if (retryAfter != null) {
-					const secs = parseInt(retryAfter, 10);
-					const formatted = !isNaN(secs) && secs >= 60
-						? `${Math.ceil(secs / 60)} minute(s)`
-						: `${retryAfter} second(s)`;
-					when = ` Try again in ${formatted}.`;
-				}
-				throw new Error(
-					`GitHub API rate limit exceeded (unauthenticated: 60 req/hr).${when} `
-					+ 'Alternatively, run from a network with a different egress IP.',
-				);
-			}
-			throw new Error(`HTTP ${response.status.toString()} fetching attestation`);
-		}
-		const data = JSON.parse((await readBounded(response, MAX_ATTESTATION_BYTES)).toString('utf-8')) as { attestations?: Array<{ bundle: AttestationBundle }> };
-		const attestations = data.attestations ?? [];
-		if (attestations.length === 0) {
-			throw new Error(`No attestation found for digest sha256:${digest}`);
-		}
-		bundles = attestations.map((a) => a.bundle);
-	} finally {
-		clearTimeout(timer);
+		const bundleBytes = await downloadBuffer(bundleUrl, MAX_ATTESTATION_BYTES);
+		bundle = JSON.parse(bundleBytes.toString('utf-8')) as AttestationBundle;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`Failed to fetch attestation bundle: ${message}`);
 	}
 
 	const workflow = expectedWorkflow();
@@ -204,35 +181,28 @@ async function verifyAttestation(buffer: Buffer): Promise<void> {
 	// against the tag that corresponds to this exact install.
 	const certIdentityURI = `https://github.com/zantarix/cursus/.github/workflows/${workflow}@refs/tags/cursus@${version}`;
 
-	const results = await Promise.allSettled(bundles.map(async (bundle) => {
+	try {
 		await verify(bundle as Bundle, {
 			certificateIssuer: 'https://token.actions.githubusercontent.com',
 			certificateIdentityURI: certIdentityURI,
 		});
-
-		// Confirm the attested subject digest matches the downloaded binary.
-		const payloadB64 = bundle.dsseEnvelope?.payload;
-		if (payloadB64 == null) {
-			throw new Error('Attestation bundle missing DSSE envelope payload');
-		}
-		const statement = JSON.parse(
-			Buffer.from(payloadB64, 'base64').toString('utf-8'),
-		) as InTotoStatement;
-		const digestMatch = (statement.subject ?? []).some((s) => s.digest?.sha256.toLowerCase() === digest);
-		if (!digestMatch) {
-			throw new Error('Attestation subject digest does not match the downloaded binary');
-		}
-	}));
-
-	if (results.some((r) => r.status === 'fulfilled')) {
-		return;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : 'Unknown error';
+		throw new Error(`Attestation verification failed: ${message}`);
 	}
 
-	// PromiseRejectedResult.reason is typed as `any` in TypeScript's built-in types.
-	const firstRejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-	const reason: unknown = firstRejected?.reason;
-	const msg = reason instanceof Error ? reason.message : 'Unknown error';
-	throw new Error(`Attestation verification failed: ${msg}`);
+	// Confirm the attested subject digest matches the downloaded binary.
+	const payloadB64 = bundle.dsseEnvelope?.payload;
+	if (payloadB64 == null) {
+		throw new Error('Attestation bundle missing DSSE envelope payload');
+	}
+	const statement = JSON.parse(
+		Buffer.from(payloadB64, 'base64').toString('utf-8'),
+	) as InTotoStatement;
+	const digestMatch = (statement.subject ?? []).some((s) => s.digest?.sha256.toLowerCase() === digest);
+	if (!digestMatch) {
+		throw new Error('Attestation subject digest does not match the downloaded binary');
+	}
 }
 
 process.stdout.write(`Downloading cursus v${version} for ${platform}/${arch}...\n`);

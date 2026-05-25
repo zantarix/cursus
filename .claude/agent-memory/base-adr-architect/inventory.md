@@ -63,3 +63,4 @@
 | 058 | 058-verified-release-commits-on-gitlab-via-web-commits-api.md | Produce Verified Release Commits on GitLab via the Web Commits API | Accepted (2026-05-22) |
 | 059 | 059-forge-selection-runtime-rules.md | Forge Selection Runtime Rules | Accepted (2026-05-13) |
 | 060 | 060-push-release-tags-via-forge-api.md | Push Release Tags via the Forge API in the Signed-Commit Decorators | Accepted (2026-05-24) |
+| 061 | 061-token-free-cross-platform-artifact-verification.md | Token-Free Cross-Platform Artifact Verification via Release-Asset Sigstore Bundles | Accepted (2026-05-25) |
