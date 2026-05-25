@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 - 2026-05-25
+
+### Features
+
+- Verifies release downloads against a co-located Sigstore attestation bundle published as a `<binary>.sigstore.json` release asset, so verification is token-free and no longer depends on the rate-limited GitHub attestations API. [4cbfaed]
+
 ## 0.8.0 - 2026-05-24
 
 ### Features
