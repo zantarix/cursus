@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1 - 2026-05-27
+
+### Bug Fixes
+
+- update rust crate serde-saphyr to 0.0.27 [7b24e20] via #162
+
 ## 0.9.0 - 2026-05-25
 
 ### Features
