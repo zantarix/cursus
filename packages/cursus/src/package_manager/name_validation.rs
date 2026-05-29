@@ -21,7 +21,7 @@ use anyhow::bail;
 /// Returns an error describing the first violation found.
 pub(crate) const MAX_BYTES: usize = 1024;
 
-pub fn validate_cargo_package_name(name: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_cargo_package_name(name: &str) -> anyhow::Result<()> {
 	if name.is_empty() {
 		bail!("Cargo package name must not be empty");
 	}
@@ -49,7 +49,7 @@ pub fn validate_cargo_package_name(name: &str) -> anyhow::Result<()> {
 /// # Errors
 ///
 /// Returns an error describing the first violation found.
-pub fn validate_npm_package_name(name: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_npm_package_name(name: &str) -> anyhow::Result<()> {
 	if name.is_empty() {
 		bail!("npm package name must not be empty");
 	}

@@ -4,7 +4,7 @@ use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventK
 use ratatui::{Frame, Terminal, backend::TestBackend};
 
 /// Creates a test terminal with an 80×24 display area.
-pub fn create_test_terminal() -> Terminal<TestBackend> {
+pub(super) fn create_test_terminal() -> Terminal<TestBackend> {
 	let backend = TestBackend::new(80, 24);
 	Terminal::new(backend).unwrap()
 }
@@ -12,7 +12,7 @@ pub fn create_test_terminal() -> Terminal<TestBackend> {
 /// Converts a terminal buffer to a plain string for assertion testing.
 ///
 /// Each row is joined by a newline, with a trailing newline at the end.
-pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+pub(super) fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
 	(0..buffer.area.height)
 		.map(|y| {
 			(0..buffer.area.width)
@@ -25,7 +25,7 @@ pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
 }
 
 /// Constructs a left mouse button down event at `(col, row)`.
-pub fn mouse_click(col: u16, row: u16) -> Event {
+pub(super) fn mouse_click(col: u16, row: u16) -> Event {
 	Event::Mouse(MouseEvent {
 		kind: MouseEventKind::Down(MouseButton::Left),
 		column: col,
@@ -38,7 +38,7 @@ pub fn mouse_click(col: u16, row: u16) -> Event {
 ///
 /// Combines `terminal.draw()`, buffer cloning, and [`buffer_to_string`] into
 /// one call, reducing boilerplate in rendering tests.
-pub fn render_to_string<F>(terminal: &mut Terminal<TestBackend>, draw_fn: F) -> String
+pub(super) fn render_to_string<F>(terminal: &mut Terminal<TestBackend>, draw_fn: F) -> String
 where
 	F: FnOnce(&mut Frame),
 {

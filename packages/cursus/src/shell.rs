@@ -17,6 +17,6 @@ use std::borrow::Cow;
 /// quoted span as a single token regardless of spaces, glob characters, or
 /// other metacharacters. Strings that contain only shell-safe characters are
 /// returned unmodified (no unnecessary quoting).
-pub fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
 	shell_escape::escape(Cow::Borrowed(s)).into_owned()
 }

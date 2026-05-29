@@ -63,7 +63,7 @@ pub(crate) enum Screen {
 }
 
 /// Shorthand for the handle_event return type used by the internal state machine.
-pub(crate) type HandleResult = KeyResult<Screen, ChangeResult>;
+pub(super) type HandleResult = KeyResult<Screen, ChangeResult>;
 
 /// Output of [`reorder_projects`]: projects sorted changed-first, with index mapping.
 pub(crate) struct ReorderedProjects {
@@ -114,7 +114,7 @@ pub(crate) fn reorder_projects(projects: &[Project], changed_flags: &[bool]) -> 
 	}
 }
 
-pub(crate) fn handle_event(
+pub(super) fn handle_event(
 	screen: Screen,
 	event: Event,
 	area: Rect,
@@ -272,7 +272,7 @@ pub fn run(
 ///
 /// Passes a default 80×24 content area so tests don't need to supply one.
 #[cfg(test)]
-pub(crate) fn handle_key(
+pub(super) fn handle_key(
 	screen: Screen,
 	key: crossterm::event::KeyCode,
 	projects: &[Project],

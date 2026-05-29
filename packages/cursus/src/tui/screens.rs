@@ -11,7 +11,7 @@ use super::widgets::{
 /// The [`KeyResult`] type for [`ButtonScreen`] event handlers.
 ///
 /// Either continues with `(State, FullScreen)` or completes with `Result`.
-pub type ButtonKeyResult<State, FullScreen, Result> = KeyResult<(State, FullScreen), Result>;
+pub(super) type ButtonKeyResult<State, FullScreen, Result> = KeyResult<(State, FullScreen), Result>;
 
 /// A TUI screen that displays a question and N buttons.
 ///
@@ -19,7 +19,7 @@ pub type ButtonKeyResult<State, FullScreen, Result> = KeyResult<(State, FullScre
 /// transitions. The default [`ButtonScreen::handle_event`] and
 /// [`ButtonScreen::render`] implementations cover shared keyboard handling,
 /// mouse handling, and the standard wizard rendering layout.
-pub trait ButtonScreen: Sized {
+pub(super) trait ButtonScreen: Sized {
 	/// The wizard state type threaded through screens.
 	type State;
 	/// The wizard result type returned on completion.

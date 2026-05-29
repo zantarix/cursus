@@ -153,7 +153,7 @@ pub(crate) enum Screen {
 	OpenEditor(bool),
 }
 
-pub(crate) type HandleResult = anyhow::Result<KeyResult<(WizardState, Screen), InitResult>>;
+pub(super) type HandleResult = anyhow::Result<KeyResult<(WizardState, Screen), InitResult>>;
 
 /// Creates a [`TextArea`] with a standard bordered block.
 pub(crate) fn bordered_textarea() -> TextArea<'static> {
@@ -217,7 +217,7 @@ pub(crate) fn detect_package_managers(git_workdir: &AbsolutePath) -> (bool, bool
 	(cargo, npm)
 }
 
-pub(crate) fn handle_event(
+pub(super) fn handle_event(
 	state: WizardState,
 	screen: Screen,
 	event: Event,
@@ -259,7 +259,7 @@ pub(crate) fn handle_event(
 }
 
 /// Maps a screen to the `[Managers, Git, Forge]` tab statuses.
-pub(crate) fn tab_states(screen: &Screen) -> [TabStatus; 3] {
+pub(super) fn tab_states(screen: &Screen) -> [TabStatus; 3] {
 	match screen {
 		Screen::ConfirmOverwrite(_)
 		| Screen::SelectPackageManagers { .. }
@@ -432,7 +432,7 @@ pub fn run(
 /// Thin wrapper used by tests so existing test code can call `handle_key(state, screen, key)`
 /// without needing to construct an `Event` or supply a content area.
 #[cfg(test)]
-pub(crate) fn handle_key(
+pub(super) fn handle_key(
 	state: WizardState,
 	screen: Screen,
 	k: crossterm::event::KeyEvent,
@@ -447,12 +447,12 @@ pub(crate) fn handle_key(
 
 /// Shared test utilities used by all screen submodule test suites.
 #[cfg(test)]
-pub(crate) mod test_helpers {
+pub(super) mod test_helpers {
 	use super::*;
 	use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 	use tempfile::TempDir;
 
-	pub(crate) use crate::tui::test_utils::mouse_click;
+	pub(super) use crate::tui::test_utils::mouse_click;
 
 	/// Content area matching an 80×24 terminal with the 3-row tab bar subtracted.
 	pub(crate) const fn test_content_area() -> Rect {
@@ -496,21 +496,21 @@ pub(crate) mod test_helpers {
 		}
 	}
 
-	pub(crate) fn unwrap_continue(result: HandleResult) -> (WizardState, Screen) {
+	pub(super) fn unwrap_continue(result: HandleResult) -> (WizardState, Screen) {
 		match result.unwrap() {
 			KeyResult::Continue(s) => s,
 			other => panic!("Expected Continue, got {other:?}"),
 		}
 	}
 
-	pub(crate) fn unwrap_complete(result: HandleResult) -> InitResult {
+	pub(super) fn unwrap_complete(result: HandleResult) -> InitResult {
 		match result.unwrap() {
 			KeyResult::Complete(r) => r,
 			other => panic!("Expected Complete, got {other:?}"),
 		}
 	}
 
-	pub(crate) fn assert_cancelled(result: HandleResult) {
+	pub(super) fn assert_cancelled(result: HandleResult) {
 		assert!(
 			matches!(result.unwrap(), KeyResult::Cancelled),
 			"Expected Cancelled"

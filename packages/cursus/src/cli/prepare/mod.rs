@@ -1,12 +1,12 @@
 //! The `prepare` subcommand.
 
-pub mod changeset;
-pub mod git_lifecycle;
-pub mod github;
-pub mod linked_versions;
-pub mod propagation;
-pub mod release_files;
-pub mod version;
+pub(super) mod changeset;
+pub(super) mod git_lifecycle;
+pub(super) mod github;
+pub(super) mod linked_versions;
+pub(super) mod propagation;
+pub(super) mod release_files;
+pub(super) mod version;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

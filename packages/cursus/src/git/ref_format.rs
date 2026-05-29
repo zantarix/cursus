@@ -26,7 +26,7 @@ use anyhow::bail;
 /// # Errors
 ///
 /// Returns an error describing the first violation found.
-pub fn validate_branch_name(name: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_branch_name(name: &str) -> anyhow::Result<()> {
 	validate_git_arg(name, "branch name")
 }
 
@@ -39,7 +39,7 @@ pub fn validate_branch_name(name: &str) -> anyhow::Result<()> {
 /// # Errors
 ///
 /// Returns an error describing the first violation found.
-pub fn validate_tag_name(name: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_tag_name(name: &str) -> anyhow::Result<()> {
 	validate_git_arg(name, "tag name")
 }
 
@@ -51,7 +51,7 @@ pub fn validate_tag_name(name: &str) -> anyhow::Result<()> {
 /// # Errors
 ///
 /// Returns an error describing the first violation found.
-pub fn validate_revision(rev: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_revision(rev: &str) -> anyhow::Result<()> {
 	validate_git_arg(rev, "revision")
 }
 

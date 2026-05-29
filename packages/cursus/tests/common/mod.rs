@@ -11,7 +11,7 @@ use cursus::model::config::{CargoConfig, Config, GitConfig, NpmConfig, PackageMa
 use tempfile::TempDir;
 
 /// Creates a minimal `Env` with a real command runner, local filesystem, and git for the given dir.
-pub fn test_env(dir: &std::path::Path) -> cursus::Env {
+pub(super) fn test_env(dir: &std::path::Path) -> cursus::Env {
 	let runner = std::sync::Arc::new(cursus::command::RealCommandRunner)
 		as std::sync::Arc<dyn cursus::command::CommandRunner>;
 	let path = cursus::path::AbsolutePath::new(dir).unwrap();
@@ -27,7 +27,7 @@ pub fn test_env(dir: &std::path::Path) -> cursus::Env {
 /// This is the standard way to invoke cursus from integration tests.
 /// Parses CLI arguments, handles dry-run wrapping, performs git discovery,
 /// and delegates to [`cursus::run`].
-pub async fn run_cursus(
+pub(super) async fn run_cursus(
 	args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 	cwd: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitCode> {
@@ -67,7 +67,7 @@ pub async fn run_cursus(
 ///
 /// Stdout is suppressed to keep test output clean. Stderr is captured and
 /// included in the panic message so failures are diagnosable.
-pub fn git_cmd(dir: &std::path::Path, args: &[&str]) {
+pub(super) fn git_cmd(dir: &std::path::Path, args: &[&str]) {
 	let output = Command::new("git")
 		.args(args)
 		.current_dir(dir)
@@ -87,7 +87,7 @@ pub fn git_cmd(dir: &std::path::Path, args: &[&str]) {
 ///
 /// Configures `user.name`, `user.email`, and disables commit/tag signing so that
 /// git operations succeed in any environment without a GPG key.
-pub fn temp_real_git_repo() -> TempDir {
+pub(super) fn temp_real_git_repo() -> TempDir {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
 	git_cmd(dir.path(), &["init", "-b", "main"]);
 	git_cmd(dir.path(), &["config", "user.name", "Cursus Test"]);
@@ -103,7 +103,10 @@ pub fn temp_real_git_repo() -> TempDir {
 }
 
 /// Creates a real git repository with a Cursus config that has git lifecycle enabled.
-pub async fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitConfig) -> TempDir {
+pub(super) async fn temp_real_git_repo_with_config(
+	pm: PackageManager,
+	git_config: GitConfig,
+) -> TempDir {
 	let dir = temp_real_git_repo();
 	let env = test_env(dir.path());
 	let config = match pm {
@@ -121,7 +124,7 @@ pub async fn temp_real_git_repo_with_config(pm: PackageManager, git_config: GitC
 /// Creates a real git repository with a Cargo workspace and Cursus config.
 ///
 /// All files are staged and committed in the initial state.
-pub async fn temp_real_git_repo_with_cargo_workspace(
+pub(super) async fn temp_real_git_repo_with_cargo_workspace(
 	members: &[(&str, &str)],
 	git_config: GitConfig,
 ) -> TempDir {
@@ -164,7 +167,7 @@ pub async fn temp_real_git_repo_with_cargo_workspace(
 /// Creates a bare "remote" repo and wires it as `origin` of the given working repo.
 ///
 /// Returns the `TempDir` holding the bare repo (must be kept alive for the test duration).
-pub fn add_local_remote(working_repo: &std::path::Path) -> TempDir {
+pub(super) fn add_local_remote(working_repo: &std::path::Path) -> TempDir {
 	let remote_dir = tempfile::tempdir().expect("Failed to create remote dir");
 	git_cmd(remote_dir.path(), &["init", "--bare"]);
 	git_cmd(
@@ -180,7 +183,7 @@ pub fn add_local_remote(working_repo: &std::path::Path) -> TempDir {
 }
 
 /// Reads the log of all git commits in the repo (most recent first).
-pub fn git_log(dir: &std::path::Path) -> Vec<String> {
+pub(super) fn git_log(dir: &std::path::Path) -> Vec<String> {
 	let output = Command::new("git")
 		.args(["log", "--format=%s"])
 		.current_dir(dir)
@@ -194,7 +197,7 @@ pub fn git_log(dir: &std::path::Path) -> Vec<String> {
 }
 
 /// Returns the list of git tags in the repo.
-pub fn git_tags(dir: &std::path::Path) -> Vec<String> {
+pub(super) fn git_tags(dir: &std::path::Path) -> Vec<String> {
 	let output = Command::new("git")
 		.args(["tag", "--list"])
 		.current_dir(dir)
@@ -209,12 +212,12 @@ pub fn git_tags(dir: &std::path::Path) -> Vec<String> {
 }
 
 /// Returns `true` if the given tag exists in the repo.
-pub fn git_tag_exists(dir: &std::path::Path, tag: &str) -> bool {
+pub(super) fn git_tag_exists(dir: &std::path::Path, tag: &str) -> bool {
 	git_tags(dir).contains(&tag.to_string())
 }
 
 /// Returns `true` if the given local branch exists.
-pub fn git_local_branch_exists(dir: &std::path::Path, branch: &str) -> bool {
+pub(super) fn git_local_branch_exists(dir: &std::path::Path, branch: &str) -> bool {
 	let output = Command::new("git")
 		.args(["branch", "--list", branch])
 		.current_dir(dir)
@@ -229,7 +232,7 @@ pub fn git_local_branch_exists(dir: &std::path::Path, branch: &str) -> bool {
 /// Pushes the current branch to origin.
 ///
 /// Panics if the push fails.
-pub fn git_push_to_remote(working_repo: &std::path::Path) {
+pub(super) fn git_push_to_remote(working_repo: &std::path::Path) {
 	let branch = git_current_branch(working_repo);
 	let output = Command::new("git")
 		.args(["push", "origin", &branch])
@@ -247,7 +250,7 @@ pub fn git_push_to_remote(working_repo: &std::path::Path) {
 /// Returns the name of the current git branch.
 ///
 /// Panics if the command fails or the HEAD is detached.
-pub fn git_current_branch(dir: &std::path::Path) -> String {
+pub(super) fn git_current_branch(dir: &std::path::Path) -> String {
 	let output = Command::new("git")
 		.args(["rev-parse", "--abbrev-ref", "HEAD"])
 		.current_dir(dir)
@@ -265,14 +268,14 @@ pub fn git_current_branch(dir: &std::path::Path) -> String {
 }
 
 /// Creates a temporary directory with a `.git` folder to simulate a git repository.
-pub fn temp_git_repo() -> TempDir {
+pub(super) fn temp_git_repo() -> TempDir {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
 	dir
 }
 
 /// Creates a temporary git repository with a Cursus config file.
-pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
+pub(super) async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let env = test_env(dir.path());
 	let config = match pm {
@@ -284,7 +287,7 @@ pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 }
 
 /// Creates a temporary git repository with a config and matching package manifest.
-pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
+pub(super) async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let env = test_env(dir.path());
 	let config = match pm {
@@ -319,7 +322,7 @@ pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 /// Each entry in `members` is a `(name, version)` pair. The workspace root
 /// `Cargo.toml` lists all members, and each gets its own `Cargo.toml` and
 /// an empty `src/lib.rs`.
-pub async fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
+pub(super) async fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> TempDir {
 	let dir = temp_git_repo();
 	let env = test_env(dir.path());
 	let config = Config::new().with_cargo(CargoConfig::enabled());
@@ -351,7 +354,7 @@ pub async fn temp_git_repo_with_cargo_workspace(members: &[(&str, &str)]) -> Tem
 }
 
 /// Creates a temporary git repository with a config and package manifest in a subfolder.
-pub async fn temp_git_repo_with_project_in_subfolder(
+pub(super) async fn temp_git_repo_with_project_in_subfolder(
 	pm: PackageManager,
 	subfolder: &str,
 ) -> TempDir {
@@ -391,14 +394,14 @@ pub async fn temp_git_repo_with_project_in_subfolder(
 ///
 /// The `content` should be a valid changeset with TOML frontmatter, e.g.:
 /// `"+++\npkg-name = \"minor\"\n+++\n\nDescription\n"`.
-pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
+pub(super) fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 	let cursus_dir = dir.join(".cursus");
 	std::fs::create_dir_all(&cursus_dir).unwrap();
 	std::fs::write(cursus_dir.join(filename), content).unwrap();
 }
 
 /// Returns a [`GitConfig`] with git lifecycle enabled and all other fields at their defaults.
-pub fn git_enabled_config() -> GitConfig {
+pub(super) fn git_enabled_config() -> GitConfig {
 	GitConfig::enabled_config()
 }
 
@@ -406,7 +409,7 @@ pub fn git_enabled_config() -> GitConfig {
 ///
 /// Runs `git remote set-head origin <branch>`. Must be called after the remote
 /// has been added and the initial push has been made.
-pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
+pub(super) fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
 	git_cmd(working_repo, &["remote", "set-head", "origin", branch]);
 }
 
@@ -415,7 +418,7 @@ pub fn git_set_remote_head(working_repo: &std::path::Path, branch: &str) {
 /// Unlike [`temp_git_repo_with_project`] (which uses a fake `.git` folder),
 /// this creates a proper git repo with commits so that git operations like
 /// `rev-list` and `diff-tree` work correctly.
-pub async fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
+pub(super) async fn temp_real_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_real_git_repo();
 	let env = test_env(dir.path());
 	let config = match pm {

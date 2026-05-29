@@ -15,7 +15,7 @@ use cursus::model::config::{CargoConfig, Config, NpmConfig, PackageManager};
 use tempfile::TempDir;
 
 /// Creates a minimal `Env` with a real command runner, local filesystem, and git for the given dir.
-pub fn test_env(dir: &std::path::Path) -> cursus::Env {
+pub(super) fn test_env(dir: &std::path::Path) -> cursus::Env {
 	let runner = std::sync::Arc::new(cursus::command::RealCommandRunner)
 		as std::sync::Arc<dyn cursus::command::CommandRunner>;
 	let path = cursus::path::AbsolutePath::new(dir).unwrap();
@@ -27,14 +27,14 @@ pub fn test_env(dir: &std::path::Path) -> cursus::Env {
 }
 
 /// Creates a temporary directory with a `.git` folder to simulate a git repository.
-pub fn temp_git_repo() -> TempDir {
+pub(super) fn temp_git_repo() -> TempDir {
 	let dir = tempfile::tempdir().expect("Failed to create temp dir");
 	std::fs::create_dir(dir.path().join(".git")).unwrap();
 	dir
 }
 
 /// Creates a temporary git repository with a Cursus config file.
-pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
+pub(super) async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let env = test_env(dir.path());
 	let config = match pm {
@@ -46,7 +46,7 @@ pub async fn temp_git_repo_with_config(pm: PackageManager) -> TempDir {
 }
 
 /// Creates a temporary git repository with a config and matching package manifest.
-pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
+pub(super) async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 	let dir = temp_git_repo();
 	let env = test_env(dir.path());
 	let config = match pm {
@@ -80,7 +80,7 @@ pub async fn temp_git_repo_with_project(pm: PackageManager) -> TempDir {
 ///
 /// The `content` should be a valid changeset with TOML frontmatter, e.g.:
 /// `"+++\npkg-name = \"minor\"\n+++\n\nDescription\n"`.
-pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
+pub(super) fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 	let cursus_dir = dir.join(".cursus");
 	std::fs::create_dir_all(&cursus_dir).unwrap();
 	std::fs::write(cursus_dir.join(filename), content).unwrap();
@@ -92,7 +92,10 @@ pub fn write_changeset(dir: &std::path::Path, filename: &str, content: &str) {
 /// when the command is expected to produce clap-generated output (e.g. `--help`, `--version`,
 /// or invalid flags/subcommands) so that the output is captured rather than leaked to the
 /// test runner's terminal.
-pub fn run_cursus_subprocess(args: &[&str], cwd: &std::path::Path) -> (bool, String, String) {
+pub(super) fn run_cursus_subprocess(
+	args: &[&str],
+	cwd: &std::path::Path,
+) -> (bool, String, String) {
 	let bin = env!("CARGO_BIN_EXE_cursus");
 	let output = Command::new(bin)
 		.args(args)
@@ -118,7 +121,7 @@ pub fn run_cursus_subprocess(args: &[&str], cwd: &std::path::Path) -> (bool, Str
 /// Nix is a required development dependency of this project, so tests using
 /// this helper run as part of the normal `cargo test` suite.
 #[cfg(feature = "nix-tests")]
-pub fn run_cursus_in_nix_shell(
+pub(super) fn run_cursus_in_nix_shell(
 	shell_attr: &str,
 	args: &[&str],
 	cwd: &std::path::Path,

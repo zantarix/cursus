@@ -24,7 +24,7 @@ use ratatui::{
 
 /// Display state of a single tab in a progress tab bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TabStatus {
+pub(super) enum TabStatus {
 	/// This step has been completed.
 	Completed,
 	/// This is the current active step.
@@ -35,7 +35,7 @@ pub enum TabStatus {
 
 /// Result of processing a key press in a TUI wizard.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KeyResult<S, T> {
+pub(super) enum KeyResult<S, T> {
 	/// Continue with updated wizard state.
 	Continue(S),
 	/// Wizard completed with a value.
@@ -45,21 +45,21 @@ pub enum KeyResult<S, T> {
 }
 
 /// Definition of a single button in a button row widget.
-pub struct ButtonDef {
+pub(super) struct ButtonDef {
 	/// The text label displayed inside the button.
-	pub label: String,
+	pub(super) label: String,
 	/// Whether this button is currently selected/highlighted.
-	pub selected: bool,
+	pub(super) selected: bool,
 	/// Optional foreground color override for the selected state.
 	/// Defaults to `Color::Green` when `None`.
-	pub color: Option<Color>,
+	pub(super) color: Option<Color>,
 }
 
 /// Returns the style for a button based on selection state.
 ///
 /// A selected button is rendered green, bold, and reversed.
 /// An unselected button is rendered in gray.
-pub fn button_style(selected: bool) -> Style {
+pub(super) fn button_style(selected: bool) -> Style {
 	button_style_colored(selected, Color::Green)
 }
 
@@ -67,7 +67,7 @@ pub fn button_style(selected: bool) -> Style {
 ///
 /// A selected button is rendered in `color`, bold, and reversed.
 /// An unselected button is rendered in gray.
-pub fn button_style_colored(selected: bool, color: Color) -> Style {
+pub(super) fn button_style_colored(selected: bool, color: Color) -> Style {
 	if selected {
 		Style::default()
 			.fg(color)
@@ -86,7 +86,7 @@ pub fn button_style_colored(selected: bool, color: Color) -> Style {
 /// `border = 2`). For borderless text pass `border = 0`. Do not pass other
 /// values — a partial border (e.g. top-only) would give an incorrect width.
 /// Returns at least `1 + border`.
-pub fn paragraph_height(text: &str, area_width: u16, border: u16) -> u16 {
+pub(super) fn paragraph_height(text: &str, area_width: u16, border: u16) -> u16 {
 	let inner = area_width.saturating_sub(4 + border);
 	let lines = Paragraph::new(text)
 		.wrap(Wrap { trim: false })
@@ -99,7 +99,7 @@ pub fn paragraph_height(text: &str, area_width: u16, border: u16) -> u16 {
 ///
 /// Displays `text` in the given `color` inside a bordered block (no title)
 /// at `area`.
-pub fn render_question(frame: &mut Frame, area: Rect, text: &str, color: Color) {
+pub(super) fn render_question(frame: &mut Frame, area: Rect, text: &str, color: Color) {
 	let question = Paragraph::new(text)
 		.style(Style::default().fg(color))
 		.wrap(Wrap { trim: false })
@@ -110,7 +110,7 @@ pub fn render_question(frame: &mut Frame, area: Rect, text: &str, color: Color) 
 /// Renders dimmed help text at `area`.
 ///
 /// Displays `text` in `Color::DarkGray` without a border.
-pub fn render_help(frame: &mut Frame, area: Rect, text: &str) {
+pub(super) fn render_help(frame: &mut Frame, area: Rect, text: &str) {
 	let help = Paragraph::new(text)
 		.style(Style::default().fg(Color::DarkGray))
 		.wrap(Wrap { trim: false });
@@ -122,7 +122,7 @@ pub fn render_help(frame: &mut Frame, area: Rect, text: &str) {
 /// Tabs are split equally. Each tab label is centred and styled according to
 /// its [`TabStatus`]: green for completed, bold blue for current, dark grey
 /// for future.
-pub fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
+pub(super) fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
 	if tabs.is_empty() {
 		return;
 	}
@@ -158,7 +158,7 @@ pub fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[(&str, TabStatus)]) {
 ///
 /// Each button occupies an equal share of `area`. The selected button's style
 /// fills the entire button area. Unselected buttons have a dark grey background.
-pub fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef]) {
+pub(super) fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef]) {
 	if buttons.is_empty() {
 		return;
 	}
@@ -191,7 +191,7 @@ pub fn render_buttons(frame: &mut Frame, area: Rect, buttons: &[ButtonDef]) {
 /// Returns layout areas corresponding to `constraints`, split over `area`.
 ///
 /// Applies a 2-cell margin on all sides.
-pub fn wizard_layout(area: Rect, constraints: &[Constraint]) -> Rc<[Rect]> {
+pub(super) fn wizard_layout(area: Rect, constraints: &[Constraint]) -> Rc<[Rect]> {
 	Layout::default()
 		.direction(Direction::Vertical)
 		.margin(2)
@@ -297,7 +297,7 @@ impl Drop for TerminalGuard {
 // and cannot be exercised without a live tty. Excluded from coverage in line with
 // the `cursus-bin/src/main.rs` convention for true IO entrypoints.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub fn run_tui<S, T, DrawFn, HandleFn>(
+pub(super) fn run_tui<S, T, DrawFn, HandleFn>(
 	mut state: S,
 	mut draw_fn: DrawFn,
 	mut handle_fn: HandleFn,
@@ -355,7 +355,7 @@ where
 /// [`render_buttons`]. `question` must be the same text passed to
 /// `render_question` on the same screen so that the height computation
 /// matches.
-pub fn button_click_index(
+pub(super) fn button_click_index(
 	content_area: Rect,
 	question: &str,
 	n_buttons: u16,
