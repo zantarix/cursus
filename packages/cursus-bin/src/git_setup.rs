@@ -17,7 +17,7 @@ use crate::forge_resolution::GitLabHandles;
 /// decorator based on the active forge (`[github].enabled` vs
 /// `[gitlab].enabled`, mutually exclusive per ADR-059) and the
 /// `signed_commits` mode resolution.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 pub(crate) async fn build_git(
 	inner: Arc<cursus::git::GitWorkdir>,
@@ -57,7 +57,7 @@ pub(crate) async fn build_git(
 	Ok(g)
 }
 
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 async fn build_github_signed(
 	inner: Arc<cursus::git::GitWorkdir>,
@@ -85,7 +85,7 @@ async fn build_github_signed(
 	)))
 }
 
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 fn build_gitlab_signed(
 	inner: Arc<cursus::git::GitWorkdir>,

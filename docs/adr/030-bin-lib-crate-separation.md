@@ -96,3 +96,7 @@ The "Full trait abstraction for filesystem access" alternative, rejected above a
 ### 2026-03-30: `GitHubClient` renamed to `CodeForgeClient`
 
 References to the `GitHubClient` trait in this ADR are incorrect: [ADR-041](041-rename-github-client-trait-to-code-forge-client.md) renames the trait to `CodeForgeClient`. The bin/lib separation and environment-injection model are unchanged; only the trait name differs.
+
+### 2026-05-29: Coverage attribute form is now gated on `coverage_nightly`
+
+The statement that the binary is annotated with `#[coverage(off)]` is now incorrect: bare `#[coverage(off)]` attributes across the workspace were converted to `#[cfg_attr(coverage_nightly, coverage(off))]`. `cargo llvm-cov` sets `--cfg coverage_nightly` automatically, so the attribute only activates while measuring coverage and compiles away as inert in normal builds; this was done so the `cursus` library crate no longer forces nightly Rust on downstream consumers. The intent is unchanged — the binary boundary remains intentionally excluded from coverage instrumentation — only the mechanism differs.

@@ -6,7 +6,7 @@
 
 /// Returns the first non-empty value from the given environment variables,
 /// or `None` if none are set or all are empty.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 pub(crate) fn env_first(vars: &[&str]) -> Option<String> {
 	vars.iter()
@@ -19,7 +19,7 @@ pub(crate) fn env_first(vars: &[&str]) -> Option<String> {
 /// 1. `CURSUS_LOCALE` environment variable (explicit override)
 /// 2. System locale via `sys_locale::get_locale()` (cross-platform)
 /// 3. `"en"` fallback
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 pub(crate) fn detect_locale() -> String {
 	env_first(&["CURSUS_LOCALE"])

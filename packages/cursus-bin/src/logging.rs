@@ -12,7 +12,7 @@ struct CliLogger {
 	stderr_is_terminal: bool,
 }
 
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 impl log::Log for CliLogger {
 	/// Always returns `true`; actual level filtering is handled by
@@ -68,7 +68,7 @@ static LOGGER: std::sync::OnceLock<CliLogger> = std::sync::OnceLock::new();
 /// Safe to call more than once; the underlying logger is initialised exactly
 /// once via [`std::sync::OnceLock`], and subsequent calls just update the
 /// max-level filter.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 pub(crate) fn init_logging(level: log::LevelFilter) {
 	use std::io::IsTerminal as _;
@@ -84,7 +84,7 @@ pub(crate) fn init_logging(level: log::LevelFilter) {
 /// Maps parsed global flags to the corresponding [`log::LevelFilter`].
 ///
 /// `-s` / `--silent` → `Error`, default → `Info`, `-v` → `Debug`, `-vv+` → `Trace`.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 pub(crate) fn determine_log_level(global: &cursus::cli::GlobalArgs) -> log::LevelFilter {
 	if global.silent {

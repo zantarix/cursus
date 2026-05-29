@@ -48,7 +48,7 @@ pub(crate) struct GitLabClientOutcome {
 /// Binary-boundary glue: reads env vars, builds an HTTP client, and resolves
 /// the project identity from a real Git checkout. Excluded from coverage in
 /// line with the `cursus-bin/src/main.rs` convention for IO entrypoints.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn gitlab_handles(
 	git: &dyn cursus::git::Git,
 	config: &Option<cursus::model::config::Config>,
@@ -90,7 +90,7 @@ pub(super) fn pin_endpoint_on_project(
 /// Selects a GitLab auth token from the environment, preferring `GITLAB_TOKEN`
 /// (PAT) over `CI_JOB_TOKEN`. Returns the token, its kind, and a flag set
 /// when no PAT fallback is available (needed by the MR preflight).
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn pick_gitlab_token() -> Result<(String, cursus::forge::gitlab::GitLabTokenKind, bool), String> {
 	let pat = env_first(&["GITLAB_TOKEN"]);
 	let job_token = env_first(&["CI_JOB_TOKEN"]);
@@ -114,7 +114,7 @@ fn pick_gitlab_token() -> Result<(String, cursus::forge::gitlab::GitLabTokenKind
 /// Builds the `AsyncGitlab` HTTP client for the resolved endpoint. Switches
 /// the builder off the default HTTPS when `scheme == "http"` so self-managed
 /// instances served over plain HTTP remain reachable.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn build_async_gitlab(
 	host: &str,
 	scheme: &str,
@@ -142,7 +142,7 @@ async fn build_async_gitlab(
 ///
 /// Binary-boundary glue; excluded from coverage in line with the
 /// `cursus-bin/src/main.rs` convention for IO entrypoints.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn resolve_gitlab_forge_client_from_handles(
 	handles: &GitLabHandles,
 ) -> GitLabClientOutcome {
@@ -162,7 +162,7 @@ pub(crate) fn resolve_gitlab_forge_client_from_handles(
 /// Binary-boundary env-var reader; the precedence logic lives in
 /// [`gitlab_endpoint_from`] (which is fully tested). Excluded from coverage
 /// in line with the `cursus-bin/src/main.rs` convention for IO entrypoints.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn gitlab_endpoint(config_host: &str) -> (String, String) {
 	gitlab_endpoint_from(env_first(&["CI_API_V4_URL"]).as_deref(), config_host)
 }

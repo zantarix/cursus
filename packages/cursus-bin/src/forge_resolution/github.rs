@@ -8,7 +8,7 @@ use crate::env_helpers::env_first;
 ///
 /// Binary-boundary HTTP-client construction; excluded from coverage in line with
 /// the `cursus-bin/src/main.rs` convention for IO entrypoints.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn build_octocrab(token: &str) -> Result<octocrab::Octocrab, octocrab::Error> {
 	octocrab::Octocrab::builder()
 		.personal_token(token.to_string())
@@ -29,7 +29,7 @@ pub(crate) fn build_octocrab(token: &str) -> Result<octocrab::Octocrab, octocrab
 /// Binary-boundary glue: reads env vars, builds an HTTP client, and resolves
 /// the repo identity from a real Git checkout. Excluded from coverage in line
 /// with the `cursus-bin/src/main.rs` convention for IO entrypoints.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn resolve_github_forge_client(
 	env: &cursus::Env,
 	config: &Option<cursus::model::config::Config>,

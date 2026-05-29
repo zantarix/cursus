@@ -1,4 +1,4 @@
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use logging::{determine_log_level, init_logging};
 /// install it explicitly so behaviour is deterministic regardless of dep
 /// graph drift. `install_default()` returns `Err` when a provider has
 /// already been installed — that path is harmless and ignored.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 fn install_crypto_provider() {
 	static INIT: std::sync::Once = std::sync::Once::new();
@@ -36,7 +36,7 @@ fn install_crypto_provider() {
 	});
 }
 
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -148,7 +148,7 @@ async fn try_main(cli: cursus::cli::Cli) -> anyhow::Result<ExitCode> {
 ///
 /// Binary-boundary IO; excluded from coverage like the other setup helpers
 /// in this file.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[mutants::skip]
 async fn build_forge_handles(
 	git: &dyn cursus::git::Git,

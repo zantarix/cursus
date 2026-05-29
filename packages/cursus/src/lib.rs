@@ -1,6 +1,11 @@
 //! Cursus is a CLI tool that manages project configuration via an interactive TUI setup wizard.
 
-#![feature(coverage_attribute)]
+// `cargo llvm-cov` sets `--cfg coverage` and `--cfg coverage_nightly` as a pair.
+// We gate `feature(coverage_attribute)` on `coverage_nightly` so the unstable
+// `coverage(off)` attribute is only enabled under coverage measurement. Normal
+// `cargo build`/`test`/`clippy` and downstream stable builds don't set the cfg,
+// so this is inert there.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod cli;
 pub mod command;
