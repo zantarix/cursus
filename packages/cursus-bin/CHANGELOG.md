@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2 - 2026-05-31
+
+### Bug Fixes
+
+- update rust crate gitlab to v0.1900.0 [f31f15f] via #167
+- update rust crate log to v0.4.30 [47f7e13] via #166
+
 ## 0.9.1 - 2026-05-27
 
 ### Bug Fixes
