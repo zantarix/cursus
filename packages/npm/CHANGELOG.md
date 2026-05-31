@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2 - 2026-05-31
+
+### Bug Fixes
+
+- version sync to 0.9.2 (linked versions)
+
 ## 0.9.1 - 2026-05-27
 
 ### Bug Fixes
