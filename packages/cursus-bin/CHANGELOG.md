@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3 - 2026-06-06
+
+### Bug Fixes
+
+- update rust crate log to v0.4.32 [8df90a0] via #182
+
 ## 0.9.2 - 2026-05-31
 
 ### Bug Fixes
