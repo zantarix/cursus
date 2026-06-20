@@ -37,7 +37,7 @@
 	],
 	"devDependencies": {
 		"@mscharley/eslint-config": "4.2.23",
-		"@sigstore/rekor-types": "4.0.0",
+		"@sigstore/rekor-types": "5.0.0",
 		"@types/make-fetch-happen": "10.0.4",
 		"@types/node": "24.12.4",
 		"typescript": "5.9.3"
